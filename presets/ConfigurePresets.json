@@ -1,0 +1,53 @@
+{
+    "version": 6,
+    "include": [
+        "BasePresets.json"
+    ],
+    "configurePresets": [
+        {
+            "name": "dev-win-msvc-ninja",
+            "hidden": true,
+            "displayName": "Developer (Windows, MSVC, Ninja Multi-Config)",
+            "inherits": "base-developer-windows",
+            "generator": "Ninja"
+        },
+        {
+            "name": "release-linux-ninja",
+            "displayName": "Release (Linux, Ninja)",
+            "inherits": "base-release-linux",
+            "generator": "Ninja"
+        },
+        {
+            "name": "release-mac-ninja",
+            "displayName": "Release (Mac, Ninja)",
+            "inherits": "base-release-mac",
+            "generator": "Ninja"
+        },
+        {
+            "name": "wasm-debug",
+            "displayName": "WASM (Emscripten, Debug)",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build/wasm-debug",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "BUILD_SHARED_LIBS": "OFF",
+                "POLLY_ENABLE_WASM": "ON",
+                "POLLY_ENABLE_AOT": "ON",
+                "POLLY_ENABLE_JIT": "OFF",
+                "CMAKE_MAKE_PROGRAM": "C:/Users/lockg/scoop/shims/ninja.exe"
+            },
+            "environment": {
+                "EMSDK": "C:/Users/lockg/scoop/apps/emscripten/4.0.14"
+            },
+            "toolchainFile": "$env{EMSDK}/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake"
+        },
+        {
+            "name": "wasm-release",
+            "displayName": "WASM (Emscripten, Release)",
+            "inherits": "wasm-debug",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release"
+            }
+        }
+    ]
+}

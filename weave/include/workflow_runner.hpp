@@ -1,0 +1,28 @@
+#ifndef __WORKFLOW_RUNNER_HPP__
+#define __WORKFLOW_RUNNER_HPP__
+
+#include "dag/enhanced_graph.hpp"
+#include "dag/workflow_executor.hpp"
+#include "yml/task_parser.hpp"
+
+#include <ctime>
+#include <filesystem>
+#include <iostream>
+#include <string>
+#include <unordered_map>
+
+class WorkflowRunner {
+public:
+    explicit WorkflowRunner(std::string const& yamlPath, std::unordered_map<std::string, std::string> inputValues = {});
+    ~WorkflowRunner(); // Declared destructor
+
+    bool run(bool useConcurrent = false, int maxConcurrency = 4);
+    bool runTask(std::string const& taskName, bool useConcurrent = false, int maxConcurrency = 4);
+
+private:
+    std::string yamlPath_;
+    std::unordered_map<std::string, std::string> inputValues_;  // New: store input values
+    std::filesystem::path base_directory_; // New: store the base directory for the workflow
+};
+
+#endif // __WORKFLOW_RUNNER_HPP__
