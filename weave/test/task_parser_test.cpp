@@ -86,6 +86,61 @@ TEST_CASE("parse script and uses tasks")
     CHECK(usesTask.vars.at("INPUT") == "data");
 }
 
+
+
+TEST_CASE("parse workflow embedded modules")
+{
+    const std::string content =
+        "embedded:\n"
+        "  helpers:\n"
+        "    source: |\n"
+        "      export function identity(value) {\n"
+        "        return value;\n"
+        "      }\n"
+        "tasks:\n"
+        "  - name: consumer\n"
+        "    script:\n"
+        "      source: |\n"
+        "        context.set("used", "module");\n";
+
+    auto wf = writeTempWorkflow("embedded.yml", content);
+
+    Workflow workflow = TaskParser::parseFile(wf.string());
+    REQUIRE(workflow.embedded.size() == 1);
+    auto it = workflow.embedded.find("helpers");
+    REQUIRE(it != workflow.embedded.end());
+    CHECK(it->second.language == "javascript");
+    CHECK(it->second.source.find("identity") != std::string::npos);
+}
+
+
+TEST_CASE("parse scalar depends_on and dotEnv fields")
+{
+    const std::string content =
+        "dotEnv: .env.global\n"
+        "tasks:\n"
+        "  - name: build\n"
+        "    command: echo build\n"
+        "  - name: deploy\n"
+        "    depends_on: build\n"
+        "    dotEnv: .env.deploy\n"
+        "    command: echo deploy\n";
+
+    auto wf = writeTempWorkflow("scalar_fields.yml", content);
+
+    Workflow workflow = TaskParser::parseFile(wf.string());
+    REQUIRE(workflow.dot_env.size() == 1);
+    CHECK(workflow.dot_env[0] == ".env.global");
+
+    REQUIRE(workflow.tasks.size() == 2);
+    const Task& deploy = workflow.tasks[1];
+    REQUIRE(deploy.depends_on.size() == 1);
+    CHECK(deploy.depends_on[0] == "build");
+    REQUIRE(deploy.dot_env.size() == 1);
+    CHECK(deploy.dot_env[0] == ".env.deploy");
+}
+
+
 TEST_CASE("parse task triggers and environment")
 {
     const std::string content =

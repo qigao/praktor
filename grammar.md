@@ -74,11 +74,28 @@ A Weave workflow is a YAML map with the following top-level keys:
 
 | Key | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| `tasks` | Array | **Yes** | The list of task definitions. |
-| `variables` | Map | No | Global constants available to all tasks. |
-| `env` | Map | No | Global environment variables. |
-| `dotEnv` | Array | No | Paths to `.env` files to load into the global environment. |
+| `name` | String | No | Human-readable workflow identifier. |
+| `description` | String | No | Optional workflow summary. |
+| `variables` | Map<String, String> | No | Global constants available to all tasks. |
+| `env` | Map<String, String> | No | Global environment variables exported to all tasks. |
+| `dotEnv` | String or Array<String> | No | Paths to `.env` files to load into the global environment. |
 | `defaults` | Map | No | Default `retries` and `timeout` applied to all tasks. |
+| `embedded` | Map<String, Module> | No | Embedded script modules that can be loaded by runtimes. |
+| `tasks` | Array<Task> | **Yes** | The list of task definitions. |
+
+### 4.1. Embedded Modules
+The optional `embedded` map lets a workflow bundle reusable script modules. Each entry's key becomes the module name; its value must provide a `source` string (JavaScript by default) and may set an explicit `language`.
+
+```yaml
+embedded:
+  string_utils:
+    source: |
+      export function slugify(value) {
+        return value.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+      }
+```
+
+Runtimes can expose these modules to `script` tasks (for example, by preloading modules listed in `script.modules`).
 
 **Example:**
 ```yaml
@@ -112,10 +129,11 @@ Every task must have a `name` and exactly one runner (`command`, `script`, or `u
 | Key | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | `name` | String | **Yes** | A unique identifier for the task. |
-| `depends_on` | Array of Strings | No | List of task names that must complete before this task runs. |
-| `vars` | Map | No | Task-scoped variables. Override global variables and are inherited by `uses` tasks. |
-| `env` | Map | No | Task-scoped environment variables. |
-| `dotEnv` | Array of Strings | No | Paths to `.env` files to load for this task. |
+| `description` | String | No | Human-readable summary of the task. |
+| `depends_on` | String or Array<String> | No | Task names that must complete before this task runs. |
+| `vars` | Map<String, String> | No | Task-scoped variables. Override globals and are inherited by `uses` tasks. |
+| `env` | Map<String, String> | No | Task-scoped environment variables. |
+| `dotEnv` | String or Array<String> | No | Paths to `.env` files to load for this task. |
 
 **Runner (exactly one required):**
 - `command` (String or Array): Execute an external command. See Section 7.1.
@@ -318,49 +336,87 @@ tasks:
 ```
 
 ## 10. JSON Schema Contract
-A canonical JSON Schema **MUST** be provided to validate workflow syntax and provide editor support.
+A canonical JSON Schema **MUST** be provided to validate workflow syntax and provide editor support. The authoritative copy lives at `grammar.schema.json` and is inlined below for convenience.
 ```json
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "Weave Workflow Specification",
-  "description": "A schema for defining Weave DSL (v6.0) workflow files.",
+  "description": "A schema for defining Weave DSL (v7.0) workflow files.",
   "type": "object",
-
   "properties": {
+    "name": {
+      "type": "string",
+      "description": "Human-readable workflow identifier."
+    },
+    "description": {
+      "type": "string",
+      "description": "Optional workflow summary."
+    },
     "variables": {
-      "type": "object",
+      "$ref": "#/$defs/stringMap",
       "description": "Global, read-only variables for expression interpolation."
     },
     "env": {
-      "type": "object",
-      "description": "Global environment variables available to all tasks.",
-      "additionalProperties": { "type": "string" }
+      "$ref": "#/$defs/stringMap",
+      "description": "Global environment variables available to all tasks."
     },
     "dotEnv": {
-      "type": "array",
-      "description": "A list of .env files to load into the global environment.",
-      "items": { "type": "string" }
+      "description": "Paths to .env files to load into the global environment.",
+      "$ref": "#/$defs/stringOrStringArray"
     },
     "defaults": {
       "type": "object",
       "description": "Default attributes applied to all tasks.",
       "properties": {
-        "retries": { "$ref": "#/$defs/retriesPolicy" },
-        "timeout": { "$ref": "#/$defs/durationString" }
+        "retries": {
+          "$ref": "#/$defs/retriesPolicy"
+        },
+        "timeout": {
+          "$ref": "#/$defs/durationString"
+        }
       },
       "additionalProperties": false
+    },
+    "embedded": {
+      "type": "object",
+      "description": "Embedded script modules available to script tasks.",
+      "additionalProperties": {
+        "$ref": "#/$defs/embeddedModule"
+      }
     },
     "tasks": {
       "type": "array",
       "description": "The list of all task definitions in the workflow.",
       "minItems": 1,
-      "items": { "$ref": "#/$defs/taskDefinition" }
+      "items": {
+        "$ref": "#/$defs/taskDefinition"
+      }
     }
   },
-  "required": ["tasks"],
+  "required": [
+    "tasks"
+  ],
   "additionalProperties": false,
-
   "$defs": {
+    "stringOrStringArray": {
+      "oneOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      ]
+    },
+    "stringMap": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
     "durationString": {
       "type": "string",
       "description": "A duration string, e.g., '30s', '5m', '1h'.",
@@ -379,7 +435,26 @@ A canonical JSON Schema **MUST** be provided to validate workflow syntax and pro
           "description": "The delay between attempts."
         }
       },
-      "required": ["count"],
+      "required": [
+        "count"
+      ],
+      "additionalProperties": false
+    },
+    "embeddedModule": {
+      "type": "object",
+      "properties": {
+        "language": {
+          "type": "string",
+          "description": "Execution language for the module (default: javascript)."
+        },
+        "source": {
+          "type": "string",
+          "description": "Module source code."
+        }
+      },
+      "required": [
+        "source"
+      ],
       "additionalProperties": false
     },
     "triggerAction": {
@@ -389,96 +464,248 @@ A canonical JSON Schema **MUST** be provided to validate workflow syntax and pro
         "http_post": {
           "type": "object",
           "properties": {
-            "url": { "type": "string", "format": "uri" },
-            "body": { "type": "string" },
+            "url": {
+              "type": "string",
+              "format": "uri"
+            },
+            "body": {
+              "type": "string"
+            },
             "headers": {
-              "type": "object",
-              "additionalProperties": { "type": "string" }
+              "$ref": "#/$defs/stringMap"
             }
           },
-          "required": ["url"],
+          "required": [
+            "url"
+          ],
           "additionalProperties": false
         },
         "write_file": {
           "type": "object",
           "properties": {
-            "path": { "type": "string" },
-            "content": { "type": "string" },
-            "mode": { "enum": ["overwrite", "append"] }
+            "path": {
+              "type": "string"
+            },
+            "content": {
+              "type": "string"
+            },
+            "mode": {
+              "enum": [
+                "overwrite",
+                "append"
+              ]
+            }
           },
-          "required": ["path", "content"],
+          "required": [
+            "path",
+            "content"
+          ],
           "additionalProperties": false
         },
         "run_task": {
           "type": "object",
           "properties": {
-            "task_name": { "type": "string" }
+            "task_name": {
+              "type": "string"
+            }
           },
-          "required": ["task_name"],
+          "required": [
+            "task_name"
+          ],
+          "additionalProperties": false
+        },
+        "weave": {
+          "type": "object",
+          "properties": {
+            "message": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "message"
+          ],
           "additionalProperties": false
         }
       },
       "oneOf": [
-        { "required": ["http_post"] },
-        { "required": ["write_file"] },
-        { "required": ["run_task"] }
-      ]
-    },
-    "triggersBlock": {
-      "type": "object",
-      "description": "Defines event-driven actions to take upon task completion.",
-      "properties": {
-        "on_success": { "$ref": "#/$defs/triggerActionList" },
-        "on_failure": { "$ref": "#/$defs/triggerActionList" },
-        "on_complete": { "$ref": "#/$defs/triggerActionList" }
-      },
+        {
+          "required": [
+            "http_post"
+          ]
+        },
+        {
+          "required": [
+            "write_file"
+          ]
+        },
+        {
+          "required": [
+            "run_task"
+          ]
+        },
+        {
+          "required": [
+            "weave"
+          ]
+        }
+      ],
       "additionalProperties": false
     },
     "triggerActionList": {
       "type": "array",
       "items": {
         "oneOf": [
-          { "type": "string", "description": "Shorthand for a 'run_task' action." },
-          { "$ref": "#/$defs/triggerAction" }
+          {
+            "type": "string",
+            "description": "Shorthand for a 'run_task' action or weave notification."
+          },
+          {
+            "$ref": "#/$defs/triggerAction"
+          }
         ]
-      }
+      },
+      "minItems": 1
+    },
+    "triggersBlock": {
+      "type": "object",
+      "description": "Defines event-driven actions to take upon task completion.",
+      "properties": {
+        "on_success": {
+          "$ref": "#/$defs/triggerActionList"
+        },
+        "on_failure": {
+          "$ref": "#/$defs/triggerActionList"
+        },
+        "on_complete": {
+          "$ref": "#/$defs/triggerActionList"
+        }
+      },
+      "additionalProperties": false
+    },
+    "eachBlock": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "$ref": "#/$defs/stringOrStringArray"
+        },
+        "matrix": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/stringOrStringArray"
+          }
+        },
+        "as": {
+          "type": "string"
+        },
+        "index_variable": {
+          "type": "string"
+        }
+      },
+      "oneOf": [
+        {
+          "required": [
+            "items"
+          ]
+        },
+        {
+          "required": [
+            "matrix"
+          ]
+        }
+      ],
+      "additionalProperties": false
     },
     "taskDefinition": {
       "type": "object",
       "properties": {
-        "name": { "type": "string" },
-        "depends_on": { "type": "array", "items": { "type": "string" } },
-        "vars": { "type": "object" },
-        "env": { "type": "object", "additionalProperties": { "type": "string" } },
-        "dotEnv": { "type": "array", "items": { "type": "string" } },
-        "timeout": { "$ref": "#/$defs/durationString" },
-        "retries": { "$ref": "#/$defs/retriesPolicy" },
-        "when": { "type": "string" },
-        "each": {
-          "type": "object",
-          "properties": {
-            "items": { "type": "array" },
-            "matrix": { "type": "object", "additionalProperties": { "type": "array" } },
-            "as": { "type": "string" },
-            "index_variable": { "type": "string" }
-          },
-          "oneOf": [ { "required": ["items"] }, { "required": ["matrix"] } ]
+        "name": {
+          "type": "string"
         },
-        "triggers": { "$ref": "#/$defs/triggersBlock" },
-        "command": { "oneOf": [ { "type": "string" }, { "type": "array", "items": { "type": "string" } } ] },
-        "output_format": { "enum": ["text", "json"] },
+        "description": {
+          "type": "string"
+        },
+        "depends_on": {
+          "$ref": "#/$defs/stringOrStringArray"
+        },
+        "vars": {
+          "$ref": "#/$defs/stringMap"
+        },
+        "env": {
+          "$ref": "#/$defs/stringMap"
+        },
+        "dotEnv": {
+          "$ref": "#/$defs/stringOrStringArray"
+        },
+        "timeout": {
+          "$ref": "#/$defs/durationString"
+        },
+        "retries": {
+          "$ref": "#/$defs/retriesPolicy"
+        },
+        "when": {
+          "type": "string"
+        },
+        "each": {
+          "$ref": "#/$defs/eachBlock"
+        },
+        "triggers": {
+          "$ref": "#/$defs/triggersBlock"
+        },
+        "command": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1
+            }
+          ]
+        },
+        "output_format": {
+          "enum": [
+            "text",
+            "json"
+          ]
+        },
         "script": {
           "type": "object",
-          "properties": { "source": { "type": "string" } },
-          "required": ["source"]
+          "properties": {
+            "source": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "source"
+          ],
+          "additionalProperties": false
         },
-        "uses": { "type": "string" }
+        "uses": {
+          "type": "string"
+        }
       },
-      "required": ["name"],
+      "required": [
+        "name"
+      ],
       "oneOf": [
-        { "required": ["command"] },
-        { "required": ["script"] },
-        { "required": ["uses"] }
+        {
+          "required": [
+            "command"
+          ]
+        },
+        {
+          "required": [
+            "script"
+          ]
+        },
+        {
+          "required": [
+            "uses"
+          ]
+        }
       ],
       "additionalProperties": false
     }
