@@ -15,6 +15,8 @@
 #include <jsoncons_ext/jmespath/jmespath.hpp>
 
 // Project includes
+#include "dag/variable_scope.hpp"
+#include "dag/task_registry.hpp"
 #include "util/system_info.hpp"
 #include "yml/task_types.hpp"
 
@@ -71,7 +73,10 @@ public:
      * @brief Constructs a WorkflowContext with initial variables.
      * @param initialVars A map of initial string variables to populate the context with.
      */
-    WorkflowContext(std::unordered_map<std::string, std::string> const& initialVars = {}) {
+    WorkflowContext(std::unordered_map<std::string, std::string> const& initialVars = {}) 
+        : root_scope_(std::make_unique<VariableScope>())
+        , current_scope_(root_scope_.get())
+    {
         // First populate with built-in system variables
         auto systemVars = weave::system::getAllSystemProperties();
         for (auto const& [key, value] : systemVars) {
@@ -86,12 +91,18 @@ public:
 
     /**
      * @brief Sets a jsoncons::json value in the context.
+     * 
+     * Now delegates to VariableScope for proper scoping.
      */
     void setValue(std::string const& key, const WorkflowValue& value) {
-        data_[key] = value;
+        current_scope_->set(key, value);
+        data_[key] = value;  // Keep for backward compatibility (temporary)
     }
 
-    void unsetValue(const std::string& key) { data_.erase(key); }
+    void unsetValue(const std::string& key) {
+        current_scope_->remove(key);
+        data_.erase(key);  // Keep for backward compatibility (temporary)
+    }
 
     /**
      * @brief Gets a value from the context.
@@ -99,18 +110,16 @@ public:
      * @param key The key of the value to retrieve.
      * @return The value associated with the key, cast to ValueType.
      * @throws std::runtime_error if the key is not found or type mismatch.
+     * 
+     * Now delegates to VariableScope for proper scope chain lookup.
      */
     template <typename ValueType>
     ValueType getValue(std::string const& key) const {
-        auto it = data_.find(key);
-        if (it != data_.end()) {
-            try {
-                return it->second.as<ValueType>();
-            } catch (const jsoncons::json_exception& e) {
-                throw std::runtime_error("Invalid type for key '" + key + "': " + e.what());
-            }
+        try {
+            return current_scope_->get(key).as<ValueType>();
+        } catch (const jsoncons::json_exception& e) {
+            throw std::runtime_error("Invalid type for key '" + key + "': " + e.what());
         }
-        throw std::runtime_error("Key not found in context: " + key);
     }
 
     /**
@@ -154,9 +163,11 @@ public:
 
     /**
      * @brief Checks if a key exists in the context.
+     * 
+     * Now delegates to VariableScope for scope chain lookup.
      */
     bool hasKey(std::string const& key) const {
-        return data_.count(key) > 0;
+        return current_scope_->has(key);
     }
 
     /**
@@ -240,9 +251,14 @@ public:
     }
 
     /**
-     * @brief Adds a completed task to the context.
+     * @brief Sets task status.
+     * 
+     * Now delegates to TaskRegistry.
      */
     void setTaskStatus(const std::string& taskName, const std::string& status) {
+        task_registry_.setStatus(taskName, status);
+        
+        // Keep data_ in sync for backward compatibility (temporary)
         WorkflowValue& tasks = data_["tasks"];
         if (!tasks.is_object()) {
             tasks = jsoncons::json::object();
@@ -255,6 +271,9 @@ public:
     }
 
     void setTaskOutput(const std::string& taskName, const std::string& key, const WorkflowValue& value) {
+        task_registry_.setOutput(taskName, key, value);
+        
+        // Keep data_ in sync for backward compatibility (temporary)
         WorkflowValue& tasks = data_["tasks"];
         if (!tasks.is_object()) {
             tasks = jsoncons::json::object();
@@ -271,11 +290,26 @@ public:
     }
 
     void mergeTaskOutputs(const std::string& taskName, const WorkflowValue& outputs) {
+        task_registry_.mergeOutputs(taskName, outputs);
+        
+        // Keep data_ in sync for backward compatibility (temporary)
         if (!outputs.is_object()) {
             return;
         }
         for (const auto& item : outputs.object_range()) {
-            setTaskOutput(taskName, item.key(), item.value());
+            WorkflowValue& tasks = data_["tasks"];
+            if (!tasks.is_object()) {
+                tasks = jsoncons::json::object();
+            }
+            WorkflowValue& task_entry = tasks[taskName];
+            if (!task_entry.is_object()) {
+                task_entry = jsoncons::json::object();
+            }
+            WorkflowValue& outputs_obj = task_entry["outputs"];
+            if (!outputs_obj.is_object()) {
+                outputs_obj = jsoncons::json::object();
+            }
+            outputs_obj.insert_or_assign(item.key(), item.value());
         }
     }
     void pushTaskScope(const std::string& taskName, std::optional<std::string> alias = std::nullopt) {
@@ -305,6 +339,9 @@ public:
 
 
     void addCompletedTask(std::string const& taskName) {
+        task_registry_.markCompleted(taskName);
+        
+        // Keep data_ in sync for backward compatibility (temporary)
         WorkflowValue& completed_tasks_json = data_["completed_tasks_set"];
         if (!completed_tasks_json.is_array()) {
             completed_tasks_json = jsoncons::json::array();
@@ -316,6 +353,9 @@ public:
      * @brief Adds a failed task to the context.
      */
     void addFailedTask(std::string const& taskName, std::string const& errorMessage) {
+        task_registry_.markFailed(taskName, errorMessage);
+        
+        // Keep data_ in sync for backward compatibility (temporary)
         WorkflowValue& failed_tasks_json = data_["failed_tasks_set"];
         if (!failed_tasks_json.is_array()) {
             failed_tasks_json = jsoncons::json::array();
@@ -331,34 +371,20 @@ public:
 
     /**
      * @brief Gets the set of completed tasks.
+     * 
+     * Now delegates to TaskRegistry.
      */
     std::unordered_set<std::string> getCompletedTasks() const {
-        std::unordered_set<std::string> result;
-        auto it = data_.find("completed_tasks_set");
-        if (it != data_.end() && it->second.is_array()) {
-            for (const auto& item : it->second.array_range()) {
-                if (item.is_string()) {
-                    result.insert(item.as<std::string>());
-                }
-            }
-        }
-        return result;
+        return task_registry_.getCompletedTasks();
     }
 
     /**
      * @brief Gets the map of failed tasks and their error messages.
+     * 
+     * Now delegates to TaskRegistry.
      */
     std::unordered_map<std::string, std::string> getFailedTasks() const {
-        std::unordered_map<std::string, std::string> result;
-        auto it = data_.find("failed_tasks_map");
-        if (it != data_.end() && it->second.is_object()) {
-            for (const auto& member : it->second.object_range()) {
-                if (member.value().is_string()) {
-                    result[member.key()] = member.value().as<std::string>();
-                }
-            }
-        }
-        return result;
+        return task_registry_.getFailedTasks();
     }
 
     /**
@@ -424,9 +450,15 @@ public:
     }
 
 private:
+    // New components (Phase 2 refactoring)
+    std::unique_ptr<VariableScope> root_scope_;
+    VariableScope* current_scope_;
+    TaskRegistry task_registry_;
+    
+    // Original members
     std::vector<std::pair<std::string, std::optional<std::string>>> task_scope_stack_;
     std::unordered_map<std::string, EmbeddedModule> embedded_modules_;
-    std::unordered_map<std::string, WorkflowValue> data_;
+    std::unordered_map<std::string, WorkflowValue> data_;  // TODO: Remove after full migration
     std::optional<TaskFailureContext> current_failure_context_;
 };
 
