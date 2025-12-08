@@ -47,32 +47,28 @@ variables:
 
 tasks:
   - name: setup
-    type: run_command
     command: "echo Setting up {{PROJECT}}: {{GREETING}}"
     outputs:
       stdout_to_variable: "setup_result"
 
   - name: create_build_dir
-    type: create_directory
-    path: "./build_output"
-    parents: true
+    create_directory:
+      path: "./build_output"
+      parents: true
     depends_on: [setup]
 
   - name: build_parallel
-    type: parallel
     depends_on: [create_build_dir]
-    tasks:
-      - name: frontend_build
-        type: run_command
-        command: "echo Building frontend..."
-      - name: backend_build
-        type: run_command
-        command: "echo Building backend..."
+    parallel:
+      tasks:
+        - name: frontend_build
+          command: "echo Building frontend..."
+        - name: backend_build
+          command: "echo Building backend..."
 
   - name: report
-    type: run_command
-    command: "echo Build completed! Setup: {{setup_result}}"
     depends_on: [build_parallel]
+    command: "echo Build completed! Setup: {{setup_result}}"
 ```
 
 ### 2. Build the project
@@ -107,11 +103,9 @@ defaults:
 
 tasks:
   - name: lint_code
-    type: run_command
     command: "echo Linting code in {{BUILD_TYPE}} mode"
 
   - name: run_tests
-    type: run_command
     depends_on: [lint_code]
     command: "echo Running tests"
     outputs:
@@ -125,11 +119,9 @@ imports:
 
 tasks:
   - name: build_app
-    type: run_command
     command: "echo Building application"
 
   - name: deploy
-    type: run_command
     depends_on: [build_app, run_tests]  # run_tests is from imported file
     command: "echo Deploying. Tests: {{test_result}}"
 ```
@@ -176,7 +168,6 @@ tasks:
   - name: scoped_task
     vars:
       LOCAL_VAR: "only in this task"  # Overrides global if same name
-    type: run_command
     command: "echo {{GLOBAL_VAR}} and {{LOCAL_VAR}}"
 ```
 
@@ -184,7 +175,6 @@ tasks:
 ```yaml
 tasks:
   - name: prod_only_task
-    type: run_command
     command: "echo Deploying to production"
     when: "{{environment}} == 'prod' and {{approval}} == true"
 ```
@@ -193,18 +183,16 @@ tasks:
 ```yaml
 tasks:
   - name: test_multiple_services
-    type: run_command
-    command: "echo Testing service: {{service}}"
     each:
       items: ["auth", "api", "worker"]
       as: "service"
+    command: "echo Testing service: {{service}}"
 ```
 
 ### Error Handling and Recovery
 ```yaml
 tasks:
   - name: critical_deployment
-    type: run_command
     command: "deploy --service myapp --env production"
     retries:
       count: 3
@@ -215,34 +203,30 @@ tasks:
     on_failure: [rollback_deployment, alert_team]
 
   - name: rollback_deployment
-    type: run_command
     command: |
-      echo "Deployment failed: {{failed_task_name}}"
-      echo "Exit code: {{failed_task_exit_code}}"
-      echo "Error: {{failed_task_stderr}}"
-      rollback --reason "{{failed_task_error}}"
+        echo "Deployment failed: {{failed_task_name}}"
+        echo "Exit code: {{failed_task_exit_code}}"
+        echo "Error: {{failed_task_stderr}}"
+        rollback --reason "{{failed_task_error}}"
 
   - name: alert_team
-    type: run_command
     command: |
-      send-alert --severity critical \
-        --task "{{failed_task_name}}" \
-        --details "{{failed_task_error}}"
+        send-alert --severity critical \
+          --task "{{failed_task_name}}" \
+          --details "{{failed_task_error}}"
 ```
 
 ### Output Chaining
 ```yaml
 tasks:
   - name: get_version
-    type: run_command
     command: "git describe --tags"
     outputs:
       stdout_to_variable: "version"
 
   - name: tag_image
-    type: run_command
-    command: "docker tag myapp:latest myapp:{{version}}"
     depends_on: [get_version]
+    command: "docker tag myapp:latest myapp:{{version}}"
 ```
 
 ## Documentation

@@ -1,877 +1,803 @@
-# Weave Workflow YAML Grammar Reference
+# Weave Workflow DSL Specification
 
-**English version - Updated for Weave v2.0 with Cross-File Imports & Advanced Features**
+**Version:** 7.0
+**Status:** Authoritative
+**Last Updated:** October 2025
 
-This document defines the complete YAML syntax for Weave workflow files. The syntax is designed to be simple yet powerful, with clear separation between orchestration logic and implementation details.
+## Table of Contents
 
-**🚀 New in v2.0**: Strategy Pattern architecture, Executor Pool optimization, and enhanced performance monitoring for production-ready workflows.
+1.  [**Introduction**](#1-introduction)
+    *   [1.1. Purpose](#11-purpose)
+    *   [1.2. Design Philosophy](#12-design-philosophy)
+2.  [**Core Concepts**](#2-core-concepts)
+3.  [**Execution Model: Context and Data Flow**](#3-execution-model-context-and-data-flow)
+    *   [3.1. The Workflow Context](#31-the-workflow-context)
+    *   [3.2. Variable and Environment Precedence](#32-variable-and-environment-precedence)
+    *   [3.3. Data Flow Between Tasks](#33-data-flow-between-tasks)
+4.  [**Workflow Structure**](#4-workflow-structure)
+5.  [**Task Definition**](#5-task-definition)
+    *   [5.1. Core Attributes](#51-core-attributes)
+    *   [5.2. Control Flow & Resilience](#52-control-flow--resilience)
+6.  [**Task Composition: `uses`**](#6-task-composition-uses)
+    *   [6.1. Executing a Reusable Workflow](#61-executing-a-reusable-workflow)
+    *   [6.2. Passing Data with `vars` and `env`](#62-passing-data-with-vars-and-env)
+7.  [**Task Runner Reference**](#7-task-runner-reference)
+    *   [7.1. Runner: `run_command` (Side Effects)](#71-runner-run_command-side-effects)
+    *   [7.2. Runner: `script` (Context Manipulation)](#72-runner-script-context-manipulation)
+8.  [**Event-Driven Triggers**](#8-event-driven-triggers)
+9.  [**Expression Language**](#9-expression-language)
+10. [**JSON Schema Contract**](#10-json-schema-contract)
+11. [**Comprehensive Examples**](#11-comprehensive-examples)
+12. [**Security and Secrets Management**](#12-security-and-secrets-management)
 
-## Performance & Architecture
+---
 
-Weave v2.0 features a **highly optimized execution engine**:
+## 1. Introduction
 
-- **Strategy Pattern Architecture**: Clean, extensible task execution with 8 specialized executors
-- **Executor Pool Optimization**: Zero-allocation task execution through intelligent caching
-- **Concurrent DAG Execution**: True parallel processing with thread-safe operations
-- **Performance Monitoring**: Built-in cache hit rate analysis and optimization suggestions
+### 1.1. Purpose
+The Weave Workflow Domain Specific Language (DSL) provides a declarative, YAML-based syntax for defining, managing, and executing complex workflows. This specification defines the grammar, data model, and execution semantics required to author interoperable, scalable, and maintainable automated processes.
 
-**Performance Benefits**:
-- 🔥 **10x+ faster** task execution through executor pooling
-- 📊 **80%+ cache hit rate** in typical workflows
-- ⚡ **Zero memory allocation** for repeated task types
-- 🧵 **Thread-safe** concurrent execution
+### 1.2. Design Philosophy
+*   **Declarative Graph:** Define tasks and their dependencies as a Directed Acyclic Graph (DAG). The runtime handles execution order and parallelization.
+*   **Context-Driven:** Data flows implicitly through a shared context. Tasks read from and write to this context, eliminating rigid input/output contracts.
+*   **Composable & Reusable:** Workflows are built from smaller components using `uses`. Composition relies on context and environment inheritance, not function-like signatures.
+*   **Separation of Concerns:** Tasks that cause side effects (`run_command`) are distinct from tasks that perform in-memory data manipulation (`script`).
+*   **Minimal & Expressive:** The DSL provides only essential primitives. Complex behavior emerges from composition, not built-in constructs.
 
-## Top-Level Structure
+## 2. Core Concepts
+*   **Workflow:** The complete automated process defined in a YAML file.
+*   **Task:** The fundamental unit of execution.
+*   **Runner:** The execution engine for a task (`run_command`, `script`).
+*   **Context:** The runtime data object holding variables, environment settings, and task outputs.
+*   **Trigger:** A lightweight, event-driven action (e.g., an HTTP call) that fires upon task completion.
 
-A Weave workflow file consists of these top-level sections:
+## 3. Execution Model: Context and Data Flow
 
-```yaml
-imports:          # NEW: Cross-file task imports
-  # ... imported workflow files (optional)
-inputs:
-  # ... runtime parameter definitions (optional) 
-variables:
-  # ... global variable definitions (optional)
-task_templates:
-  # ... reusable task definitions (optional) # NEW: Custom Task Types
-defaults:
-  # ... default task attributes (optional)
-tasks:
-  # ... task definition list (required)
-```
+### 3.1. The Workflow Context
+The runtime maintains a global context that is accessible to all tasks. This context is a tree-like data structure holding `variables` and the `tasks` object, which stores the outputs of all completed tasks.
 
-### `imports` (Optional) - **NEW IN v2.0**
+### 3.2. Variable and Environment Precedence
+For any given task, variables are resolved in the following order (higher numbers override lower ones):
+1.  Global `variables` / `env` from the workflow file.
+2.  Variables / environment inherited from a parent `uses` task.
+3.  Task-level `vars` / `env` defined directly on the task.
 
-**Revolutionary feature**: Import tasks from other workflow files for modular, reusable workflows.
+### 3.3. Data Flow Between Tasks
+State is passed between tasks by writing to and reading from the context.
+*   A `run_command` task produces output by writing to `stdout`, which is captured into the context.
+*   A `script` task can both read from and write to any part of the context tree using the `context` module.
 
-- **Type**: Array of strings (file paths)
-- **Resolution**: Relative to importing file
-- **Features**:
-  - ✅ Recursive imports (imported files can import others)
-  - ✅ Automatic conflict resolution (main workflow wins)
-  - ✅ Variable and defaults merging
-  - ✅ Cross-file task dependencies
+The outputs for a completed task `my-task` are stored at `tasks.my-task.outputs`.
 
-**Example**:
-```yaml
-imports:
-  - "shared/build-tasks.yml"
-  - "shared/deploy-tasks.yml"
-  - "../common/database-tasks.yml"
+## 4. Workflow Structure
+A Weave workflow is a YAML map with the following top-level keys:
 
-tasks:
-  - name: my_task
-    depends_on: [shared_build_task]  # Reference imported task
-```
+| Key | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `tasks` | Array | **Yes** | The list of task definitions. |
+| `variables` | Map | No | Global constants available to all tasks. |
+| `env` | Map | No | Global environment variables. |
+| `dotEnv` | Array | No | Paths to `.env` files to load into the global environment. |
+| `defaults` | Map | No | Default `retries` and `timeout` applied to all tasks. |
 
-### `inputs` (Optional)
-
-Define runtime parameters accepted by the workflow.
-
-- **Type**: Array of objects
-- **Fields**:
-  - `name` (string, required): Parameter name
-  - `type` (string, required): Parameter type (`string`, `integer`, `boolean`)
-  - `default` (optional): Default value if not provided
-  - `description` (string, optional): Parameter description
-
-**Example**:
-```yaml
-inputs:
-  - name: environment
-    type: string
-    default: "dev"
-    description: "Deployment environment (dev, staging, prod)"
-```
-
-### `variables` (Optional)
-
-Define global constants available throughout the workflow.
-
-- **Type**: Map (key-value pairs)
-
-**Example**:
+**Example:**
 ```yaml
 variables:
-  DOCKER_REGISTRY: "my.docker.registry.com"
-  APP_VERSION: "1.2.3"
-```
+  APP_NAME: "my-app"
+  VERSION: "1.0.0"
 
-### `task_templates` (Optional) - **NEW: Custom Task Types**
+env:
+  NODE_ENV: "production"
 
-Define reusable, parameterized task definitions. These act like custom task types.
+dotEnv:
+  - ".env.production"
 
-- **Type**: Array of objects
-- **Fields**:
-  - `name` (string, required): Unique name for the custom task type.
-  - `parameters` (array, optional): List of parameters this custom task accepts.
-    - Each parameter object has:
-      - `name` (string, required): Parameter name.
-      - `type` (string, required): Parameter type (e.g., `string`, `integer`, `boolean`).
-      - `default` (optional): Default value if not provided.
-      - `description` (string, optional): Parameter description.
-  - `tasks` (array, required): The actual task definitions that make up this custom task. These tasks can use the defined parameters via `{{param_name}}` syntax.
-
-**Example**:
-```yaml
-task_templates:
-  - name: deploy_service
-    parameters:
-      - name: service_name
-        type: string
-        description: "Name of the service to deploy"
-      - name: version
-        type: string
-        default: "latest"
-        description: "Version of the service"
-    tasks:
-      - name: build_{{service_name}}
-        type: run_command
-        command: "build --service {{service_name}} --version {{version}}"
-      - name: push_{{service_name}}
-        type: run_command
-        depends_on: [build_{{service_name}}]
-        command: "docker push {{DOCKER_REGISTRY}}/{{service_name}}:{{version}}"
-      - name: deploy_{{service_name}}
-        type: run_command
-        depends_on: [push_{{service_name}}]
-        command: "kubectl apply -f {{service_name}}-{{version}}.yaml"
-```
-
-### `defaults` (Optional)
-
-Define default attributes for all tasks in the workflow. Individual tasks can override these defaults.
-
-- **Type**: Map
-- **Common Fields**: `retries`, `timeout`, `vars`
-
-**Example**:
-```yaml
 defaults:
   retries:
     count: 2
     delay: "5s"
-  vars:
-    LOG_LEVEL: "info"
+  timeout: "10m"
+
+tasks:
+  - name: build
+    command: "npm run build"
 ```
 
-### `tasks` (Required)
+## 5. Task Definition
 
-Define the list of tasks to execute in the workflow.
+Every task must have a `name` and exactly one runner (`command`, `script`, or `uses`).
 
-- **Type**: Array of task objects
-- **Note**: Execution order determined by `depends_on`, not array order
+### 5.1. Core Attributes
 
-## Universal Task Properties
+| Key | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `name` | String | **Yes** | A unique identifier for the task. |
+| `depends_on` | Array of Strings | No | List of task names that must complete before this task runs. |
+| `vars` | Map | No | Task-scoped variables. Override global variables and are inherited by `uses` tasks. |
+| `env` | Map | No | Task-scoped environment variables. |
+| `dotEnv` | Array of Strings | No | Paths to `.env` files to load for this task. |
 
-### `name` (Required)
+**Runner (exactly one required):**
+- `command` (String or Array): Execute an external command. See Section 7.1.
+- `script` (Object): Execute JavaScript code. See Section 7.2.
+- `uses` (String): Execute a reusable workflow file. See Section 6.
 
-Unique task identifier within the workflow (including imported tasks).
+### 5.2. Control Flow & Resilience
 
-- **Type**: String
-- **Scope**: Must be unique across merged workflow
+| Key | Type | Description |
+| :--- | :--- | :--- |
+| `when` | String | An expression that must evaluate to `true` for the task to run. |
+| `each` | Object | Execute the task multiple times over a list or matrix. |
+| `retries` | Object | Retry policy with `count` (integer) and `delay` (duration string). |
+| `timeout` | String | Maximum execution time (e.g., `"30s"`, `"5m"`, `"1h"`). |
+| `triggers` | Object | Event-driven actions to execute on task completion. See Section 8. |
 
-### `type` (Required)
-
-Task type determining behavior and required parameters.
-
-- **Type**: String
-- **Values**: `run_command`, `copy_file`, `create_directory`, `move_file`, `parallel`, `group`, `choose`, `dynamic_tasks`
-
-#### **🎯 Task Type Performance Guide**
-
-**High-Performance Task Types** (Optimized in v2.0):
-
-1. **`run_command`** - Process execution with libuv
-   ```yaml
-   - name: build
-     type: run_command
-     command: "make build -j$(nproc)"
-   ```
-
-2. **`parallel`** - Concurrent execution
-   ```yaml
-   - name: parallel_builds
-     type: parallel
-     tasks: ["build_frontend", "build_backend", "build_tests"]
-   ```
-
-3. **`dynamic_tasks`** - Template-based task generation
-   ```yaml
-   - name: deploy_all_services
-     type: dynamic_tasks
-     items_variable: "{{services}}"
-     task_template:
-       name: "deploy_{{item.name}}"
-       type: run_command
-       command: "deploy {{item.name}} --env {{environment}}"
-   ```
-
-### `choose`
-
-Execute tasks based on conditional branches, similar to if/else if/else.
-
-**Properties**:
-- `branches` (array, required): A list of conditional branches. The first branch whose `when` condition evaluates to true will have its tasks executed. If no `when` condition is met, the `default` tasks will be executed.
-  - Each branch object has:
-    - `when` (string, required): A boolean expression. If true, this branch's tasks are executed.
-    - `tasks` (array, required): A list of tasks to execute if the `when` condition is met.
-- `default` (array, optional): A list of tasks to execute if no `when` condition in `branches` is met.
-
-**Constraints**:
-- `branches` must have at least one entry.
-- `when` condition is required for each branch.
-- Subtasks within `branches` or `default` can have `depends_on` (as per general task rules).
-
-### `depends_on` (Optional)
-
-Tasks that must complete successfully before this task starts.
-
-- **Type**: Array of strings (task names)
-- **Cross-file**: Can reference imported tasks
-- **Creates**: Directed Acyclic Graph (DAG)
-
-**Example**: `depends_on: ["compile_code", "imported_setup_task"]`
-
-### `when` (Optional)
-
-Conditional execution - task runs only if expression evaluates to true.
-
-- **Type**: String (boolean expression)
-- **Syntax**:
-  - **Variables**: `{{variable_name}}` or `{{variable_name.jmespath_query}}` for structured data
-  - **Operators**: `==`, `!=`, `and`, `or`
-  - **Precedence**: `and` higher than `or`
-  - **Grouping**: `()` for precedence control
-  - **Literals**: `'strings'`, `true/false`, `123`
-
-**JMESPath Usage**: When referencing a variable that contains structured data (e.g., JSON), you can use JMESPath syntax after the variable name to extract specific values. The JMESPath query is applied to the JSON object stored in the variable.
-
-**Example with JMESPath**: `when: "{{api_response.status_code}} == 200 and {{api_response.body.data[0].id}} != null"`
-
-**Example**: `when: "({{env}} == 'prod' or {{env}} == 'staging') and {{deploy_enabled}} == true"`
-
-### `on_failure` & `on_success` - **ENHANCED: Detailed Failure Context**
-
-Execute specific tasks when the current task fails or succeeds.
-
-- **Type**: Array of strings (task names)
-- **Enhanced Feature**: `on_failure` tasks automatically receive detailed failure context
-
-**🔥 NEW: Failure Context Variables**
-
-When a task fails and triggers `on_failure` handlers, the failure tasks automatically get access to special read-only variables:
-
-- `{{failed_task_name}}` - Name of the failed task
-- `{{failed_task_type}}` - Type of the failed task (e.g., "run_command")
-- `{{failed_task_exit_code}}` - Exit code (for run_command tasks)  
-- `{{failed_task_stdout}}` - Standard output from the failed task
-- `{{failed_task_stderr}}` - Standard error from the failed task
-- `{{failed_task_error}}` - Error message from the failure
-- `{{failed_task_outputs.variable_name}}` - Access captured outputs before failure
-
-**Real-World Example**:
+**Example:**
 ```yaml
 tasks:
-  - name: deploy_application
-    type: run_command
-    command: "kubectl apply -f app.yaml"
+  - name: deploy
+    depends_on: [build, test]
+    command: "./deploy.sh"
+    when: "{{ env.ENVIRONMENT }} == 'production'"
     retries:
       count: 3
       delay: "10s"
-    outputs:
-      stdout_to_variable: "deploy_stdout"
-      stderr_to_variable: "deploy_stderr"  
-      exit_code_to_variable: "deploy_exit_code"
-    on_failure: [rollback_deployment, alert_team]
-
-  - name: rollback_deployment  
-    type: run_command
-    command: |
-      echo "Rolling back {{failed_task_name}} - Exit Code: {{failed_task_exit_code}}"
-      echo "Error Details: {{failed_task_stderr}}"
-      kubectl rollout undo deployment/myapp
-      # Access captured outputs: {{failed_task_outputs.deploy_stdout}}
-      
-  - name: alert_team
-    type: run_command  
-    command: |
-      send-alert \
-        --title "Deployment Failed: {{failed_task_name}}" \
-        --message "Task {{failed_task_name}} failed with exit code {{failed_task_exit_code}}" \
-        --details "{{failed_task_error}}" \
-        --logs "{{failed_task_stderr}}"
+    timeout: "15m"
 ```
 
-**Advanced Failure Handling**:
+## 6. Task Composition: `uses`
+
+### 6.1. Executing a Reusable Workflow
+The `uses` keyword executes another workflow file as a task. This creates a nested, scoped execution of the target workflow.
+
+| Key | Type | Description |
+| :--- | :--- | :--- |
+| `uses` | String | Path to a reusable workflow file. Mutually exclusive with runner keys. |
+
+### 6.2. Passing Data with `vars` and `env`
+Instead of a formal contract, data is passed to a reusable workflow via the calling task's context.
+*   The `vars` map of the calling task is inherited as the `variables` of the reusable workflow.
+*   The `env` map of the calling task is merged into the environment of the reusable workflow.
+
+The reusable workflow can set its own outputs using `context.set()` in a `script` task. These outputs are namespaced and available to the parent workflow at `{{ tasks.<calling_task_name>.outputs.<key> }}`.
+
+## 7. Task Runner Reference
+
+### 7.1. Runner: `command` (Side Effects)
+
+Executes external programs and captures their output.
+
+**Attributes:**
+- `command` (String or Array, **Required**): The command to execute.
+- `output_format` (String, Optional): How to interpret stdout. Values: `text` (default) or `json`.
+
+**Output Capture:**
+- Text output: `{{ tasks.<task_name>.outputs.stdout }}`
+- JSON output: `{{ tasks.<task_name>.outputs.data }}` (parsed as JSON object)
+- Exit code: `{{ tasks.<task_name>.outputs.exit_code }}`
+- Stderr: `{{ tasks.<task_name>.outputs.stderr }}`
+
+**Example:**
 ```yaml
 tasks:
-  - name: database_migration
-    type: run_command
-    command: "migrate --env production"
-    outputs:
-      output_json_to_variable: "migration_result"
-    on_failure: [analyze_migration_failure]
-    
-  - name: analyze_migration_failure
-    type: run_command
-    command: |
-      echo "Migration failed for task: {{failed_task_name}}"
-      if [[ "{{failed_task_exit_code}}" == "2" ]]; then
-        echo "Schema conflict detected"
-        rollback-schema --reason "{{failed_task_error}}"
-      elif [[ "{{failed_task_exit_code}}" == "3" ]]; then
-        echo "Data validation failed"
-        fix-data-issues --details "{{failed_task_stderr}}"
-      else
-        echo "Unknown migration error: {{failed_task_error}}"
-        emergency-rollback --full
-      fi
+  - name: get_version
+    command: "git describe --tags"
+    # Output available at: tasks.get_version.outputs.stdout
+
+  - name: fetch_config
+    command: "curl -s https://api.example.com/config"
+    output_format: json
+    # Output available at: tasks.fetch_config.outputs.data.version
 ```
 
-**Why This Enhancement Matters**:
-- **Intelligent Recovery**: Make decisions based on specific failure details
-- **Better Logging**: Capture exact error context for debugging  
-- **Conditional Logic**: Different recovery strategies based on exit codes
-- **Zero Configuration**: Failure variables are automatically available
+### 7.2. Runner: `script` (Context Manipulation)
 
-### `retries` (Optional)
+Executes JavaScript code for in-memory data transformation and context manipulation.
 
-Automatic retry configuration for failed tasks.
+**Attributes:**
+- `script.source` (String, **Required**): The JavaScript code to execute.
 
-- **Type**: Object
-- **Fields**:
-  - `count` (integer, required): Maximum retry attempts
-  - `delay` (string, optional): Delay between retries (e.g., `"5s"`, `"1m"`)
+**Context API:**
+- `context.get(path)`: Retrieves a value from the context (e.g., `"tasks.build.outputs.version"`).
+- `context.set(key, value)`: Writes a JSON-serializable value to the current task's outputs.
 
-**Note**: Retries happen before `on_failure` handlers are triggered. Only after all retries fail will `on_failure` tasks execute with full failure context.
-
-### `each` (Optional)
-
-Execute task multiple times, once for each item in a list.
-
-- **Type**: Object
-- **Fields**:
-  - `items` (array, required): List to iterate over
-  - `as` (string, required): Variable name for current item
-
-**Example**:
+**Example:**
 ```yaml
-each:
-  items: ["auth", "api", "worker"]
-  as: "service"
-# Task runs 3 times with {{service}} = "auth", then "api", then "worker"
+tasks:
+  - name: calculate_tag
+    script:
+      source: |
+        const version = context.get("tasks.get_version.outputs.stdout").trim();
+        const env = context.get("ENVIRONMENT");
+        const tag = `${version}-${env}`;
+        context.set("docker_tag", tag);
+    # Output available at: tasks.calculate_tag.outputs.docker_tag
 ```
 
-### `outputs` (Optional)
+## 8. Event-Driven Triggers
 
-Capture task execution results into variables.
+A `triggers` block defines lightweight, event-driven actions that execute after a task completes.
 
-- **Type**: Object
-- **Fields**:
-  - `stdout_to_variable` (string): Capture standard output
-  - `stderr_to_variable` (string): Capture standard error  
-  - `exit_code_to_variable` (string): Capture exit code
-  - `output_json_to_variable` (string, optional): Capture standard output as JSON and store the parsed JSON object in the specified variable. Useful for API responses or structured command outputs.
+**Events:**
+- `on_success`: Fires when the task completes successfully.
+- `on_failure`: Fires when the task fails (after all retries).
+- `on_complete`: Fires regardless of success or failure.
 
-## Task Types
+**Actions:**
 
-### `run_command`
+### 8.1. `http_post` - Send HTTP Webhook
+```yaml
+triggers:
+  on_success:
+    - http_post:
+        url: "https://hooks.slack.com/services/..."
+        body: '{"text": "Build completed: {{ tasks.build.outputs.version }}"}'
+        headers:
+          Content-Type: "application/json"
+```
 
-Execute shell commands or external programs.
+### 8.2. `write_file` - Create File Artifact
+```yaml
+triggers:
+  on_complete:
+    - write_file:
+        path: "./logs/build.log"
+        content: "{{ tasks.build.outputs.stdout }}"
+        mode: overwrite  # or "append"
+```
 
-**Properties**:
-- `command` (string/array, required): Command to execute.
-  - When `command` is a **string**, it will be executed directly by the shell. This allows for shell features like pipes (`|`), redirects (`>`), and variable expansion (`$VAR`). Be mindful of shell injection risks and quoting.
-  - When `command` is an **array of strings**, the first element is treated as the executable, and subsequent elements are passed as arguments. This bypasses shell parsing, making execution more predictable and safer, especially when arguments contain spaces or special characters. **It is generally recommended to use the array form unless shell features are explicitly required.**
-- `working_directory` (string, optional): Execution directory
-- `environment` (map, optional): Environment variables
+### 8.3. `run_task` - Execute Recovery Task
+```yaml
+triggers:
+  on_failure:
+    - run_task:
+        task_name: rollback_deployment
+```
 
-### `copy_file`
+**Shorthand:** For `run_task`, you can use a string directly:
+```yaml
+triggers:
+  on_failure: [rollback_deployment, alert_team]
+```
 
-Copy files or directories.
 
-**Properties**:
-- `source` (string, required): Source path
-- `destination` (string, required): Destination path
-- `overwrite` (boolean, optional): Overwrite existing files
+### 8.4. `@weave` - Weave Notification Shortcut
+A convenience action to notify the Weave assistant or a configured webhook.
 
-### `create_directory`
+Write a scalar beginning with `@weave` to send a notification message:
+```yaml
+triggers:
+  on_success:
+    - "@weave Build {{ VERSION }} deployed to {{ env.DEPLOY_ENV }}"
+```
 
-Create directories.
+Equivalent long form:
+```yaml
+triggers:
+  on_success:
+    - weave:
+        message: "Build {{ VERSION }} deployed to {{ env.DEPLOY_ENV }}"
+```
 
-**Properties**:
-- `path` (string, required): Directory path
-- `parents` (boolean, optional): Create parent directories
+Behavior:
+- If `WEAVE_WEBHOOK` (or `WEAVE_NOTIFY_URL`) is present in environment, performs an HTTP POST with JSON `{ "text": "<message>" }`.
+- Otherwise, logs the message to the workflow log as an info entry.
+- All variables support standard substitution.
+## 9. Expression Language
 
-### `move_file`
+Expressions enable dynamic values and conditional logic throughout the workflow.
 
-Move or rename files/directories.
+**Syntax:** Expressions are wrapped in `{{ ... }}`.
 
-**Properties**:
-- `source` (string, required): Source path
-- `destination` (string, required): Destination path
-- `overwrite` (boolean, optional): Overwrite existing files
+**Variable Access:**
+- Simple variables: `{{ VERSION }}`
+- Nested paths: `{{ tasks.build.outputs.version }}`
+- Environment variables: `{{ env.NODE_ENV }}`
 
-### `parallel`
+**Operators (in `when` clauses):**
+- Comparison: `==`, `!=`, `<`, `>`, `<=`, `>=`
+- Logical: `and`, `or`, `not`
+- Grouping: `(`, `)`
 
-Execute multiple tasks concurrently.
+**JMESPath Queries:**
+For complex JSON data, use JMESPath syntax:
+```yaml
+vars:
+  latest_version: "{{ tasks.fetch_config.outputs.data.releases[0].version }}"
+```
 
-**Properties**:
-- `tasks` (array, required): Task list for parallel execution
+**Examples:**
+```yaml
+tasks:
+  - name: conditional_deploy
+    command: "./deploy.sh"
+    when: "{{ ENVIRONMENT }} == 'production' and {{ tasks.test.outputs.exit_code }} == 0"
 
-**Constraints**:
-- Context modifications may not be visible to subsequent tasks.
-- **Shared State & Idempotency**: Tasks executed in parallel should ideally be **idempotent** (producing the same result regardless of how many times or concurrently they are run) and avoid modifying shared external state without proper external synchronization. Weave does not provide built-in mechanisms for concurrent access control to external resources. If parallel tasks modify the same external resource (e.g., a database, a file system), you must ensure atomicity and consistency through external means.
+  - name: use_output
+    command: "echo Deploying version {{ tasks.build.outputs.version }}"
+```
 
-### `dynamic_tasks` - **NEW: Advanced Task Generation**
+## 10. JSON Schema Contract
+A canonical JSON Schema **MUST** be provided to validate workflow syntax and provide editor support.
+```json
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Weave Workflow Specification",
+  "description": "A schema for defining Weave DSL (v6.0) workflow files.",
+  "type": "object",
 
-Generate and execute tasks dynamically from JSON data and templates.
+  "properties": {
+    "variables": {
+      "type": "object",
+      "description": "Global, read-only variables for expression interpolation."
+    },
+    "env": {
+      "type": "object",
+      "description": "Global environment variables available to all tasks.",
+      "additionalProperties": { "type": "string" }
+    },
+    "dotEnv": {
+      "type": "array",
+      "description": "A list of .env files to load into the global environment.",
+      "items": { "type": "string" }
+    },
+    "defaults": {
+      "type": "object",
+      "description": "Default attributes applied to all tasks.",
+      "properties": {
+        "retries": { "$ref": "#/$defs/retriesPolicy" },
+        "timeout": { "$ref": "#/$defs/durationString" }
+      },
+      "additionalProperties": false
+    },
+    "tasks": {
+      "type": "array",
+      "description": "The list of all task definitions in the workflow.",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/taskDefinition" }
+    }
+  },
+  "required": ["tasks"],
+  "additionalProperties": false,
 
-**Properties**:
-- `items_variable` (string, required): Variable containing JSON array of items
-- `task_template` (object, required): Template for generating tasks
+  "$defs": {
+    "durationString": {
+      "type": "string",
+      "description": "A duration string, e.g., '30s', '5m', '1h'.",
+      "pattern": "^[0-9]+(s|m|h)$"
+    },
+    "retriesPolicy": {
+      "type": "object",
+      "properties": {
+        "count": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Maximum number of retry attempts."
+        },
+        "delay": {
+          "$ref": "#/$defs/durationString",
+          "description": "The delay between attempts."
+        }
+      },
+      "required": ["count"],
+      "additionalProperties": false
+    },
+    "triggerAction": {
+      "type": "object",
+      "description": "A single, self-contained action to perform when a trigger fires.",
+      "properties": {
+        "http_post": {
+          "type": "object",
+          "properties": {
+            "url": { "type": "string", "format": "uri" },
+            "body": { "type": "string" },
+            "headers": {
+              "type": "object",
+              "additionalProperties": { "type": "string" }
+            }
+          },
+          "required": ["url"],
+          "additionalProperties": false
+        },
+        "write_file": {
+          "type": "object",
+          "properties": {
+            "path": { "type": "string" },
+            "content": { "type": "string" },
+            "mode": { "enum": ["overwrite", "append"] }
+          },
+          "required": ["path", "content"],
+          "additionalProperties": false
+        },
+        "run_task": {
+          "type": "object",
+          "properties": {
+            "task_name": { "type": "string" }
+          },
+          "required": ["task_name"],
+          "additionalProperties": false
+        }
+      },
+      "oneOf": [
+        { "required": ["http_post"] },
+        { "required": ["write_file"] },
+        { "required": ["run_task"] }
+      ]
+    },
+    "triggersBlock": {
+      "type": "object",
+      "description": "Defines event-driven actions to take upon task completion.",
+      "properties": {
+        "on_success": { "$ref": "#/$defs/triggerActionList" },
+        "on_failure": { "$ref": "#/$defs/triggerActionList" },
+        "on_complete": { "$ref": "#/$defs/triggerActionList" }
+      },
+      "additionalProperties": false
+    },
+    "triggerActionList": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          { "type": "string", "description": "Shorthand for a 'run_task' action." },
+          { "$ref": "#/$defs/triggerAction" }
+        ]
+      }
+    },
+    "taskDefinition": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "depends_on": { "type": "array", "items": { "type": "string" } },
+        "vars": { "type": "object" },
+        "env": { "type": "object", "additionalProperties": { "type": "string" } },
+        "dotEnv": { "type": "array", "items": { "type": "string" } },
+        "timeout": { "$ref": "#/$defs/durationString" },
+        "retries": { "$ref": "#/$defs/retriesPolicy" },
+        "when": { "type": "string" },
+        "each": {
+          "type": "object",
+          "properties": {
+            "items": { "type": "array" },
+            "matrix": { "type": "object", "additionalProperties": { "type": "array" } },
+            "as": { "type": "string" },
+            "index_variable": { "type": "string" }
+          },
+          "oneOf": [ { "required": ["items"] }, { "required": ["matrix"] } ]
+        },
+        "triggers": { "$ref": "#/$defs/triggersBlock" },
+        "command": { "oneOf": [ { "type": "string" }, { "type": "array", "items": { "type": "string" } } ] },
+        "output_format": { "enum": ["text", "json"] },
+        "script": {
+          "type": "object",
+          "properties": { "source": { "type": "string" } },
+          "required": ["source"]
+        },
+        "uses": { "type": "string" }
+      },
+      "required": ["name"],
+      "oneOf": [
+        { "required": ["command"] },
+        { "required": ["script"] },
+        { "required": ["uses"] }
+      ],
+      "additionalProperties": false
+    }
+  }
+}
+```
+## 11. Comprehensive Examples
 
-**Template Substitution**:
-- `{{item.field}}` - Access item properties
-- `{{item.nested.field}}` - Access nested JSON structures
-- All standard variables remain available
+### 11.1. Basic Workflow with Dependencies
 
-**Example**:
 ```yaml
 variables:
-  services: '[{"name": "auth", "port": 3001}, {"name": "api", "port": 3002}]'
+  PROJECT_NAME: "my-app"
+  BUILD_DIR: "./dist"
 
 tasks:
-  - name: deploy_all_microservices
-    type: dynamic_tasks
-    items_variable: "{{services}}"
-    task_template:
-      name: "deploy_{{item.name}}"
-      type: run_command
-      command: "docker run -p {{item.port}}:{{item.port}} {{item.name}}"
-      vars:
-        SERVICE_NAME: "{{item.name}}"
-        SERVICE_PORT: "{{item.port}}"
+  - name: clean
+    command: "rm -rf {{ BUILD_DIR }}"
+
+  - name: install
+    depends_on: [clean]
+    command: "npm install"
+
+  - name: build
+    depends_on: [install]
+    command: "npm run build"
+    timeout: "10m"
+
+  - name: test
+    depends_on: [build]
+    command: "npm test"
+    retries:
+      count: 2
+      delay: "5s"
 ```
 
-**Advanced Usage with API Data**:
+### 11.2. Reusable Workflow with Context Inheritance
+
+**File: `reusable/docker-build.yml`**
 ```yaml
+# This reusable workflow expects IMAGE_NAME, TAG, and REGISTRY_URL
+# to be provided via 'vars' by the calling task.
+
 tasks:
-  - name: fetch_deployment_config
-    type: run_command
-    command: "curl -s https://api.example.com/deploy-config"
-    outputs:
-      output_json_to_variable: "deploy_config"
-  
-  - name: deploy_from_api_config
-    type: dynamic_tasks
-    depends_on: [fetch_deployment_config]
-    items_variable: "{{deploy_config.services}}"
-    task_template:
-      name: "deploy_{{item.service_name}}"
-      type: run_command
-      command: "deploy --service {{item.service_name}} --replicas {{item.replicas}}"
+  - name: set_full_tag
+    script:
+      source: |
+        const full_tag = `{{ REGISTRY_URL }}/{{ IMAGE_NAME }}:{{ TAG }}`;
+        context.set("full_image_tag", full_tag);
+
+  - name: docker_build
+    depends_on: [set_full_tag]
+    command: "docker build -t {{ tasks.set_full_tag.outputs.full_image_tag }} ."
+
+  - name: docker_push
+    depends_on: [docker_build]
+    command: "docker push {{ tasks.set_full_tag.outputs.full_image_tag }}"
 ```
 
-## Variable Usage
-
-Variables from `inputs`, `variables`, task `vars`, or captured `outputs` can be referenced using `{{variable_name}}` syntax. These variables can now hold **structured data** (e.g., JSON objects), not just simple strings.
-
-**Accessing Structured Data**: For variables holding structured data, you can use JMESPath queries directly within the `{{...}}` syntax to extract specific values. For example, if `api_response` contains `{"status": "success", "data": {"id": 123}}`, you can access `{{api_response.status}}` or `{{api_response.data.id}}`.
-
-**💡 Best Practice for JMESPath**: While powerful, overly complex or deeply nested JMESPath queries directly within your YAML can significantly reduce readability and make debugging difficult. If your data transformation logic becomes intricate, consider performing the transformation in a preceding `run_command` task (e.g., using a simple script) and storing the simplified result in a new variable. This keeps your workflow YAML clean and focused on orchestration.
-
-**Precedence** (highest to lowest):
-1. Task-level `vars`
-2. Global `variables`
-3. Input parameters
-4. Captured `outputs`
-
-## Complete Example with Imports
-
+**File: `ci-pipeline.yml`**
 ```yaml
-# Modern Weave workflow with all features
-imports:
-  - "collections/cpp/build-tasks.yml"
-  - "collections/docker/container-tasks.yml"
-
-inputs:
-  - name: environment
-    type: string
-    default: "dev"
-  - name: enable_tests
-    type: boolean
-    default: true
-
 variables:
-  APP_NAME: "MyApp"
-  VERSION: "2.0.0"
-  DOCKER_REGISTRY: "my.docker.registry.com"
+  APP_NAME: "web-app"
+  REGISTRY: "registry.example.com"
 
-task_templates:
-  - name: deploy_service
-    parameters:
-      - name: service_name
-        type: string
-      - name: version
-        type: string
-        default: "latest"
-    tasks:
-      - name: build_{{service_name}}
-        type: run_command
-        command: "echo Building {{service_name}} v{{version}}"
-      - name: push_{{service_name}}
-        type: run_command
-        depends_on: [build_{{service_name}}]
-        command: "echo Pushing {{DOCKER_REGISTRY}}/{{service_name}}:{{version}}"
-      - name: deploy_{{service_name}}
-        type: run_command
-        depends_on: [push_{{service_name}}]
-        command: "echo Deploying {{service_name}} v{{version}} to {{environment}}"
+env:
+  DOCKER_BUILDKIT: "1"
+
+tasks:
+  - name: get_version
+    command: "git describe --tags --always"
+
+  - name: build_image
+    depends_on: [get_version]
+    uses: ./reusable/docker-build.yml
+    vars:
+      IMAGE_NAME: "{{ APP_NAME }}"
+      TAG: "{{ tasks.get_version.outputs.stdout }}"
+      REGISTRY_URL: "{{ REGISTRY }}"
+
+  - name: deploy
+    depends_on: [build_image]
+    command: "./scripts/deploy.sh --image {{ tasks.build_image.outputs.full_image_tag }}"
+    when: "{{ ENVIRONMENT }} == 'production'"
+    triggers:
+      on_failure:
+        - http_post:
+            url: "{{ env.SLACK_WEBHOOK_URL }}"
+            body: '{"text": "Deployment failed for {{ tasks.build_image.outputs.full_image_tag }}"}'
+```
+
+### 11.3. Data Transformation with Script
+
+```yaml
+tasks:
+  - name: fetch_config
+    command: "curl -s https://api.example.com/config"
+    output_format: json
+
+  - name: process_config
+    depends_on: [fetch_config]
+    script:
+      source: |
+        const config = context.get("tasks.fetch_config.outputs.data");
+        const version = config.version;
+        const features = config.features.filter(f => f.enabled);
+
+        context.set("app_version", version);
+        context.set("enabled_features", features.map(f => f.name).join(","));
+
+  - name: deploy_with_features
+    depends_on: [process_config]
+    command: |
+      ./deploy.sh \
+        --version {{ tasks.process_config.outputs.app_version }} \
+        --features {{ tasks.process_config.outputs.enabled_features }}
+```
+
+### 11.4. Loop Execution with Each
+
+```yaml
+tasks:
+  - name: test_services
+    each:
+      items: ["auth", "api", "worker"]
+      as: "service"
+    command: "./test-service.sh {{ service }}"
+
+  - name: build_matrix
+    each:
+      matrix:
+        os: ["linux", "windows", "macos"]
+        arch: ["amd64", "arm64"]
+      as: "config"
+    command: "./build.sh --os {{ config.os }} --arch {{ config.arch }}"
+```
+
+### 11.5. Error Handling with Triggers
+
+```yaml
+tasks:
+  - name: deploy_app
+    command: "./deploy.sh --env production"
+    retries:
+      count: 3
+      delay: "10s"
+    triggers:
+      on_failure: [rollback, notify_team]
+      on_success:
+        - write_file:
+            path: "./logs/deploy-success.log"
+            content: "Deployed at {{ tasks.deploy_app.outputs.stdout }}"
+
+  - name: rollback
+    command: "./rollback.sh --reason 'Deploy failed'"
+
+  - name: notify_team
+    command: |
+      curl -X POST {{ env.SLACK_WEBHOOK }} \
+        -d '{"text": "Deploy failed: {{ failed_task_error }}"}'
+```
+
+## 12. Security and Secrets Management
+
+### 12.1. Principle of Least Privilege
+Use task-scoped `env` and `dotEnv` to expose secrets only to tasks that need them:
+
+```yaml
+tasks:
+  - name: deploy
+    env:
+      AWS_ACCESS_KEY_ID: "{{ env.AWS_KEY }}"
+      AWS_SECRET_ACCESS_KEY: "{{ env.AWS_SECRET }}"
+    command: "./deploy.sh"
+```
+
+### 12.2. Secrets Backend Integration
+Runtimes **SHOULD** integrate with dedicated secrets managers:
+- HashiCorp Vault
+- AWS Secrets Manager
+- Azure Key Vault
+- Environment-specific secret stores
+
+### 12.3. Log Redaction
+Runtimes **MUST** automatically redact values from logs when keys match common secret patterns:
+- `*_SECRET`, `*_PASSWORD`, `*_TOKEN`, `*_KEY`
+- `API_KEY`, `PRIVATE_KEY`, `ACCESS_TOKEN`
+
+### 12.4. Best Practices
+- Never commit secrets to version control
+- Use `.env` files (gitignored) for local development
+- Use secret managers for production environments
+- Rotate secrets regularly
+- Audit secret access through workflow logs
+
+---
+
+## Appendix A: Complete Grammar Reference
+
+### Workflow File Structure
+```yaml
+# Optional metadata
+name: "Workflow Name"
+description: "Workflow description"
+
+# Optional global configuration
+variables:
+  KEY: "value"
+
+env:
+  ENV_VAR: "value"
+
+dotEnv:
+  - ".env"
 
 defaults:
   retries:
     count: 2
     delay: "5s"
-  vars:
-    LOG_LEVEL: "info"
+  timeout: "10m"
 
+# Required: at least one task
 tasks:
-  - name: setup
-    type: run_command
-    command: "echo Starting {{APP_NAME}} v{{VERSION}}"
-    outputs:
-      stdout_to_variable: "start_message"
+  - name: "task_name"
+    depends_on: ["other_task"]
+    vars:
+      TASK_VAR: "value"
+    env:
+      TASK_ENV: "value"
+    dotEnv:
+      - ".env.task"
+    when: "{{ condition }}"
+    each:
+      items: ["a", "b"]
+      as: "item"
+    retries:
+      count: 3
+      delay: "10s"
+    timeout: "15m"
 
-  # Use imported tasks
-  - name: build_app
-    type: run_command
-    command: "echo Build complete"
-    depends_on: [setup, cpp_build_project]  # cpp_build_project from imports
+    # Exactly one runner:
+    command: "echo hello"
+    # OR
+    script:
+      source: "context.set('key', 'value');"
+    # OR
+    uses: "./path/to/workflow.yml"
 
-  - name: test_conditional
-    type: run_command
-    command: "echo Running tests"
-    depends_on: [build_app]
-    when: "{{enable_tests}} == true"
-
-  # Use custom task type
-  - name: deploy_auth_service
-    type: deploy_service
-    depends_on: [test_conditional]
-    service_name: "auth"
-    version: "1.0.0"
-
-  - name: deploy_api_service
-    type: deploy_service
-    depends_on: [deploy_auth_service]
-    service_name: "api"
-    version: "{{VERSION}}"
-
-  - name: completion
-    type: run_command
-    command: "echo {{start_message}} - Deployment complete!"
-    depends_on: [deploy_api_service]
+    # Optional triggers
+    triggers:
+      on_success: []
+      on_failure: []
+      on_complete: []
 ```
 
-This example demonstrates:
-- ✅ Cross-file imports for reusable tasks
-- ✅ Runtime inputs with defaults
-- ✅ Global and task-scoped variables  
-- ✅ Cross-file task dependencies
-- ✅ Conditional execution
-- ✅ Parallel task execution
-- ✅ Output capture and chaining
-- ✅ Complete workflow orchestration
+### Task Runner Summary
+
+| Runner | Purpose | Output Location |
+| :--- | :--- | :--- |
+| `command` | Execute external programs | `tasks.<name>.outputs.stdout` |
+| `script` | JavaScript data transformation | `tasks.<name>.outputs.<key>` (via `context.set`) |
+| `uses` | Execute reusable workflow | `tasks.<name>.outputs.*` (from nested tasks) |
 
 ---
 
-## 🏆 Best Practices & Patterns
+## Appendix B: Migration Guide
 
-### **🚀 Performance Optimization Patterns**
+### From Version 6.0 to 7.0
 
-#### **1. Leverage Executor Pool Caching**
-```yaml
-# ✅ GOOD: Reuse same task types for optimal caching
-tasks:
-  - name: build_service_1
-    type: run_command
-    command: "build service1"
-  - name: build_service_2  
-    type: run_command        # Same type = cached executor
-    command: "build service2"
-  - name: build_service_3
-    type: run_command        # Same type = cached executor  
-    command: "build service3"
+**Removed Features:**
+- `parallel` blocks - Use DAG dependencies instead
+- `group` blocks - Use DAG dependencies instead
+- `imports` - Use `uses` for reusable workflows
 
-# ❌ AVOID: Mixing task types unnecessarily
-```
+**Migration Examples:**
 
-#### **2. Maximize Parallel Execution**
-```yaml
-# ✅ EXCELLENT: Parallel independent tasks
-tasks:
-  - name: setup_infrastructure
-    type: parallel
-    tasks: 
-      - setup_database
-      - setup_cache
-      - setup_load_balancer
-      - setup_monitoring
-  
-  - name: deploy_services
-    type: parallel
-    depends_on: [setup_infrastructure]
-    tasks:
-      - deploy_auth_service
-      - deploy_api_service
-      - deploy_worker_service
-```
-
-#### **3. Optimize Dynamic Task Generation**
-```yaml
-# ✅ BEST PRACTICE: Fetch data once, generate many tasks
-tasks:
-  - name: get_deployment_config
-    type: run_command
-    command: "kubectl get deployments -o json"
-    outputs:
-      output_json_to_variable: "deployments"
-  
-  - name: rolling_update_all
-    type: dynamic_tasks
-    depends_on: [get_deployment_config]
-    items_variable: "{{deployments.items}}"
-    task_template:
-      name: "update_{{item.metadata.name}}"
-      type: run_command
-      command: |
-        kubectl patch deployment {{item.metadata.name}} \
-        -p '{"spec":{"template":{"metadata":{"labels":{"version":"{{VERSION}}"}}}}}'
-```
-
-### **🎯 Workflow Design Patterns**
-
-#### **1. Pipeline Pattern**
-```yaml
-# Sequential stages with clear dependencies
-tasks:
-  - name: validate
-    type: run_command
-    command: "validate-inputs"
-  
-  - name: build
-    type: run_command 
-    depends_on: [validate]
-    command: "build-application"
-  
-  - name: test
-    type: parallel
-    depends_on: [build]
-    tasks: [unit_tests, integration_tests, security_tests]
-  
-  - name: deploy
-    type: run_command
-    depends_on: [test]
-    command: "deploy-to-production"
-```
-
-#### **2. Fan-Out/Fan-In Pattern**
+**Before (v6.0 with parallel):**
 ```yaml
 tasks:
-  - name: prepare_data
-    type: run_command
-    command: "prepare-shared-data"
-  
-  # Fan-out: Process data in parallel
-  - name: process_parallel
-    type: parallel
-    depends_on: [prepare_data]
-    tasks: [process_chunk_1, process_chunk_2, process_chunk_3]
-  
-  # Fan-in: Combine results
-  - name: combine_results
-    type: run_command
-    depends_on: [process_parallel]
-    command: "combine-all-results"
+  - name: build_all
+    parallel:
+      tasks:
+        - name: build_frontend
+          command: "npm run build:frontend"
+        - name: build_backend
+          command: "npm run build:backend"
 ```
 
-#### **3. Conditional Deployment Pattern**
+**After (v7.0 with DAG):**
 ```yaml
 tasks:
-  - name: check_environment_health
-    type: run_command
-    command: "health-check --env {{environment}}"
-    outputs:
-      output_json_to_variable: "health_status"
-  
-  - name: conditional_deployment
-    type: choose
-    depends_on: [check_environment_health]
-    branches:
-      - when: "{{health_status.status}} == 'healthy' and {{environment}} == 'prod'"
-        tasks: [full_production_deploy]
-      - when: "{{health_status.status}} == 'healthy'"
-        tasks: [standard_deploy]
-    default: [rollback_deployment]
+  - name: build_frontend
+    command: "npm run build:frontend"
+
+  - name: build_backend
+    command: "npm run build:backend"
+
+  - name: build_complete
+    depends_on: [build_frontend, build_backend]
+    command: "echo Build complete"
 ```
 
-### **⚡ Performance Monitoring**
-
-Weave v2.0 automatically logs performance statistics:
-
-```
-=== Executor Pool Performance Stats ===
-Registered executor types: 8
-Total cached executors: 8  
-Cache hits: 247
-Cache misses: 8
-Cache hit rate: 96.9%
-EXCELLENT: High cache efficiency - significant performance gain!
-=========================================
-```
-
-#### **Performance Tuning Tips**:
-
-1. **Monitor Cache Hit Rate**
-   - **90%+**: Excellent performance
-   - **70-90%**: Good performance  
-   - **<70%**: Consider workflow optimization
-
-2. **Optimize Task Types**
-   - Group similar operations using same task types
-   - Use `parallel` for independent operations
-   - Leverage `dynamic_tasks` for bulk operations
-
-3. **Concurrent Execution Settings**
-   ```bash
-   # Adjust based on your system
-   weave workflow.yml --concurrent --jobs 8
-   ```
-
-### **🔧 Advanced Patterns**
-
-#### **1. Multi-Stage Build Pipeline**
+**Before (v6.0 with imports):**
 ```yaml
 imports:
-  - "pipelines/build-stages.yml"
-  - "pipelines/test-stages.yml"
-  - "pipelines/deploy-stages.yml"
-
-variables:
-  DOCKER_REGISTRY: "my.registry.com"
-  APP_VERSION: "{{CI_COMMIT_SHA | substring(0, 7)}}"
+  - "shared-tasks.yml"
 
 tasks:
-  - name: multi_stage_pipeline
-    type: group
-    tasks:
-      - compile_and_package
-      - security_scan_parallel
-      - integration_tests
-      - staging_deployment
-      - production_deployment
-
-  - name: security_scan_parallel
-    type: parallel
-    tasks: [dependency_scan, code_scan, container_scan, secret_scan]
+  - name: deploy
+    depends_on: [lint_code, run_tests]
 ```
 
-#### **2. Microservices Deployment**
+**After (v7.0 with uses):**
 ```yaml
-inputs:
-  - name: services_config
-    type: string
-    default: "config/services.json"
-
 tasks:
-  - name: load_services_config
-    type: run_command
-    command: "cat {{services_config}}"
-    outputs:
-      output_json_to_variable: "services"
-  
-  - name: deploy_all_microservices
-    type: dynamic_tasks
-    depends_on: [load_services_config]
-    items_variable: "{{services}}"
-    task_template:
-      name: "deploy_{{item.name}}"
-      type: group
-      tasks:
-        - name: "build_{{item.name}}"
-          type: run_command
-          command: "docker build -t {{DOCKER_REGISTRY}}/{{item.name}}:{{APP_VERSION}} ./{{item.path}}"
-        - name: "push_{{item.name}}"  
-          type: run_command
-          command: "docker push {{DOCKER_REGISTRY}}/{{item.name}}:{{APP_VERSION}}"
-        - name: "deploy_{{item.name}}"
-          type: run_command
-          command: "kubectl set image deployment/{{item.name}} {{item.name}}={{DOCKER_REGISTRY}}/{{item.name}}:{{APP_VERSION}}"
+  - name: shared_tasks
+    uses: "./shared-tasks.yml"
+
+  - name: deploy
+    depends_on: [shared_tasks]
+    command: "./deploy.sh"
 ```
-
-#### **3. Error Handling & Recovery**
-```yaml
-defaults:
-  retries:
-    count: 3
-    delay: "5s"
-
-tasks:
-  - name: resilient_deployment
-    type: choose
-    branches:
-      - when: "{{deployment_strategy}} == 'blue-green'"
-        tasks: [blue_green_deploy]
-      - when: "{{deployment_strategy}} == 'canary'" 
-        tasks: [canary_deploy]
-      - when: "{{deployment_strategy}} == 'rolling'"
-        tasks: [rolling_deploy]
-    default: [emergency_rollback]
-  
-  - name: emergency_rollback
-    type: run_command
-    command: "kubectl rollout undo deployment/{{service_name}}"
-    retries:
-      count: 5
-      delay: "2s"
-```
-
-### **📊 Monitoring & Observability**
-
-```yaml
-# Add monitoring to critical workflows
-tasks:
-  - name: deployment_with_monitoring
-    type: group
-    tasks:
-      - name: pre_deploy_health_check
-        type: run_command
-        command: "health-check --pre-deploy"
-        outputs:
-          output_json_to_variable: "pre_deploy_status"
-      
-      - name: actual_deployment
-        type: run_command
-        command: "deploy --service {{service}} --version {{version}}"
-        when: "{{pre_deploy_status.healthy}} == true"
-        outputs:
-          stdout_to_variable: "deploy_output"
-          exit_code_to_variable: "deploy_exit_code"
-      
-      - name: post_deploy_verification
-        type: run_command
-        command: "verify-deployment --service {{service}}"
-        depends_on: [actual_deployment]
-        when: "{{deploy_exit_code}} == '0'"
-        
-      - name: alert_on_failure
-        type: run_command
-        command: "send-alert --message 'Deployment failed: {{deploy_output}}'"
-        when: "{{deploy_exit_code}} != '0'"
-```
-
----
-
-**Weave v2.0**: Professional workflow orchestration with enterprise-grade performance and monitoring.

@@ -1,47 +1,36 @@
-#ifndef __TASK_H__
+﻿#ifndef __TASK_H__
 #define __TASK_H__
 
 #include "task_types.hpp"
-#include "dag/enhanced_graph.hpp"
+#include "dag/dependency_graph.hpp"
 
 #include <string>
 #include <unordered_map>
 #include <vector>
 
-/**
- * @struct Task
- * @brief Represents a single task in a workflow, aligned with weave_workflow_grammar.md.
- */
 struct Task {
-    // Core attributes
     std::string name;
-    std::string type; // e.g., "run_command", "copy_file"
+    TaskAction action = TaskAction::None;
 
-    // Dependency and conditional execution
     StrList depends_on;
-    std::string when;
+    Vars vars;
+    Vars env;
+    DotEnv dot_env;
 
-    // Execution control
-    RetryPolicy retries;
-    Each each;
-    std::string timeout;
+    std::optional<std::string> when;
+    std::optional<Each> each;
+    std::optional<RetryPolicy> retries;
+    std::optional<std::string> timeout;
+    std::optional<Triggers> triggers;
 
-    // Input/Output
+    TaskSpecifics specifics = std::monostate{};
     Outputs outputs;
 
-    // Post-execution hooks
-    StrList on_success;
-    StrList on_failure;
-
-    // Task-specific parameters
-    TaskSpecifics specifics;
-
-    // For backward compatibility or other potential uses
-    std::string description; // from old 'desc' field
-    Vars vars; // task-local variables
+    std::string description;
+    std::string source_path;
 
     bool operator==(const Task& other) const {
-        return name == other.name; // Simple comparison for now
+        return name == other.name;
     }
 
     bool operator!=(const Task& other) const {
@@ -49,7 +38,19 @@ struct Task {
     }
 };
 
-// Custom hash specialization for Task
+struct Workflow {
+    Vars variables;
+    Vars env;
+    DotEnv dot_env;
+    TaskDefaults defaults;
+    std::vector<Task> tasks;
+    std::unordered_map<std::string, EmbeddedModule> embedded;
+
+    std::string name;
+    std::string description;
+    std::string source_path;
+};
+
 namespace std {
     template<>
     struct hash<Task> {
@@ -58,26 +59,5 @@ namespace std {
         }
     };
 }
-
-// Custom hash for Task for use in unordered_map/set if needed
-
-
-/**
- * @struct Workflow
- * @brief Represents a parsed workflow file, containing all tasks and configurations.
- *        This replaces the old FlowFile struct.
- */
-struct Workflow {
-    std::vector<Input> inputs;
-    Vars variables;
-    Task defaults; // Task struct can hold default values
-    std::vector<Task> tasks;
-    std::vector<TaskTemplate> task_templates; // New: Custom task templates
-    StrList imports; // List of workflow files to import
-
-    // For backward compatibility or metadata
-    std::string name;
-    std::string description;
-};
 
 #endif // __TASK_H__

@@ -93,41 +93,62 @@ Task TemplateEngine::createTaskFromTemplate(
     const DynamicTaskTemplate& task_template,
     const jsoncons::json& item_data,
     const WorkflowContext& context,
-    size_t index
+    size_t /*index*/
 ) {
     Task task;
-    
-    // Expand template fields
+
     task.name = expandTemplate(task_template.name, item_data, context);
-    task.type = task_template.type;  // Type is usually not templated
-    
-    // Handle timeout
+
     if (!task_template.timeout.empty()) {
         task.timeout = expandTemplate(task_template.timeout, item_data, context);
     }
-    
-    // Handle when condition
+
     if (!task_template.when.empty()) {
         task.when = expandTemplate(task_template.when, item_data, context);
     }
-    
-    // Handle dependencies (expand each dependency name)
+
     for (const auto& dep : task_template.depends_on) {
-        std::string expanded_dep = expandTemplate(dep, item_data, context);
-        task.depends_on.push_back(expanded_dep);
+        task.depends_on.push_back(expandTemplate(dep, item_data, context));
     }
-    
-    // Create task specifics based on type
-    if (task_template.type == "run_command") {
-        RunCommandParams params;
-        std::string expanded_command = expandTemplate(task_template.command, item_data, context);
-        params.command = expanded_command;
-        task.specifics = params;
-    } else {
-        throw std::runtime_error("Unsupported task type for dynamic tasks: " + task_template.type);
+
+    task.action = task_template.action;
+
+    switch (task_template.action) {
+        case TaskAction::RunCommand: {
+            RunCommandParams params = task_template.run_command;
+
+            if (std::holds_alternative<std::string>(params.command)) {
+                std::string expanded = expandTemplate(std::get<std::string>(params.command), item_data, context);
+                params.command = expanded;
+            } else {
+                StrList expanded;
+                const auto& parts = std::get<StrList>(params.command);
+                expanded.reserve(parts.size());
+                for (const auto& part : parts) {
+                    expanded.push_back(expandTemplate(part, item_data, context));
+                }
+                params.command = expanded;
+            }
+
+            if (!params.working_directory.empty()) {
+                params.working_directory = expandTemplate(params.working_directory, item_data, context);
+            }
+
+            for (auto& entry : params.environment) {
+                entry.second = expandTemplate(entry.second, item_data, context);
+            }
+
+            task.specifics = params;
+            break;
+        }
+        case TaskAction::None:
+            throw std::runtime_error("dynamic_tasks template is missing an action block");
+        default:
+            throw std::runtime_error("Unsupported action in dynamic_tasks template");
     }
-    
+
     return task;
 }
+
 
 } // namespace Weave::Util

@@ -1,4 +1,4 @@
-#ifndef __WORKFLOW_CONTEXT_HPP__
+﻿#ifndef __WORKFLOW_CONTEXT_HPP__
 #define __WORKFLOW_CONTEXT_HPP__
 
 // Standard library includes
@@ -16,6 +16,7 @@
 
 // Project includes
 #include "util/system_info.hpp"
+#include "yml/task_types.hpp"
 
 // Define WorkflowValue as jsoncons::json
 using WorkflowValue = jsoncons::json;
@@ -89,6 +90,8 @@ public:
     void setValue(std::string const& key, const WorkflowValue& value) {
         data_[key] = value;
     }
+
+    void unsetValue(const std::string& key) { data_.erase(key); }
 
     /**
      * @brief Gets a value from the context.
@@ -166,9 +169,62 @@ public:
     /**
      * @brief Gets a variable from the context (alias for getValueOrDefault with string).
      */
+
     std::string getVariable(std::string const& key) const {
-        return getValueOrDefault<std::string>(key, "");
+        return getValueOrDefault<std::string>(key, "\"");
     }
+
+    WorkflowValue getValueByPath(const std::string& path) const {
+        if (path.empty()) {
+            return WorkflowValue();
+        }
+
+        // Fast path: direct key lookup
+        auto direct_it = data_.find(path);
+        if (direct_it != data_.end()) {
+            return direct_it->second;
+        }
+
+        // Split path by '.' to walk nested objects (supports simple array indices later if needed)
+        std::vector<std::string> segments;
+        std::string current;
+        for (char ch : path) {
+            if (ch == '.') {
+                if (!current.empty()) {
+                    segments.push_back(current);
+                    current.clear();
+                }
+            } else {
+                current.push_back(ch);
+            }
+        }
+        if (!current.empty()) {
+            segments.push_back(current);
+        }
+
+        if (segments.empty()) {
+            return WorkflowValue();
+        }
+
+        auto it = data_.find(segments.front());
+        if (it == data_.end()) {
+            auto str = getValueOrDefault<std::string>(path, "");
+            return str.empty() ? WorkflowValue() : WorkflowValue(str);
+        }
+
+        const WorkflowValue* current_value = &it->second;
+        for (size_t i = 1; i < segments.size(); ++i) {
+            const auto& key = segments[i];
+            if (!current_value->is_object() || !current_value->contains(key)) {
+                return WorkflowValue();
+            }
+            current_value = &current_value->at(key);
+        }
+
+        return *current_value;
+    }
+
+
 
     /**
      * @brief Gets all variables as a string map (only simple string values).
@@ -186,6 +242,68 @@ public:
     /**
      * @brief Adds a completed task to the context.
      */
+    void setTaskStatus(const std::string& taskName, const std::string& status) {
+        WorkflowValue& tasks = data_["tasks"];
+        if (!tasks.is_object()) {
+            tasks = jsoncons::json::object();
+        }
+        WorkflowValue& task_entry = tasks[taskName];
+        if (!task_entry.is_object()) {
+            task_entry = jsoncons::json::object();
+        }
+        task_entry["status"] = status;
+    }
+
+    void setTaskOutput(const std::string& taskName, const std::string& key, const WorkflowValue& value) {
+        WorkflowValue& tasks = data_["tasks"];
+        if (!tasks.is_object()) {
+            tasks = jsoncons::json::object();
+        }
+        WorkflowValue& task_entry = tasks[taskName];
+        if (!task_entry.is_object()) {
+            task_entry = jsoncons::json::object();
+        }
+        WorkflowValue& outputs = task_entry["outputs"];
+        if (!outputs.is_object()) {
+            outputs = jsoncons::json::object();
+        }
+        outputs.insert_or_assign(key, value);
+    }
+
+    void mergeTaskOutputs(const std::string& taskName, const WorkflowValue& outputs) {
+        if (!outputs.is_object()) {
+            return;
+        }
+        for (const auto& item : outputs.object_range()) {
+            setTaskOutput(taskName, item.key(), item.value());
+        }
+    }
+    void pushTaskScope(const std::string& taskName, std::optional<std::string> alias = std::nullopt) {
+        task_scope_stack_.emplace_back(taskName, alias);
+    }
+
+    void popTaskScope() {
+        if (!task_scope_stack_.empty()) {
+            task_scope_stack_.pop_back();
+        }
+    }
+
+    void setCurrentTaskOutput(const std::string& key, const WorkflowValue& value) {
+        if (task_scope_stack_.empty()) {
+            setTaskOutput("__root__", key, value);
+            return;
+        }
+
+        const auto& scope = task_scope_stack_.back();
+        setTaskOutput(scope.first, key, value);
+        setValue("tasks." + scope.first + ".outputs." + key, value);
+        if (scope.second && scope.second.value() != scope.first) {
+            setTaskOutput(scope.second.value(), key, value);
+            setValue("tasks." + scope.second.value() + ".outputs." + key, value);
+        }
+    }
+
+
     void addCompletedTask(std::string const& taskName) {
         WorkflowValue& completed_tasks_json = data_["completed_tasks_set"];
         if (!completed_tasks_json.is_array()) {
@@ -285,7 +403,29 @@ public:
         return current_failure_context_.has_value();
     }
 
+    void setEmbeddedModules(const std::unordered_map<std::string, EmbeddedModule>& modules) {
+        embedded_modules_ = modules;
+    }
+
+    bool hasEmbeddedModule(const std::string& name) const {
+        return embedded_modules_.find(name) != embedded_modules_.end();
+    }
+
+    const EmbeddedModule* getEmbeddedModule(const std::string& name) const {
+        auto it = embedded_modules_.find(name);
+        if (it == embedded_modules_.end()) {
+            return nullptr;
+        }
+        return &it->second;
+    }
+
+    const std::unordered_map<std::string, EmbeddedModule>& getEmbeddedModules() const {
+        return embedded_modules_;
+    }
+
 private:
+    std::vector<std::pair<std::string, std::optional<std::string>>> task_scope_stack_;
+    std::unordered_map<std::string, EmbeddedModule> embedded_modules_;
     std::unordered_map<std::string, WorkflowValue> data_;
     std::optional<TaskFailureContext> current_failure_context_;
 };

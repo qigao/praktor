@@ -1,462 +1,583 @@
 #include "yml/task_yaml.hpp"
 
-#include <ryml/ryml_std.hpp>
-#include <ryml/ryml.hpp>
+#include <algorithm>
+#include <cctype>
 #include <stdexcept>
-#include <iostream>
+#include <string>
 
-#include "yml/task_parser.hpp"
+namespace {
+std::string ltrim_copy(std::string s) { s.erase(s.begin(), std::find_if(s.begin(), s.end(), [](unsigned char ch){ return !std::isspace(ch); })); return s; }
+std::string rtrim_copy(std::string s) { s.erase(std::find_if(s.rbegin(), s.rend(), [](unsigned char ch){ return !std::isspace(ch); }).base(), s.end()); return s; }
+std::string trim_copy(std::string s) { return rtrim_copy(ltrim_copy(std::move(s))); }
 
-// Utility function to convert ryml node to string vector
-std::vector<std::string> node_to_string_vector(const ryml::ConstNodeRef& node) {
-    std::vector<std::string> result;
+std::string to_lower_copy(std::string value) {
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
+        return static_cast<char>(std::tolower(ch));
+    });
+    return value;
+}
+
+CommandOutputFormat parse_output_format(const std::string& value) {
+    if (value.empty()) {
+        return CommandOutputFormat::Text;
+    }
+
+    std::string lowered = to_lower_copy(value);
+    if (lowered == "text") {
+        return CommandOutputFormat::Text;
+    }
+    if (lowered == "json") {
+        return CommandOutputFormat::Json;
+    }
+    throw std::runtime_error("Unsupported output_format value: '" + value + "'");
+}
+
+WriteFileMode parse_write_file_mode(const std::string& value) {
+    std::string lowered = to_lower_copy(value);
+    if (lowered == "overwrite" || lowered.empty()) {
+        return WriteFileMode::Overwrite;
+    }
+    if (lowered == "append") {
+        return WriteFileMode::Append;
+    }
+    throw std::runtime_error("Unsupported write_file mode: '" + value + "'");
+}
+
+HttpPostTrigger parse_http_post_trigger(const ryml::ConstNodeRef& node) {
+    if (!node.is_map()) {
+        throw std::runtime_error("http_post trigger must be a map");
+    }
+
+    HttpPostTrigger trigger;
+    if (!node.has_child("url")) {
+        throw std::runtime_error("http_post trigger requires a 'url'");
+    }
+    node["url"] >> trigger.url;
+    if (trigger.url.empty()) {
+        throw std::runtime_error("http_post trigger 'url' cannot be empty");
+    }
+
+    if (node.has_child("body")) {
+        std::string body;
+        node["body"] >> body;
+        trigger.body = body;
+    }
+
+    if (node.has_child("headers")) {
+        const auto& headers_node = node["headers"];
+        if (!headers_node.is_map()) {
+            throw std::runtime_error("http_post trigger 'headers' must be a map");
+        }
+        for (const auto& header : headers_node) {
+            std::string key(header.key().str, header.key().len);
+            std::string value;
+            header >> value;
+            trigger.headers[key] = value;
+        }
+    }
+
+    return trigger;
+}
+
+WriteFileTrigger parse_write_file_trigger(const ryml::ConstNodeRef& node) {
+    if (!node.is_map()) {
+        throw std::runtime_error("write_file trigger must be a map");
+    }
+
+    WriteFileTrigger trigger;
+    if (!node.has_child("path") || !node.has_child("content")) {
+        throw std::runtime_error("write_file trigger requires 'path' and 'content'");
+    }
+    node["path"] >> trigger.path;
+    node["content"] >> trigger.content;
+
+    if (trigger.path.empty()) {
+        throw std::runtime_error("write_file trigger 'path' cannot be empty");
+    }
+
+    if (node.has_child("mode")) {
+        std::string mode;
+        node["mode"] >> mode;
+        trigger.mode = parse_write_file_mode(mode);
+    }
+
+    return trigger;
+}
+
+
+WeaveNotifyTrigger parse_weave_notify_trigger(const ryml::ConstNodeRef& node) {
+    WeaveNotifyTrigger trigger;
+    if (node.is_val()) {
+        std::string value;
+        node >> value;
+        std::string trimmed = trim_copy(value);
+        const std::string prefix = "@weave";
+        if (trimmed.rfind(prefix, 0) == 0) {
+            std::string msg = trim_copy(trimmed.substr(prefix.size()));
+            if (!msg.empty() && (msg[0] == ':' || msg[0] == '-')) {
+                msg = trim_copy(msg.substr(1));
+            }
+            trigger.message = std::move(msg);
+        } else {
+            trigger.message = std::move(trimmed);
+        }
+    } else if (node.is_map()) {
+        if (!node.has_child("message")) {
+            throw std::runtime_error("weave trigger requires 'message'");
+        }
+        node["message"] >> trigger.message;
+    } else {
+        throw std::runtime_error("weave trigger must be a string or map");
+    }
+
+    if (trigger.message.empty()) {
+        throw std::runtime_error("weave trigger 'message' cannot be empty");
+    }
+    return trigger;
+}RunTaskTrigger parse_run_task_trigger(const ryml::ConstNodeRef& node) {
+    RunTaskTrigger trigger;
+    if (node.is_val()) {
+        node >> trigger.task_name;
+    } else if (node.is_map()) {
+        if (!node.has_child("task_name")) {
+            throw std::runtime_error("run_task trigger requires 'task_name'");
+        }
+        node["task_name"] >> trigger.task_name;
+    } else {
+        throw std::runtime_error("run_task trigger must be a string or map");
+    }
+
+    if (trigger.task_name.empty()) {
+        throw std::runtime_error("run_task trigger 'task_name' cannot be empty");
+    }
+
+    return trigger;
+}
+
+TriggerAction parse_trigger_action_node(const ryml::ConstNodeRef& node) {
+    if (node.is_val()) {
+        std::string scalar;
+        node >> scalar;
+        std::string trimmed = trim_copy(scalar);
+        if (trimmed.rfind("@weave", 0) == 0) {
+            return TriggerAction{parse_weave_notify_trigger(node)};
+        }
+        return TriggerAction{parse_run_task_trigger(node)};
+    }
+
+    if (!node.is_map()) {
+        throw std::runtime_error("Trigger action must be a string or single-key map");
+    }
+
+    if (node.num_children() != 1) {
+        throw std::runtime_error("Trigger action map must contain exactly one action");
+    }
+
+    for (const auto& child : node) {
+        std::string key(child.key().str, child.key().len);
+        if (key == "http_post") {
+            return TriggerAction{parse_http_post_trigger(child)};
+        }
+        if (key == "write_file") {
+            return TriggerAction{parse_write_file_trigger(child)};
+        }
+        if (key == "run_task") {
+            return TriggerAction{parse_run_task_trigger(child)};
+        }
+        if (key == "weave" || key == "@weave") {
+            return TriggerAction{parse_weave_notify_trigger(child)};
+        }
+        throw std::runtime_error("Unsupported trigger action: '" + key + "'");
+    }
+
+    throw std::runtime_error("Failed to parse trigger action");
+}std::vector<TriggerAction> parse_trigger_action_list(const ryml::ConstNodeRef& node) {
+    if (!node.is_seq()) {
+        throw std::runtime_error("Trigger action list must be a sequence");
+    }
+
+    std::vector<TriggerAction> actions;
+    for (const auto& item : node) {
+        actions.emplace_back(parse_trigger_action_node(item));
+    }
+    return actions;
+}
+
+} // namespace
+
+StrList node_to_string_vector(const ryml::ConstNodeRef& node) {
+    StrList result;
     if (node.is_seq()) {
         for (const auto& child : node) {
             std::string value;
             child >> value;
             result.push_back(value);
         }
-    }
-    return result;
-}
-
-// Utility function to convert ryml node to string map
-Vars node_to_string_map(const ryml::ConstNodeRef& node) {
-    Vars result;
-    if (node.is_map()) {
-        for (const auto& child : node) {
-            std::string key, value;
-            // Convert ryml csubstr to std::string
-            key = std::string(child.key().str, child.key().len);
-            child >> value;
-            result[key] = value;
+    } else if (node.is_val()) {
+        std::string value;
+        node >> value;
+        if (!value.empty()) {
+            result.push_back(value);
         }
+    } else {
+        throw std::runtime_error("Expected sequence or scalar when converting to string list");
     }
     return result;
 }
 
-// Utility function to parse imports section
-StrList parse_imports(const ryml::ConstNodeRef& node) {
-    if (node.has_child("imports")) {
-        return node_to_string_vector(node["imports"]);
-    }
-    return {}; // Return empty list if no imports section
-}
-
-// Conversion functions for our structs
-Input parse_input(const ryml::ConstNodeRef& node) {
-    Input input;
-
-    if (!node.is_map() || !node.has_child("name") || !node.has_child("type")) {
-        throw std::runtime_error("Input must have 'name' and 'type' fields");
+Vars node_to_string_map(const ryml::ConstNodeRef& node) {
+    if (!node.is_map()) {
+        throw std::runtime_error("Expected mapping when converting to string map");
     }
 
-    node["name"] >> input.name;
-    node["type"] >> input.type;
-    input.default_value = get_optional<std::string>(node, "default", "");
-    input.description = get_optional<std::string>(node, "description", "");
-
-    return input;
+    Vars result;
+    for (const auto& child : node) {
+        std::string key(child.key().str, child.key().len);
+        std::string value;
+        child >> value;
+        result[key] = value;
+    }
+    return result;
 }
 
 RetryPolicy parse_retry_policy(const ryml::ConstNodeRef& node) {
-    RetryPolicy policy;
-
     if (!node.is_map()) {
-        throw std::runtime_error("RetryPolicy must be a map");
+        throw std::runtime_error("retries must be a map");
     }
 
-    policy.count = get_optional<int>(node, "count", 0);
-    policy.delay = get_optional<std::string>(node, "delay", "0s");
+    RetryPolicy policy;
+    if (node.has_child("count")) {
+        node["count"] >> policy.count;
+        if (policy.count < 0) {
+            throw std::runtime_error("retry count cannot be negative");
+        }
+    }
+
+    if (node.has_child("delay")) {
+        node["delay"] >> policy.delay;
+    }
 
     return policy;
 }
 
 Each parse_each(const ryml::ConstNodeRef& node) {
-    Each each;
-
-    if (!node.is_map() || !node.has_child("items") || !node.has_child("as")) {
-        throw std::runtime_error("Each must have 'items' and 'as' fields");
+    if (!node.is_map()) {
+        throw std::runtime_error("each must be a map");
     }
 
-    each.items = node_to_string_vector(node["items"]);
-    node["as"] >> each.as;
+    Each each;
+    if (node.has_child("items")) {
+        each.items = node_to_string_vector(node["items"]);
+    }
+
+    if (node.has_child("matrix")) {
+        const auto& matrix_node = node["matrix"];
+        if (!matrix_node.is_map()) {
+            throw std::runtime_error("each.matrix must be a map");
+        }
+        for (const auto& child : matrix_node) {
+            std::string key(child.key().str, child.key().len);
+            each.matrix[key] = node_to_string_vector(child);
+        }
+    }
+
+    if (each.hasItems() && each.hasMatrix()) {
+        throw std::runtime_error("each cannot define both 'items' and 'matrix'");
+    }
+    if (!each.hasItems() && !each.hasMatrix()) {
+        throw std::runtime_error("each requires either 'items' or 'matrix'");
+    }
+
+    if (node.has_child("as")) {
+        node["as"] >> each.as;
+        if (each.as.empty()) {
+            each.as = "item";
+        }
+    }
+
+    if (node.has_child("index_variable")) {
+        node["index_variable"] >> each.index_variable;
+    }
 
     return each;
 }
 
-Outputs parse_outputs(const ryml::ConstNodeRef& node) {
-    Outputs outputs;
-
+Triggers parse_triggers(const ryml::ConstNodeRef& node) {
     if (!node.is_map()) {
-        throw std::runtime_error("Outputs must be a map");
+        throw std::runtime_error("triggers must be a map");
     }
 
-    outputs.stdout_to_variable = get_optional<std::string>(node, "stdout_to_variable", "");
-    outputs.stderr_to_variable = get_optional<std::string>(node, "stderr_to_variable", "");
-    outputs.exit_code_to_variable = get_optional<std::string>(node, "exit_code_to_variable", "");
-    outputs.output_json_to_variable = get_optional<std::string>(node, "output_json_to_variable", "");
+    Triggers triggers;
 
-    return outputs;
+    if (node.has_child("on_success")) {
+        triggers.on_success = parse_trigger_action_list(node["on_success"]);
+    }
+    if (node.has_child("on_failure")) {
+        triggers.on_failure = parse_trigger_action_list(node["on_failure"]);
+    }
+    if (node.has_child("on_complete")) {
+        triggers.on_complete = parse_trigger_action_list(node["on_complete"]);
+    }
+
+    if (triggers.empty()) {
+        throw std::runtime_error("triggers block must contain at least one action list");
+    }
+
+    return triggers;
 }
 
-// Task-specific param parsers
 RunCommandParams parse_run_command_params(const ryml::ConstNodeRef& node) {
-    RunCommandParams params;
-
     if (!node.has_child("command")) {
-        throw std::runtime_error("RunCommandParams must have 'command' field");
+        throw std::runtime_error("run_command task requires a 'command'");
     }
 
-    auto command_node = node["command"];
-
-    // Check node type with correct ryml API
-    if (command_node.is_val()) {
+    RunCommandParams params;
+    const auto& command_node = node["command"];
+    if (command_node.is_seq()) {
+        StrList command_list = node_to_string_vector(command_node);
+        if (command_list.empty()) {
+            throw std::runtime_error("command array must contain at least one entry");
+        }
+        params.command = command_list;
+    } else if (command_node.has_val()) {
+        auto value = command_node.val();
+        std::string command(value.str, value.len);
+        if (command.empty()) {
+            throw std::runtime_error("command string cannot be empty");
+        }
+        params.command = command;
+    } else {
         std::string command;
         command_node >> command;
+        if (command.empty()) {
+            throw std::runtime_error("command string cannot be empty");
+        }
         params.command = command;
-    } else if (command_node.is_seq()) {
-        params.command = node_to_string_vector(command_node);
+    }
+
+    if (node.has_child("output_format")) {
+        std::string format;
+        node["output_format"] >> format;
+        params.output_format = parse_output_format(format);
+    }
+
+    return params;
+}
+
+
+ScriptParams parse_script_params(const ryml::ConstNodeRef& node) {
+    if (!node.is_map()) {
+        throw std::runtime_error("script must be a map");
+    }
+    if (!node.has_child("source")) {
+        throw std::runtime_error("script requires a 'source'");
+    }
+
+    ScriptParams params;
+    node["source"] >> params.source;
+    if (params.source.empty()) {
+        throw std::runtime_error("script source cannot be empty");
+    }
+
+    return params;
+}
+
+UsesParams parse_uses_params(const ryml::ConstNodeRef& node) {
+    UsesParams params;
+    if (node.has_val()) {
+        auto value = node.val();
+        params.path.assign(value.str, value.len);
     } else {
-        // Try extracting as string regardless
-        try {
-            std::string command;
-            command_node >> command;
-            params.command = command;
-        } catch (...) {
-            throw std::runtime_error("Command must be a string or array of strings");
-        }
+        node >> params.path;
     }
-
-    params.working_directory = get_optional<std::string>(node, "working_directory", "");
-
-    if (node.has_child("environment")) {
-        params.environment = node_to_string_map(node["environment"]);
+    if (params.path.empty()) {
+        throw std::runtime_error("uses value cannot be empty");
     }
-
     return params;
 }
 
-CopyFileParams parse_copy_file_params(const ryml::ConstNodeRef& node) {
-    CopyFileParams params;
 
-    if (!node.has_child("source") || !node.has_child("destination")) {
-        throw std::runtime_error("CopyFileParams must have 'source' and 'destination' fields");
+TaskDefaults parse_defaults(const ryml::ConstNodeRef& node) {
+    if (!node.is_map()) {
+        throw std::runtime_error("defaults must be a map");
     }
 
-    node["source"] >> params.source;
-    node["destination"] >> params.destination;
-    params.overwrite = get_optional<bool>(node, "overwrite", false);
-
-    return params;
+    TaskDefaults defaults;
+    if (node.has_child("retries")) {
+        defaults.retries = parse_retry_policy(node["retries"]);
+    }
+    if (node.has_child("timeout")) {
+        std::string timeout;
+        node["timeout"] >> timeout;
+        defaults.timeout = timeout;
+    }
+    return defaults;
 }
 
-CreateDirectoryParams parse_create_directory_params(const ryml::ConstNodeRef& node) {
-    CreateDirectoryParams params;
-
-    if (!node.has_child("path")) {
-        throw std::runtime_error("CreateDirectoryParams must have 'path' field");
+Task parse_task(const ryml::ConstNodeRef& node, const std::string& source_path) {
+    if (!node.is_map()) {
+        throw std::runtime_error("task must be a map");
     }
 
-    node["path"] >> params.path;
-    params.parents = get_optional<bool>(node, "parents", false);
-
-    return params;
-}
-
-MoveFileParams parse_move_file_params(const ryml::ConstNodeRef& node) {
-    MoveFileParams params;
-
-    if (!node.has_child("source") || !node.has_child("destination")) {
-        throw std::runtime_error("MoveFileParams must have 'source' and 'destination' fields");
-    }
-
-    node["source"] >> params.source;
-    node["destination"] >> params.destination;
-    params.overwrite = get_optional<bool>(node, "overwrite", false);
-
-    return params;
-}
-
-ParallelParams parse_parallel_params(const ryml::ConstNodeRef& node) {
-    ParallelParams params;
-
-    if (!node.has_child("tasks") || !node["tasks"].is_seq()) {
-        throw std::runtime_error("ParallelParams must have 'tasks' array");
-    }
-
-    for (const auto& task_node : node["tasks"]) {
-        params.tasks.push_back(parse_task(task_node));
-    }
-
-    return params;
-}
-
-GroupParams parse_group_params(const ryml::ConstNodeRef& node) {
-    GroupParams params;
-
-    if (!node.has_child("tasks") || !node["tasks"].is_seq()) {
-        throw std::runtime_error("GroupParams must have 'tasks' array");
-    }
-
-    for (const auto& task_node : node["tasks"]) {
-        params.tasks.push_back(parse_task(task_node));
-    }
-
-    return params;
-}
-
-ChooseParams parse_choose_params(const ryml::ConstNodeRef& node) {
-    ChooseParams params;
-
-    if (!node.has_child("branches") || !node["branches"].is_seq()) {
-        throw std::runtime_error("ChooseParams must have a 'branches' array");
-    }
-
-    for (const auto& branch_node : node["branches"]) {
-        ChooseBranch branch;
-        if (!branch_node.has_child("when")) {
-            throw std::runtime_error("Each choose branch must have a 'when' condition");
-        }
-        branch_node["when"] >> branch.when;
-
-        if (!branch_node.has_child("tasks") || !branch_node["tasks"].is_seq()) {
-            throw std::runtime_error("Each choose branch must have a 'tasks' array");
-        }
-
-        for (const auto& task_node : branch_node["tasks"]) {
-            branch.tasks.push_back(parse_task(task_node));
-        }
-        params.branches.push_back(branch);
-    }
-
-    if (node.has_child("default")) {
-        if (!node["default"].is_seq()) {
-            throw std::runtime_error("Choose 'default' must be a sequence of tasks");
-        }
-        // Note: default_task_names is still std::vector<std::string>
-        // If it should also be std::vector<Task>, then this needs to be changed in task_types.hpp
-        // For now, assuming it remains string names.
-        for (const auto& task_node : node["default"]) {
-            // This assumes default tasks are just names, not full task definitions
-            // If they are full task definitions, parse_task should be used and then names extracted
-            std::string task_name;
-            task_node >> task_name;
-            params.default_task_names.push_back(task_name);
-        }
-    }
-
-    return params;
-}
-
-// Parse dynamic_tasks type
-DynamicTasksParams parse_dynamic_tasks(const ryml::ConstNodeRef& node) {
-    DynamicTasksParams params;
-
-    // Parse template section
-    if (node.has_child("template")) {
-        const auto& template_node = node["template"];
-
-        if (template_node.has_child("name")) {
-            template_node["name"] >> params.task_template.name;
-        }
-        if (template_node.has_child("type")) {
-            template_node["type"] >> params.task_template.type;
-        }
-        if (template_node.has_child("command")) {
-            template_node["command"] >> params.task_template.command;
-        }
-        if (template_node.has_child("timeout")) {
-            template_node["timeout"] >> params.task_template.timeout;
-        }
-        if (template_node.has_child("when")) {
-            template_node["when"] >> params.task_template.when;
-        }
-        if (template_node.has_child("depends_on")) {
-            params.task_template.depends_on = node_to_string_vector(template_node["depends_on"]);
-        }
-    }
-
-    // Parse items variable reference
-    if (node.has_child("items")) {
-        node["items"] >> params.items_variable;
-    }
-
-    return params;
-}
-
-// Main parsers
-Task parse_task(const ryml::ConstNodeRef& node) {
     Task task;
 
-    if (!node.is_map()) {
-        throw std::runtime_error("Task must be a map");
+    if (!node.has_child("name")) {
+        throw std::runtime_error("task requires a 'name'");
+    }
+    node["name"] >> task.name;
+    if (task.name.empty()) {
+        throw std::runtime_error("task name cannot be empty");
     }
 
-    // Handle defaults case: defaults may not have name or type
-    bool isDefaults = !node.has_child("name") && !node.has_child("type");
-
-    if (!isDefaults && (!node.has_child("name") || !node.has_child("type"))) {
-        throw std::runtime_error("Regular tasks must have 'name' and 'type' fields");
+    if (node.has_child("description")) {
+        node["description"] >> task.description;
     }
 
-    if (node.has_child("name")) {
-        node["name"] >> task.name;
-    }
-
-    if (node.has_child("type")) {
-        node["type"] >> task.type;
-    }
-
-    // Common optional attributes
     if (node.has_child("depends_on")) {
         task.depends_on = node_to_string_vector(node["depends_on"]);
     }
-
-    task.when = get_optional<std::string>(node, "when", "");
-    task.timeout = get_optional<std::string>(node, "timeout", "");
-    task.description = get_optional<std::string>(node, "description", "");
 
     if (node.has_child("vars")) {
         task.vars = node_to_string_map(node["vars"]);
     }
 
-    // Nested structures
-    if (node.has_child("retries")) {
-        task.retries = parse_retry_policy(node["retries"]);
+    if (node.has_child("env")) {
+        task.env = node_to_string_map(node["env"]);
+    }
+
+    if (node.has_child("dotEnv")) {
+        task.dot_env = node_to_string_vector(node["dotEnv"]);
+    }
+
+    if (node.has_child("when")) {
+        std::string when;
+        node["when"] >> when;
+        task.when = when;
     }
 
     if (node.has_child("each")) {
         task.each = parse_each(node["each"]);
     }
 
-    if (node.has_child("outputs")) {
-        task.outputs = parse_outputs(node["outputs"]);
+    if (node.has_child("retries")) {
+        task.retries = parse_retry_policy(node["retries"]);
     }
 
-    if (node.has_child("on_success")) {
-        task.on_success = node_to_string_vector(node["on_success"]);
+    if (node.has_child("timeout")) {
+        std::string timeout;
+        node["timeout"] >> timeout;
+        task.timeout = timeout;
     }
 
-    if (node.has_child("on_failure")) {
-        task.on_failure = node_to_string_vector(node["on_failure"]);
-    }
-
-    // Task-specifics based on `type` (skip for defaults)
-    if (!task.type.empty()) {
-        if (task.type == "run_command") {
-            task.specifics = parse_run_command_params(node);
-        } else if (task.type == "copy_file") {
-            task.specifics = parse_copy_file_params(node);
-        } else if (task.type == "create_directory") {
-            task.specifics = parse_create_directory_params(node);
-        } else if (task.type == "move_file") {
-            task.specifics = parse_move_file_params(node);
-        } else if (task.type == "parallel") {
-            task.specifics = parse_parallel_params(node);
-        } else if (task.type == "group") {
-            task.specifics = parse_group_params(node);
-        } else if (task.type == "choose") {
-            task.specifics = parse_choose_params(node);
-        } else if (task.type == "dynamic_tasks") {
-            task.specifics = parse_dynamic_tasks(node);
-        } else {
-            std::cerr << "Warning: Unknown task type '" << task.type << "' for task '" << task.name << "'." << std::endl;
+    if (node.has_child("triggers")) {
+        Triggers triggers = parse_triggers(node["triggers"]);
+        if (!triggers.empty()) {
+            task.triggers = triggers;
         }
+    }
+
+    int action_count = 0;
+
+    if (node.has_child("command")) {
+        task.action = TaskAction::RunCommand;
+        task.specifics = parse_run_command_params(node);
+        ++action_count;
+    }
+
+    if (node.has_child("script")) {
+        const auto& script_node = node["script"];
+        task.action = TaskAction::Script;
+        task.specifics = parse_script_params(script_node);
+        ++action_count;
+    }
+
+    if (node.has_child("uses")) {
+        const auto& uses_node = node["uses"];
+        task.action = TaskAction::Uses;
+        task.specifics = parse_uses_params(uses_node);
+        ++action_count;
+    }
+
+    if (action_count == 0) {
+        throw std::runtime_error("task '" + task.name + "' must declare exactly one runner (command/script/uses)");
+    }
+    if (action_count > 1) {
+        throw std::runtime_error("task '" + task.name + "' declares multiple runners");
     }
 
     return task;
 }
 
-TemplateParameter parse_template_parameter(const ryml::ConstNodeRef& node) {
-    TemplateParameter param;
-    if (!node.is_map() || !node.has_child("name") || !node.has_child("type")) {
-        throw std::runtime_error("Template parameter must have 'name' and 'type' fields");
-    }
-    node["name"] >> param.name;
-    node["type"] >> param.type;
-    param.default_value = get_optional<std::string>(node, "default", "");
-    param.description = get_optional<std::string>(node, "description", "");
-    return param;
-}
-
-TaskTemplate parse_task_template(const ryml::ConstNodeRef& node) {
-    TaskTemplate tmpl;
-    if (!node.is_map() || !node.has_child("name") || !node.has_child("tasks")) {
-        throw std::runtime_error("Task template must have 'name' and 'tasks' fields");
-    }
-    node["name"] >> tmpl.name;
-
-    if (node.has_child("parameters")) {
-        if (!node["parameters"].is_seq()) {
-            throw std::runtime_error("Task template 'parameters' must be a sequence");
-        }
-        for (const auto& param_node : node["parameters"]) {
-            tmpl.parameters.push_back(parse_template_parameter(param_node));
-        }
+Workflow parse_workflow(const ryml::ConstNodeRef& node, const std::string& source_path) {
+    if (!node.is_map()) {
+        throw std::runtime_error("workflow must be a map");
     }
 
-    if (!node["tasks"].is_seq()) {
-        throw std::runtime_error("Task template 'tasks' must be a sequence");
-    }
-    for (const auto& task_node : node["tasks"]) {
-        tmpl.tasks.push_back(parse_task(task_node));
-    }
-    return tmpl;
-}
-
-Workflow parse_workflow(const ryml::ConstNodeRef& node) {
     Workflow workflow;
 
-    if (!node.is_map()) {
-        throw std::runtime_error("Workflow must be a map");
+    if (node.has_child("name")) {
+        node["name"] >> workflow.name;
+    }
+    if (node.has_child("description")) {
+        node["description"] >> workflow.description;
     }
 
-    // Parse inputs
-    if (node.has_child("inputs")) {
-        for (const auto& input_node : node["inputs"]) {
-            workflow.inputs.push_back(parse_input(input_node));
-        }
-    }
-
-    // Parse variables
     if (node.has_child("variables")) {
         workflow.variables = node_to_string_map(node["variables"]);
     }
 
-    // Parse task_templates
-    if (node.has_child("task_templates")) {
-        if (!node["task_templates"].is_seq()) {
-            throw std::runtime_error("'task_templates' must be a sequence");
-        }
-        for (const auto& tmpl_node : node["task_templates"]) {
-            workflow.task_templates.push_back(parse_task_template(tmpl_node));
-        }
+    if (node.has_child("env")) {
+        workflow.env = node_to_string_map(node["env"]);
     }
 
-    // Parse defaults
-    if (node.has_child("defaults")) {
-        workflow.defaults = parse_task(node["defaults"]);
+    if (node.has_child("dotEnv")) {
+        workflow.dot_env = node_to_string_vector(node["dotEnv"]);
     }
 
-    // Parse tasks
-    if (node.has_child("tasks")) {
-        auto tasks_node = node["tasks"];
-        if (tasks_node.is_seq()) {
-            for (const auto& task_node : tasks_node) {
-                workflow.tasks.push_back(parse_task(task_node));
+    if (node.has_child("embedded")) {
+        const auto& embedded_node = node["embedded"];
+        if (!embedded_node.is_map()) {
+            throw std::runtime_error("workflow 'embedded' section must be a map of modules");
+        }
+        for (const auto& module_node : embedded_node) {
+            std::string module_name(module_node.key().str, module_node.key().len);
+            if (!module_node.is_map()) {
+                throw std::runtime_error("Embedded module '" + module_name + "' must be a map");
             }
-        } else {
-            throw std::runtime_error("'tasks' must be a sequence (list) of task objects");
+            EmbeddedModule module;
+            module.language = get_optional<std::string>(module_node, "language", std::string("javascript"));
+            if (!module_node.has_child("source")) {
+                throw std::runtime_error("Embedded module '" + module_name + "' requires a 'source' field");
+            }
+            module_node["source"] >> module.source;
+            if (module.source.empty()) {
+                throw std::runtime_error("Embedded module '" + module_name + "' cannot have an empty source");
+            }
+            workflow.embedded[module_name] = std::move(module);
         }
     }
 
-    // Parse imports
-    workflow.imports = parse_imports(node);
+    if (node.has_child("defaults")) {
+        workflow.defaults = parse_defaults(node["defaults"]);
+    }
 
-    // For metadata/compatibility
-    workflow.name = get_optional<std::string>(node, "name", "");
-    workflow.description = get_optional<std::string>(node, "description", "");
+    if (!node.has_child("tasks")) {
+        throw std::runtime_error("workflow must define a 'tasks' list");
+    }
+
+    const auto& tasks_node = node["tasks"];
+    if (!tasks_node.is_seq()) {
+        throw std::runtime_error("'tasks' must be a sequence");
+    }
+
+    for (const auto& task_node : tasks_node) {
+        workflow.tasks.push_back(parse_task(task_node, source_path));
+    }
+
+    if (workflow.tasks.empty()) {
+        throw std::runtime_error("workflow must define at least one task");
+    }
 
     return workflow;
 }
+

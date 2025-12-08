@@ -1,7 +1,7 @@
 #ifndef __WORKFLOW_RUNNER_HPP__
 #define __WORKFLOW_RUNNER_HPP__
 
-#include "dag/enhanced_graph.hpp"
+#include "dag/dependency_graph.hpp"
 #include "dag/workflow_executor.hpp"
 #include "yml/task_parser.hpp"
 

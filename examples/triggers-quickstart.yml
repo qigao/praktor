@@ -1,0 +1,54 @@
+# Weave Triggers Quick Start
+# This workflow demonstrates the three trigger types with minimal examples
+
+variables:
+  APP_NAME: "quickstart-app"
+
+tasks:
+  # Example 1: Write file on success
+  - name: build
+    command: "echo Building application..."
+    triggers:
+      on_success:
+        - write_file:
+            path: "./build-success.txt"
+            content: "Build completed for {{ APP_NAME }}"
+
+  # Example 2: Send webhook on failure
+  - name: test
+    depends_on: [build]
+    command: "echo Running tests... && exit 0"
+    triggers:
+      on_failure:
+        - write_file:
+            path: "./test-failure.txt"
+            content: "Tests failed: {{ failed_task_error }}"
+
+  # Example 3: Run recovery task on failure
+  - name: deploy
+    depends_on: [test]
+    command: "echo Deploying {{ APP_NAME }}..."
+    triggers:
+      on_failure: [rollback]  # Shorthand syntax
+      on_success:
+        - write_file:
+            path: "./deploy-log.txt"
+            content: "Deployed successfully"
+            mode: append
+
+  # Recovery task
+  - name: rollback
+    command: "echo Rolling back deployment..."
+
+  # Example 4: Multiple triggers on complete
+  - name: cleanup
+    depends_on: [deploy]
+    command: "echo Cleaning up temporary files..."
+    triggers:
+      on_complete:
+        - write_file:
+            path: "./workflow-complete.txt"
+            content: |
+              Workflow completed
+              Status: {{ tasks.cleanup.status }}
+              App: {{ APP_NAME }}

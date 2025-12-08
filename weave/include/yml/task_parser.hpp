@@ -1,7 +1,7 @@
 #ifndef __TASK_PARSER_HPP__
 #define __TASK_PARSER_HPP__
 
-#include "dag/enhanced_graph.hpp"
+#include "dag/dependency_graph.hpp"
 #include "task.hpp"
 
 #include <memory>
@@ -22,9 +22,9 @@ namespace TaskParser {
     /**
      * @brief Builds a task graph from a Workflow object.
      * @param workflow The Workflow object to build the graph from.
-     * @return An EnhancedGraph representing the task dependencies.
+     * @return A DependencyGraph representing the task dependencies.
      */
-    EnhancedGraph<Task> buildGraph(const Workflow& workflow);
+    DependencyGraph<Task> buildGraph(const Workflow& workflow);
 
     /**
      * @brief Parses a workflow file with imports, recursively loading all dependencies.
