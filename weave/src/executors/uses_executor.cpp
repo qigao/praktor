@@ -141,6 +141,14 @@ TaskResult UsesExecutor::execute(const Task& task, WorkflowContext& context)
         WorkflowExecutor nested_executor(graph, nested_env, num_threads_);
         nested_executor.execute(context, task.name);
 
+        // Collect all variables from nested workflow context as outputs
+        // These can be accessed as tasks.<task_name>.outputs.<key>
+        auto all_visible = context.getAllVisibleValues();
+        for (const auto& [key, value] : all_visible) {
+            // Set each variable as an output of this task
+            context.setTaskOutput(task.name, key, value);
+        }
+
         return TaskResult(true);
     } catch (const std::bad_variant_access& e) {
         return TaskResult(false, "Task does not contain UsesParams: " + std::string(e.what()));

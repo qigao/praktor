@@ -274,6 +274,15 @@ public:
     }
 
     /**
+     * @brief Gets all visible variables as WorkflowValue (for collecting outputs).
+     * 
+     * Returns all variables visible in current scope (including inherited from parent scopes).
+     */
+    std::unordered_map<std::string, WorkflowValue> getAllVisibleValues() const {
+        return current_scope_->getAllVisible();
+    }
+
+    /**
      * @brief Sets task status.
      * 
      * Fully delegates to TaskRegistry.
