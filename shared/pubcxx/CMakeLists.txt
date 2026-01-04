@@ -13,8 +13,6 @@ target_include_directories(
 # Find dependencies
 find_package(magic_enum CONFIG REQUIRED)
 find_package(pegtl CONFIG REQUIRED)
-find_path(BSHOSHANY_THREAD_POOL_INCLUDE_DIRS "BS_thread_pool.hpp")
-target_include_directories( ${TARGET_NAME} PRIVATE ${BSHOSHANY_THREAD_POOL_INCLUDE_DIRS})
 find_package(mimalloc)
 find_package(xxHash CONFIG REQUIRED)
 # Link dependencies

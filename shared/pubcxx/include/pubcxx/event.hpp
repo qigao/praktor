@@ -5,7 +5,7 @@
 
 #pragma once
 
-#include "BS_thread_pool.hpp"
+#include "pubcxx/thread_pool.hpp"
 
 #include <atomic>
 #include <chrono>
@@ -425,5 +425,5 @@ private:
 
     std::atomic<std::shared_ptr<TrieNode<Event>>> root; /**< The root node of the topic trie. */
     std::atomic<uint64_t> next_id{1};                   /**< Atomic counter for generating unique subscription IDs. */
-    BS::thread_pool<> thread_pool;                        /**< Thread pool for asynchronous event dispatching. */
+    pubcxx::ThreadPool thread_pool;                        /**< Thread pool for asynchronous event dispatching. */
 };

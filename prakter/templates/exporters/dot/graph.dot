@@ -1,0 +1,10 @@
+digraph PrakterWorkflow {
+    rankdir=LR;
+    node [shape=box, style=rounded, fontname="Arial"];
+    label="{{ WORKFLOW_NAME }}";
+    labelloc="t";
+
+{{ NODES }}
+
+{{ EDGES }}
+}

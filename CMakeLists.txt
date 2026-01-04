@@ -15,8 +15,8 @@ set(PROJECT_VERSION
     ${CMAKE_PROJECT_VERSION_MAJOR}.${CMAKE_PROJECT_VERSION_MINOR}.${CMAKE_PROJECT_VERSION_PATCH}
 )
 
-set(PROJECT_NAME "TaskWeaver")
-set(PROJECT_DESCRIPTION "A task&workflow ochetrator by DAG")
+set(PROJECT_NAME "Prakter")
+set(PROJECT_DESCRIPTION "A task & workflow orchestrator by DAG")
 set(PROJECT_WEBSITE "http://github.com/qigao/project-cpp-template.git")
 set(APPLICATION_LICENSE "Apache2 License")
 
@@ -40,5 +40,5 @@ set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 add_subdirectory(vendor)
 # add_subdirectory(parser)
 add_subdirectory(shared)
-add_subdirectory(weave)
+add_subdirectory(prakter)
 add_subdirectory(modules)

@@ -1,4 +1,4 @@
-# Weave Workflow DSL Specification
+# Prakter Workflow DSL Specification
 
 **Version:** 7.0
 **Status:** Authoritative
@@ -35,7 +35,7 @@
 ## 1. Introduction
 
 ### 1.1. Purpose
-The Weave Workflow Domain Specific Language (DSL) provides a declarative, YAML-based syntax for defining, managing, and executing complex workflows. This specification defines the grammar, data model, and execution semantics required to author interoperable, scalable, and maintainable automated processes.
+The Prakter Workflow Domain Specific Language (DSL) provides a declarative, YAML-based syntax for defining, managing, and executing complex workflows. This specification defines the grammar, data model, and execution semantics required to author interoperable, scalable, and maintainable automated processes.
 
 ### 1.2. Design Philosophy
 *   **Declarative Graph:** Define tasks and their dependencies as a Directed Acyclic Graph (DAG). The runtime handles execution order and parallelization.
@@ -70,7 +70,7 @@ State is passed between tasks by writing to and reading from the context.
 The outputs for a completed task `my-task` are stored at `tasks.my-task.outputs`.
 
 ## 4. Workflow Structure
-A Weave workflow is a YAML map with the following top-level keys:
+A Prakter workflow is a YAML map with the following top-level keys:
 
 | Key | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
@@ -149,6 +149,14 @@ Every task must have a `name` and exactly one runner (`command`, `script`, or `u
 | `retries` | Object | Retry policy with `count` (integer) and `delay` (duration string). |
 | `timeout` | String | Maximum execution time (e.g., `"30s"`, `"5m"`, `"1h"`). |
 | `triggers` | Object | Event-driven actions to execute on task completion. See Section 8. |
+| `continue_on_error` | Boolean | If `true`, workflow continues even if this task fails. Default: `false`. |
+
+### 5.3. Execution Context
+
+| Key | Type | Description |
+| :--- | :--- | :--- |
+| `working_dir` | String | Working directory for command execution. Relative paths resolve from workflow file location. |
+| `silent` | Boolean | Suppress command output from logs. Default: `false`. |
 
 **Example:**
 ```yaml
@@ -161,6 +169,24 @@ tasks:
       count: 3
       delay: "10s"
     timeout: "15m"
+
+  # Run all tests, collect all failures
+  - name: test_unit
+    command: "npm run test:unit"
+    continue_on_error: true
+
+  - name: test_integration
+    command: "npm run test:integration"
+    continue_on_error: true
+
+  # Monorepo: build each package in its directory
+  - name: build_frontend
+    working_dir: "./packages/frontend"
+    command: "npm run build"
+
+  - name: build_backend
+    working_dir: "./packages/backend"
+    command: "cargo build --release"
 ```
 
 ## 6. Task Composition: `uses`
@@ -214,6 +240,10 @@ Executes JavaScript code for in-memory data transformation and context manipulat
 
 **Attributes:**
 - `script.source` (String, **Required**): The JavaScript code to execute.
+- `script.language` (String, Optional): Execution language. Default: `javascript`.
+- `script.modules` (Array<String>, Optional): List of embedded module names to load before execution.
+- `script.globals` (Map<String, String>, Optional): Global variables injected into the script environment.
+- `script.env` (Map<String, String>, Optional): Environment variables for script execution.
 
 **Context API:**
 - `context.get(path)`: Retrieves a value from the context (e.g., `"tasks.build.outputs.version"`).
@@ -230,7 +260,56 @@ tasks:
         const tag = `${version}-${env}`;
         context.set("docker_tag", tag);
     # Output available at: tasks.calculate_tag.outputs.docker_tag
+
+  - name: with_modules
+    script:
+      modules: [string_utils]  # Load embedded module defined in workflow
+      globals:
+        PREFIX: "v"
+      source: |
+        const tag = slugify(context.get("name"));
+        context.set("slug", PREFIX + tag);
 ```
+
+### 7.3. Runner: `dynamic_tasks` (Runtime Task Generation)
+
+Generates and executes tasks dynamically at runtime based on data from the context. This enables data-driven workflows where the number and configuration of tasks is determined by runtime values.
+
+**Attributes:**
+- `dynamic_tasks.items_variable` (String, **Required**): Context path to a JSON array that drives task generation.
+- `dynamic_tasks.template` (Object, **Required**): Task template with `{{ item }}` placeholders.
+
+**Template Placeholders:**
+- `{{ item }}`: The current item (string or JSON object).
+- `{{ item.field }}`: Access a specific field when item is an object.
+- `{{ index }}`: The zero-based index of the current item.
+
+**Example:**
+```yaml
+tasks:
+  - name: discover_services
+    command: "curl -s https://api.example.com/services"
+    output_format: json
+    # Output: tasks.discover_services.outputs.data = [{"name": "auth", "port": 8080}, ...]
+
+  - name: deploy_all_services
+    depends_on: [discover_services]
+    dynamic_tasks:
+      items_variable: "{{ tasks.discover_services.outputs.data }}"
+      template:
+        name: "deploy_{{ item.name }}"
+        command: "./deploy.sh --service {{ item.name }} --port {{ item.port }}"
+        timeout: "5m"
+        retries:
+          count: 2
+          delay: "10s"
+```
+
+**Use Cases:**
+- Deploy to multiple environments discovered at runtime
+- Process files found by a previous task
+- Run tests for dynamically discovered modules
+- Fan-out operations based on API responses
 
 ## 8. Event-Driven Triggers
 
@@ -279,21 +358,21 @@ triggers:
 ```
 
 
-### 8.4. `@weave` - Weave Notification Shortcut
-A convenience action to notify the Weave assistant or a configured webhook.
+### 8.4. `@prakter` - Prakter Notification Shortcut
+A convenience action to notify the Prakter assistant or a configured webhook.
 
-Write a scalar beginning with `@weave` to send a notification message:
+Write a scalar beginning with `@prakter` to send a notification message:
 ```yaml
 triggers:
   on_success:
-    - "@weave Build {{ VERSION }} deployed to {{ env.DEPLOY_ENV }}"
+    - "@prakter Build {{ VERSION }} deployed to {{ env.DEPLOY_ENV }}"
 ```
 
 Equivalent long form:
 ```yaml
 triggers:
   on_success:
-    - weave:
+    - prakter:
         message: "Build {{ VERSION }} deployed to {{ env.DEPLOY_ENV }}"
 ```
 
@@ -340,8 +419,8 @@ A canonical JSON Schema **MUST** be provided to validate workflow syntax and pro
 ```json
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "Weave Workflow Specification",
-  "description": "A schema for defining Weave DSL (v7.0) workflow files.",
+  "title": "Prakter Workflow Specification",
+  "description": "A schema for defining Prakter DSL (v7.0) workflow files.",
   "type": "object",
   "properties": {
     "name": {
@@ -514,7 +593,7 @@ A canonical JSON Schema **MUST** be provided to validate workflow syntax and pro
           ],
           "additionalProperties": false
         },
-        "weave": {
+        "prakter": {
           "type": "object",
           "properties": {
             "message": {
@@ -545,7 +624,7 @@ A canonical JSON Schema **MUST** be provided to validate workflow syntax and pro
         },
         {
           "required": [
-            "weave"
+            "prakter"
           ]
         }
       ],
@@ -557,7 +636,7 @@ A canonical JSON Schema **MUST** be provided to validate workflow syntax and pro
         "oneOf": [
           {
             "type": "string",
-            "description": "Shorthand for a 'run_task' action or weave notification."
+            "description": "Shorthand for a 'run_task' action or prakter notification."
           },
           {
             "$ref": "#/$defs/triggerAction"
@@ -651,6 +730,20 @@ A canonical JSON Schema **MUST** be provided to validate workflow syntax and pro
         "triggers": {
           "$ref": "#/$defs/triggersBlock"
         },
+        "continue_on_error": {
+          "type": "boolean",
+          "description": "If true, workflow continues even if this task fails.",
+          "default": false
+        },
+        "working_dir": {
+          "type": "string",
+          "description": "Working directory for command execution."
+        },
+        "silent": {
+          "type": "boolean",
+          "description": "Suppress command output.",
+          "default": false
+        },
         "command": {
           "oneOf": [
             {
@@ -675,7 +768,25 @@ A canonical JSON Schema **MUST** be provided to validate workflow syntax and pro
           "type": "object",
           "properties": {
             "source": {
-              "type": "string"
+              "type": "string",
+              "description": "The JavaScript code to execute."
+            },
+            "language": {
+              "type": "string",
+              "description": "Execution language (default: javascript)."
+            },
+            "modules": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "List of embedded module names to load before execution."
+            },
+            "globals": {
+              "$ref": "#/$defs/stringMap",
+              "description": "Global variables to inject into the script environment."
+            },
+            "env": {
+              "$ref": "#/$defs/stringMap",
+              "description": "Environment variables for script execution."
             }
           },
           "required": [
@@ -685,6 +796,32 @@ A canonical JSON Schema **MUST** be provided to validate workflow syntax and pro
         },
         "uses": {
           "type": "string"
+        },
+        "dynamic_tasks": {
+          "type": "object",
+          "description": "Generate and execute tasks dynamically at runtime.",
+          "properties": {
+            "items_variable": {
+              "type": "string",
+              "description": "Context path to a JSON array that drives task generation."
+            },
+            "template": {
+              "type": "object",
+              "description": "Task template with {{ item }} placeholders.",
+              "properties": {
+                "name": { "type": "string" },
+                "command": { "$ref": "#/$defs/stringOrStringArray" },
+                "timeout": { "$ref": "#/$defs/durationString" },
+                "retries": { "$ref": "#/$defs/retriesPolicy" },
+                "when": { "type": "string" },
+                "depends_on": { "$ref": "#/$defs/stringOrStringArray" },
+                "env": { "$ref": "#/$defs/stringMap" }
+              },
+              "required": ["name", "command"]
+            }
+          },
+          "required": ["items_variable", "template"],
+          "additionalProperties": false
         }
       },
       "required": [
@@ -704,6 +841,11 @@ A canonical JSON Schema **MUST** be provided to validate workflow syntax and pro
         {
           "required": [
             "uses"
+          ]
+        },
+        {
+          "required": [
+            "dynamic_tasks"
           ]
         }
       ],
@@ -968,6 +1110,7 @@ tasks:
 | `command` | Execute external programs | `tasks.<name>.outputs.stdout` |
 | `script` | JavaScript data transformation | `tasks.<name>.outputs.<key>` (via `context.set`) |
 | `uses` | Execute reusable workflow | `tasks.<name>.outputs.*` (from nested tasks) |
+| `dynamic_tasks` | Runtime task generation | Outputs from each generated task |
 
 ---
 

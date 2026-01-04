@@ -1,32 +1,32 @@
-# Weave - A Modern C++ YAML Workflow Engine
+# Prakter - A Modern C++ YAML Workflow Engine
 
-Weave is a high-performance, concurrent workflow engine written in modern C++20. It allows you to define complex task dependencies and execution logic in a clean, simple YAML format. It's designed for orchestrating build pipelines, deployments, data processing jobs, and other multi-step automated processes.
+Prakter is a high-performance, concurrent workflow engine written in modern C++20. It allows you to define complex task dependencies and execution logic in a clean, simple YAML format. It's designed for orchestrating build pipelines, deployments, data processing jobs, and other multi-step automated processes.
 
 ## Core Features
 
 - **🚀 High-Performance YAML Parsing**: Powered by `ryml` for 5-10x faster YAML parsing compared to traditional parsers
 - **📝 Declarative YAML Syntax**: Define your workflows in a simple, human-readable YAML format
-- **⚡ Concurrent Execution**: Thread-pool-based executor runs independent tasks in parallel to maximize performance
-- **📦 Cross-File Task Imports**: Modular workflow design with `imports` for reusable task libraries
+- **⚡ Concurrent Execution**: DAG-based executor runs independent tasks in parallel to maximize performance
+- **📦 Reusable Workflows**: Compose complex pipelines using the `uses` keyword to execute external workflow files
 - **🎯 Advanced Control Flow**:
     - `depends_on`: Define a Directed Acyclic Graph (DAG) of task dependencies
     - `when`: Use powerful conditional expressions (e.g., `"{{env}} == 'prod' and {{tag}} != 'latest'"`) to control task execution
-    - `each`: Loop over lists and run tasks for each item
-    - `retries`: Automatic retry with configurable delays
-- **🏗️ Structural Tasks**:
-    - `group`: Sequential task execution with logical grouping
-    - `parallel`: Concurrent task blocks with deadlock-safe execution
-- **🔧 Built-in Task Types**: Native support for `run_command`, `create_directory`, `copy_file`, and `move_file`
-- **📊 Output Capture**: Capture stdout, stderr, and exit codes into variables for task chaining
-- **🛡️ Enhanced Error Handling**: Intelligent `on_failure` mechanism with automatic failure context propagation
+    - `each`: Loop over lists or matrices and run tasks for each item
+    - `retries`: Automatic retry with configurable delays and backoff
+- **🔧 Integrated Runners**:
+    - `command`: Native execution of external programs and shell scripts
+    - `script`: In-memory data transformation using a high-performance JavaScript engine (QuickJS-ng)
+    - `dynamic_tasks`: Generate and execute tasks at runtime based on data from the context
+- **📊 Output Capture**: Intelligent capture of stdout, stderr, and JSON data into the shared context
+- **🛡️ Resilience & Triggers**: Event-driven actions (`on_success`, `on_failure`) for notifications and automated recovery
 
 ## Technology Stack
 
 - **C++20**: Modern C++ features for performance and safety
 - **ryml (Rapid YAML)**: Ultra-fast YAML parsing library (5-10x faster than yaml-cpp)
-- **PEGTL**: Powers the sophisticated `when` clause expression parser
-- **Thread Pool**: Custom thread pool implementation for optimal concurrent execution
-- **CMake + vcpkg**: Modern C++ package management and build system
+- **jsoncons**: Powers JMESPath queries and advanced JSON context management
+- **QuickJS-ng**: High-performance, embedded JavaScript engine for scriptable tasks
+- **vcpkg**: Modern C++ package management for easy dependency resolution
 
 ## Quick Start
 
@@ -35,45 +35,37 @@ Weave is a high-performance, concurrent workflow engine written in modern C++20.
 Create a file named `my_workflow.yml`:
 
 ```yaml
-defaults:
-  retries:
-    count: 1
-    delay: "1s"
-  vars:
-    GREETING: "Hello from Weave!"
-
 variables:
-  PROJECT: "MyApp"
+  PROJECT: "Prakter-Demo"
+  ENVIRONMENT: "staging"
 
 tasks:
   - name: setup
-    command: "echo Setting up {{PROJECT}}: {{GREETING}}"
-    outputs:
-      stdout_to_variable: "setup_result"
+    command: "echo Setting up {{PROJECT}} in {{ENVIRONMENT}}..."
 
-  - name: create_build_dir
-    create_directory:
-      path: "./build_output"
-      parents: true
+  - name: fetch_config
     depends_on: [setup]
+    command: "curl -s https://api.example.com/config"
+    output_format: json
+    # Result stored in tasks.fetch_config.outputs.data
 
-  - name: build_parallel
-    depends_on: [create_build_dir]
-    parallel:
-      tasks:
-        - name: frontend_build
-          command: "echo Building frontend..."
-        - name: backend_build
-          command: "echo Building backend..."
+  - name: process_config
+    depends_on: [fetch_config]
+    script:
+      source: |
+        const cfg = context.get("tasks.fetch_config.outputs.data");
+        context.set("api_endpoint", cfg.endpoint);
+        context.set("is_secure", cfg.port === 443);
 
-  - name: report
-    depends_on: [build_parallel]
-    command: "echo Build completed! Setup: {{setup_result}}"
+  - name: build
+    depends_on: [process_config]
+    command: "./build.sh --url {{ tasks.process_config.outputs.api_endpoint }}"
+    when: "{{ tasks.process_config.outputs.is_secure }} == true"
 ```
 
 ### 2. Build the project
 
-Weave uses CMake with vcpkg for dependency management:
+Prakter uses CMake with vcpkg for dependency management:
 
 ```bash
 # Configure the project (vcpkg will install dependencies)
@@ -87,54 +79,64 @@ cmake --build build/Ninja/Msvc
 
 ```bash
 # Run the workflow (from build directory)
-bin/weave.exe my_workflow.yml
+bin/prakter run my_workflow.yml
 ```
 
-## Cross-File Task Imports
+## CLI Usage
 
-One of Weave's most powerful features is the ability to create modular, reusable workflows:
+Prakter provides a powerful command-line interface with subcommands for different stages of your workflow lifecycle.
 
-### Create shared tasks (`shared.yml`):
+| Command | Description | Example Usage |
+|:---|:---|:---|
+| `run` | Execute a workflow (default) | `prakter run workflow.yml --concurrent` |
+| `init` | Scaffold a new workflow | `prakter init --template=cpp-library` |
+| `validate` | Verify YAML and DAG sanity | `prakter validate workflow.yml` |
+| `export` | Translate to other platforms | `prakter export workflow.yml --output=ci.yml` |
+| `benchmark` | Profile execution time | `prakter benchmark workflow.yml` |
+| `visualize` | Generate DAG architecture | `prakter visualize workflow.yml` |
+
+**Common Options:**
+- `-f, --file <path>`: Path to the YAML workflow file.
+- `-c, --concurrent`: Enable parallel task execution.
+- `-j, --jobs <n>`: Set maximum concurrency (default: 4).
+- `-v, --verbose`: Enable debug logging.
+- `-i, --input <k=v>`: Pass input parameters to the workflow.
+- `-t, --task <name>`: Run only a specific task and its dependencies.
+
+## Reusable Workflows with `uses`
+
+Prakter promotes modularity by allowing you to execute external workflow files as single tasks.
+
+### Create a reusable module (`modules/docker-build.yml`):
 ```yaml
-name: "Shared Build Tasks"
-defaults:
-  vars:
-    BUILD_TYPE: "release"
-
 tasks:
-  - name: lint_code
-    command: "echo Linting code in {{BUILD_TYPE}} mode"
-
-  - name: run_tests
-    depends_on: [lint_code]
-    command: "echo Running tests"
-    outputs:
-      stdout_to_variable: "test_result"
+  - name: build
+    command: "docker build -t {{ IMAGE_NAME }}:{{ TAG }} ."
 ```
 
-### Import and use (`main.yml`):
+### Reference it in your main pipeline (`workflow.yml`):
 ```yaml
-imports:
-  - "shared.yml"
-
 tasks:
-  - name: build_app
-    command: "echo Building application"
+  - name: get_version
+    command: "git describe --tags"
 
-  - name: deploy
-    depends_on: [build_app, run_tests]  # run_tests is from imported file
-    command: "echo Deploying. Tests: {{test_result}}"
+  - name: push_image
+    depends_on: [get_version]
+    uses: ./modules/docker-build.yml
+    vars:
+      IMAGE_NAME: "myapp"
+      TAG: "{{ tasks.get_version.outputs.stdout }}"
 ```
 
-**Key Import Features:**
-- ✅ **Recursive imports**: Imported files can import other files
-- ✅ **Relative path resolution**: Import paths relative to the importing file
-- ✅ **Conflict resolution**: Main workflow tasks take precedence over imported ones
-- ✅ **Variable merging**: Variables and defaults are intelligently merged
+**Key Benefits:**
+- ✅ **Encapsulation**: Reusable workflows have their own private task names
+- ✅ **Context Inheritance**: Inherit variables and environment from the calling task
+- ✅ **Namespaced Outputs**: Module results available via `{{ tasks.<task_name>.outputs.<key> }}`
+- ✅ **Clean Pipelines**: Keep your main workflow high-level and readable
 
 ## Architecture Overview
 
-Weave is designed with performance and modularity in mind:
+Prakter is designed with performance and modularity in mind:
 
 ```
 ┌─────────────────┐    ┌──────────────────┐    ┌─────────────────────┐
@@ -150,11 +152,11 @@ Weave is designed with performance and modularity in mind:
 ```
 
 **Core Components:**
-- **Task Parser**: Handles YAML parsing with `ryml` and recursive import resolution
-- **Enhanced Graph**: Builds and validates task dependency DAGs
-- **Workflow Executor**: Orchestrates concurrent task execution with proper synchronization and intelligent error handling
-- **Thread Pool**: Custom implementation to avoid deadlocks in nested parallel tasks
-- **Expression Evaluator**: PEGTL-based parser for `when` conditions
+- **Task Parser**: High-speed YAML engine using `ryml` for zero-allocation parsing
+- **Enhanced Graph**: Advanced DAG orchestration with cycle detection and parallel scheduling
+- **Workflow Executor**: Concurrent runtime that manages thread pools and execution context
+- **Script Runner**: Embedded QuickJS runtime for complex data manipulation without external tools
+- **Expression Engine**: Powerful interpolation engine supporting variables, environment, and task outputs
 
 ## Advanced Features
 
@@ -189,31 +191,23 @@ tasks:
     command: "echo Testing service: {{service}}"
 ```
 
-### Error Handling and Recovery
+### Error Handling & Triggers
 ```yaml
 tasks:
-  - name: critical_deployment
-    command: "deploy --service myapp --env production"
+  - name: deploy
+    command: "./deploy.sh"
     retries:
       count: 3
-      delay: "10s"
-    outputs:
-      stdout_to_variable: "deploy_log"
-      exit_code_to_variable: "deploy_status"
-    on_failure: [rollback_deployment, alert_team]
-
-  - name: rollback_deployment
-    command: |
-        echo "Deployment failed: {{failed_task_name}}"
-        echo "Exit code: {{failed_task_exit_code}}"
-        echo "Error: {{failed_task_stderr}}"
-        rollback --reason "{{failed_task_error}}"
-
-  - name: alert_team
-    command: |
-        send-alert --severity critical \
-          --task "{{failed_task_name}}" \
-          --details "{{failed_task_error}}"
+      delay: "30s"
+    triggers:
+      on_failure:
+        - http_post:
+            url: "{{ env.SLACK_WEBHOOK }}"
+            body: '{"text": "Deployment failed: {{ failed_task_error }}"}'
+        - run_task:
+            task_name: rollback
+      on_success:
+        - "@prakter Deployment of {{ VERSION }} succeeded!"
 ```
 
 ### Output Chaining
@@ -231,7 +225,12 @@ tasks:
 
 ## Documentation
 
-TBD
+Complete documentation is available in the [docs/](./docs/README.md) directory:
+
+- 🏗️ **[Architecture Overview](./docs/ARCHITECTURE.md)**: Deep dive into the system design
+- 📁 **[Project Structure](./docs/PROJECT_STRUCTURE.md)**: Guide to folders and codebase organization
+- ⚡ **[Trigger System](./docs/TRIGGERS.md)**: Detailed guide on event-driven actions
+- 📖 **[DSL Specification](./grammar.md)**: Full reference for the Prakter YAML grammar
 
 ## Contributing & Development
 
@@ -250,14 +249,14 @@ ctest --preset=default
 
 ### Project Structure
 ```
-weave/
-├── include/           # Public headers
-├── src/              # Implementation
-│   ├── yml/          # YAML parsing (ryml)
-│   ├── dag/          # Graph and execution logic
-│   └── util/         # Utilities (expressions, variables)
-├── test/             # Unit tests (Catch2)
-└── docs/             # Documentation
+prakter/
+├── prakter/           # Core library and CLI
+│   ├── include/       # Public headers
+│   ├── src/           # Implementation
+│   └── test/          # Unit tests (Catch2)
+├── docs/              # System & feature documentation
+├── examples/          # Sample workflow files
+└── grammar.md         # Authoritative DSL specification
 ```
 
 ## Performance Characteristics
@@ -269,7 +268,7 @@ weave/
 
 ## License & Status
 
-Weave is actively developed and production-ready. The core engine is feature-complete with:
+Prakter is actively developed and production-ready. The core engine is feature-complete with:
 - ✅ Full YAML workflow specification support
 - ✅ Cross-file imports and modular design
 - ✅ Thread-safe concurrent execution
@@ -281,12 +280,12 @@ Weave is actively developed and production-ready. The core engine is feature-com
 **Help us prioritize!** Vote on features you want most by starring ⭐ issues or contributing PRs.
 
 ### 🛠️ Developer Experience
-- [ ] **Advanced CLI Tools**
-  - [ ] `weave init --template=cpp-library` - Project scaffolding
-  - [ ] `weave validate workflow.yml` - Workflow validation
-  - [ ] `weave export --github-actions` - Platform integration
-  - [ ] `weave benchmark workflow.yml` - Performance profiling
-  - [ ] `weave visualize workflow.yml` - DAG visualization
+- [x] **Advanced CLI Tools**
+  - [x] `prakter init --template=cpp-library` - Project scaffolding
+  - [x] `prakter validate workflow.yml` - Workflow validation
+  - [x] `prakter export --github-actions` - Platform integration
+  - [x] `prakter benchmark workflow.yml` - Performance profiling
+  - [x] `prakter visualize workflow.yml` - DAG visualization
 
 ### 🎨 IDE Integration
 - [ ] **VS Code Extension**
@@ -370,7 +369,7 @@ Weave is actively developed and production-ready. The core engine is feature-com
   - [ ] Security compliance automation
 
 ### 🌍 Community & Ecosystem
-- [ ] **Weave Hub - Community Platform**
+- [ ] **Prakter Hub - Community Platform**
   - [ ] Collection marketplace with ratings/reviews
   - [ ] Easy sharing and contribution workflows
   - [ ] Semantic versioning for collections
@@ -379,7 +378,7 @@ Weave is actively developed and production-ready. The core engine is feature-com
   - [ ] Community Discord/Slack
   - [ ] Monthly community calls
   - [ ] Contribution recognition program
-  - [ ] Weave certification program
+  - [ ] Prakter certification program
 
 ### 🔧 Runtime Enhancements
 - [ ] **Dynamic Workflows**
@@ -434,6 +433,6 @@ Weave is actively developed and production-ready. The core engine is feature-com
 
 ---
 
-**Join the Journey!** Weave is more than a tool - it's a community building the future of workflow orchestration. Every contribution, big or small, makes a difference.
+**Join the Journey!** Prakter is more than a tool - it's a community building the future of workflow orchestration. Every contribution, big or small, makes a difference.
 
 **Get Started Contributing**: Check our [Contributing Guide](CONTRIBUTING.md) and pick your first issue!

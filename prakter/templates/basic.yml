@@ -1,0 +1,15 @@
+name: "Standard Workflow"
+description: "A basic Prakter workflow template"
+
+variables:
+  PROJECT: "MyProject"
+
+tasks:
+  - name: hello
+    description: "Say hello"
+    command: "echo Hello from {{ PROJECT }}!"
+
+  - name: goodbye
+    description: "Say goodbye"
+    depends_on: [hello]
+    command: "echo Execution of {{ PROJECT }} workflow finished."

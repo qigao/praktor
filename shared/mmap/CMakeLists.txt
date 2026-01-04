@@ -13,8 +13,6 @@ target_include_directories(
 find_package(ZLIB REQUIRED)
 # Find dependencies
 find_package(fmt CONFIG REQUIRED)
-find_path(BSHOSHANY_THREAD_POOL_INCLUDE_DIRS "BS_thread_pool.hpp")
-target_include_directories( ${TARGET_NAME} PRIVATE ${BSHOSHANY_THREAD_POOL_INCLUDE_DIRS})
 # Link dependencies
 target_link_libraries(
     ${TARGET_NAME} PUBLIC pubcxx

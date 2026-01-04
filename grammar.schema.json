@@ -1,0 +1,436 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Prakter Workflow Specification",
+  "description": "A schema for defining Prakter DSL (v7.0) workflow files.",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Human-readable workflow identifier."
+    },
+    "description": {
+      "type": "string",
+      "description": "Optional workflow summary."
+    },
+    "variables": {
+      "$ref": "#/$defs/stringMap",
+      "description": "Global, read-only variables for expression interpolation."
+    },
+    "env": {
+      "$ref": "#/$defs/stringMap",
+      "description": "Global environment variables available to all tasks."
+    },
+    "dotEnv": {
+      "description": "Paths to .env files to load into the global environment.",
+      "$ref": "#/$defs/stringOrStringArray"
+    },
+    "defaults": {
+      "type": "object",
+      "description": "Default attributes applied to all tasks.",
+      "properties": {
+        "retries": {
+          "$ref": "#/$defs/retriesPolicy"
+        },
+        "timeout": {
+          "$ref": "#/$defs/durationString"
+        }
+      },
+      "additionalProperties": false
+    },
+    "embedded": {
+      "type": "object",
+      "description": "Embedded script modules available to script tasks.",
+      "additionalProperties": {
+        "$ref": "#/$defs/embeddedModule"
+      }
+    },
+    "tasks": {
+      "type": "array",
+      "description": "The list of all task definitions in the workflow.",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/taskDefinition"
+      }
+    }
+  },
+  "required": [
+    "tasks"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "stringOrStringArray": {
+      "oneOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      ]
+    },
+    "stringMap": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "durationString": {
+      "type": "string",
+      "description": "A duration string, e.g., '30s', '5m', '1h'.",
+      "pattern": "^[0-9]+(s|m|h)$"
+    },
+    "retriesPolicy": {
+      "type": "object",
+      "properties": {
+        "count": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Maximum number of retry attempts."
+        },
+        "delay": {
+          "$ref": "#/$defs/durationString",
+          "description": "The delay between attempts."
+        }
+      },
+      "required": [
+        "count"
+      ],
+      "additionalProperties": false
+    },
+    "embeddedModule": {
+      "type": "object",
+      "properties": {
+        "language": {
+          "type": "string",
+          "description": "Execution language for the module (default: javascript)."
+        },
+        "source": {
+          "type": "string",
+          "description": "Module source code."
+        }
+      },
+      "required": [
+        "source"
+      ],
+      "additionalProperties": false
+    },
+    "triggerAction": {
+      "type": "object",
+      "description": "A single, self-contained action to perform when a trigger fires.",
+      "properties": {
+        "http_post": {
+          "type": "object",
+          "properties": {
+            "url": {
+              "type": "string",
+              "format": "uri"
+            },
+            "body": {
+              "type": "string"
+            },
+            "headers": {
+              "$ref": "#/$defs/stringMap"
+            }
+          },
+          "required": [
+            "url"
+          ],
+          "additionalProperties": false
+        },
+        "write_file": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string"
+            },
+            "content": {
+              "type": "string"
+            },
+            "mode": {
+              "enum": [
+                "overwrite",
+                "append"
+              ]
+            }
+          },
+          "required": [
+            "path",
+            "content"
+          ],
+          "additionalProperties": false
+        },
+        "run_task": {
+          "type": "object",
+          "properties": {
+            "task_name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "task_name"
+          ],
+          "additionalProperties": false
+        },
+        "prakter": {
+          "type": "object",
+          "properties": {
+            "message": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "message"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "oneOf": [
+        {
+          "required": [
+            "http_post"
+          ]
+        },
+        {
+          "required": [
+            "write_file"
+          ]
+        },
+        {
+          "required": [
+            "run_task"
+          ]
+        },
+        {
+          "required": [
+            "prakter"
+          ]
+        }
+      ],
+      "additionalProperties": false
+    },
+    "triggerActionList": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {
+            "type": "string",
+            "description": "Shorthand for a 'run_task' action or prakter notification."
+          },
+          {
+            "$ref": "#/$defs/triggerAction"
+          }
+        ]
+      },
+      "minItems": 1
+    },
+    "triggersBlock": {
+      "type": "object",
+      "description": "Defines event-driven actions to take upon task completion.",
+      "properties": {
+        "on_success": {
+          "$ref": "#/$defs/triggerActionList"
+        },
+        "on_failure": {
+          "$ref": "#/$defs/triggerActionList"
+        },
+        "on_complete": {
+          "$ref": "#/$defs/triggerActionList"
+        }
+      },
+      "additionalProperties": false
+    },
+    "eachBlock": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "$ref": "#/$defs/stringOrStringArray"
+        },
+        "matrix": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/stringOrStringArray"
+          }
+        },
+        "as": {
+          "type": "string"
+        },
+        "index_variable": {
+          "type": "string"
+        }
+      },
+      "oneOf": [
+        {
+          "required": [
+            "items"
+          ]
+        },
+        {
+          "required": [
+            "matrix"
+          ]
+        }
+      ],
+      "additionalProperties": false
+    },
+    "taskDefinition": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "depends_on": {
+          "$ref": "#/$defs/stringOrStringArray"
+        },
+        "vars": {
+          "$ref": "#/$defs/stringMap"
+        },
+        "env": {
+          "$ref": "#/$defs/stringMap"
+        },
+        "dotEnv": {
+          "$ref": "#/$defs/stringOrStringArray"
+        },
+        "timeout": {
+          "$ref": "#/$defs/durationString"
+        },
+        "retries": {
+          "$ref": "#/$defs/retriesPolicy"
+        },
+        "when": {
+          "type": "string"
+        },
+        "each": {
+          "$ref": "#/$defs/eachBlock"
+        },
+        "triggers": {
+          "$ref": "#/$defs/triggersBlock"
+        },
+        "continue_on_error": {
+          "type": "boolean",
+          "description": "If true, workflow continues even if this task fails.",
+          "default": false
+        },
+        "working_dir": {
+          "type": "string",
+          "description": "Working directory for command execution."
+        },
+        "silent": {
+          "type": "boolean",
+          "description": "Suppress command output.",
+          "default": false
+        },
+        "command": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1
+            }
+          ]
+        },
+        "output_format": {
+          "enum": [
+            "text",
+            "json"
+          ]
+        },
+        "script": {
+          "type": "object",
+          "properties": {
+            "source": {
+              "type": "string",
+              "description": "The JavaScript code to execute."
+            },
+            "language": {
+              "type": "string",
+              "description": "Execution language (default: javascript)."
+            },
+            "modules": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "List of embedded module names to load before execution."
+            },
+            "globals": {
+              "$ref": "#/$defs/stringMap",
+              "description": "Global variables to inject into the script environment."
+            },
+            "env": {
+              "$ref": "#/$defs/stringMap",
+              "description": "Environment variables for script execution."
+            }
+          },
+          "required": [
+            "source"
+          ],
+          "additionalProperties": false
+        },
+        "uses": {
+          "type": "string"
+        },
+        "dynamic_tasks": {
+          "type": "object",
+          "description": "Generate and execute tasks dynamically at runtime.",
+          "properties": {
+            "items_variable": {
+              "type": "string",
+              "description": "Context path to a JSON array that drives task generation."
+            },
+            "template": {
+              "type": "object",
+              "description": "Task template with {{ item }} placeholders.",
+              "properties": {
+                "name": { "type": "string" },
+                "command": { "$ref": "#/$defs/stringOrStringArray" },
+                "timeout": { "$ref": "#/$defs/durationString" },
+                "retries": { "$ref": "#/$defs/retriesPolicy" },
+                "when": { "type": "string" },
+                "depends_on": { "$ref": "#/$defs/stringOrStringArray" },
+                "env": { "$ref": "#/$defs/stringMap" }
+              },
+              "required": ["name", "command"]
+            }
+          },
+          "required": ["items_variable", "template"],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "oneOf": [
+        {
+          "required": [
+            "command"
+          ]
+        },
+        {
+          "required": [
+            "script"
+          ]
+        },
+        {
+          "required": [
+            "uses"
+          ]
+        },
+        {
+          "required": [
+            "dynamic_tasks"
+          ]
+        }
+      ],
+      "additionalProperties": false
+    }
+  }
+}
