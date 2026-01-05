@@ -1,6 +1,6 @@
-# Prakter - A Modern C++ YAML Workflow Engine
+# Praktor - A Modern C++ YAML Workflow Engine
 
-Prakter is a high-performance, concurrent workflow engine written in modern C++20. It allows you to define complex task dependencies and execution logic in a clean, simple YAML format. It's designed for orchestrating build pipelines, deployments, data processing jobs, and other multi-step automated processes.
+Praktor is a high-performance, concurrent workflow engine written in modern C++20. It allows you to define complex task dependencies and execution logic in a clean, simple YAML format. It's designed for orchestrating build pipelines, deployments, data processing jobs, and other multi-step automated processes.
 
 ## Core Features
 
@@ -36,7 +36,7 @@ Create a file named `my_workflow.yml`:
 
 ```yaml
 variables:
-  PROJECT: "Prakter-Demo"
+  PROJECT: "Praktor-Demo"
   ENVIRONMENT: "staging"
 
 tasks:
@@ -65,7 +65,7 @@ tasks:
 
 ### 2. Build the project
 
-Prakter uses CMake with vcpkg for dependency management:
+Praktor uses CMake with vcpkg for dependency management:
 
 ```bash
 # Configure the project (vcpkg will install dependencies)
@@ -79,21 +79,20 @@ cmake --build build/Ninja/Msvc
 
 ```bash
 # Run the workflow (from build directory)
-bin/prakter run my_workflow.yml
+bin/praktor -f my_workflow.yml
 ```
 
 ## CLI Usage
 
-Prakter provides a powerful command-line interface with subcommands for different stages of your workflow lifecycle.
+Praktor provides a powerful command-line interface with subcommands for different stages of your workflow lifecycle.
 
 | Command | Description | Example Usage |
 |:---|:---|:---|
-| `run` | Execute a workflow (default) | `prakter run workflow.yml --concurrent` |
-| `init` | Scaffold a new workflow | `prakter init --template=cpp-library` |
-| `validate` | Verify YAML and DAG sanity | `prakter validate workflow.yml` |
-| `export` | Translate to other platforms | `prakter export workflow.yml --output=ci.yml` |
-| `benchmark` | Profile execution time | `prakter benchmark workflow.yml` |
-| `visualize` | Generate DAG architecture | `prakter visualize workflow.yml` |
+| (default) | Execute a workflow | `praktor -f workflow.yml --concurrent` |
+| `init` | Scaffold a new workflow | `praktor init --template=cpp-library` |
+| `validate` | Verify YAML and DAG sanity | `praktor validate -f workflow.yml` |
+| `export` | Translate to other platforms | `praktor export -f workflow.yml -o ci.yml` |
+| `visualize` | Generate DAG architecture | `praktor visualize -f workflow.yml` |
 
 **Common Options:**
 - `-f, --file <path>`: Path to the YAML workflow file.
@@ -102,10 +101,11 @@ Prakter provides a powerful command-line interface with subcommands for differen
 - `-v, --verbose`: Enable debug logging.
 - `-i, --input <k=v>`: Pass input parameters to the workflow.
 - `-t, --task <name>`: Run only a specific task and its dependencies.
+- `--benchmark`: Show execution benchmark results (execution time and status).
 
 ## Reusable Workflows with `uses`
 
-Prakter promotes modularity by allowing you to execute external workflow files as single tasks.
+Praktor promotes modularity by allowing you to execute external workflow files as single tasks.
 
 ### Create a reusable module (`modules/docker-build.yml`):
 ```yaml
@@ -136,7 +136,7 @@ tasks:
 
 ## Architecture Overview
 
-Prakter is designed with performance and modularity in mind:
+Praktor is designed with performance and modularity in mind:
 
 ```
 ┌─────────────────┐    ┌──────────────────┐    ┌─────────────────────┐
@@ -207,7 +207,7 @@ tasks:
         - run_task:
             task_name: rollback
       on_success:
-        - "@prakter Deployment of {{ VERSION }} succeeded!"
+        - "@praktor Deployment of {{ VERSION }} succeeded!"
 ```
 
 ### Output Chaining
@@ -229,8 +229,8 @@ Complete documentation is available in the [docs/](./docs/README.md) directory:
 
 - 🏗️ **[Architecture Overview](./docs/ARCHITECTURE.md)**: Deep dive into the system design
 - 📁 **[Project Structure](./docs/PROJECT_STRUCTURE.md)**: Guide to folders and codebase organization
-- ⚡ **[Trigger System](./docs/TRIGGERS.md)**: Detailed guide on event-driven actions
-- 📖 **[DSL Specification](./grammar.md)**: Full reference for the Prakter YAML grammar
+- ⚡ **[Trigger System](./grammar.md#8-event-driven-triggers)**: Detailed guide on event-driven actions
+- 📖 **[DSL Specification](./grammar.md)**: Full reference for the Praktor YAML grammar
 
 ## Contributing & Development
 
@@ -249,8 +249,8 @@ ctest --preset=default
 
 ### Project Structure
 ```
-prakter/
-├── prakter/           # Core library and CLI
+praktor/
+├── praktor/           # Core library and CLI
 │   ├── include/       # Public headers
 │   ├── src/           # Implementation
 │   └── test/          # Unit tests (Catch2)
@@ -268,7 +268,7 @@ prakter/
 
 ## License & Status
 
-Prakter is actively developed and production-ready. The core engine is feature-complete with:
+Praktor is actively developed and production-ready. The core engine is feature-complete with:
 - ✅ Full YAML workflow specification support
 - ✅ Cross-file imports and modular design
 - ✅ Thread-safe concurrent execution
@@ -281,11 +281,11 @@ Prakter is actively developed and production-ready. The core engine is feature-c
 
 ### 🛠️ Developer Experience
 - [x] **Advanced CLI Tools**
-  - [x] `prakter init --template=cpp-library` - Project scaffolding
-  - [x] `prakter validate workflow.yml` - Workflow validation
-  - [x] `prakter export --github-actions` - Platform integration
-  - [x] `prakter benchmark workflow.yml` - Performance profiling
-  - [x] `prakter visualize workflow.yml` - DAG visualization
+  - [x] `praktor init --template=cpp-library` - Project scaffolding
+  - [x] `praktor validate -f workflow.yml` - Workflow validation
+  - [x] `praktor export -f workflow.yml` - Platform integration
+  - [x] `praktor -f workflow.yml --benchmark` - Performance profiling
+  - [x] `praktor visualize -f workflow.yml` - DAG visualization
 
 ### 🎨 IDE Integration
 - [ ] **VS Code Extension**
@@ -369,7 +369,7 @@ Prakter is actively developed and production-ready. The core engine is feature-c
   - [ ] Security compliance automation
 
 ### 🌍 Community & Ecosystem
-- [ ] **Prakter Hub - Community Platform**
+- [ ] **Praktor Hub - Community Platform**
   - [ ] Collection marketplace with ratings/reviews
   - [ ] Easy sharing and contribution workflows
   - [ ] Semantic versioning for collections
@@ -378,7 +378,7 @@ Prakter is actively developed and production-ready. The core engine is feature-c
   - [ ] Community Discord/Slack
   - [ ] Monthly community calls
   - [ ] Contribution recognition program
-  - [ ] Prakter certification program
+  - [ ] Praktor certification program
 
 ### 🔧 Runtime Enhancements
 - [ ] **Dynamic Workflows**
@@ -433,6 +433,6 @@ Prakter is actively developed and production-ready. The core engine is feature-c
 
 ---
 
-**Join the Journey!** Prakter is more than a tool - it's a community building the future of workflow orchestration. Every contribution, big or small, makes a difference.
+**Join the Journey!** Praktor is more than a tool - it's a community building the future of workflow orchestration. Every contribution, big or small, makes a difference.
 
 **Get Started Contributing**: Check our [Contributing Guide](CONTRIBUTING.md) and pick your first issue!

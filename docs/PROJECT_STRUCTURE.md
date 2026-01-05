@@ -1,9 +1,9 @@
-# Prakter Project Structure Guide
+# Praktor Project Structure Guide
 
 ## Current Structure Overview
 
 ```
-prakter/
+praktor/
 ├── include/                     # Public headers
 │   ├── dag/                     # DAG and execution (⚠️ confusing name)
 │   │   ├── executors/           # Task executors
@@ -118,7 +118,7 @@ prakter/
 ### By Layer (Recommended)
 
 ```
-prakter/
+praktor/
 ├── core/              # Core workflow engine
 │   ├── workflow_runner
 │   ├── workflow_executor
@@ -149,7 +149,7 @@ prakter/
 ### By Feature (Alternative)
 
 ```
-prakter/
+praktor/
 ├── workflow/          # Workflow management
 │   ├── runner
 │   ├── executor
@@ -240,15 +240,15 @@ main.cpp
 
 **Recommended style (with namespace):**
 ```cpp
-#include "prakter/core/workflow_executor.hpp"
-#include "prakter/parsers/task_parser.hpp"
-#include "prakter/utils/logger.hpp"
+#include "praktor/core/workflow_executor.hpp"
+#include "praktor/parsers/task_parser.hpp"
+#include "praktor/utils/logger.hpp"
 ```
 
 ### Namespace Organization
 
 ```cpp
-namespace Prakter {
+namespace Praktor {
     namespace Core {
         // workflow_runner, workflow_executor
     }
@@ -287,11 +287,11 @@ When adding a new component:
 ### Short Term
 1. Rename `dag/` to `core/` or `engine/`
 2. Rename `yml/` to `parsers/`
-4. Add `prakter/` prefix to all include paths
+4. Add `praktor/` prefix to all include paths
 
 ### Long Term
 1. Separate public API from internal implementation
-2. Create a `prakter/` namespace for all code
+2. Create a `praktor/` namespace for all code
 3. Split large files (e.g., `workflow_executor.cpp`)
 4. Add module-level README files
 5. Generate API documentation with Doxygen

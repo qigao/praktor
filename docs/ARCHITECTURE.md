@@ -1,4 +1,4 @@
-# Prakter Architecture Overview
+# Praktor Architecture Overview
 
 ## System Architecture
 
@@ -222,7 +222,7 @@ util/
 ## Execution Sequence
 
 ```
-1. User runs: prakter [run|validate|export|...] workflow.yml
+1. User runs: praktor [run|validate|export|...] workflow.yml
    │
 2. main.cpp parses subcommands and arguments
    │
@@ -472,7 +472,7 @@ Expression Error  → ExpressionEvaluator  → Return false
 
 ## Summary
 
-The Prakter architecture follows a layered approach with clear separation of concerns:
+The Praktor architecture follows a layered approach with clear separation of concerns:
 
 1. **Presentation** - CLI interface
 2. **Application** - Workflow management

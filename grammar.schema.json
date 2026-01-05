@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "Prakter Workflow Specification",
-  "description": "A schema for defining Prakter DSL (v7.0) workflow files.",
+  "title": "Praktor Workflow Specification",
+  "description": "A schema for defining Praktor DSL (v7.0) workflow files.",
   "type": "object",
   "properties": {
     "name": {
@@ -174,7 +174,7 @@
           ],
           "additionalProperties": false
         },
-        "prakter": {
+        "praktor": {
           "type": "object",
           "properties": {
             "message": {
@@ -205,7 +205,7 @@
         },
         {
           "required": [
-            "prakter"
+            "praktor"
           ]
         }
       ],
@@ -217,7 +217,7 @@
         "oneOf": [
           {
             "type": "string",
-            "description": "Shorthand for a 'run_task' action or prakter notification."
+            "description": "Shorthand for a 'run_task' action or praktor notification."
           },
           {
             "$ref": "#/$defs/triggerAction"

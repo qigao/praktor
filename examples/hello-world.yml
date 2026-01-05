@@ -1,0 +1,16 @@
+name: "Hello Praktor"
+description: "A simple introduction to Praktor workflows"
+
+variables:
+  GREETING: "Hello"
+  TARGET: "World"
+
+tasks:
+  - name: say_hello
+    description: "Greets the target"
+    command: "echo {{ GREETING }}, {{ TARGET }}!"
+
+  - name: show_info
+    description: "Displays system info"
+    depends_on: [say_hello]
+    command: "echo Running on {{ env.OS || 'Unknown OS' }}"

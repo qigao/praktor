@@ -1,0 +1,23 @@
+name: "Data Transformation"
+description: "Demonstrates using JavaScript for data processing"
+
+tasks:
+  - name: fetch_data
+    description: "Simulate fetching some JSON data"
+    command: 'echo {"users": [{"id": 1, "name": "Alice", "role": "admin"}, {"id": 2, "name": "Bob", "role": "user"}], "meta": {"status": "ok"}}'
+    output_format: json
+
+  - name: transform
+    description: "Extract admin users using JS"
+    depends_on: [fetch_data]
+    script:
+      source: |
+        const data = context.get("tasks.fetch_data.outputs.data");
+        const admins = data.users.filter(u => u.role === "admin");
+        context.set("admin_names", admins.map(u => u.name).join(", "));
+        context.set("count", admins.length);
+
+  - name: report
+    description: "Output the transformed data"
+    depends_on: [transform]
+    command: "echo Found {{ tasks.transform.outputs.count }} admins: {{ tasks.transform.outputs.admin_names }}"

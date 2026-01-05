@@ -1,6 +1,6 @@
-# Prakter Documentation Index
+# Praktor Documentation Index
 
-Welcome to the Prakter workflow engine documentation! This index will help you find the right documentation for your needs.
+Welcome to the Praktor workflow engine documentation! This index will help you find the right documentation for your needs.
 
 ## 📚 Documentation Overview
 
@@ -8,12 +8,11 @@ Welcome to the Prakter workflow engine documentation! This index will help you f
 |----------|---------|----------|-----------|
 | **[PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md)** | Detailed structure analysis | New developers, architects | 15 min |
 | **[ARCHITECTURE.md](ARCHITECTURE.md)** | System architecture & design | Architects, senior developers | 20 min |
-| **[TRIGGERS.md](TRIGGERS.md)** | Trigger system guide | Feature developers | 15 min |
-| **[../grammar.md](../grammar.md)** | DSL specification | All developers | 30 min |
+| **[../grammar.md](../grammar.md)** | DSL specification (inc. Triggers) | All developers | 30 min |
 
 ## 🎯 Start Here
 
-### I'm New to Prakter
+### I'm New to Praktor
 1. Read **[../README.md](../README.md)** - Project overview
 2. Read **[PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md)** - Understand the structure
 3. Try **[../examples/](../examples/)** - Run example workflows
@@ -27,12 +26,12 @@ Welcome to the Prakter workflow engine documentation! This index will help you f
 ### I Want to Add a Feature
 1. Read **[PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md)** - Find relevant files
 2. Read **[ARCHITECTURE.md](ARCHITECTURE.md)** - Understand extension points
-3. Check **[TRIGGERS.md](TRIGGERS.md)** - If adding trigger features
+3. Check **[../grammar.md](../grammar.md)** - If adding trigger features
 
 ### I Want to Understand the Code
 1. Read **[ARCHITECTURE.md](ARCHITECTURE.md)** - High-level design
 2. Read **[PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md)** - File organization
-3. Browse **[../prakter/](../prakter/)** - Source code
+3. Browse **[../praktor/](../praktor/)** - Source code
 
 ## 📖 Documentation by Topic
 
@@ -44,7 +43,7 @@ Welcome to the Prakter workflow engine documentation! This index will help you f
 - **[../grammar.md](../grammar.md)** - DSL specification (v7.0)
 
 ### Features
-- **[TRIGGERS.md](TRIGGERS.md)** - Complete trigger system guide
+- **[../grammar.md](../grammar.md)#8-event-driven-triggers** - Complete trigger system guide
 
 ### Examples
 - **[../examples/](../examples/)** - Example workflows
@@ -55,22 +54,22 @@ Welcome to the Prakter workflow engine documentation! This index will help you f
 
 | What | Where | Documentation |
 |------|-------|---------------|
-| Workflow execution | `prakter/src/dag/workflow_executor.cpp` | [ARCHITECTURE.md](ARCHITECTURE.md) |
-| CLI Subcommands | `prakter/main.cpp` | [../README.md](../README.md#cli-usage) |
-| YAML parsing | `prakter/src/yml/task_parser.cpp` | [PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md) |
-| Task executors | `prakter/src/executors/` | [PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md) |
-| Trigger system | `prakter/src/dag/trigger_executor.cpp` | [TRIGGERS.md](TRIGGERS.md) |
-| Expression eval | `prakter/src/expressions/` | [ARCHITECTURE.md](ARCHITECTURE.md) |
-| Data models | `prakter/include/yml/task*.hpp` | [PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md) |
-| GHA Exporter | `prakter/include/util/gha_exporter.hpp` | [../README.md](../README.md#cli-usage) |
-| DAG Visualization | `prakter/include/util/dag_exporter.hpp` | [../README.md](../README.md#cli-usage) |
+| Workflow execution | `praktor/src/dag/workflow_executor.cpp` | [ARCHITECTURE.md](ARCHITECTURE.md) |
+| CLI Subcommands | `praktor/main.cpp` | [../README.md](../README.md#cli-usage) |
+| YAML parsing | `praktor/src/yml/task_parser.cpp` | [PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md) |
+| Task executors | `praktor/src/executors/` | [PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md) |
+| Trigger system | `praktor/src/dag/trigger_executor.cpp` | [../grammar.md](../grammar.md#8-event-driven-triggers) |
+| Expression eval | `praktor/src/expressions/` | [ARCHITECTURE.md](ARCHITECTURE.md) |
+| Data models | `praktor/include/yml/task*.hpp` | [PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md) |
+| GHA Exporter | `praktor/include/util/gha_exporter.hpp` | [../README.md](../README.md#cli-usage) |
+| DAG Visualization | `praktor/include/util/dag_exporter.hpp` | [../README.md](../README.md#cli-usage) |
 
 ### Common Tasks
 
 | Task | Documentation |
 |------|---------------|
 | Add new task type | [PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md#common-tasks) |
-| Add trigger action | [TRIGGERS.md](TRIGGERS.md) |
+| Add trigger action | [../grammar.md](../grammar.md#8-event-driven-triggers) |
 | Modify YAML syntax | [PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md) |
 | Understand execution flow | [ARCHITECTURE.md](ARCHITECTURE.md#execution-sequence) |
 | Scaffold project | [../README.md](../README.md#cli-usage) |
@@ -178,7 +177,7 @@ Welcome to the Prakter workflow engine documentation! This index will help you f
 ### Coverage
 - ✅ Project structure documented
 - ✅ Architecture documented
-- ✅ Features documented (triggers)
+- ✅ Features documented (triggers in grammar.md)
 - ✅ Examples provided
 - ✅ Navigation guides created
 - ⚠️ API reference (future)
@@ -208,12 +207,12 @@ Welcome to the Prakter workflow engine documentation! This index will help you f
 
 ## 📞 Contact
 
-- **Issues:** [GitHub Issues](https://github.com/your-repo/prakter/issues)
-- **Discussions:** [GitHub Discussions](https://github.com/your-repo/prakter/discussions)
+- **Issues:** [GitHub Issues](https://github.com/your-repo/praktor/issues)
+- **Discussions:** [GitHub Discussions](https://github.com/your-repo/praktor/discussions)
 - **Email:** [your-email@example.com](mailto:your-email@example.com)
 
 ---
 
 **Last Updated:** October 2025
 **Documentation Version:** 1.0
-**Prakter Version:** 1.0.0
+**Praktor Version:** 1.0.0

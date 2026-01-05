@@ -54,7 +54,7 @@ public:
         return res;
     }
 
-    // Alias for Weave compatibility
+    // Alias for Praktor compatibility
     template<class F, class... Args>
     auto enqueue(F&& f, Args&&... args) {
         return submit_task(std::forward<F>(f), std::forward<Args>(args)...);

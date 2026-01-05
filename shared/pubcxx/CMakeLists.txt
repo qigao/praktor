@@ -20,7 +20,6 @@ target_link_libraries(
     ${TARGET_NAME}
     PUBLIC
     mimalloc
-    hashmap
     xxHash::xxhash
     taocpp::pegtl
 )

@@ -1,5 +1,0 @@
-      - name: {{ TASK_NAME }}
-        run: |
-          echo "Executing Prakter task: {{ TASK_NAME }}"
-          {{ TASK_COMMAND }}
-{{ TASK_DEPENDS }}

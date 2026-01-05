@@ -1,29 +1,29 @@
-# Contributing to Weave
+# Contributing to Praktor
 
-**Welcome to the Weave community!** 🎉 We're excited you're interested in contributing to the future of workflow orchestration.
+**Welcome to the Praktor community!** 🎉 We're excited you're interested in contributing to the future of workflow orchestration.
 
 ## 🚀 Quick Start for Contributors
 
 ### 1. Choose Your Adventure
 
-**New to Weave?** Start here:
+**New to Praktor?** Start here:
 - [ ] ⭐ **Star the repository** to show support
-- [ ] 📖 **Read the [README](README.md)** to understand Weave
-- [ ] 🎮 **Try the examples**: `bin/weave.exe weave/collections/cpp/full-pipeline.yml`
+- [ ] 📖 **Read the [README](README.md)** to understand Praktor
+- [ ] 🎮 **Try the examples**: `bin/praktor -f examples/cpp-pipeline.yml`
 - [ ] 💬 **Join our community** discussions
 
 **Ready to code?** Pick an area:
-- [ ] 🐛 **Fix bugs** - Check [good first issue](https://github.com/weave-workflow/weave/labels/good%20first%20issue) label
+- [ ] 🐛 **Fix bugs** - Check [good first issue](https://github.com/praktor-workflow/praktor/labels/good%20first%20issue) label
 - [ ] ✨ **Add features** - Pick from our [roadmap checkboxes](README.md#whats-next---community-roadmap)
-- [ ] 📚 **Build collections** - Create workflows for new technology stacks
-- [ ] 📝 **Improve docs** - Help others understand and use Weave
+- [ ] 📚 **Build examples** - Create workflows for new technology stacks
+- [ ] 📝 **Improve docs** - Help others understand and use Praktor
 
 ### 2. Development Setup
 
 ```bash
 # 1. Fork and clone the repository
-git clone https://github.com/YOUR-USERNAME/weave.git
-cd weave
+git clone https://github.com/YOUR-USERNAME/praktor.git
+cd praktor
 
 # 2. Install dependencies (vcpkg handles this)
 cmake --preset=default
@@ -35,7 +35,7 @@ cmake --build build/Ninja/Msvc
 ctest --preset=default
 
 # 5. Try a workflow
-bin/weave.exe test_final_defaults.yml
+bin/praktor -f examples/hello-world.yml
 ```
 
 **Development Requirements:**
@@ -66,7 +66,7 @@ bin/weave.exe test_final_defaults.yml
 
 **High-Priority Features** (from roadmap):
 - [ ] VS Code extension with syntax highlighting
-- [ ] `weave validate` command for workflow validation
+- [x] `praktor validate` command for workflow validation
 - [ ] Kubernetes operator for distributed execution
 - [ ] Workflow result caching system
 
@@ -77,10 +77,10 @@ bin/weave.exe test_final_defaults.yml
 4. Implement with tests and documentation
 5. Submit PR for review
 
-### 📚 Collections Development
+### 📚 Examples Development
 **Perfect for**: Domain experts, those who want immediate user impact
 
-**Missing Collections** (high demand):
+**Missing Examples** (high demand):
 - [ ] **Web Development**: React, Vue, Angular build pipelines
 - [ ] **Machine Learning**: MLOps, model training, data processing
 - [ ] **Mobile Development**: React Native, Flutter workflows
@@ -89,25 +89,17 @@ bin/weave.exe test_final_defaults.yml
 
 **How to contribute:**
 1. Choose a technology stack you know well
-2. Create `weave/collections/TECH-NAME/` directory
-3. Build task libraries following our [collection structure](weave/collections/README.md)
+2. Create `examples/TECH-NAME/` directory
+3. Build workflows following our standards
 4. Test with real projects
-5. Document with examples and README
+5. Document with a README in the directory
 
-**Collection Template:**
+**Example Template:**
 ```
-weave/collections/your-tech/
+examples/your-tech/
 ├── README.md                    # Overview and usage guide
-├── full-pipeline.yml            # Complete end-to-end workflow
-├── tasks/
-│   ├── build-tasks.yml         # Build-related tasks
-│   ├── test-tasks.yml          # Testing workflows
-│   └── deploy-tasks.yml        # Deployment automation
-├── templates/
-│   ├── basic-workflow.yml      # Simple getting-started template
-│   └── advanced-workflow.yml   # Complex real-world example
-└── examples/
-    └── real-project.yml        # Actual project integration
+├── workflow.yml                 # The main workflow file
+└── sub-workflows/               # (Optional) nested workflows
 ```
 
 ### 📝 Documentation
@@ -142,7 +134,7 @@ git pull origin main
 git checkout -b feature/your-feature-name
 # or
 git checkout -b fix/bug-description
-# or  
+# or
 git checkout -b collection/tech-name
 ```
 
@@ -174,13 +166,13 @@ git checkout -b collection/tech-name
 ctest --preset=default
 
 # Test specific functionality
-bin/weave.exe your-test-workflow.yml
+bin/praktor.exe your-test-workflow.yml
 
 # Test collections
-bin/weave.exe weave/collections/your-collection/full-pipeline.yml
+bin/praktor.exe praktor/collections/your-collection/full-pipeline.yml
 
 # Performance testing
-bin/weave.exe --benchmark your-workflow.yml
+bin/praktor -f your-workflow.yml --benchmark
 ```
 
 ### Submitting Your PR
@@ -196,7 +188,7 @@ bin/weave.exe --benchmark your-workflow.yml
 ## What This PR Does
 Brief description of the change
 
-## Why This Change Is Needed  
+## Why This Change Is Needed
 Problem you're solving or feature you're adding
 
 ## How to Test
@@ -230,7 +222,7 @@ We celebrate all contributions! Contributors get:
 
 ### Code of Conduct
 - **Be respectful** - Everyone was new once
-- **Be constructive** - Focus on the code, not the person  
+- **Be constructive** - Focus on the code, not the person
 - **Be collaborative** - We're building something together
 - **Be inclusive** - Welcome developers of all backgrounds and skill levels
 
@@ -251,7 +243,7 @@ We celebrate all contributions! Contributors get:
 ### 🟢 High Priority (Always Welcome)
 - Bug fixes with tests
 - Performance improvements
-- Security enhancements  
+- Security enhancements
 - Documentation improvements
 - Collection development for popular technologies
 
@@ -270,19 +262,19 @@ We celebrate all contributions! Contributors get:
 
 - **Feature discussions**: Open a GitHub issue
 - **Contribution questions**: Use GitHub Discussions
-- **Security issues**: Email security@weave-workflow.io
-- **Partnership inquiries**: Email partnerships@weave-workflow.io
+- **Security issues**: Email security@praktor-workflow.io
+- **Partnership inquiries**: Email partnerships@praktor-workflow.io
 
 ---
 
 ## 🎉 Ready to Contribute?
 
 1. **⭐ Star the repo** if you haven't already
-2. **🍴 Fork the repository**  
+2. **🍴 Fork the repository**
 3. **📋 Pick an issue** or feature from our roadmap
 4. **💻 Start coding** following our guidelines
 5. **🔄 Submit your PR** and celebrate! 🎊
 
-**Remember**: Every expert was once a beginner. Don't hesitate to ask questions, and welcome to the Weave community! 
+**Remember**: Every expert was once a beginner. Don't hesitate to ask questions, and welcome to the Praktor community!
 
-**Your contribution, no matter how small, makes Weave better for thousands of developers worldwide.** 🌍✨
+**Your contribution, no matter how small, makes Praktor better for thousands of developers worldwide.** 🌍✨

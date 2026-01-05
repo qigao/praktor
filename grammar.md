@@ -1,4 +1,4 @@
-# Prakter Workflow DSL Specification
+# Praktor Workflow DSL Specification
 
 **Version:** 7.0
 **Status:** Authoritative
@@ -6,36 +6,58 @@
 
 ## Table of Contents
 
-1.  [**Introduction**](#1-introduction)
-    *   [1.1. Purpose](#11-purpose)
-    *   [1.2. Design Philosophy](#12-design-philosophy)
-2.  [**Core Concepts**](#2-core-concepts)
-3.  [**Execution Model: Context and Data Flow**](#3-execution-model-context-and-data-flow)
-    *   [3.1. The Workflow Context](#31-the-workflow-context)
-    *   [3.2. Variable and Environment Precedence](#32-variable-and-environment-precedence)
-    *   [3.3. Data Flow Between Tasks](#33-data-flow-between-tasks)
-4.  [**Workflow Structure**](#4-workflow-structure)
-5.  [**Task Definition**](#5-task-definition)
-    *   [5.1. Core Attributes](#51-core-attributes)
-    *   [5.2. Control Flow & Resilience](#52-control-flow--resilience)
-6.  [**Task Composition: `uses`**](#6-task-composition-uses)
-    *   [6.1. Executing a Reusable Workflow](#61-executing-a-reusable-workflow)
-    *   [6.2. Passing Data with `vars` and `env`](#62-passing-data-with-vars-and-env)
-7.  [**Task Runner Reference**](#7-task-runner-reference)
-    *   [7.1. Runner: `run_command` (Side Effects)](#71-runner-run_command-side-effects)
-    *   [7.2. Runner: `script` (Context Manipulation)](#72-runner-script-context-manipulation)
-8.  [**Event-Driven Triggers**](#8-event-driven-triggers)
-9.  [**Expression Language**](#9-expression-language)
-10. [**JSON Schema Contract**](#10-json-schema-contract)
-11. [**Comprehensive Examples**](#11-comprehensive-examples)
-12. [**Security and Secrets Management**](#12-security-and-secrets-management)
+- [Praktor Workflow DSL Specification](#praktor-workflow-dsl-specification)
+  - [Table of Contents](#table-of-contents)
+  - [1. Introduction](#1-introduction)
+    - [1.1. Purpose](#11-purpose)
+    - [1.2. Design Philosophy](#12-design-philosophy)
+  - [2. Core Concepts](#2-core-concepts)
+  - [3. Execution Model: Context and Data Flow](#3-execution-model-context-and-data-flow)
+    - [3.1. The Workflow Context](#31-the-workflow-context)
+    - [3.2. Variable and Environment Precedence](#32-variable-and-environment-precedence)
+    - [3.3. Data Flow Between Tasks](#33-data-flow-between-tasks)
+  - [4. Workflow Structure](#4-workflow-structure)
+    - [4.1. Embedded Modules](#41-embedded-modules)
+  - [5. Task Definition](#5-task-definition)
+    - [5.1. Core Attributes](#51-core-attributes)
+    - [5.2. Control Flow \& Resilience](#52-control-flow--resilience)
+    - [5.3. Execution Context](#53-execution-context)
+  - [6. Task Composition: `uses`](#6-task-composition-uses)
+    - [6.1. Executing a Reusable Workflow](#61-executing-a-reusable-workflow)
+    - [6.2. Passing Data with `vars` and `env`](#62-passing-data-with-vars-and-env)
+  - [7. Task Runner Reference](#7-task-runner-reference)
+    - [7.1. Runner: `command` (Side Effects)](#71-runner-command-side-effects)
+    - [7.2. Runner: `script` (Context Manipulation)](#72-runner-script-context-manipulation)
+    - [7.3. Runner: `dynamic_tasks` (Runtime Task Generation)](#73-runner-dynamic_tasks-runtime-task-generation)
+  - [8. Event-Driven Triggers](#8-event-driven-triggers)
+    - [8.1. `http_post` - Send HTTP Webhook](#81-http_post---send-http-webhook)
+    - [8.2. `write_file` - Create File Artifact](#82-write_file---create-file-artifact)
+    - [8.3. `run_task` - Execute Recovery Task](#83-run_task---execute-recovery-task)
+    - [8.5. Failure Context Variables](#85-failure-context-variables)
+    - [8.4. `@praktor` - Praktor Notification Shortcut](#84-praktor---praktor-notification-shortcut)
+  - [9. Expression Language](#9-expression-language)
+  - [10. JSON Schema Contract](#10-json-schema-contract)
+  - [11. Comprehensive Examples](#11-comprehensive-examples)
+    - [11.1. Basic Workflow with Dependencies](#111-basic-workflow-with-dependencies)
+    - [11.2. Reusable Workflow with Context Inheritance](#112-reusable-workflow-with-context-inheritance)
+    - [11.3. Data Transformation with Script](#113-data-transformation-with-script)
+    - [11.4. Loop Execution with Each](#114-loop-execution-with-each)
+    - [11.5. Error Handling with Triggers](#115-error-handling-with-triggers)
+  - [12. Security and Secrets Management](#12-security-and-secrets-management)
+    - [12.1. Principle of Least Privilege](#121-principle-of-least-privilege)
+    - [12.2. Secrets Backend Integration](#122-secrets-backend-integration)
+    - [12.3. Log Redaction](#123-log-redaction)
+    - [12.4. Best Practices](#124-best-practices)
+  - [Appendix A: Complete Grammar Reference](#appendix-a-complete-grammar-reference)
+    - [Workflow File Structure](#workflow-file-structure)
+    - [Task Runner Summary](#task-runner-summary)
 
 ---
 
 ## 1. Introduction
 
 ### 1.1. Purpose
-The Prakter Workflow Domain Specific Language (DSL) provides a declarative, YAML-based syntax for defining, managing, and executing complex workflows. This specification defines the grammar, data model, and execution semantics required to author interoperable, scalable, and maintainable automated processes.
+The Praktor Workflow Domain Specific Language (DSL) provides a declarative, YAML-based syntax for defining, managing, and executing complex workflows. This specification defines the grammar, data model, and execution semantics required to author interoperable, scalable, and maintainable automated processes.
 
 ### 1.2. Design Philosophy
 *   **Declarative Graph:** Define tasks and their dependencies as a Directed Acyclic Graph (DAG). The runtime handles execution order and parallelization.
@@ -70,7 +92,7 @@ State is passed between tasks by writing to and reading from the context.
 The outputs for a completed task `my-task` are stored at `tasks.my-task.outputs`.
 
 ## 4. Workflow Structure
-A Prakter workflow is a YAML map with the following top-level keys:
+A Praktor workflow is a YAML map with the following top-level keys:
 
 | Key | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
@@ -139,6 +161,7 @@ Every task must have a `name` and exactly one runner (`command`, `script`, or `u
 - `command` (String or Array): Execute an external command. See Section 7.1.
 - `script` (Object): Execute JavaScript code. See Section 7.2.
 - `uses` (String): Execute a reusable workflow file. See Section 6.
+- `dynamic_tasks` (Object): Execute tasks generated at runtime. See Section 7.3.
 
 ### 5.2. Control Flow & Resilience
 
@@ -357,27 +380,42 @@ triggers:
   on_failure: [rollback_deployment, alert_team]
 ```
 
+### 8.5. Failure Context Variables
 
-### 8.4. `@prakter` - Prakter Notification Shortcut
-A convenience action to notify the Prakter assistant or a configured webhook.
+When a task fails, the following variables are available in `on_failure` triggers to provide diagnostic information:
 
-Write a scalar beginning with `@prakter` to send a notification message:
+| Variable | Description |
+| :--- | :--- |
+| `failed_task_name` | Name of the failed task. |
+| `failed_task_type` | Type of runner used (`command`, `script`, `uses`, `dynamic_tasks`). |
+| `failed_task_exit_code` | Process exit code (available for `command` runner). |
+| `failed_task_stdout` | The captured standard output of the failed task. |
+| `failed_task_stderr` | The captured standard error of the failed task. |
+| `failed_task_error` | The primary error message describing the failure. |
+
+These variables can be used in trigger actions like `http_post` bodies or `write_file` content using the standard `{{ variable_name }}` syntax.
+
+
+### 8.4. `@praktor` - Praktor Notification Shortcut
+A convenience action to notify the Praktor assistant or a configured webhook.
+
+Write a scalar beginning with `@praktor` to send a notification message:
 ```yaml
 triggers:
   on_success:
-    - "@prakter Build {{ VERSION }} deployed to {{ env.DEPLOY_ENV }}"
+    - "@praktor Build {{ VERSION }} deployed to {{ env.DEPLOY_ENV }}"
 ```
 
 Equivalent long form:
 ```yaml
 triggers:
   on_success:
-    - prakter:
+    - praktor:
         message: "Build {{ VERSION }} deployed to {{ env.DEPLOY_ENV }}"
 ```
 
 Behavior:
-- If `WEAVE_WEBHOOK` (or `WEAVE_NOTIFY_URL`) is present in environment, performs an HTTP POST with JSON `{ "text": "<message>" }`.
+- If `PRAKTOR_WEBHOOK` (or `PRAKTOR_NOTIFY_URL`) is present in environment, performs an HTTP POST with JSON `{ "text": "<message>" }`.
 - Otherwise, logs the message to the workflow log as an info entry.
 - All variables support standard substitution.
 ## 9. Expression Language
@@ -415,445 +453,7 @@ tasks:
 ```
 
 ## 10. JSON Schema Contract
-A canonical JSON Schema **MUST** be provided to validate workflow syntax and provide editor support. The authoritative copy lives at `grammar.schema.json` and is inlined below for convenience.
-```json
-{
-  "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "Prakter Workflow Specification",
-  "description": "A schema for defining Prakter DSL (v7.0) workflow files.",
-  "type": "object",
-  "properties": {
-    "name": {
-      "type": "string",
-      "description": "Human-readable workflow identifier."
-    },
-    "description": {
-      "type": "string",
-      "description": "Optional workflow summary."
-    },
-    "variables": {
-      "$ref": "#/$defs/stringMap",
-      "description": "Global, read-only variables for expression interpolation."
-    },
-    "env": {
-      "$ref": "#/$defs/stringMap",
-      "description": "Global environment variables available to all tasks."
-    },
-    "dotEnv": {
-      "description": "Paths to .env files to load into the global environment.",
-      "$ref": "#/$defs/stringOrStringArray"
-    },
-    "defaults": {
-      "type": "object",
-      "description": "Default attributes applied to all tasks.",
-      "properties": {
-        "retries": {
-          "$ref": "#/$defs/retriesPolicy"
-        },
-        "timeout": {
-          "$ref": "#/$defs/durationString"
-        }
-      },
-      "additionalProperties": false
-    },
-    "embedded": {
-      "type": "object",
-      "description": "Embedded script modules available to script tasks.",
-      "additionalProperties": {
-        "$ref": "#/$defs/embeddedModule"
-      }
-    },
-    "tasks": {
-      "type": "array",
-      "description": "The list of all task definitions in the workflow.",
-      "minItems": 1,
-      "items": {
-        "$ref": "#/$defs/taskDefinition"
-      }
-    }
-  },
-  "required": [
-    "tasks"
-  ],
-  "additionalProperties": false,
-  "$defs": {
-    "stringOrStringArray": {
-      "oneOf": [
-        {
-          "type": "string"
-        },
-        {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        }
-      ]
-    },
-    "stringMap": {
-      "type": "object",
-      "additionalProperties": {
-        "type": "string"
-      }
-    },
-    "durationString": {
-      "type": "string",
-      "description": "A duration string, e.g., '30s', '5m', '1h'.",
-      "pattern": "^[0-9]+(s|m|h)$"
-    },
-    "retriesPolicy": {
-      "type": "object",
-      "properties": {
-        "count": {
-          "type": "integer",
-          "minimum": 0,
-          "description": "Maximum number of retry attempts."
-        },
-        "delay": {
-          "$ref": "#/$defs/durationString",
-          "description": "The delay between attempts."
-        }
-      },
-      "required": [
-        "count"
-      ],
-      "additionalProperties": false
-    },
-    "embeddedModule": {
-      "type": "object",
-      "properties": {
-        "language": {
-          "type": "string",
-          "description": "Execution language for the module (default: javascript)."
-        },
-        "source": {
-          "type": "string",
-          "description": "Module source code."
-        }
-      },
-      "required": [
-        "source"
-      ],
-      "additionalProperties": false
-    },
-    "triggerAction": {
-      "type": "object",
-      "description": "A single, self-contained action to perform when a trigger fires.",
-      "properties": {
-        "http_post": {
-          "type": "object",
-          "properties": {
-            "url": {
-              "type": "string",
-              "format": "uri"
-            },
-            "body": {
-              "type": "string"
-            },
-            "headers": {
-              "$ref": "#/$defs/stringMap"
-            }
-          },
-          "required": [
-            "url"
-          ],
-          "additionalProperties": false
-        },
-        "write_file": {
-          "type": "object",
-          "properties": {
-            "path": {
-              "type": "string"
-            },
-            "content": {
-              "type": "string"
-            },
-            "mode": {
-              "enum": [
-                "overwrite",
-                "append"
-              ]
-            }
-          },
-          "required": [
-            "path",
-            "content"
-          ],
-          "additionalProperties": false
-        },
-        "run_task": {
-          "type": "object",
-          "properties": {
-            "task_name": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "task_name"
-          ],
-          "additionalProperties": false
-        },
-        "prakter": {
-          "type": "object",
-          "properties": {
-            "message": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "message"
-          ],
-          "additionalProperties": false
-        }
-      },
-      "oneOf": [
-        {
-          "required": [
-            "http_post"
-          ]
-        },
-        {
-          "required": [
-            "write_file"
-          ]
-        },
-        {
-          "required": [
-            "run_task"
-          ]
-        },
-        {
-          "required": [
-            "prakter"
-          ]
-        }
-      ],
-      "additionalProperties": false
-    },
-    "triggerActionList": {
-      "type": "array",
-      "items": {
-        "oneOf": [
-          {
-            "type": "string",
-            "description": "Shorthand for a 'run_task' action or prakter notification."
-          },
-          {
-            "$ref": "#/$defs/triggerAction"
-          }
-        ]
-      },
-      "minItems": 1
-    },
-    "triggersBlock": {
-      "type": "object",
-      "description": "Defines event-driven actions to take upon task completion.",
-      "properties": {
-        "on_success": {
-          "$ref": "#/$defs/triggerActionList"
-        },
-        "on_failure": {
-          "$ref": "#/$defs/triggerActionList"
-        },
-        "on_complete": {
-          "$ref": "#/$defs/triggerActionList"
-        }
-      },
-      "additionalProperties": false
-    },
-    "eachBlock": {
-      "type": "object",
-      "properties": {
-        "items": {
-          "$ref": "#/$defs/stringOrStringArray"
-        },
-        "matrix": {
-          "type": "object",
-          "additionalProperties": {
-            "$ref": "#/$defs/stringOrStringArray"
-          }
-        },
-        "as": {
-          "type": "string"
-        },
-        "index_variable": {
-          "type": "string"
-        }
-      },
-      "oneOf": [
-        {
-          "required": [
-            "items"
-          ]
-        },
-        {
-          "required": [
-            "matrix"
-          ]
-        }
-      ],
-      "additionalProperties": false
-    },
-    "taskDefinition": {
-      "type": "object",
-      "properties": {
-        "name": {
-          "type": "string"
-        },
-        "description": {
-          "type": "string"
-        },
-        "depends_on": {
-          "$ref": "#/$defs/stringOrStringArray"
-        },
-        "vars": {
-          "$ref": "#/$defs/stringMap"
-        },
-        "env": {
-          "$ref": "#/$defs/stringMap"
-        },
-        "dotEnv": {
-          "$ref": "#/$defs/stringOrStringArray"
-        },
-        "timeout": {
-          "$ref": "#/$defs/durationString"
-        },
-        "retries": {
-          "$ref": "#/$defs/retriesPolicy"
-        },
-        "when": {
-          "type": "string"
-        },
-        "each": {
-          "$ref": "#/$defs/eachBlock"
-        },
-        "triggers": {
-          "$ref": "#/$defs/triggersBlock"
-        },
-        "continue_on_error": {
-          "type": "boolean",
-          "description": "If true, workflow continues even if this task fails.",
-          "default": false
-        },
-        "working_dir": {
-          "type": "string",
-          "description": "Working directory for command execution."
-        },
-        "silent": {
-          "type": "boolean",
-          "description": "Suppress command output.",
-          "default": false
-        },
-        "command": {
-          "oneOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "array",
-              "items": {
-                "type": "string"
-              },
-              "minItems": 1
-            }
-          ]
-        },
-        "output_format": {
-          "enum": [
-            "text",
-            "json"
-          ]
-        },
-        "script": {
-          "type": "object",
-          "properties": {
-            "source": {
-              "type": "string",
-              "description": "The JavaScript code to execute."
-            },
-            "language": {
-              "type": "string",
-              "description": "Execution language (default: javascript)."
-            },
-            "modules": {
-              "type": "array",
-              "items": { "type": "string" },
-              "description": "List of embedded module names to load before execution."
-            },
-            "globals": {
-              "$ref": "#/$defs/stringMap",
-              "description": "Global variables to inject into the script environment."
-            },
-            "env": {
-              "$ref": "#/$defs/stringMap",
-              "description": "Environment variables for script execution."
-            }
-          },
-          "required": [
-            "source"
-          ],
-          "additionalProperties": false
-        },
-        "uses": {
-          "type": "string"
-        },
-        "dynamic_tasks": {
-          "type": "object",
-          "description": "Generate and execute tasks dynamically at runtime.",
-          "properties": {
-            "items_variable": {
-              "type": "string",
-              "description": "Context path to a JSON array that drives task generation."
-            },
-            "template": {
-              "type": "object",
-              "description": "Task template with {{ item }} placeholders.",
-              "properties": {
-                "name": { "type": "string" },
-                "command": { "$ref": "#/$defs/stringOrStringArray" },
-                "timeout": { "$ref": "#/$defs/durationString" },
-                "retries": { "$ref": "#/$defs/retriesPolicy" },
-                "when": { "type": "string" },
-                "depends_on": { "$ref": "#/$defs/stringOrStringArray" },
-                "env": { "$ref": "#/$defs/stringMap" }
-              },
-              "required": ["name", "command"]
-            }
-          },
-          "required": ["items_variable", "template"],
-          "additionalProperties": false
-        }
-      },
-      "required": [
-        "name"
-      ],
-      "oneOf": [
-        {
-          "required": [
-            "command"
-          ]
-        },
-        {
-          "required": [
-            "script"
-          ]
-        },
-        {
-          "required": [
-            "uses"
-          ]
-        },
-        {
-          "required": [
-            "dynamic_tasks"
-          ]
-        }
-      ],
-      "additionalProperties": false
-    }
-  }
-}
-```
+A canonical JSON Schema **MUST** be provided to validate workflow syntax and provide editor support. The authoritative copy lives at [JSON Grammar](./grammar.schema.json).
 ## 11. Comprehensive Examples
 
 ### 11.1. Basic Workflow with Dependencies
@@ -1095,6 +695,12 @@ tasks:
       source: "context.set('key', 'value');"
     # OR
     uses: "./path/to/workflow.yml"
+    # OR
+    dynamic_tasks:
+      items_variable: "{{ my_items }}"
+      template:
+        name: "subtask_{{ item }}"
+        command: "echo {{ item }}"
 
     # Optional triggers
     triggers:
@@ -1113,61 +719,3 @@ tasks:
 | `dynamic_tasks` | Runtime task generation | Outputs from each generated task |
 
 ---
-
-## Appendix B: Migration Guide
-
-### From Version 6.0 to 7.0
-
-**Removed Features:**
-- `parallel` blocks - Use DAG dependencies instead
-- `group` blocks - Use DAG dependencies instead
-- `imports` - Use `uses` for reusable workflows
-
-**Migration Examples:**
-
-**Before (v6.0 with parallel):**
-```yaml
-tasks:
-  - name: build_all
-    parallel:
-      tasks:
-        - name: build_frontend
-          command: "npm run build:frontend"
-        - name: build_backend
-          command: "npm run build:backend"
-```
-
-**After (v7.0 with DAG):**
-```yaml
-tasks:
-  - name: build_frontend
-    command: "npm run build:frontend"
-
-  - name: build_backend
-    command: "npm run build:backend"
-
-  - name: build_complete
-    depends_on: [build_frontend, build_backend]
-    command: "echo Build complete"
-```
-
-**Before (v6.0 with imports):**
-```yaml
-imports:
-  - "shared-tasks.yml"
-
-tasks:
-  - name: deploy
-    depends_on: [lint_code, run_tests]
-```
-
-**After (v7.0 with uses):**
-```yaml
-tasks:
-  - name: shared_tasks
-    uses: "./shared-tasks.yml"
-
-  - name: deploy
-    depends_on: [shared_tasks]
-    command: "./deploy.sh"
-```

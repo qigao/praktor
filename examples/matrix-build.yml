@@ -1,0 +1,18 @@
+name: "Matrix Build"
+description: "Demonstrates parallel execution using the 'each' matrix"
+
+tasks:
+  - name: build_platform
+    description: "Multi-platform build simulation"
+    each:
+      matrix:
+        os: ["linux", "windows", "macos"]
+        arch: ["amd64", "arm64"]
+      as: "cfg"
+    command: "echo Building for {{ cfg.os }} on {{ cfg.arch }}..."
+    triggers:
+      on_success:
+        - write_file:
+            path: "./builds/{{ cfg.os }}-{{ cfg.arch }}.txt"
+            content: "Build successful for {{ cfg.os }} {{ cfg.arch }}"
+            mode: overwrite
