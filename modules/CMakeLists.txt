@@ -33,6 +33,7 @@ target_link_libraries(${TARGET_NAME} PUBLIC)
 target_link_libraries(${TARGET_NAME} PUBLIC libuv::uv qjs)
 include_directories(${Boost_INCLUDE_DIRS} ${OPENSSL_INCLUDE_DIR})
 set_target_properties(${TARGET_NAME} PROPERTIES LINKER_LANGUAGE C)
+target_compile_definitions(${TARGET_NAME} PUBLIC $<$<BOOL:WIN32>:NOMINMAX>)
 
 set_target_properties(${TARGET_NAME} PROPERTIES FOLDER "${TARGET_NAME}")
 add_subdirectory(examples)

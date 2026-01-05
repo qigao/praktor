@@ -27,7 +27,7 @@
                 "Msvc",
                 "flags-msvc"
             ],
-            "binaryDir": "${sourceDir}/build/windows-msvc-dev"
+            "binaryDir": "${sourceDir}/build/windows-msvc-release"
         },
         {
             "name": "base-release-linux",
