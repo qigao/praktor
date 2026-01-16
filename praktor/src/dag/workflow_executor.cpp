@@ -61,6 +61,56 @@ void sleepWithDelay(const std::string &delay) {
   }
 }
 
+std::vector<jsoncons::json> generateMatrixCombinations(const std::unordered_map<std::string, StrList> &matrix) {
+  if (matrix.empty())
+    return {};
+
+  std::vector<std::string> keys;
+  std::vector<StrList> values;
+  for (const auto &[key, list] : matrix) {
+    keys.push_back(key);
+    values.push_back(list);
+  }
+
+  std::vector<jsoncons::json> results;
+  std::vector<size_t> indices(keys.size(), 0);
+  bool done = false;
+  while (!done) {
+    jsoncons::json combination = jsoncons::json::object();
+    for (size_t i = 0; i < keys.size(); ++i) {
+      combination[keys[i]] = values[i][indices[i]];
+    }
+    results.push_back(std::move(combination));
+
+    // Advance indices
+    for (int i = static_cast<int>(keys.size()) - 1; i >= 0; --i) {
+      indices[i]++;
+      if (indices[i] < values[i].size()) {
+        break;
+      }
+      indices[i] = 0;
+      if (i == 0) {
+        done = true;
+      }
+    }
+  }
+  return results;
+}
+
+std::vector<jsoncons::json> generateEachCombinations(const Each &each) {
+  if (each.hasItems()) {
+    std::vector<jsoncons::json> results;
+    for (const auto &item : each.items) {
+      results.push_back(jsoncons::json(item));
+    }
+    return results;
+  }
+  if (each.hasMatrix()) {
+    return generateMatrixCombinations(each.matrix);
+  }
+  return {};
+}
+
 } // namespace
 
 WorkflowExecutor::WorkflowExecutor(DependencyGraph<Task> &graph,
@@ -297,6 +347,59 @@ void WorkflowExecutor::updateTaskCache(const Task &task, WorkflowContext &contex
 
 bool WorkflowExecutor::executeTask(const Task &task, WorkflowContext &context,
                                    std::optional<std::string> alias) {
+  // Mark as running in registry to allow setOutput calls
+  context.setTaskStatus(task.name, "running");
+  if (alias && alias.value() != task.name) {
+    context.setTaskStatus(alias.value(), "running");
+  }
+
+  bool overall_success = false;
+  std::string final_status = "failed";
+
+  if (task.each && task.each->enabled()) {
+    auto combinations = generateEachCombinations(*task.each);
+    logi("Executing task '{}' for {} combinations", task.name, combinations.size());
+
+    bool all_success = true;
+    bool any_executed = false;
+    for (size_t i = 0; i < combinations.size(); ++i) {
+      auto child_context = context.fork();
+      child_context->setValue(task.each->as, combinations[i]);
+      if (!task.each->index_variable.empty()) {
+        child_context->setValue(task.each->index_variable, std::to_string(i));
+      }
+
+      auto [success, status] = executeTaskInternal(task, *child_context, alias);
+      if (!success) {
+        all_success = false;
+      }
+      if (status != "skipped") {
+        any_executed = true;
+      }
+    }
+    overall_success = all_success;
+    if (!any_executed && overall_success) {
+      final_status = "skipped";
+    } else {
+      final_status = overall_success ? "success" : "failed";
+    }
+  } else {
+    auto [success, status] = executeTaskInternal(task, context, alias);
+    overall_success = success;
+    final_status = status;
+  }
+
+  // Finalize in registry
+  context.setTaskStatus(task.name, final_status);
+  if (alias && alias.value() != task.name) {
+    context.setTaskStatus(alias.value(), final_status);
+  }
+
+  return overall_success;
+}
+
+std::pair<bool, std::string> WorkflowExecutor::executeTaskInternal(const Task &task, WorkflowContext &context,
+                                           std::optional<std::string> alias) {
   context.pushTaskScope(task.name, alias);
   ScopedVariables scoped_vars(context, task.vars);
 
@@ -347,15 +450,10 @@ bool WorkflowExecutor::executeTask(const Task &task, WorkflowContext &context,
     status = "failed";
   }
 
-  context.setTaskStatus(task.name, status);
-  if (alias && alias.value() != task.name) {
-    context.setTaskStatus(alias.value(), status);
-  }
-
   executeTriggers(task, success, context);
   context.popTaskScope();
 
-  return success;
+  return {success, status};
 }
 
 bool WorkflowExecutor::evaluateWhen(const Task &task, WorkflowContext &context) const {

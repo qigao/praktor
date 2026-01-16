@@ -19,6 +19,17 @@
             "binaryDir": "${sourceDir}/build/Ninja/Msvc"
         },
         {
+            "name": "base-developer-windows-asan",
+            "hidden": true,
+            "inherits": [
+                "ISWindows",
+                "developer-mode-asan",
+                "Msvc",
+                "flags-msvc"
+            ],
+            "binaryDir": "${sourceDir}/build/Ninja/Msvc-ASan"
+        },
+        {
             "name": "base-release-windows",
             "hidden": true,
             "inherits": [

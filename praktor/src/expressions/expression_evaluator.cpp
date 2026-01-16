@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <functional>
 #include <limits>
 #include <optional>
 #include <sstream>
@@ -12,8 +13,8 @@
 #include <tao/pegtl.hpp>
 #include <tao/pegtl/contrib/parse_tree.hpp>
 
-#include <regex>
 #include "fmtlog.h"
+#include <regex>
 
 namespace Praktor::Expressions {
 
@@ -23,17 +24,13 @@ namespace {
 
 constexpr double kEpsilon = 1e-9;
 
-template <typename... Ts>
-struct Overloaded : Ts...
-{
+template <typename... Ts> struct Overloaded : Ts... {
   using Ts::operator()...;
 };
 
-template <typename... Ts>
-Overloaded(Ts...) -> Overloaded<Ts...>;
+template <typename... Ts> Overloaded(Ts...) -> Overloaded<Ts...>;
 
-std::string trim(std::string_view text)
-{
+std::string trim(std::string_view text) {
   auto begin = text.begin();
   auto end = text.end();
   while (begin != end && std::isspace(static_cast<unsigned char>(*begin))) {
@@ -49,8 +46,7 @@ namespace grammar {
 
 struct ws : pegtl::space {};
 
-template <typename Rule>
-using padded = pegtl::pad<Rule, ws>;
+template <typename Rule> using padded = pegtl::pad<Rule, ws>;
 
 struct identifier_start : pegtl::sor<pegtl::alpha, pegtl::one<'_'>> {};
 struct identifier_char : pegtl::sor<identifier_start, pegtl::digit> {};
@@ -60,7 +56,7 @@ struct dotted_identifier : pegtl::list<identifier, pegtl::one<'.'>> {};
 struct moustache_body : pegtl::star<pegtl::not_one<'}'>> {};
 struct moustache_inner : pegtl::pad<moustache_body, ws> {};
 struct moustache_variable
-  : pegtl::if_must<pegtl::string<'{', '{'>, moustache_inner, pegtl::string<'}', '}'> > {};
+    : pegtl::if_must<pegtl::string<'{', '{'>, moustache_inner, pegtl::string<'}', '}'>> {};
 
 struct string_escape : pegtl::seq<pegtl::one<'\\'>, pegtl::one<'\\', '\'', '"', 'n', 'r', 't'>> {};
 struct string_char : pegtl::sor<string_escape, pegtl::not_one<'\''>> {};
@@ -71,14 +67,14 @@ struct boolean_false : pegtl::keyword<'f', 'a', 'l', 's', 'e'> {};
 struct boolean_literal : pegtl::sor<boolean_true, boolean_false> {};
 
 struct number_literal
-  : pegtl::seq<pegtl::opt<pegtl::one<'-'>>, pegtl::plus<pegtl::digit>,
-               pegtl::opt<pegtl::seq<pegtl::one<'.'>, pegtl::plus<pegtl::digit>>>> {};
+    : pegtl::seq<pegtl::opt<pegtl::one<'-'>>, pegtl::plus<pegtl::digit>,
+                 pegtl::opt<pegtl::seq<pegtl::one<'.'>, pegtl::plus<pegtl::digit>>>> {};
 
 struct lparen : pegtl::one<'('> {};
 struct rparen : pegtl::one<')'> {};
 struct comma : pegtl::one<','> {};
 
-struct op_plus : pegtl::one<'+' > {};
+struct op_plus : pegtl::one<'+'> {};
 struct op_minus : pegtl::one<'-'> {};
 struct op_mul : pegtl::one<'*'> {};
 struct op_div : pegtl::one<'/'> {};
@@ -90,10 +86,14 @@ struct op_gte : pegtl::string<'>', '='> {};
 struct op_lt : pegtl::one<'<'> {};
 struct op_gt : pegtl::one<'>'> {};
 struct op_contains : pegtl::keyword<'c', 'o', 'n', 't', 'a', 'i', 'n', 's'> {};
-struct op_startswith : pegtl::keyword<'s', 't', 'a', 'r', 't', 's', '_', 'w', 'i', 't', 'h'> {};
-struct op_startswith_no_underscore : pegtl::keyword<'s', 't', 'a', 'r', 't', 's', 'w', 'i', 't', 'h'> {};
-struct op_endswith : pegtl::keyword<'e', 'n', 'd', 's', '_', 'w', 'i', 't', 'h'> {};
-struct op_endswith_no_underscore : pegtl::keyword<'e', 'n', 'd', 's', 'w', 'i', 't', 'h'> {};
+struct op_startswith : pegtl::sor<
+  pegtl::keyword<'s', 't', 'a', 'r', 't', 's', '_', 'w', 'i', 't', 'h'>,
+  pegtl::keyword<'s', 't', 'a', 'r', 't', 's', 'w', 'i', 't', 'h'>
+> {};
+struct op_endswith : pegtl::sor<
+  pegtl::keyword<'e', 'n', 'd', 's', '_', 'w', 'i', 't', 'h'>,
+  pegtl::keyword<'e', 'n', 'd', 's', 'w', 'i', 't', 'h'>
+> {};
 struct op_in : pegtl::keyword<'i', 'n'> {};
 struct op_matches : pegtl::keyword<'m', 'a', 't', 'c', 'h', 'e', 's'> {};
 struct op_and : pegtl::keyword<'a', 'n', 'd'> {};
@@ -107,19 +107,12 @@ struct argument_list;
 
 struct function_name : identifier {};
 struct function_call
-  : pegtl::seq<function_name,
-               padded<lparen>,
-               pegtl::opt<argument_list>,
-               padded<rparen>> {};
+    : pegtl::seq<function_name, padded<lparen>, pegtl::opt<argument_list>, padded<rparen>> {};
 
 struct bare_variable : dotted_identifier {};
 
-struct leaf : pegtl::sor<function_call,
-                         moustache_variable,
-                         string_literal,
-                         number_literal,
-                         boolean_literal,
-                         bare_variable> {};
+struct leaf : pegtl::sor<function_call, moustache_variable, string_literal, number_literal,
+                         boolean_literal, bare_variable> {};
 
 struct paren_expression : pegtl::seq<padded<lparen>, expression, padded<rparen>> {};
 struct primary : pegtl::sor<paren_expression, padded<leaf>> {};
@@ -127,99 +120,69 @@ struct primary : pegtl::sor<paren_expression, padded<leaf>> {};
 struct unary_prefix : pegtl::sor<op_not, op_bang, op_minus> {};
 struct unary : pegtl::seq<pegtl::star<padded<unary_prefix>>, primary> {};
 
-struct multiplicative_tail
-  : pegtl::seq<padded<pegtl::sor<op_mul, op_div, op_mod>>, unary> {};
-struct multiplicative
-  : pegtl::seq<unary, pegtl::star<multiplicative_tail>> {};
+struct multiplicative_tail : pegtl::seq<padded<pegtl::sor<op_mul, op_div, op_mod>>, unary> {};
+struct multiplicative : pegtl::seq<unary, pegtl::star<multiplicative_tail>> {};
 
-struct additive_tail
-  : pegtl::seq<padded<pegtl::sor<op_plus, op_minus>>, multiplicative> {};
-struct additive
-  : pegtl::seq<multiplicative, pegtl::star<additive_tail>> {};
+struct additive_tail : pegtl::seq<padded<pegtl::sor<op_plus, op_minus>>, multiplicative> {};
+struct additive : pegtl::seq<multiplicative, pegtl::star<additive_tail>> {};
 
 struct relational_tail
-  : pegtl::seq<padded<pegtl::sor<op_lte, op_gte, op_lt, op_gt, 
-                                op_contains, op_startswith, op_startswith_no_underscore,
-                                op_endswith, op_endswith_no_underscore, op_in, op_matches>>, additive> {};
-struct relational
-  : pegtl::seq<additive, pegtl::star<relational_tail>> {};
+    : pegtl::seq<padded<pegtl::sor<op_lte, op_gte, op_lt, op_gt, op_contains, op_startswith,
+                                   op_endswith, op_in, op_matches>>,
+                 additive> {};
+struct relational : pegtl::seq<additive, pegtl::star<relational_tail>> {};
 
-struct equality_tail
-  : pegtl::seq<padded<pegtl::sor<op_eq, op_neq>>, relational> {};
-struct equality
-  : pegtl::seq<relational, pegtl::star<equality_tail>> {};
+struct equality_tail : pegtl::seq<padded<pegtl::sor<op_eq, op_neq>>, relational> {};
+struct equality : pegtl::seq<relational, pegtl::star<equality_tail>> {};
 
-struct logical_and_tail
-  : pegtl::seq<padded<op_and>, equality> {};
-struct logical_and
-  : pegtl::seq<equality, pegtl::star<logical_and_tail>> {};
+struct logical_and_tail : pegtl::seq<padded<op_and>, equality> {};
+struct logical_and : pegtl::seq<equality, pegtl::star<logical_and_tail>> {};
 
-struct logical_or_tail
-  : pegtl::seq<padded<op_or>, logical_and> {};
-struct logical_or
-  : pegtl::seq<logical_and, pegtl::star<logical_or_tail>> {};
+struct logical_or_tail : pegtl::seq<padded<op_or>, logical_and> {};
+struct logical_or : pegtl::seq<logical_and, pegtl::star<logical_or_tail>> {};
 
-struct expression : logical_or {};
+struct expression : pegtl::seq<logical_or> {};
 
-struct argument_list_tail
-  : pegtl::seq<padded<comma>, expression> {};
-struct argument_list
-  : pegtl::seq<expression, pegtl::star<argument_list_tail>> {};
+struct argument_list_tail : pegtl::seq<padded<comma>, expression> {};
+struct argument_list : pegtl::seq<expression, pegtl::star<argument_list_tail>> {};
 
-struct grammar
-  : pegtl::seq<pegtl::star<ws>, expression, pegtl::star<ws>, pegtl::eof> {};
+struct grammar : pegtl::seq<pegtl::star<ws>, expression, pegtl::star<ws>, pegtl::eof> {};
 
-}  // namespace grammar
+} // namespace grammar
 
 template <typename Rule>
 using Selector = pegtl::parse_tree::selector<
     Rule,
     pegtl::parse_tree::store_content::on<
-        grammar::boolean_literal,
-        grammar::number_literal,
-        grammar::string_literal,
-        grammar::function_name,
-        grammar::bare_variable,
-        grammar::moustache_inner,
-        grammar::op_not,
-        grammar::op_bang,
-        grammar::op_and,
-        grammar::op_or,
-        grammar::op_eq,
-        grammar::op_neq,
-        grammar::op_lte,
-        grammar::op_gte,
-        grammar::op_lt,
-        grammar::op_gt,
-        grammar::op_contains,
-        grammar::op_startswith,
-        grammar::op_startswith_no_underscore,
-        grammar::op_endswith,
-        grammar::op_endswith_no_underscore,
-        grammar::op_in,
-        grammar::op_matches,
-        grammar::op_plus,
-        grammar::op_minus,
-        grammar::op_mul,
-        grammar::op_div,
-        grammar::op_mod>,
-    pegtl::parse_tree::fold_one::on<grammar::moustache_variable>>;
+        grammar::logical_or, grammar::logical_or_tail, grammar::logical_and,
+        grammar::logical_and_tail, grammar::equality, grammar::equality_tail, grammar::relational,
+        grammar::relational_tail, grammar::additive, grammar::additive_tail,
+        grammar::multiplicative, grammar::multiplicative_tail, grammar::unary,
+        grammar::function_call, grammar::argument_list, grammar::argument_list_tail,
+        grammar::boolean_literal, grammar::number_literal, grammar::string_literal,
+        grammar::function_name, grammar::bare_variable, grammar::moustache_body,
+        grammar::moustache_inner, grammar::op_not, grammar::op_bang, grammar::op_and,
+        grammar::op_or, grammar::op_eq, grammar::op_neq, grammar::op_lte, grammar::op_gte,
+        grammar::op_lt, grammar::op_gt, grammar::op_contains, grammar::op_startswith,
+        grammar::op_endswith, grammar::op_in, grammar::op_matches, grammar::op_plus,
+        grammar::op_minus, grammar::op_mul, grammar::op_div, grammar::op_mod>,
+    pegtl::parse_tree::fold_one::on<grammar::grammar, grammar::expression,
+                                    grammar::paren_expression, grammar::primary, grammar::leaf,
+                                    grammar::moustache_variable>>;
 
-const pegtl::parse_tree::node& unwrap(const pegtl::parse_tree::node& node)
-{
-  const pegtl::parse_tree::node* current = &node;
+const pegtl::parse_tree::node &unwrap(const pegtl::parse_tree::node &node) {
+  const pegtl::parse_tree::node *current = &node;
   while (!current->has_content() && current->children.size() == 1) {
     current = current->children.front().get();
   }
   return *current;
 }
 
-std::optional<std::string> findToken(const pegtl::parse_tree::node& node)
-{
+std::optional<std::string> findToken(const pegtl::parse_tree::node &node) {
   if (node.has_content()) {
     return node.string();
   }
-  for (const auto& child : node.children) {
+  for (const auto &child : node.children) {
     if (auto token = findToken(*child)) {
       return token;
     }
@@ -227,62 +190,67 @@ std::optional<std::string> findToken(const pegtl::parse_tree::node& node)
   return std::nullopt;
 }
 
-std::optional<double> to_number(const Value& value)
-{
-  return std::visit(
-      Overloaded{
-          [](std::monostate) -> std::optional<double> { return std::nullopt; },
-          [](bool b) -> std::optional<double> { return b ? 1.0 : 0.0; },
-          [](double d) -> std::optional<double> { return d; },
-          [](const std::string& text) -> std::optional<double> {
-            if (text.empty()) return std::nullopt;
-            try {
-              size_t pos = 0;
-              double number = std::stod(text, &pos);
-              if (pos == text.size()) {
-                return number;
-              }
-            } catch (...) {
-            }
-            return std::nullopt;
-          }},
-      value);
+// Unified type conversion - "Good taste eliminates repetition"
+template<typename T>
+T convert(const Value& value);
+
+template<>
+std::optional<double> convert<std::optional<double>>(const Value &value) {
+  return std::visit(Overloaded{
+    [](std::monostate) -> std::optional<double> { return std::nullopt; },
+    [](bool b) -> std::optional<double> { return b ? 1.0 : 0.0; },
+    [](double d) -> std::optional<double> { return d; },
+    [](const std::string &text) -> std::optional<double> {
+      if (text.empty()) return std::nullopt;
+      try {
+        size_t pos = 0;
+        double number = std::stod(text, &pos);
+        return (pos == text.size()) ? std::optional<double>(number) : std::nullopt;
+      } catch (...) {
+        return std::nullopt;
+      }
+    }
+  }, value);
 }
 
-bool to_bool(const Value& value)
-{
-  return std::visit(
-      Overloaded{
-          [](std::monostate) { return false; },
-          [](bool b) { return b; },
-          [](double d) { return std::fabs(d) > kEpsilon; },
-          [](const std::string& s) { 
-            if (s.empty()) return false;
-            std::string lowered = s;
-            std::transform(lowered.begin(), lowered.end(), lowered.begin(), [](unsigned char c){ return std::tolower(c); });
-            if (lowered == "false" || lowered == "0" || lowered == "null") return false;
-            return true;
-          }},
-      value);
+template<>
+std::string convert<std::string>(const Value &value) {
+  return std::visit(Overloaded{
+    [](std::monostate) { return std::string{}; },
+    [](bool b) { return b ? std::string("true") : std::string("false"); },
+    [](double d) { 
+      std::ostringstream oss;
+      oss << d;
+      return oss.str();
+    },
+    [](const std::string &s) { return s; }
+  }, value);
 }
 
-std::string to_string_value(const Value& value)
-{
-  return std::visit(
-      Overloaded{
-          [](std::monostate) { return std::string{}; },
-          [](bool b) { return b ? std::string("true") : std::string("false"); },
-          [](double d) {
-            std::ostringstream oss;
-            oss << d;
-            return oss.str();
-          },
-          [](const std::string& s) { return s; }},
-      value);
+template<>
+bool convert<bool>(const Value &value) {
+  bool res = std::visit(Overloaded{
+    [](std::monostate) { return false; },
+    [](bool b) { return b; },
+    [](double d) { return std::fabs(d) > kEpsilon; },
+    [](const std::string &s) {
+      if (s.empty()) return false;
+      std::string lowered = s;
+      std::transform(lowered.begin(), lowered.end(), lowered.begin(),
+                     [](unsigned char c) { return std::tolower(c); });
+      return !(lowered == "false" || lowered == "0" || lowered == "null");
+    }
+  }, value);
+  logd("Expression to_bool: '{}' -> {}", convert<std::string>(value), res);
+  return res;
 }
 
-bool equals(const Value& lhs, const Value& rhs)
-{
+// Convenience functions for backward compatibility
+std::optional<double> to_number(const Value &value) { return convert<std::optional<double>>(value); }
+std::string to_string_value(const Value &value) { return convert<std::string>(value); }
+bool to_bool(const Value &value) { return convert<bool>(value); }
+
+bool equals(const Value &lhs, const Value &rhs) {
   if (lhs.index() == rhs.index()) {
     return lhs == rhs;
   }
@@ -294,8 +262,7 @@ bool equals(const Value& lhs, const Value& rhs)
   return to_string_value(lhs) == to_string_value(rhs);
 }
 
-int compare(const Value& lhs, const Value& rhs)
-{
+int compare(const Value &lhs, const Value &rhs) {
   auto lhs_num = to_number(lhs);
   auto rhs_num = to_number(rhs);
   if (lhs_num && rhs_num) {
@@ -318,8 +285,7 @@ int compare(const Value& lhs, const Value& rhs)
   return 0;
 }
 
-Value add(const Value& lhs, const Value& rhs)
-{
+Value add(const Value &lhs, const Value &rhs) {
   auto lhs_num = to_number(lhs);
   auto rhs_num = to_number(rhs);
   if (lhs_num && rhs_num) {
@@ -328,8 +294,7 @@ Value add(const Value& lhs, const Value& rhs)
   return Value{to_string_value(lhs) + to_string_value(rhs)};
 }
 
-Value subtract(const Value& lhs, const Value& rhs)
-{
+Value subtract(const Value &lhs, const Value &rhs) {
   auto lhs_num = to_number(lhs);
   auto rhs_num = to_number(rhs);
   if (!lhs_num || !rhs_num) {
@@ -338,8 +303,7 @@ Value subtract(const Value& lhs, const Value& rhs)
   return Value{*lhs_num - *rhs_num};
 }
 
-Value multiply(const Value& lhs, const Value& rhs)
-{
+Value multiply(const Value &lhs, const Value &rhs) {
   auto lhs_num = to_number(lhs);
   auto rhs_num = to_number(rhs);
   if (!lhs_num || !rhs_num) {
@@ -348,8 +312,7 @@ Value multiply(const Value& lhs, const Value& rhs)
   return Value{*lhs_num * *rhs_num};
 }
 
-Value divide(const Value& lhs, const Value& rhs)
-{
+Value divide(const Value &lhs, const Value &rhs) {
   auto lhs_num = to_number(lhs);
   auto rhs_num = to_number(rhs);
   if (!lhs_num || !rhs_num) {
@@ -361,8 +324,7 @@ Value divide(const Value& lhs, const Value& rhs)
   return Value{*lhs_num / *rhs_num};
 }
 
-Value modulo(const Value& lhs, const Value& rhs)
-{
+Value modulo(const Value &lhs, const Value &rhs) {
   auto lhs_num = to_number(lhs);
   auto rhs_num = to_number(rhs);
   if (!lhs_num || !rhs_num) {
@@ -374,32 +336,23 @@ Value modulo(const Value& lhs, const Value& rhs)
   return Value{std::fmod(*lhs_num, *rhs_num)};
 }
 
-std::size_t value_length(const Value& value)
-{
+std::size_t value_length(const Value &value) {
   return std::visit(
-      Overloaded{
-          [](std::monostate) -> std::size_t { return 0; },
-          [](bool b) -> std::size_t { return b ? 1 : 0; },
-          [](double d) -> std::size_t {
-            return std::fabs(d) > kEpsilon ? 1 : 0;
-          },
-          [](const std::string& s) -> std::size_t { return s.size(); }},
+      Overloaded{[](std::monostate) -> std::size_t { return 0; },
+                 [](bool b) -> std::size_t { return b ? 1 : 0; },
+                 [](double d) -> std::size_t { return std::fabs(d) > kEpsilon ? 1 : 0; },
+                 [](const std::string &s) -> std::size_t { return s.size(); }},
       value);
 }
 
-bool value_empty(const Value& value)
-{
-  return std::visit(
-      Overloaded{
-          [](std::monostate) { return true; },
-          [](bool b) { return !b; },
-          [](double d) { return std::fabs(d) <= kEpsilon; },
-          [](const std::string& s) { return s.empty(); }},
-      value);
+bool value_empty(const Value &value) {
+  return std::visit(Overloaded{[](std::monostate) { return true; }, [](bool b) { return !b; },
+                               [](double d) { return std::fabs(d) <= kEpsilon; },
+                               [](const std::string &s) { return s.empty(); }},
+                    value);
 }
 
-std::string parse_string_literal(const std::string& token)
-{
+std::string parse_string_literal(const std::string &token) {
   std::string result;
   if (token.size() < 2) {
     return result;
@@ -410,13 +363,27 @@ std::string parse_string_literal(const std::string& token)
     if (ch == '\\' && i + 1 < token.size() - 1) {
       char next = token[++i];
       switch (next) {
-        case '\\': result.push_back('\\'); break;
-        case '\'': result.push_back('\''); break;
-        case '"': result.push_back('"'); break;
-        case 'n': result.push_back('\n'); break;
-        case 'r': result.push_back('\r'); break;
-        case 't': result.push_back('\t'); break;
-        default: result.push_back(next); break;
+      case '\\':
+        result.push_back('\\');
+        break;
+      case '\'':
+        result.push_back('\'');
+        break;
+      case '"':
+        result.push_back('"');
+        break;
+      case 'n':
+        result.push_back('\n');
+        break;
+      case 'r':
+        result.push_back('\r');
+        break;
+      case 't':
+        result.push_back('\t');
+        break;
+      default:
+        result.push_back(next);
+        break;
       }
     } else {
       result.push_back(ch);
@@ -425,82 +392,71 @@ std::string parse_string_literal(const std::string& token)
   return result;
 }
 
-double parse_number_literal(const std::string& token)
-{
-  return std::stod(token);
-}
+double parse_number_literal(const std::string &token) { return std::stod(token); }
 
-bool parse_boolean_literal(const std::string& token)
-{
-  return token == "true";
-}
+bool parse_boolean_literal(const std::string &token) { return token == "true"; }
 
-Value interpret_text_value(const std::string& text)
-{
+Value interpret_text_value(const std::string &text) {
   const auto trimmed = trim(text);
-  if (trimmed.empty()) {
+  if (trimmed.empty())
     return Value{std::string{}};
-  }
+
   std::string lowered = trimmed;
   std::transform(lowered.begin(), lowered.end(), lowered.begin(),
                  [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
-  if (lowered == "true") {
+
+  if (lowered == "true")
     return Value{true};
-  }
-  if (lowered == "false") {
+  if (lowered == "false")
     return Value{false};
-  }
-  if (lowered == "null") {
+  if (lowered == "null")
     return Value{};
-  }
+
   try {
     size_t pos = 0;
     double number = std::stod(trimmed, &pos);
-    if (pos == trimmed.size()) {
+    if (pos == trimmed.size())
       return Value{number};
-    }
   } catch (...) {
   }
-  return Value{text};
+
+  return Value{trimmed};
 }
 
-Value resolve_variable(const WorkflowContext& context, const std::string& raw_name)
-{
+Value resolve_variable(const WorkflowContext &context, const std::string &raw_name) {
   std::string name = trim(raw_name);
   if (name.empty()) {
+    logi("resolve_variable: empty name, returning monostate");
     return Value{};
   }
 
-  if (context.hasKey(name)) {
-      auto val = context.getValueByPath(name);
-      if (val.is_bool()) return Value{val.as_bool()};
-      if (val.is_double()) return Value{val.as_double()};
-      if (val.is_int64()) return Value{static_cast<double>(val.as<int64_t>())};
-      if (val.is_string()) return interpret_text_value(val.as_string());
-      return Value{val.to_string()};
+  WorkflowValue val = context.getValueByPath(name);
+
+  // Check for null, empty object, or empty array - these all mean "not found"
+  bool is_empty =
+      val.is_null() || (val.is_object() && val.empty()) || (val.is_array() && val.empty());
+
+  if (!is_empty) {
+    if (val.is_bool())
+      return Value{val.as_bool()};
+    if (val.is_double())
+      return Value{val.as_double()};
+    if (val.is_int64())
+      return Value{static_cast<double>(val.as<int64_t>())};
+    if (val.is_string())
+      return interpret_text_value(val.as_string());
+    return Value{val.to_string()};
   }
 
-  // Fallback to variable substitution logic (handling env variables, etc)
-  std::string text = context.getVariable(name);
-  if (text.empty()) {
-      // Check if it's a nested key that might be available
-      auto dot = name.find('.');
-      if (dot != std::string::npos) {
-          std::string base = name.substr(0, dot);
-          if (context.hasKey(base)) {
-              auto val = context.getValueByPath(name);
-              if (!val.is_null()) return Value{val.to_string()};
-          }
-      }
-      logw("Expression variable '{}' not found in context.", name);
-      return Value{};
-  }
-
-  return interpret_text_value(text);
+  // Only use getVariable fallback if it returns a non-empty string
+  // Note: getVariable returns "" for non-existent variables, but we need to
+  // distinguish between "variable exists with empty value" vs "variable doesn't exist"
+  // Since getValueByPath already returned empty, the variable truly doesn't exist
+  logi("Expression variable '{}' not found in context, returning monostate", name);
+  return Value{};
 }
 
-enum class BinaryOp
-{
+enum class BinaryOp {
   LogicalOr,
   LogicalAnd,
   Equal,
@@ -521,24 +477,24 @@ enum class BinaryOp
   Matches
 };
 
-enum class UnaryOp
-{
-  LogicalNot,
-  Negate
+enum class UnaryOp { LogicalNot, Negate };
+
+// Operator mapping tables - defined before use
+static const std::unordered_map<std::string, UnaryOp> unary_ops = {
+  {"not", UnaryOp::LogicalNot},
+  {"!", UnaryOp::LogicalNot},
+  {"-", UnaryOp::Negate}
 };
 
-std::optional<UnaryOp> parse_unary_operator(const pegtl::parse_tree::node& node)
-{
+std::optional<UnaryOp> parse_unary_operator(const pegtl::parse_tree::node &node) {
   if (auto token = findToken(node)) {
     auto content = trim(*token);
-    if (content == "not" || content == "!") {
-      return UnaryOp::LogicalNot;
-    }
-    if (content == "-") {
-      return UnaryOp::Negate;
+    auto it = unary_ops.find(content);
+    if (it != unary_ops.end()) {
+      return it->second;
     }
   }
-  for (const auto& child : node.children) {
+  for (const auto &child : node.children) {
     if (auto op = parse_unary_operator(*child)) {
       return op;
     }
@@ -546,86 +502,79 @@ std::optional<UnaryOp> parse_unary_operator(const pegtl::parse_tree::node& node)
   return std::nullopt;
 }
 
-BinaryOp parse_equality_operator(const pegtl::parse_tree::node& node)
-{
+// Unified operator parser - "Good taste eliminates repetition"
+template<typename OpType>
+OpType parse_operator(const pegtl::parse_tree::node &node, const std::unordered_map<std::string, OpType>& op_map) {
   if (auto token = findToken(node)) {
     auto content = trim(*token);
-    if (content == "==") {
-      return BinaryOp::Equal;
-    }
-    if (content == "!=") {
-      return BinaryOp::NotEqual;
+    auto it = op_map.find(content);
+    if (it != op_map.end()) {
+      return it->second;
     }
   }
-  throw std::runtime_error("Unknown equality operator");
+  throw std::runtime_error("Unknown operator: " + (findToken(node).value_or("???")));
 }
 
-BinaryOp parse_relational_operator(const pegtl::parse_tree::node& node)
-{
-  if (auto token = findToken(node)) {
-    auto content = trim(*token);
-    if (content == "<=") return BinaryOp::LessEqual;
-    if (content == "<") return BinaryOp::Less;
-    if (content == ">=") return BinaryOp::GreaterEqual;
-    if (content == ">") return BinaryOp::Greater;
-    if (content == "contains") return BinaryOp::Contains;
-    if (content == "starts_with" || content == "startswith") return BinaryOp::StartsWith;
-    if (content == "ends_with" || content == "endswith") return BinaryOp::EndsWith;
-    if (content == "in") return BinaryOp::In;
-    if (content == "matches") return BinaryOp::Matches;
-  }
-  throw std::runtime_error("Unknown relational operator");
-}
-
-BinaryOp parse_additive_operator(const pegtl::parse_tree::node& node)
-{
-  if (auto token = findToken(node)) {
-    auto content = trim(*token);
-    if (content == "+") {
-      return BinaryOp::Add;
-    }
-    if (content == "-") {
-      return BinaryOp::Subtract;
-    }
-  }
-  throw std::runtime_error("Unknown additive operator");
-}
-
-BinaryOp parse_multiplicative_operator(const pegtl::parse_tree::node& node)
-{
-  if (auto token = findToken(node)) {
-    auto content = trim(*token);
-    if (content == "*") {
-      return BinaryOp::Multiply;
-    }
-    if (content == "/") {
-      return BinaryOp::Divide;
-    }
-    if (content == "%") {
-      return BinaryOp::Modulo;
-    }
-  }
-  throw std::runtime_error("Unknown multiplicative operator");
-}
-
-class ASTNode
-{
-public:
-  virtual ~ASTNode() = default;
-  virtual Value evaluate(const WorkflowContext& context,
-                         const FunctionRegistry& registry) const = 0;
+// Operator mapping tables
+static const std::unordered_map<std::string, BinaryOp> equality_ops = {
+  {"==", BinaryOp::Equal},
+  {"!=", BinaryOp::NotEqual}
 };
 
-class LiteralNode final : public ASTNode
-{
-public:
-  explicit LiteralNode(Value value)
-      : value_(std::move(value))
-  {
-  }
+static const std::unordered_map<std::string, BinaryOp> relational_ops = {
+  {"<=", BinaryOp::LessEqual},
+  {"<", BinaryOp::Less},
+  {">=", BinaryOp::GreaterEqual},
+  {">", BinaryOp::Greater},
+  {"contains", BinaryOp::Contains},
+  {"starts_with", BinaryOp::StartsWith},
+  {"startswith", BinaryOp::StartsWith},
+  {"ends_with", BinaryOp::EndsWith},
+  {"endswith", BinaryOp::EndsWith},
+  {"in", BinaryOp::In},
+  {"matches", BinaryOp::Matches}
+};
 
-  Value evaluate(const WorkflowContext&, const FunctionRegistry&) const override
-  {
+static const std::unordered_map<std::string, BinaryOp> additive_ops = {
+  {"+", BinaryOp::Add},
+  {"-", BinaryOp::Subtract}
+};
+
+static const std::unordered_map<std::string, BinaryOp> multiplicative_ops = {
+  {"*", BinaryOp::Multiply},
+  {"/", BinaryOp::Divide},
+  {"%", BinaryOp::Modulo}
+};
+
+// Simplified operator parsers
+BinaryOp parse_equality_operator(const pegtl::parse_tree::node &node) {
+  return parse_operator(node, equality_ops);
+}
+
+BinaryOp parse_relational_operator(const pegtl::parse_tree::node &node) {
+  return parse_operator(node, relational_ops);
+}
+
+BinaryOp parse_additive_operator(const pegtl::parse_tree::node &node) {
+  return parse_operator(node, additive_ops);
+}
+
+BinaryOp parse_multiplicative_operator(const pegtl::parse_tree::node &node) {
+  return parse_operator(node, multiplicative_ops);
+}
+
+class ASTNode {
+public:
+  virtual ~ASTNode() = default;
+  virtual Value evaluate(const WorkflowContext &context,
+                         const FunctionRegistry &registry) const = 0;
+};
+
+class LiteralNode final : public ASTNode {
+public:
+  explicit LiteralNode(Value value) : value_(std::move(value)) {}
+
+  Value evaluate(const WorkflowContext &, const FunctionRegistry &) const override {
     return value_;
   }
 
@@ -633,16 +582,11 @@ private:
   Value value_;
 };
 
-class VariableNode final : public ASTNode
-{
+class VariableNode final : public ASTNode {
 public:
-  explicit VariableNode(std::string name)
-      : name_(std::move(name))
-  {
-  }
+  explicit VariableNode(std::string name) : name_(std::move(name)) {}
 
-  Value evaluate(const WorkflowContext& context, const FunctionRegistry&) const override
-  {
+  Value evaluate(const WorkflowContext &context, const FunctionRegistry &) const override {
     return resolve_variable(context, name_);
   }
 
@@ -650,28 +594,22 @@ private:
   std::string name_;
 };
 
-class UnaryNode final : public ASTNode
-{
+class UnaryNode final : public ASTNode {
 public:
-  UnaryNode(UnaryOp op, std::unique_ptr<ASTNode> operand)
-      : op_(op)
-      , operand_(std::move(operand))
-  {
-  }
+  UnaryNode(UnaryOp op, std::unique_ptr<ASTNode> operand) : op_(op), operand_(std::move(operand)) {}
 
-  Value evaluate(const WorkflowContext& context, const FunctionRegistry& registry) const override
-  {
+  Value evaluate(const WorkflowContext &context, const FunctionRegistry &registry) const override {
     Value value = operand_->evaluate(context, registry);
     switch (op_) {
-      case UnaryOp::LogicalNot:
-        return Value{!to_bool(value)};
-      case UnaryOp::Negate: {
-        auto number = to_number(value);
-        if (!number) {
-          throw std::runtime_error("Unary '-' expects a numeric operand");
-        }
-        return Value{-*number};
+    case UnaryOp::LogicalNot:
+      return Value{!to_bool(value)};
+    case UnaryOp::Negate: {
+      auto number = to_number(value);
+      if (!number) {
+        throw std::runtime_error("Unary '-' expects a numeric operand");
       }
+      return Value{-*number};
+    }
     }
     return Value{};
   }
@@ -681,34 +619,24 @@ private:
   std::unique_ptr<ASTNode> operand_;
 };
 
-class BinaryNode final : public ASTNode
-{
+class BinaryNode final : public ASTNode {
 public:
-  BinaryNode(BinaryOp op,
-             std::unique_ptr<ASTNode> lhs,
-             std::unique_ptr<ASTNode> rhs)
-      : op_(op)
-      , lhs_(std::move(lhs))
-      , rhs_(std::move(rhs))
-  {
-  }
+  BinaryNode(BinaryOp op, std::unique_ptr<ASTNode> lhs, std::unique_ptr<ASTNode> rhs)
+      : op_(op), lhs_(std::move(lhs)), rhs_(std::move(rhs)) {}
 
-  Value evaluate(const WorkflowContext& context, const FunctionRegistry& registry) const override
-  {
+  Value evaluate(const WorkflowContext &context, const FunctionRegistry &registry) const override {
     if (op_ == BinaryOp::LogicalOr) {
       Value left = lhs_->evaluate(context, registry);
-      if (to_bool(left)) {
+      if (to_bool(left))
         return Value{true};
-      }
       Value right = rhs_->evaluate(context, registry);
       return Value{to_bool(right)};
     }
 
     if (op_ == BinaryOp::LogicalAnd) {
       Value left = lhs_->evaluate(context, registry);
-      if (!to_bool(left)) {
+      if (!to_bool(left))
         return Value{false};
-      }
       Value right = rhs_->evaluate(context, registry);
       return Value{to_bool(right)};
     }
@@ -717,62 +645,63 @@ public:
     Value right = rhs_->evaluate(context, registry);
 
     switch (op_) {
-      case BinaryOp::Equal:
-        return Value{equals(left, right)};
-      case BinaryOp::NotEqual:
-        return Value{!equals(left, right)};
-      case BinaryOp::Less:
-        return Value{compare(left, right) < 0};
-      case BinaryOp::LessEqual:
-        return Value{compare(left, right) <= 0};
-      case BinaryOp::Greater:
-        return Value{compare(left, right) > 0};
-      case BinaryOp::GreaterEqual:
-        return Value{compare(left, right) >= 0};
-      case BinaryOp::Add:
-        return add(left, right);
-      case BinaryOp::Subtract:
-        return subtract(left, right);
-      case BinaryOp::Multiply:
-        return multiply(left, right);
-      case BinaryOp::Divide:
-        return divide(left, right);
-      case BinaryOp::Modulo:
-        return modulo(left, right);
-      case BinaryOp::Contains: {
-          std::string l = to_string_value(left);
-          std::string r = to_string_value(right);
-          return Value{l.find(r) != std::string::npos};
+    case BinaryOp::Equal:
+      return Value{equals(left, right)};
+    case BinaryOp::NotEqual:
+      return Value{!equals(left, right)};
+    case BinaryOp::Less:
+      return Value{compare(left, right) < 0};
+    case BinaryOp::LessEqual:
+      return Value{compare(left, right) <= 0};
+    case BinaryOp::Greater:
+      return Value{compare(left, right) > 0};
+    case BinaryOp::GreaterEqual:
+      return Value{compare(left, right) >= 0};
+    case BinaryOp::Add:
+      return add(left, right);
+    case BinaryOp::Subtract:
+      return subtract(left, right);
+    case BinaryOp::Multiply:
+      return multiply(left, right);
+    case BinaryOp::Divide:
+      return divide(left, right);
+    case BinaryOp::Modulo:
+      return modulo(left, right);
+    case BinaryOp::Contains: {
+      std::string l = to_string_value(left);
+      std::string r = to_string_value(right);
+      return Value{l.find(r) != std::string::npos};
+    }
+    case BinaryOp::StartsWith: {
+      std::string l = to_string_value(left);
+      std::string r = to_string_value(right);
+      return Value{l.rfind(r, 0) == 0};
+    }
+    case BinaryOp::EndsWith: {
+      std::string l = to_string_value(left);
+      std::string r = to_string_value(right);
+      if (r.length() > l.length())
+        return Value{false};
+      return Value{l.compare(l.length() - r.length(), r.length(), r) == 0};
+    }
+    case BinaryOp::In: {
+      // 'in' currently only works with strings (substring) or we can extend it to lists later
+      std::string needle = to_string_value(left);
+      std::string haystack = to_string_value(right);
+      return Value{haystack.find(needle) != std::string::npos};
+    }
+    case BinaryOp::Matches: {
+      std::string text = to_string_value(left);
+      std::string pattern = to_string_value(right);
+      try {
+        std::regex re(pattern);
+        return Value{std::regex_search(text, re)};
+      } catch (...) {
+        return Value{false};
       }
-      case BinaryOp::StartsWith: {
-          std::string l = to_string_value(left);
-          std::string r = to_string_value(right);
-          return Value{l.rfind(r, 0) == 0};
-      }
-      case BinaryOp::EndsWith: {
-          std::string l = to_string_value(left);
-          std::string r = to_string_value(right);
-          if (r.length() > l.length()) return Value{false};
-          return Value{l.compare(l.length() - r.length(), r.length(), r) == 0};
-      }
-      case BinaryOp::In: {
-          // 'in' currently only works with strings (substring) or we can extend it to lists later
-          std::string needle = to_string_value(left);
-          std::string haystack = to_string_value(right);
-          return Value{haystack.find(needle) != std::string::npos};
-      }
-      case BinaryOp::Matches: {
-          std::string text = to_string_value(left);
-          std::string pattern = to_string_value(right);
-          try {
-              std::regex re(pattern);
-              return Value{std::regex_search(text, re)};
-          } catch (...) {
-              return Value{false};
-          }
-      }
-      default:
-        break;
+    }
+    default:
+      break;
     }
     return Value{};
   }
@@ -783,27 +712,22 @@ private:
   std::unique_ptr<ASTNode> rhs_;
 };
 
-class FunctionCallNode final : public ASTNode
-{
+class FunctionCallNode final : public ASTNode {
 public:
   FunctionCallNode(std::string name, std::vector<std::unique_ptr<ASTNode>> args)
-      : name_(std::move(name))
-      , args_(std::move(args))
-  {
-  }
+      : name_(std::move(name)), args_(std::move(args)) {}
 
-  Value evaluate(const WorkflowContext& context, const FunctionRegistry& registry) const override
-  {
+  Value evaluate(const WorkflowContext &context, const FunctionRegistry &registry) const override {
     std::vector<Value> evaluated;
     evaluated.reserve(args_.size());
-    for (const auto& arg : args_) {
+    for (const auto &arg : args_) {
       evaluated.emplace_back(arg->evaluate(context, registry));
     }
 
-    if (const auto* fn = registry.findFunction(name_)) {
+    if (const auto *fn = registry.findFunction(name_)) {
       return (*fn)(evaluated, context);
     }
-    if (const auto* fn = ExpressionEvaluator::defaultRegistry().findFunction(name_)) {
+    if (const auto *fn = ExpressionEvaluator::defaultRegistry().findFunction(name_)) {
       return (*fn)(evaluated, context);
     }
 
@@ -815,33 +739,31 @@ private:
   std::vector<std::unique_ptr<ASTNode>> args_;
 };
 
-std::unique_ptr<ASTNode> build_node(const pegtl::parse_tree::node& node);
+std::unique_ptr<ASTNode> build_node(const pegtl::parse_tree::node &node);
 
-std::vector<std::unique_ptr<ASTNode>> build_argument_list(const pegtl::parse_tree::node& node)
-{
+std::vector<std::unique_ptr<ASTNode>> build_argument_list(const pegtl::parse_tree::node &node) {
   std::vector<std::unique_ptr<ASTNode>> result;
   if (node.children.empty()) {
     return result;
   }
-  const auto& first = unwrap(*node.children.front());
+  const auto &first = unwrap(*node.children.front());
   result.emplace_back(build_node(first));
   for (std::size_t i = 1; i < node.children.size(); ++i) {
-    const auto& tail = unwrap(*node.children[i]);
+    const auto &tail = unwrap(*node.children[i]);
     if (tail.children.size() < 2) {
       continue;
     }
-    const auto& expr = unwrap(*tail.children.back());
+    const auto &expr = unwrap(*tail.children.back());
     result.emplace_back(build_node(expr));
   }
   return result;
 }
 
-std::unique_ptr<ASTNode> build_function_call(const pegtl::parse_tree::node& node)
-{
+std::unique_ptr<ASTNode> build_function_call(const pegtl::parse_tree::node &node) {
   std::string name;
   std::vector<std::unique_ptr<ASTNode>> args;
-  for (const auto& child_ptr : node.children) {
-    const auto& child = unwrap(*child_ptr);
+  for (const auto &child_ptr : node.children) {
+    const auto &child = unwrap(*child_ptr);
     if (child.is_type<grammar::function_name>()) {
       name = child.string();
     } else if (child.is_type<grammar::argument_list>()) {
@@ -851,16 +773,15 @@ std::unique_ptr<ASTNode> build_function_call(const pegtl::parse_tree::node& node
   return std::make_unique<FunctionCallNode>(std::move(name), std::move(args));
 }
 
-std::unique_ptr<ASTNode> build_unary(const pegtl::parse_tree::node& node)
-{
+std::unique_ptr<ASTNode> build_unary(const pegtl::parse_tree::node &node) {
   std::vector<UnaryOp> ops;
   for (std::size_t i = 0; i + 1 < node.children.size(); ++i) {
-    const auto& prefix = unwrap(*node.children[i]);
+    const auto &prefix = unwrap(*node.children[i]);
     if (auto op = parse_unary_operator(prefix)) {
       ops.push_back(*op);
     }
   }
-  const auto& operand = unwrap(*node.children.back());
+  const auto &operand = unwrap(*node.children.back());
   auto current = build_node(operand);
   for (auto it = ops.rbegin(); it != ops.rend(); ++it) {
     current = std::make_unique<UnaryNode>(*it, std::move(current));
@@ -868,36 +789,46 @@ std::unique_ptr<ASTNode> build_unary(const pegtl::parse_tree::node& node)
   return current;
 }
 
-std::unique_ptr<ASTNode> build_binary_sequence(const pegtl::parse_tree::node& node,
-                                               BinaryOp (*operator_selector)(const pegtl::parse_tree::node&))
-{
+// Simplified binary sequence builder - "Good taste eliminates special cases"
+std::unique_ptr<ASTNode>
+build_binary_sequence(const pegtl::parse_tree::node &node,
+                      BinaryOp (*operator_selector)(const pegtl::parse_tree::node &)) {
   if (node.children.empty()) {
     return std::make_unique<LiteralNode>(Value{});
   }
+  
   auto result = build_node(unwrap(*node.children.front()));
+  
   for (std::size_t i = 1; i < node.children.size(); ++i) {
-    const auto& tail = unwrap(*node.children[i]);
-    if (tail.children.size() < 2) {
-      continue;
+    const auto &tail = *node.children[i];
+    
+    // Simple case: tail has operator and RHS
+    if (tail.children.size() >= 2) {
+      BinaryOp op = operator_selector(*tail.children.front());
+      auto rhs = build_node(unwrap(*tail.children.back()));
+      result = std::make_unique<BinaryNode>(op, std::move(result), std::move(rhs));
     }
-    const auto& op_node = *tail.children.front();
-    const auto& rhs_node = unwrap(*tail.children.back());
-    BinaryOp op = operator_selector(op_node);
-    auto rhs = build_node(rhs_node);
-    result = std::make_unique<BinaryNode>(op, std::move(result), std::move(rhs));
+    // Edge case: single child (RHS only, operator inferred)
+    else if (tail.children.size() == 1) {
+      BinaryOp op = operator_selector(tail);
+      auto rhs = build_node(unwrap(*tail.children.front()));
+      result = std::make_unique<BinaryNode>(op, std::move(result), std::move(rhs));
+    }
+    // Skip malformed tails instead of logging
   }
   return result;
 }
 
-std::unique_ptr<ASTNode> build_node(const pegtl::parse_tree::node& raw)
-{
-  const auto& node = unwrap(raw);
+// Simplified AST node builder - "Good taste groups similar cases"
+std::unique_ptr<ASTNode> build_node(const pegtl::parse_tree::node &raw) {
+  const auto &node = unwrap(raw);
 
+  // Binary operators - grouped by similar handling
   if (node.is_type<grammar::logical_or>()) {
-    return build_binary_sequence(node, [](const pegtl::parse_tree::node&) { return BinaryOp::LogicalOr; });
+    return build_binary_sequence(node, [](const pegtl::parse_tree::node &) { return BinaryOp::LogicalOr; });
   }
   if (node.is_type<grammar::logical_and>()) {
-    return build_binary_sequence(node, [](const pegtl::parse_tree::node&) { return BinaryOp::LogicalAnd; });
+    return build_binary_sequence(node, [](const pegtl::parse_tree::node &) { return BinaryOp::LogicalAnd; });
   }
   if (node.is_type<grammar::equality>()) {
     return build_binary_sequence(node, parse_equality_operator);
@@ -911,20 +842,21 @@ std::unique_ptr<ASTNode> build_node(const pegtl::parse_tree::node& raw)
   if (node.is_type<grammar::multiplicative>()) {
     return build_binary_sequence(node, parse_multiplicative_operator);
   }
+
+  // Unary and structural nodes
   if (node.is_type<grammar::unary>()) {
     return build_unary(node);
+  }
+  if (node.is_type<grammar::paren_expression>()) {
+    if (node.children.empty())
+      throw std::runtime_error("Empty paren expression");
+    return build_node(*node.children.front());
   }
   if (node.is_type<grammar::function_call>()) {
     return build_function_call(node);
   }
-  if (node.is_type<grammar::paren_expression>()) {
-    for (const auto& child : node.children) {
-      const auto& inner = unwrap(*child);
-      if (inner.is_type<grammar::expression>() || inner.is_type<grammar::logical_or>()) {
-        return build_node(inner);
-      }
-    }
-  }
+
+  // Literals - create directly without intermediate functions
   if (node.is_type<grammar::string_literal>()) {
     return std::make_unique<LiteralNode>(Value{parse_string_literal(node.string())});
   }
@@ -934,35 +866,35 @@ std::unique_ptr<ASTNode> build_node(const pegtl::parse_tree::node& raw)
   if (node.is_type<grammar::boolean_literal>()) {
     return std::make_unique<LiteralNode>(Value{parse_boolean_literal(node.string())});
   }
-  if (node.is_type<grammar::moustache_inner>() || node.is_type<grammar::bare_variable>()) {
+
+  // Variables - all variable types handled the same way
+  if (node.is_type<grammar::moustache_inner>() || 
+      node.is_type<grammar::moustache_body>() ||
+      node.is_type<grammar::bare_variable>()) {
     return std::make_unique<VariableNode>(node.string());
   }
-  if (!node.children.empty()) {
-    for (const auto& child : node.children) {
-      auto candidate = build_node(*child);
-      if (candidate) {
-        return candidate;
-      }
-    }
+
+  // Fallback: try children
+  for (const auto &child : node.children) {
+    if (auto res = build_node(*child))
+      return res;
   }
 
-  throw std::runtime_error("Cannot build AST node for expression component");
+  throw std::runtime_error("Cannot build AST node for expression component: " +
+                           (node.has_content() ? node.string() : "[sequence]"));
 }
 
-}  // namespace
+} // namespace
 
-void FunctionRegistry::registerFunction(std::string name, FunctionSignature fn)
-{
+void FunctionRegistry::registerFunction(std::string name, FunctionSignature fn) {
   functions_.insert_or_assign(std::move(name), std::move(fn));
 }
 
-bool FunctionRegistry::hasFunction(const std::string& name) const noexcept
-{
+bool FunctionRegistry::hasFunction(const std::string &name) const noexcept {
   return functions_.find(name) != functions_.end();
 }
 
-const FunctionSignature* FunctionRegistry::findFunction(const std::string& name) const noexcept
-{
+const FunctionSignature *FunctionRegistry::findFunction(const std::string &name) const noexcept {
   auto it = functions_.find(name);
   if (it == functions_.end()) {
     return nullptr;
@@ -970,99 +902,96 @@ const FunctionSignature* FunctionRegistry::findFunction(const std::string& name)
   return &it->second;
 }
 
-Value ExpressionEvaluator::evaluate(const std::string& expression,
-                                    const WorkflowContext& context) const
-{
+Value ExpressionEvaluator::evaluate(const std::string &expression,
+                                    const WorkflowContext &context) const {
   return evaluate(expression, context, defaultRegistry());
 }
 
-Value ExpressionEvaluator::evaluate(const std::string& expression,
-                                    const WorkflowContext& context,
-                                    const FunctionRegistry& registry) const
-{
+Value ExpressionEvaluator::evaluate(const std::string &expression, const WorkflowContext &context,
+                                    const FunctionRegistry &registry) const {
   if (trim(expression).empty()) {
-    return Value{true};
-  }
-
-  pegtl::string_input in(expression, "PraktorExpression");
-  std::unique_ptr<pegtl::parse_tree::node> root;
-  try {
-    root = pegtl::parse_tree::parse<grammar::grammar, Selector>(in);
-  } catch (const pegtl::parse_error& error) {
-    throw std::runtime_error("Expression parsing failed: " + std::string(error.what()));
-  }
-
-  if (!root) {
-    throw std::runtime_error("Failed to parse expression");
-  }
-
-  const pegtl::parse_tree::node* expr_node = nullptr;
-  for (const auto& child : root->children) {
-    const auto& candidate = unwrap(*child);
-    if (candidate.is_type<grammar::expression>() || candidate.is_type<grammar::logical_or>()) {
-      expr_node = &candidate;
-      break;
-    }
-  }
-
-  if (!expr_node) {
     return Value{};
   }
 
-  auto ast = build_node(*expr_node);
-  return ast->evaluate(context, registry);
+  pegtl::string_input in(expression, "PraktorExpression");
+  // Use grammar::grammar which includes EOF to ensure the entire expression is consumed
+  auto root = pegtl::parse_tree::parse<grammar::grammar, Selector>(in);
+  if (!root) {
+    throw std::runtime_error("Failed to parse expression: " + expression);
+  }
+
+  if (root->children.empty()) {
+    return Value{};
+  }
+
+  // Log the root structure recursively
+  std::function<void(const pegtl::parse_tree::node &, int)> log_tree;
+  log_tree = [&log_tree](const pegtl::parse_tree::node &n, int depth) {
+    for (const auto &c : n.children) {
+      log_tree(*c, depth + 1);
+    }
+  };
+  logd("evaluate: Parse tree for '{}':", expression);
+  log_tree(*root, 0);
+
+  // The root node should have the top-level expression as its only child (if folded)
+  // or a sequence of children. We build the first one that yields an AST.
+  for (const auto &child : root->children) {
+    if (auto ast = build_node(*child)) {
+      Value val = ast->evaluate(context, registry);
+      logd("Expression final result: '{}'", to_string_value(val));
+      return val;
+    }
+  }
+
+  throw std::runtime_error("Failed to build AST for expression: " + expression);
 }
 
-bool ExpressionEvaluator::evaluateAsBool(const std::string& expression,
-                                         const WorkflowContext& context) const
-{
+bool ExpressionEvaluator::evaluateAsBool(const std::string &expression,
+                                         const WorkflowContext &context) const {
   return evaluateAsBool(expression, context, defaultRegistry());
 }
 
-bool ExpressionEvaluator::evaluateAsBool(const std::string& expression,
-                                         const WorkflowContext& context,
-                                         const FunctionRegistry& registry) const
-{
-  return to_bool(evaluate(expression, context, registry));
+bool ExpressionEvaluator::evaluateAsBool(const std::string &expression,
+                                         const WorkflowContext &context,
+                                         const FunctionRegistry &registry) const {
+  Value result = evaluate(expression, context, registry);
+  bool truthy = to_bool(result);
+  return truthy;
 }
 
-const FunctionRegistry& ExpressionEvaluator::defaultRegistry()
-{
+const FunctionRegistry &ExpressionEvaluator::defaultRegistry() {
   static FunctionRegistry registry = [] {
     FunctionRegistry reg;
 
-    reg.registerFunction(
-        "len",
-        [](const std::vector<Value>& args, const WorkflowContext&) -> Value {
-          if (args.empty()) {
-            return Value{0.0};
-          }
-          return Value{static_cast<double>(value_length(args.front()))};
-        });
+    reg.registerFunction("len",
+                         [](const std::vector<Value> &args, const WorkflowContext &) -> Value {
+                           if (args.empty()) {
+                             return Value{0.0};
+                           }
+                           return Value{static_cast<double>(value_length(args.front()))};
+                         });
+
+    reg.registerFunction("empty",
+                         [](const std::vector<Value> &args, const WorkflowContext &) -> Value {
+                           if (args.empty()) {
+                             return Value{true};
+                           }
+                           return Value{value_empty(args.front())};
+                         });
+
+    reg.registerFunction("contains",
+                         [](const std::vector<Value> &args, const WorkflowContext &) -> Value {
+                           if (args.size() < 2) {
+                             return Value{false};
+                           }
+                           const auto haystack = to_string_value(args[0]);
+                           const auto needle = to_string_value(args[1]);
+                           return Value{haystack.find(needle) != std::string::npos};
+                         });
 
     reg.registerFunction(
-        "empty",
-        [](const std::vector<Value>& args, const WorkflowContext&) -> Value {
-          if (args.empty()) {
-            return Value{true};
-          }
-          return Value{value_empty(args.front())};
-        });
-
-    reg.registerFunction(
-        "contains",
-        [](const std::vector<Value>& args, const WorkflowContext&) -> Value {
-          if (args.size() < 2) {
-            return Value{false};
-          }
-          const auto haystack = to_string_value(args[0]);
-          const auto needle = to_string_value(args[1]);
-          return Value{haystack.find(needle) != std::string::npos};
-        });
-
-    reg.registerFunction(
-        "lower",
-        [](const std::vector<Value>& args, const WorkflowContext&) -> Value {
+        "lower", [](const std::vector<Value> &args, const WorkflowContext &) -> Value {
           if (args.empty()) {
             return Value{std::string{}};
           }
@@ -1073,8 +1002,7 @@ const FunctionRegistry& ExpressionEvaluator::defaultRegistry()
         });
 
     reg.registerFunction(
-        "upper",
-        [](const std::vector<Value>& args, const WorkflowContext&) -> Value {
+        "upper", [](const std::vector<Value> &args, const WorkflowContext &) -> Value {
           if (args.empty()) {
             return Value{std::string{}};
           }
@@ -1084,27 +1012,25 @@ const FunctionRegistry& ExpressionEvaluator::defaultRegistry()
           return Value{text};
         });
 
-    reg.registerFunction(
-        "abs",
-        [](const std::vector<Value>& args, const WorkflowContext&) -> Value {
-          if (args.empty()) {
-            return Value{0.0};
-          }
-          auto number = to_number(args.front());
-          if (!number) {
-            throw std::runtime_error("abs() expects a numeric argument");
-          }
-          return Value{std::fabs(*number)};
-        });
+    reg.registerFunction("abs",
+                         [](const std::vector<Value> &args, const WorkflowContext &) -> Value {
+                           if (args.empty()) {
+                             return Value{0.0};
+                           }
+                           auto number = to_number(args.front());
+                           if (!number) {
+                             throw std::runtime_error("abs() expects a numeric argument");
+                           }
+                           return Value{std::fabs(*number)};
+                         });
 
-    reg.registerFunction(
-        "bool",
-        [](const std::vector<Value>& args, const WorkflowContext&) -> Value {
-          if (args.empty()) {
-            return Value{false};
-          }
-          return Value{to_bool(args.front())};
-        });
+    reg.registerFunction("bool",
+                         [](const std::vector<Value> &args, const WorkflowContext &) -> Value {
+                           if (args.empty()) {
+                             return Value{false};
+                           }
+                           return Value{to_bool(args.front())};
+                         });
 
     return reg;
   }();
@@ -1112,4 +1038,4 @@ const FunctionRegistry& ExpressionEvaluator::defaultRegistry()
   return registry;
 }
 
-}  // namespace Praktor::Expressions
+} // namespace Praktor::Expressions

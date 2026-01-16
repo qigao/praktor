@@ -41,6 +41,8 @@ TaskResult DynamicTasksExecutor::execute(const Task& task, WorkflowContext& cont
         jsoncons::json items_json;
         try {
             items_json = context.getValueByPath(items_var);
+            logi("Retrieved items_variable '{}': is_null={}, is_array={}, type={}", 
+                 items_var, items_json.is_null(), items_json.is_array(), (int)items_json.type());
         } catch (const std::exception& e) {
             return TaskResult(false, fmt::format("dynamic_tasks items_variable '{}' not found in context: {}", 
                                 items_var, e.what()));

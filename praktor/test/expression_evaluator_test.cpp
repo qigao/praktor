@@ -123,7 +123,7 @@ TEST_CASE("ExpressionEvaluator Tests", "[evaluator]") {
 
     SECTION("Whitespace Handling") {
         context.setValue("my var", "value");
-        REQUIRE(evaluator.evaluate("{{ my var }} == 'value'", context) == true);
-        REQUIRE(evaluator.evaluate("  true  and  false  ", context) == false);
+        REQUIRE(evaluator.evaluateAsBool("{{ my var }} == 'value'", context) == true);
+        REQUIRE(evaluator.evaluateAsBool("  true  and  false  ", context) == false);
     }
 }

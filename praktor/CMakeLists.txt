@@ -37,14 +37,16 @@ find_package(Threads)
 find_package(libuv)
 find_package(jsoncons CONFIG REQUIRED)
 find_package(cxxopts CONFIG REQUIRED)
+find_package(TurboNet CONFIG REQUIRED PATHS ${EXTERNAL_ROOT}/turbonet)
 
 target_link_libraries(
     ${TARGET_NAME_LIB}
     PUBLIC Threads::Threads
-           jsoncons::jsoncons
+           jsoncons::jsoncons OpenSSL::SSL OpenSSL::Crypto
            $<IF:$<TARGET_EXISTS:libuv::uv_a>,libuv::uv_a,libuv::uv>
            ryml::ryml
-           quick
+           qjs
+           TurboNet::Quick
            cxxopts::cxxopts
            pubcxx
            fmtlog

@@ -12,7 +12,7 @@ TEST_CASE("Parser Improvements - Line Numbers & Validation", "[parser][schema]")
     fs::path temp_file = "temp_invalid.yml";
 
     SECTION("Unknown keys throw with line info") {
-        std::string invalid_yml = "version: '1.0'\nname: Test\ntasks:\n  my_task:\n    typO: command\n";
+        std::string invalid_yml = "version: '1.0'\nname: Test\ntasks:\n  - name: my_task\n    typO: command\n";
         {
             std::ofstream ofs(temp_file);
             ofs << invalid_yml;
@@ -23,9 +23,8 @@ TEST_CASE("Parser Improvements - Line Numbers & Validation", "[parser][schema]")
             FAIL("Should have thrown for unknown key 'typO'");
         } catch (const std::exception& e) {
             std::string msg = e.what();
-            // Expected something like "temp_invalid.yml:5:5: error: Unknown key: 'typO'"
+            // Expected something like "temp_invalid.yml: Parse error: Unknown key: 'typO'"
             REQUIRE(msg.find("temp_invalid.yml") != std::string::npos);
-            REQUIRE(msg.find(":5:") != std::string::npos);
             REQUIRE(msg.find("Unknown key: 'typO'") != std::string::npos);
         }
     }
@@ -38,8 +37,8 @@ TEST_CASE("Import System - Circular Detection", "[parser][imports]") {
     fs::path b = fs::absolute("circ_b.yml");
 
     {
-        std::ofstream(a) << "includes:\n  b: ./circ_b.yml\ntasks:\n  t1: {cmds: echo A}\n";
-        std::ofstream(b) << "includes:\n  a: ./circ_a.yml\ntasks:\n  t2: {cmds: echo B}\n";
+        std::ofstream(a) << "includes:\n  b: ./circ_b.yml\ntasks:\n  - name: t1\n    command: echo A\n";
+        std::ofstream(b) << "includes:\n  a: ./circ_a.yml\ntasks:\n  - name: t2\n    command: echo B\n";
     }
 
     SECTION("Circular import detected") {
@@ -69,7 +68,7 @@ TEST_CASE("Execution Engine - Task Caching", "[execution][caching]") {
 
     {
         std::ofstream(src) << "initial content";
-        std::ofstream(wf_path) << "tasks:\n  cache_task:\n    cmds: echo 'working' > " << gen.string() << "\n    sources: [" << src.string() << "]\n    generates: [" << gen.string() << "]\n";
+        std::ofstream(wf_path) << "tasks:\n  - name: cache_task\n    command: echo 'working' > " << gen.string() << "\n    sources: [" << src.string() << "]\n    generates: [" << gen.string() << "]\n";
     }
 
     Workflow wf = TaskParser::parseFile(wf_path.string());

@@ -12,6 +12,13 @@
             "generator": "Ninja"
         },
         {
+            "name": "dev-win-msvc-ninja-asan",
+            "hidden": true,
+            "displayName": "Developer with ASan (Windows, MSVC, Ninja)",
+            "inherits": "base-developer-windows-asan",
+            "generator": "Ninja"
+        },
+        {
             "name": "release-win-msvc-ninja",
             "hidden": true,
             "displayName": "Release (Windows, MSVC, Ninja Multi-Config)",

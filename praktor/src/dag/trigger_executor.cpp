@@ -6,7 +6,7 @@
 #include <fstream>
 #include <sstream>
 #include <variant>
-
+#include <filesystem>
 #ifdef _WIN32
 #include <windows.h>
 #include <winhttp.h>
@@ -268,20 +268,25 @@ void TriggerExecutor::executeHttpPost(const HttpPostTrigger& trigger,
 void TriggerExecutor::executeWriteFile(const WriteFileTrigger& trigger,
                                       WorkflowContext& context)
 {
-    std::string path = substituteVariables(trigger.path, context);
+    std::string path_str = substituteVariables(trigger.path, context);
     std::string content = substituteVariables(trigger.content, context);
 
-    logi("Executing write_file trigger: {}", path);
+    logi("Executing write_file trigger: {}", path_str);
 
     try {
+        std::filesystem::path fs_path(path_str);
+        if (fs_path.has_parent_path()) {
+            std::filesystem::create_directories(fs_path.parent_path());
+        }
+
         std::ios_base::openmode mode = std::ios::out;
         if (trigger.mode == WriteFileMode::Append) {
             mode |= std::ios::app;
         }
 
-        std::ofstream file(path, mode);
+        std::ofstream file(fs_path, mode);
         if (!file.is_open()) {
-            throw std::runtime_error("Failed to open file: " + path);
+            throw std::runtime_error("Failed to open file: " + path_str);
         }
 
         file << content;

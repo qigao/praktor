@@ -22,15 +22,17 @@ enum class TaskState {
     Pending,    // Task not yet started
     Running,    // Task currently executing (outputs can be written)
     Completed,  // Task finished successfully (outputs locked)
-    Failed      // Task failed (outputs locked)
+    Failed,     // Task failed (outputs locked)
+    Skipped     // Task was skipped due to 'when' or cache (outputs locked)
 };
 
 inline std::string taskStateToString(TaskState state) {
     switch (state) {
         case TaskState::Pending: return "pending";
         case TaskState::Running: return "running";
-        case TaskState::Completed: return "completed";
+        case TaskState::Completed: return "success";
         case TaskState::Failed: return "failed";
+        case TaskState::Skipped: return "skipped";
     }
     return "unknown";
 }
@@ -130,8 +132,8 @@ public:
         } else if (status == "failed") {
             task_state_[task_name] = TaskState::Failed;
         } else if (status == "skipped") {
-            // Skipped tasks go directly to completed without running
-            task_state_[task_name] = TaskState::Completed;
+            // Skipped tasks use their own state but are treated as completed for dependency purposes
+            task_state_[task_name] = TaskState::Skipped;
             completed_tasks_.insert(task_name);
         }
     }

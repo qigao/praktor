@@ -79,7 +79,8 @@ public:
      * @brief Check if variable exists in scope chain
      */
     bool has(const std::string& key) const {
-        if (local_.count(key)) {
+        bool in_local = local_.count(key) > 0;
+        if (in_local) {
             return true;
         }
         return parent_ ? parent_->has(key) : false;

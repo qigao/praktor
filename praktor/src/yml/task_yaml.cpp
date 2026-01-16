@@ -648,6 +648,7 @@ Task parse_task(const ryml::ConstNodeRef& node, const std::string& source_path) 
         throw_parse_error(node, "task '" + task.name + "' declares multiple runners");
     }
 
+    task.source_path = source_path;
     return task;
 }
 

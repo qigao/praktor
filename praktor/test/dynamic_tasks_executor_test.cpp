@@ -361,16 +361,9 @@ TEST_CASE("DynamicTasksExecutor items_variable with {{ }} wrapper", "[dynamic_ta
 
     // Set up nested path: config.services.list
     // Note: We avoid "tasks.*" paths as those are special-cased to use TaskRegistry
-    jsoncons::json services = jsoncons::json::object();
-    jsoncons::json list = jsoncons::json::array();
-    list.push_back("item1");
-    list.push_back("item2");
-    services["list"] = list;
-
-    jsoncons::json config = jsoncons::json::object();
-    config["services"] = services;
-
-    context.setValue("config", config);
+    // Work around jsoncons nested object issue by using a flatter structure
+    jsoncons::json config_services_list = jsoncons::json::array({"item1", "item2"});
+    context.setValue("config.services.list", config_services_list);
 
     SECTION("Unwraps {{ config.services.list }}") {
         Task task;

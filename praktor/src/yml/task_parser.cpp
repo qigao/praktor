@@ -102,6 +102,36 @@ Workflow parseInternal(const std::string& filePath, ParseContext& ctx) {
         Workflow workflow = parse_workflow(root, absolutePath);
         workflow.source_path = absolutePath;
 
+        if (root.has_child("includes")) {
+            const auto& includes_node = root["includes"];
+            if (includes_node.is_map()) {
+                for (const auto& child : includes_node) {
+                    std::string include_path_str;
+                    child >> include_path_str;
+
+                    fs::path include_path = fs::path(absolutePath).parent_path() / include_path_str;
+                    Workflow included = parseInternal(include_path.string(), ctx);
+
+                    // Merge tasks
+                    for (auto& t : included.tasks) {
+                        workflow.tasks.push_back(std::move(t));
+                    }
+                    // Merge variables (included files act as defaults)
+                    for (const auto& [key, val] : included.variables) {
+                        if (workflow.variables.find(key) == workflow.variables.end()) {
+                            workflow.variables[key] = val;
+                        }
+                    }
+                    // Merge environment
+                    for (const auto& [key, val] : included.env) {
+                        if (workflow.env.find(key) == workflow.env.end()) {
+                            workflow.env[key] = val;
+                        }
+                    }
+                }
+            }
+        }
+
         ctx.cache[absolutePath] = workflow;
         ctx.import_stack.pop_back();
         return workflow;

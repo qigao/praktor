@@ -115,8 +115,8 @@ public:
      * Fully delegates to VariableScope.
      */
     void setValue(std::string const& key, const WorkflowValue& value) {
-        scope_->set(key, value);
-    }
+         scope_->set(key, value);
+     }
 
     void unsetValue(const std::string& key) {
         scope_->remove(key);
@@ -133,22 +133,14 @@ public:
      */
     template <typename ValueType>
     ValueType getValue(std::string const& key) const {
-        if (key.rfind("tasks.", 0) == 0) {
-            WorkflowValue val = getValueByPath(key);
-            if (val.is_null()) {
-                throw std::runtime_error("Variable not found: " + key);
-            }
-            try {
-                return val.as<ValueType>();
-            } catch (const std::exception& e) {
-                throw std::runtime_error("Invalid type for key '" + key + "': " + e.what());
-            }
+        WorkflowValue val = getValueByPath(key);
+        if (val.is_null()) {
+             throw std::runtime_error("Variable not found: " + key);
         }
-
         try {
-            return scope_->get(key).as<ValueType>();
-        } catch (const jsoncons::json_exception& e) {
-            throw std::runtime_error("Invalid type for key '" + key + "': " + e.what());
+            return val.as<ValueType>();
+        } catch (const std::exception& e) {
+             throw std::runtime_error("Invalid type for key '" + key + "': " + e.what());
         }
     }
 
@@ -232,84 +224,58 @@ public:
     }
 
     WorkflowValue getValueByPath(const std::string& path) const {
-        if (path.empty()) {
-            return WorkflowValue();
-        }
+        if (path.empty()) return WorkflowValue::null();
+        std::string trimmed_path = path;
+        trimmed_path.erase(0, trimmed_path.find_first_not_of(" \t\r\n"));
+        auto last = trimmed_path.find_last_not_of(" \t\r\n");
+        if (last != std::string::npos) trimmed_path.erase(last + 1);
 
-        // Special case: "tasks.*" paths should use TaskRegistry
-        if (path.rfind("tasks.", 0) == 0) {
-            logd("getValueByPath: tasks path detected: {}", path);
-            // Parse "tasks.task_name.outputs.key" or "tasks.task_name.status"
-            auto first_dot = path.find('.', 6);  // After "tasks."
-            if (first_dot == std::string::npos) {
-                // Just "tasks" - return all tasks as JSON
-                return task_registry_->toJson();
-            }
-
-            std::string task_name = path.substr(6, first_dot - 6);
-            std::string rest = path.substr(first_dot + 1);
-            logd("getValueByPath: task_name={}, rest={}", task_name, rest);
-
-            if (rest == "status") {
-                return WorkflowValue(task_registry_->getStatus(task_name));
-            } else if (rest.rfind("outputs.", 0) == 0) {
-                std::string output_key = rest.substr(8);
-                logd("getValueByPath: looking for output_key={}", output_key);
-                try {
-                    auto result = task_registry_->getOutput(task_name, output_key);
-                    logd("getValueByPath: found output!");
-                    return result;
-                } catch (const std::exception& e) {
-                    logd("getValueByPath: exception: {}", e.what());
-                    return WorkflowValue();
-                }
+        if (trimmed_path.rfind("tasks.", 0) == 0) {
+            auto first_dot = trimmed_path.find('.', 6);
+            if (first_dot == std::string::npos) return task_registry_->toJson();
+            std::string task_name = trimmed_path.substr(6, first_dot - 6);
+            std::string rest = trimmed_path.substr(first_dot + 1);
+            if (rest == "status") return WorkflowValue(task_registry_->getStatus(task_name));
+            if (rest.rfind("outputs.", 0) == 0) {
+                try { return task_registry_->getOutput(task_name, rest.substr(8)); } catch(...) {}
             } else if (rest == "outputs") {
                 return task_registry_->getAllOutputs(task_name);
             }
         }
 
-        // Try direct lookup from VariableScope
-        try {
-            return scope_->get(path);
-        } catch (...) {
-            // Path might be nested - try splitting
+        // Check if the exact path exists as a key
+        if (scope_->has(trimmed_path)) {
+            try { return scope_->get(trimmed_path); } catch (...) {}
+        }
+
+        // Handle dotted paths by traversing nested objects
+        if (trimmed_path.find('.') != std::string::npos) {
             std::vector<std::string> segments;
-            std::string current;
-            for (char ch : path) {
-                if (ch == '.') {
-                    if (!current.empty()) {
-                        segments.push_back(current);
-                        current.clear();
+            std::string segment;
+            std::stringstream ss(trimmed_path);
+            while (std::getline(ss, segment, '.')) {
+                if (!segment.empty()) segments.push_back(segment);
+            }
+
+            if (segments.size() >= 2 && scope_->has(segments[0])) {
+                try {
+                    WorkflowValue val = scope_->get(segments[0]);
+                     for (size_t i = 1; i < segments.size(); ++i) {
+                         if (!val.is_object()) {
+                            return WorkflowValue::null();
+                        }
+                        if (!val.contains(segments[i])) {
+                             return WorkflowValue::null();
+                        }
+                        val = val.at(segments[i]);
                     }
-                } else {
-                    current.push_back(ch);
+                      return val;
+                } catch (const std::exception& e) {
+                    logw("getValueByPath: exception during traversal: {}", e.what());
                 }
-            }
-            if (!current.empty()) {
-                segments.push_back(current);
-            }
-
-            if (segments.empty()) {
-                return WorkflowValue();
-            }
-
-            // Try getting the root key
-            try {
-                WorkflowValue root_value = scope_->get(segments.front());
-                const WorkflowValue* current_value = &root_value;
-
-                for (size_t i = 1; i < segments.size(); ++i) {
-                    const auto& key = segments[i];
-                    if (!current_value->is_object() || !current_value->contains(key)) {
-                        return WorkflowValue();
-                    }
-                    current_value = &current_value->at(key);
-                }
-                return *current_value;
-            } catch (...) {
-                return WorkflowValue();
             }
         }
+        return WorkflowValue::null();
     }
 
 
@@ -346,6 +312,10 @@ public:
      */
     void setTaskStatus(const std::string& taskName, const std::string& status) {
         task_registry_->setStatus(taskName, status);
+    }
+
+    std::string getTaskStatus(const std::string& taskName) const {
+        return task_registry_->getStatus(taskName);
     }
 
     void setTaskOutput(const std::string& taskName, const std::string& key, const WorkflowValue& value) {

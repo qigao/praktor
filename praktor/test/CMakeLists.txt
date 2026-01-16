@@ -14,6 +14,12 @@ set(TEST_SOURCES
     workflow_context_test.cpp
     workflow_runner_test.cpp
     core_improvements_test.cpp
+    matrix_test.cpp
+)
+
+# Copy test fixtures to build directory
+file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/fixtures
+     DESTINATION ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}
 )
 
 foreach(test_source ${TEST_SOURCES})

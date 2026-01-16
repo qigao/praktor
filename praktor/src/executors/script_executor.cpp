@@ -5,9 +5,8 @@
 #include "util/variable_substitution.hpp"
 
 
-#include <js_uv_module.h>
+#include <js_module.h>
 #include <quickjs.h>
-#include <uv.h>
 
 
 #include <jsoncons/json.hpp>
@@ -131,6 +130,24 @@ static JSValue js_context_has(JSContext *ctx, JSValueConst this_val, int argc, J
   return JS_NewBool(ctx, exists);
 }
 
+bool hasES6Import(const std::string &source) {
+  // Simple heuristic: check for import statements
+  // Matches: import x from, import { x }, import 'x', import "x"
+  size_t pos = 0;
+  while ((pos = source.find("import", pos)) != std::string::npos) {
+    // Check if 'import' is at start of line or after whitespace/newline
+    if (pos == 0 || source[pos - 1] == '\n' || source[pos - 1] == ' ' || source[pos - 1] == '\t') {
+      size_t after = pos + 6;
+      if (after < source.size() && (source[after] == ' ' || source[after] == '\t' ||
+                                    source[after] == '\'' || source[after] == '"')) {
+        return true;
+      }
+    }
+    pos++;
+  }
+  return false;
+}
+
 } // namespace
 
 namespace Praktor::Execution {
@@ -156,10 +173,8 @@ TaskResult ScriptExecutor::execute(const Task &task, WorkflowContext &context) {
   opaque.task = &task;
   JS_SetContextOpaque(ctx, &opaque);
 
-  // Initialize libuv bridge
-  uv_loop_t loop;
-  uv_loop_init(&loop);
-  js_init_uv_module(ctx, &loop);
+  // Initialize TurboNet modules
+  js_init_turbo_module(ctx);
 
   JSValue global_obj = JS_GetGlobalObject(ctx);
 
@@ -209,8 +224,17 @@ TaskResult ScriptExecutor::execute(const Task &task, WorkflowContext &context) {
 
   // Execute the main source
   std::string source = substituteVariables(params.source, context);
-  JSValue result_val =
-      JS_Eval(ctx, source.c_str(), source.size(), task.name.c_str(), JS_EVAL_TYPE_GLOBAL);
+
+  // Detect if source uses ES6 modules
+  bool is_module = hasES6Import(source);
+  int eval_flags = is_module ? JS_EVAL_TYPE_MODULE : JS_EVAL_TYPE_GLOBAL;
+  JSValue result_val = JS_Eval(ctx, source.c_str(), source.size(), task.name.c_str(), eval_flags);
+
+  // For modules, the result is a promise that resolves when the module is loaded
+  // We need to process pending jobs to execute the module
+  if (is_module && !JS_IsException(result_val)) {
+    js_turbo_process_events(ctx);
+  }
 
   TaskResult task_result(true);
   task_result.exit_code = 0;
@@ -235,7 +259,7 @@ TaskResult ScriptExecutor::execute(const Task &task, WorkflowContext &context) {
     JS_FreeValue(ctx, exception);
   } else {
     // Run loop to process any async tasks
-    js_uv_run_loop(rt);
+    js_turbo_process_events(ctx);
 
     std::string stdout_data = opaque.oss.str();
     if (!JS_IsUndefined(result_val) && !JS_IsNull(result_val)) {
@@ -253,7 +277,6 @@ TaskResult ScriptExecutor::execute(const Task &task, WorkflowContext &context) {
   JS_FreeValue(ctx, result_val);
   JS_FreeContext(ctx);
   JS_FreeRuntime(rt);
-  uv_loop_close(&loop);
 
   if (task_result.success) {
     applyOutputs(task, task_result, context);

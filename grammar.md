@@ -272,6 +272,47 @@ Executes JavaScript code for in-memory data transformation and context manipulat
 - `context.get(path)`: Retrieves a value from the context (e.g., `"tasks.build.outputs.version"`).
 - `context.set(key, value)`: Writes a JSON-serializable value to the current task's outputs.
 
+**ES6 Module Imports:**
+
+Scripts can use ES6 `import` syntax to load built-in TurboNet modules or external JavaScript files. The runtime automatically detects `import` statements and switches to module mode.
+
+*Built-in Modules:*
+
+| Module | Description |
+| :--- | :--- |
+| `turbo:fs` | File system operations (readFile, writeFile, stat, readdir, mkdir) |
+| `turbo:os` | OS info (hostname, homedir, cwd, getenv, pid) |
+| `turbo:dns` | DNS resolution (resolve, resolveAsync) |
+| `turbo:http` | HTTP client (get, post, request) |
+| `turbo:timers` | Timers (setTimeout, setInterval, sleep) |
+| `turbo:utils` | Utilities (base64Encode, base64Decode) |
+| `turbo:net` | Networking (TcpClient, WebSocket) |
+| `turbo:signal` | Signal handling (watch, SIGINT, SIGTERM) |
+| `turbo:proc` | Process management (spawn, kill) |
+
+*Import Syntax:*
+```javascript
+// Default import
+import fs from 'turbo:fs';
+
+// Named imports
+import { readFile, writeFile } from 'turbo:fs';
+import { hostname, cwd } from 'turbo:os';
+
+// External file modules (absolute or relative path)
+import myModule from './lib/helpers.js';
+import { myFunction } from '/path/to/module.js';
+```
+
+*Global Object (Legacy):*
+
+Scripts without `import` statements can use the global `turbo` object:
+```javascript
+turbo.fs.stat(".");
+turbo.os.hostname();
+turbo.http.get("https://api.example.com");
+```
+
 **Example:**
 ```yaml
 tasks:
@@ -292,6 +333,25 @@ tasks:
       source: |
         const tag = slugify(context.get("name"));
         context.set("slug", PREFIX + tag);
+
+  - name: with_es6_imports
+    script:
+      source: |
+        import fs from 'turbo:fs';
+        import { hostname } from 'turbo:os';
+
+        const config = fs.readJson('./config.json');
+        context.set("host", hostname());
+        context.set("config_version", config.version);
+
+  - name: with_external_module
+    script:
+      source: |
+        import { processData } from './lib/data-processor.js';
+
+        const input = context.get("tasks.fetch.outputs.data");
+        const result = processData(input);
+        context.set("processed", result);
 ```
 
 ### 7.3. Runner: `dynamic_tasks` (Runtime Task Generation)
@@ -420,7 +480,7 @@ Behavior:
 - All variables support standard substitution.
 ## 9. Expression Language
 
-Expressions enable dynamic values and conditional logic throughout the workflow.
+Expressions enable dynamic values and conditional logic throughout the workflow. The expression evaluator has been optimized for performance and maintainability while supporting all existing functionality.
 
 **Syntax:** Expressions are wrapped in `{{ ... }}`.
 
@@ -428,11 +488,32 @@ Expressions enable dynamic values and conditional logic throughout the workflow.
 - Simple variables: `{{ VERSION }}`
 - Nested paths: `{{ tasks.build.outputs.version }}`
 - Environment variables: `{{ env.NODE_ENV }}`
+- System variables: `{{ os.name }}`, `{{ os.arch }}`
 
 **Operators (in `when` clauses):**
-- Comparison: `==`, `!=`, `<`, `>`, `<=`, `>=`
-- Logical: `and`, `or`, `not`
-- Grouping: `(`, `)`
+- **Comparison**: `==`, `!=`, `<`, `>`, `<=`, `>=`
+- **Logical**: `and`, `or`, `not` (also supports `!` for negation)
+- **String Operations**: 
+  - `contains` - Check if string contains substring
+  - `starts_with` or `startswith` - Check if string starts with prefix
+  - `ends_with` or `endswith` - Check if string ends with suffix
+  - `in` - Check if substring exists in string
+  - `matches` - Regular expression matching
+- **Arithmetic**: `+`, `-`, `*`, `/`, `%` (for numeric values)
+- **Grouping**: `(`, `)` for precedence control
+
+**Type Conversion:**
+The expression evaluator automatically handles type conversions:
+- Strings to numbers when used in arithmetic operations
+- Numbers to strings when used in string operations
+- Truthiness evaluation for conditional logic
+- Empty strings, zero values, and `null` evaluate to `false`
+
+**Built-in Functions:**
+- `len(value)` - Get length of string or array
+- `empty(value)` - Check if value is empty
+- `abs(number)` - Absolute value
+- `bool(value)` - Convert to boolean
 
 **JMESPath Queries:**
 For complex JSON data, use JMESPath syntax:
@@ -448,9 +529,28 @@ tasks:
     command: "./deploy.sh"
     when: "{{ ENVIRONMENT }} == 'production' and {{ tasks.test.outputs.exit_code }} == 0"
 
+  - name: string_operations
+    command: "echo Processing"
+    when: "{{ tasks.fetch.outputs.data }} contains 'success' and {{ VERSION }} starts_with 'v'"
+
+  - name: regex_validation
+    command: "./validate.sh"
+    when: "{{ EMAIL }} matches '.*@.*\\.com'"
+
   - name: use_output
     command: "echo Deploying version {{ tasks.build.outputs.version }}"
+
+  - name: arithmetic_example
+    script:
+      source: |
+        const total = {{ tasks.count.outputs.value }} + 10;
+        context.set("total_count", total);
 ```
+
+**Performance Notes:**
+- Expression parsing uses optimized PEG grammar for fast evaluation
+- Type conversions are cached and unified for better performance
+- Operator parsing uses lookup tables instead of linear searches
 
 ## 10. JSON Schema Contract
 A canonical JSON Schema **MUST** be provided to validate workflow syntax and provide editor support. The authoritative copy lives at [JSON Grammar](./grammar.schema.json).

@@ -162,7 +162,7 @@ TEST_CASE("TaskRegistry Backward Compatibility", "[registry]") {
 
     SECTION("setStatus with 'skipped' marks as completed") {
         registry.setStatus("task_a", "skipped");
-        REQUIRE(registry.getState("task_a") == TaskState::Completed);
+        REQUIRE(registry.getState("task_a") == TaskState::Skipped);
         REQUIRE(registry.isCompleted("task_a"));
     }
 
@@ -189,7 +189,7 @@ TEST_CASE("TaskRegistry toJson", "[registry]") {
     REQUIRE(json.contains("task_a"));
     REQUIRE(json.contains("task_b"));
 
-    REQUIRE(json["task_a"]["status"].as<std::string>() == "completed");
+    REQUIRE(json["task_a"]["status"].as<std::string>() == "success");
     REQUIRE(json["task_a"]["outputs"]["result"].as<std::string>() == "success");
 
     REQUIRE(json["task_b"]["status"].as<std::string>() == "failed");
