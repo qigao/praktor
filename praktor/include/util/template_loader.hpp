@@ -2,9 +2,9 @@
 #ifndef __TEMPLATE_LOADER_HPP__
 #define __TEMPLATE_LOADER_HPP__
 
+#include "logging.hpp"
 #include <filesystem>
 #include <fstream>
-#include <iostream>
 #include <string>
 #include <vector>
 #include <sstream>
@@ -27,7 +27,7 @@ public:
             }
         }
 
-        std::cerr << "Warning: Template '" << name << "' not found in category '" << category << "'" << std::endl;
+        TLOG_WARN("Template '{}' not found in category '{}'", name, category);
         return "";
     }
 

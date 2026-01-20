@@ -1,6 +1,6 @@
 #include "dag/trigger_executor.hpp"
 #include "executors/command_executor.hpp"
-#include "fmtlog.h"
+#include "util/logging.hpp"
 #include "util/variable_substitution.hpp"
 
 #include <fstream>
@@ -58,7 +58,7 @@ bool sendHttpPostWindows(const std::string& url,
     urlComp.dwUrlPathLength = sizeof(path) / sizeof(wchar_t);
 
     if (!WinHttpCrackUrl(wurl.c_str(), 0, 0, &urlComp)) {
-        loge("Failed to parse URL: {}", url);
+        loge("Failed to parse URL: {:s}", url.c_str());
         return false;
     }
 
@@ -156,7 +156,7 @@ bool sendHttpPostCurl(const std::string& url,
     bool success = (res == CURLE_OK);
 
     if (!success) {
-        loge("HTTP POST failed: {}", curl_easy_strerror(res));
+        loge("HTTP POST failed: {:s}", curl_easy_strerror(res));
     }
 
     if (header_list) {
@@ -214,7 +214,7 @@ void TriggerExecutor::executeTriggers(const Task& task,
         try {
             executeTriggerAction(action, context, environment);
         } catch (const std::exception& e) {
-            logw("Trigger execution failed: {}", e.what());
+            logw("Trigger execution failed: {:s}", e.what());
         }
     }
 }
@@ -256,7 +256,7 @@ void TriggerExecutor::executeHttpPost(const HttpPostTrigger& trigger,
         headers["Content-Type"] = "application/json";
     }
 
-    logi("Executing HTTP POST trigger to: {}", url);
+    logi("Executing HTTP POST trigger to: {:s}", url.c_str());
 
     if (sendHttpPost(url, body, headers)) {
         logi("HTTP POST trigger completed successfully");
@@ -271,7 +271,7 @@ void TriggerExecutor::executeWriteFile(const WriteFileTrigger& trigger,
     std::string path_str = substituteVariables(trigger.path, context);
     std::string content = substituteVariables(trigger.content, context);
 
-    logi("Executing write_file trigger: {}", path_str);
+    logi("Executing write_file trigger: {:s}", path_str.c_str());
 
     try {
         std::filesystem::path fs_path(path_str);
@@ -294,7 +294,7 @@ void TriggerExecutor::executeWriteFile(const WriteFileTrigger& trigger,
 
         logi("write_file trigger completed successfully");
     } catch (const std::exception& e) {
-        loge("write_file trigger failed: {}", e.what());
+        loge("write_file trigger failed: {:s}", e.what());
         throw;
     }
 }
@@ -305,7 +305,7 @@ void TriggerExecutor::executeRunTask(const RunTaskTrigger& trigger,
 {
     std::string task_name = substituteVariables(trigger.task_name, context);
 
-    logi("Executing run_task trigger: {}", task_name);
+    logi("Executing run_task trigger: {:s}", task_name.c_str());
 
     // Create a synthetic task for the trigger
     Task synthetic_task;
@@ -325,10 +325,10 @@ void TriggerExecutor::executeRunTask(const RunTaskTrigger& trigger,
         if (result.success) {
             logi("run_task trigger completed successfully");
         } else {
-            logw("run_task trigger failed: {}", result.error_message);
+            logw("run_task trigger failed: {:s}", result.error_message.c_str());
         }
     } catch (const std::exception& e) {
-        loge("run_task trigger failed: {}", e.what());
+        loge("run_task trigger failed: {:s}", e.what());
         throw;
     }
 }
@@ -351,7 +351,7 @@ void TriggerExecutor::executePraktorNotify(const PraktorNotifyTrigger& trigger,
     }
 
     if (webhook.empty()) {
-        logi("@praktor {}", message);
+        logi("@praktor {:s}", message.c_str());
         return;
     }
 

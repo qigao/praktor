@@ -1,5 +1,5 @@
 #include "dag/task_executor_pool.hpp"
-#include "fmtlog.h"
+#include "util/logging.hpp"
 #include <iostream>
 
 namespace Praktor::Execution

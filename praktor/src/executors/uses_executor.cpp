@@ -3,7 +3,7 @@
 #include "dag/dependency_graph.hpp"
 #include "dag/scoped_variables.hpp"
 #include "dag/workflow_executor.hpp"
-#include "fmtlog.h"
+#include "util/logging.hpp"
 #include "util/variable_substitution.hpp"
 #include "yml/task_parser.hpp"
 
@@ -96,7 +96,7 @@ UsesExecutor::UsesExecutor(std::unordered_map<std::string, std::string> base_env
 
 TaskResult UsesExecutor::execute(const Task& task, WorkflowContext& context)
 {
-    logi("Executing uses: {}", task.name);
+    TLOG_INFO("Executing uses: {}", task.name);
 
     try {
         const auto& params = std::get<UsesParams>(task.specifics);
@@ -113,7 +113,7 @@ TaskResult UsesExecutor::execute(const Task& task, WorkflowContext& context)
         // Build environment for nested workflow
         EnvMap nested_env = base_environment_;
         Vars env_vars_to_scope;
-        
+
         for (const auto& [key, value] : nested.env) {
             std::string evaluated = substituteVariables(value, context);
             nested_env[key] = evaluated;
@@ -130,7 +130,7 @@ TaskResult UsesExecutor::execute(const Task& task, WorkflowContext& context)
                     env_vars_to_scope[key] = evaluated;
                 }
             } catch (const std::exception& e) {
-                logw("Failed to load nested dotEnv file '{}': {}", env_path.string(), e.what());
+                TLOG_WARN("Failed to load nested dotEnv file '{}': {}", env_path.string(), e.what());
             }
         }
 
@@ -147,9 +147,9 @@ TaskResult UsesExecutor::execute(const Task& task, WorkflowContext& context)
 
         return TaskResult(true);
     } catch (const std::bad_variant_access& e) {
-        return TaskResult(false, fmt::format("Task does not contain UsesParams: {}", e.what()));
+        return TaskResult(false, "Task does not contain UsesParams: " + std::string(e.what()));
     } catch (const std::exception& e) {
-        return TaskResult(false, fmt::format("Uses execution failed: {}", e.what()));
+        return TaskResult(false, "Uses execution failed: " + std::string(e.what()));
     }
 }
 

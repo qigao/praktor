@@ -1,7 +1,7 @@
 
 #include "executors/script_executor.hpp"
 #include "dag/workflow_context.hpp"
-#include "fmtlog.h"
+#include "util/logging.hpp"
 #include "util/variable_substitution.hpp"
 
 
@@ -153,7 +153,7 @@ bool hasES6Import(const std::string &source) {
 namespace Praktor::Execution {
 
 TaskResult ScriptExecutor::execute(const Task &task, WorkflowContext &context) {
-  logi("Executing script (QuickJS): {}", task.name);
+  TLOG_INFO("Executing script (QuickJS): {}", task.name);
 
   const auto *params_ptr = std::get_if<ScriptParams>(&task.specifics);
   if (!params_ptr) {
@@ -162,7 +162,7 @@ TaskResult ScriptExecutor::execute(const Task &task, WorkflowContext &context) {
   const ScriptParams &params = *params_ptr;
 
   if (params.language != "javascript") {
-    return TaskResult(false, fmt::format("Unsupported script language: {}", params.language));
+    return TaskResult(false, "Unsupported script language: " + params.language);
   }
 
   JSRuntime *rt = JS_NewRuntime();
@@ -212,7 +212,7 @@ TaskResult ScriptExecutor::execute(const Task &task, WorkflowContext &context) {
         // Handle error
         JSValue exception = JS_GetException(ctx);
         const char *msg = JS_ToCString(ctx, exception);
-        loge("Error loading module {}: {}", module_name, (msg ? msg : "unknown error"));
+        TLOG_ERROR("Error loading module {}: {}", module_name, (msg ? msg : "unknown error"));
         JS_FreeCString(ctx, msg);
         JS_FreeValue(ctx, exception);
       }

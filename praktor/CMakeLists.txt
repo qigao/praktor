@@ -47,9 +47,9 @@ target_link_libraries(
            ryml::ryml
            qjs
            TurboNet::Quick
+           TurboNet::Utils
            cxxopts::cxxopts
            pubcxx
-           fmtlog
 )
 target_compile_definitions(${TARGET_NAME_LIB} PUBLIC $<$<BOOL:WIN32>:NOMINMAX>)
 

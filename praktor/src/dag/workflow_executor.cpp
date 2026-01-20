@@ -16,7 +16,7 @@
 #include <algorithm>
 #include <chrono>
 #include <filesystem>
-#include <fmtlog.h>
+#include "util/logging.hpp"
 #include <fstream>
 #include <jsoncons/json.hpp>
 #include <optional>
@@ -271,7 +271,7 @@ void WorkflowExecutor::loadCache(const std::string &workflow_path) {
       cache_[task_name] = std::move(state);
     }
   } catch (...) {
-    logw("Failed to load cache from {}", cache_file_);
+    logw("Failed to load cache from {:s}", cache_file_.c_str());
   }
 }
 
@@ -296,7 +296,7 @@ void WorkflowExecutor::saveCache() {
     std::ofstream os(cache_file_);
     os << jsoncons::pretty_print(j);
   } catch (...) {
-    logw("Failed to save cache to {}", cache_file_);
+    logw("Failed to save cache to {:s}", cache_file_.c_str());
   }
 }
 
@@ -326,7 +326,7 @@ bool WorkflowExecutor::checkSkipTask(const Task &task, WorkflowContext &context)
     }
   }
 
-  logi("Skipping task '{}' (already up to date)", task.name);
+  logi("Skipping task '{:s}' (already up to date)", task.name.c_str());
   return true;
 }
 
@@ -358,7 +358,7 @@ bool WorkflowExecutor::executeTask(const Task &task, WorkflowContext &context,
 
   if (task.each && task.each->enabled()) {
     auto combinations = generateEachCombinations(*task.each);
-    logi("Executing task '{}' for {} combinations", task.name, combinations.size());
+    logi("Executing task '{:s}' for %zu combinations", task.name.c_str(), combinations.size());
 
     bool all_success = true;
     bool any_executed = false;
@@ -426,7 +426,7 @@ std::pair<bool, std::string> WorkflowExecutor::executeTaskInternal(const Task &t
 
       for (int attempt = 0; attempt < attempts; ++attempt) {
         if (attempt > 0) {
-          logw("Retrying task '{}' ({}/{})", task.name, attempt, attempts - 1);
+          logw("Retrying task '{:s}' ({:d}/{:d})", task.name.c_str(), attempt, attempts - 1);
           sleepWithDelay(retries.delay);
         }
 
@@ -445,7 +445,7 @@ std::pair<bool, std::string> WorkflowExecutor::executeTaskInternal(const Task &t
       }
     }
   } catch (const std::exception &e) {
-    loge("Task '{}' failed: {}", task.name, e.what());
+    loge("Task '{:s}' failed: {:s}", task.name.c_str(), e.what());
     success = false;
     status = "failed";
   }
@@ -464,7 +464,7 @@ bool WorkflowExecutor::evaluateWhen(const Task &task, WorkflowContext &context) 
   try {
     return Praktor::Expressions::ExpressionEvaluator{}.evaluateAsBool(*task.when, context);
   } catch (const std::exception &e) {
-    loge("Failed to evaluate 'when' expression for task '{}': {}", task.name, e.what());
+    loge("Failed to evaluate 'when' expression for task '{:s}': {:s}", task.name.c_str(), e.what());
     return false;
   }
 }
@@ -482,7 +482,7 @@ std::unordered_map<std::string, std::string> WorkflowExecutor::buildTaskEnvironm
         env[key] = substituteVariables(value, context);
       }
     } catch (const std::exception &e) {
-      logw("Failed to load task dotEnv file '{}': {}", env_path.string(), e.what());
+      logw("Failed to load task dotEnv file '{:s}': {:s}", env_path.string().c_str(), e.what());
     }
   }
 
@@ -498,11 +498,11 @@ void WorkflowExecutor::executeTriggers(const Task &task, bool success, WorkflowC
     return;
   }
 
-  logd("Executing triggers for task '{}' (success={})", task.name, success);
+  logd("Executing triggers for task '{:s}' (success={:d})", task.name.c_str(), success);
 
   try {
     trigger_executor_.executeTriggers(task, success, context, base_environment_);
   } catch (const std::exception &e) {
-    logw("Trigger execution encountered an error: {}", e.what());
+    logw("Trigger execution encountered an error: {:s}", e.what());
   }
 }

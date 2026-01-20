@@ -1,7 +1,7 @@
 #include "yml/task_parser.hpp"
 #include "yml/task_yaml.hpp"
 
-#include "fmtlog.h"
+#include "util/logging.hpp"
 
 #include <filesystem>
 #include <fstream>
@@ -137,7 +137,7 @@ Workflow parseInternal(const std::string& filePath, ParseContext& ctx) {
         return workflow;
     } catch (const std::exception& e) {
         std::string error_msg = absolutePath + ": " + e.what();
-        loge("YAML parsing error: {}", error_msg);
+        TLOG_ERROR("YAML parsing error: {}", error_msg);
         ctx.import_stack.pop_back();
         throw std::runtime_error(error_msg);
     }

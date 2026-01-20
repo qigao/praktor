@@ -14,7 +14,7 @@
 #include <uv.h>
 
 #include "executors/command_executor.hpp"
-#include "fmtlog.h"
+#include "util/logging.hpp"
 #include "util/variable_substitution.hpp"
 
 namespace Praktor::Execution
@@ -94,7 +94,7 @@ void on_handle_closed(uv_handle_t* handle) {
 TaskResult CommandExecutor::execute(const Task& task,
                                        WorkflowContext& context)
 {
-  logi("Executing run_command: {}", task.name);
+  TLOG_INFO("Executing run_command: {}", task.name);
 
   // Extract RunCommandParams from task.specifics
   try {
@@ -115,10 +115,10 @@ TaskResult CommandExecutor::execute(const Task& task,
   } catch (const std::bad_variant_access& e) {
     return TaskResult(
         false,
-        fmt::format("Task does not contain RunCommandParams: {}", e.what()));
+        "Task does not contain RunCommandParams: " + std::string(e.what()));
   } catch (const std::exception& e) {
     return TaskResult(false,
-                      fmt::format("RunCommand execution failed: {}", e.what()));
+                      "RunCommand execution failed: " + std::string(e.what()));
   }
 }
 
@@ -202,12 +202,12 @@ TaskResult CommandExecutor::executeProcess(const RunCommandParams& params,
 
   if (std::holds_alternative<std::string>(params.command)) {
     std::string full_command = substituteVariables(std::get<std::string>(params.command), context);
-    logd("Command: {} (CWD: {})", full_command, actual_cwd);
+    TLOG_DEBUG("Command: {} (CWD: {})", full_command, actual_cwd);
   } else {
     if (!command_parts.empty()) {
-        logd("Command (list): {} (CWD: {})", command_parts[0], actual_cwd);
+        TLOG_DEBUG("Command (list): {} (CWD: {})", command_parts[0], actual_cwd);
     } else {
-        logd("Command (list): <empty> (CWD: {})", actual_cwd);
+        TLOG_DEBUG("Command (list): <empty> (CWD: {})", actual_cwd);
     }
   }
 
@@ -252,11 +252,10 @@ TaskResult CommandExecutor::executeProcess(const RunCommandParams& params,
   result.stderr_data = proc_context.result.stderr_data;
 
   if (!result.success) {
-    result.error_message = fmt::format("Command failed with exit code: {}. Stderr: {}", 
-        result.exit_code, result.stderr_data);
-    loge("Command failed. Stdout: {} Stderr: {}", result.stdout_data, result.stderr_data);
+    result.error_message = "Command failed with exit code: " + std::to_string(result.exit_code) + ". Stderr: " + result.stderr_data;
+    TLOG_ERROR("Command failed. Stdout: {} Stderr: {}", result.stdout_data, result.stderr_data);
   } else {
-    logd("Command succeeded. Stdout: {} Stderr: {}", result.stdout_data, result.stderr_data);
+    TLOG_DEBUG("Command succeeded. Stdout: {} Stderr: {}", result.stdout_data, result.stderr_data);
   }
 
   return result;

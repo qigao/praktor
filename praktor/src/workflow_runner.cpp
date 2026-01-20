@@ -1,6 +1,6 @@
 #include "workflow_runner.hpp"
 #include "util/env_parser.hpp"
-#include "fmtlog.h"
+#include "util/logging.hpp"
 #include "util/file_utils.hpp"
 #include "yml/task_parser.hpp"
 #include "dag/workflow_executor.hpp"
@@ -22,7 +22,7 @@ std::unordered_map<std::string, std::string> collectWorkflowEnvironment(const Wo
     for (const auto& env_path_str : workflow.dot_env) {
         std::filesystem::path env_path(env_path_str);
         if (!std::filesystem::exists(env_path)) {
-            logw("dotEnv file not found: {}", env_path.string());
+            TLOG_WARN("dotEnv file not found: {}", env_path.string());
             continue;
         }
 
@@ -31,9 +31,9 @@ std::unordered_map<std::string, std::string> collectWorkflowEnvironment(const Wo
             for (auto& [key, value] : parsed) {
                 env_values[key] = value;
             }
-            logi("Loaded dotEnv file: {}", env_path.string());
+            TLOG_INFO("Loaded dotEnv file: {}", env_path.string());
         } catch (const std::exception& e) {
-            logw("Failed to load dotEnv file '{}': {}", env_path.string(), e.what());
+            TLOG_WARN("Failed to load dotEnv file '{}': {}", env_path.string(), e.what());
         }
     }
 
@@ -55,9 +55,9 @@ bool setProcessEnvironmentVariable(const std::string& key, const std::string& va
 void applyProcessEnvironmentOverrides(const std::unordered_map<std::string, std::string>& env_values) {
     for (const auto& [key, value] : env_values) {
         if (!setProcessEnvironmentVariable(key, value)) {
-            logw("Failed to set environment variable '{}'", key);
+            TLOG_WARN("Failed to set environment variable '{}'", key);
         } else {
-            logd("Set environment variable '{}'", key);
+            TLOG_DEBUG("Set environment variable '{}'", key);
         }
     }
 }
@@ -65,13 +65,13 @@ void applyProcessEnvironmentOverrides(const std::unordered_map<std::string, std:
 void applyDefaults(Task& task, const TaskDefaults& defaults) {
     if (!task.retries && defaults.retries) {
         task.retries = defaults.retries;
-        logi("Applied default retries to task '{}': count={}, delay={}", task.name,
+        TLOG_INFO("Applied default retries to task '{}': count={}, delay={}", task.name,
                 defaults.retries->count, defaults.retries->delay);
     }
 
     if (!task.timeout && defaults.timeout) {
         task.timeout = defaults.timeout;
-        logi("Applied default timeout to task '{}': {}", task.name, defaults.timeout.value());
+        TLOG_INFO("Applied default timeout to task '{}': {}", task.name, defaults.timeout.value());
     }
 }
 
@@ -86,7 +86,7 @@ WorkflowRunner::~WorkflowRunner() = default;
 
 bool WorkflowRunner::run(bool useConcurrent, int maxConcurrency) {
     try {
-        logi("Loading workflow from: {}", yamlPath_);
+        TLOG_INFO("Loading workflow from: {}", yamlPath_);
         Workflow workflow = TaskParser::parseFileWithImports(yamlPath_, base_directory_.string());
 
         auto env_overrides = collectWorkflowEnvironment(workflow);
@@ -100,45 +100,45 @@ bool WorkflowRunner::run(bool useConcurrent, int maxConcurrency) {
         WorkflowContext context(inputValues_);
         context.setEmbeddedModules(workflow.embedded);
 
-        logi("Initializing workflow context...");
+        TLOG_INFO("Initializing workflow context...");
         for (const auto& [key, value] : inputValues_) {
-            logi("Set input variable: {} = {}", key, value);
+            TLOG_INFO("Set input variable: {} = {}", key, value);
         }
         for (const auto& [key, value] : workflow.variables) {
             context.setValue(key, value);
-            logi("Set variable: {} = {}", key, value);
+            TLOG_INFO("Set variable: {} = {}", key, value);
         }
 
         for (const auto& [key, value] : env_overrides) {
             context.setValue(key, value);
-            logd("Set environment variable override: {} = {}", key, value);
+            TLOG_DEBUG("Set environment variable override: {} = {}", key, value);
         }
 
-        logi("Building task graph...");
+        TLOG_INFO("Building task graph...");
         DependencyGraph<Task> graph = TaskParser::buildGraph(workflow);
 
-        logi("Starting workflow execution...");
+        TLOG_INFO("Starting workflow execution...");
         WorkflowExecutor executor(graph, env_overrides, useConcurrent ? maxConcurrency : 1);
         executor.execute(context);
 
         std::string status = context.getValueOrDefault<std::string>("workflow_status", "unknown");
         if (status == "failed") {
-            loge("Workflow execution failed.");
+            TLOG_ERROR("Workflow execution failed.");
             return false;
         }
 
-        logi("Workflow finished successfully.");
+        TLOG_INFO("Workflow finished successfully.");
         return true;
 
     } catch (const std::exception& e) {
-        loge("An error occurred during workflow execution: {}", e.what());
+        TLOG_ERROR("An error occurred during workflow execution: {}", e.what());
         return false;
     }
 }
 
 bool WorkflowRunner::runTask(std::string const& taskName, bool useConcurrent, int maxConcurrency) {
     try {
-        logi("Loading workflow to run single task: {}", taskName);
+        TLOG_INFO("Loading workflow to run single task: {}", taskName);
         Workflow workflow = TaskParser::parseFileWithImports(yamlPath_, base_directory_.string());
 
         auto env_overrides = collectWorkflowEnvironment(workflow);
@@ -157,7 +157,7 @@ bool WorkflowRunner::runTask(std::string const& taskName, bool useConcurrent, in
         }
 
         DependencyGraph<Task> fullGraph = TaskParser::buildGraph(workflow);
-        logi("Creating subgraph for task: {}", taskName);
+        TLOG_INFO("Creating subgraph for task: {}", taskName);
         DependencyGraph<Task> subgraph = fullGraph.createSubgraphFor(*targetTaskIt);
 
         WorkflowContext context(inputValues_);
@@ -169,7 +169,7 @@ bool WorkflowRunner::runTask(std::string const& taskName, bool useConcurrent, in
             context.setValue(key, value);
         }
 
-        logi("Executing subgraph for task: {}", taskName);
+        TLOG_INFO("Executing subgraph for task: {}", taskName);
         WorkflowExecutor executor(subgraph, env_overrides, useConcurrent ? maxConcurrency : 1);
         executor.execute(context);
 
@@ -177,7 +177,7 @@ bool WorkflowRunner::runTask(std::string const& taskName, bool useConcurrent, in
         return status != "failed";
 
     } catch (const std::exception& e) {
-        loge("An error occurred during single task execution: {}", e.what());
+        TLOG_ERROR("An error occurred during single task execution: {}", e.what());
         return false;
     }
 }

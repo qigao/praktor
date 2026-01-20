@@ -1,5 +1,5 @@
 #include <cxxopts.hpp>
-#include "fmtlog.h"
+#include "util/logging.hpp"
 #include "util/version.hpp"
 #include "workflow_runner.hpp"
 #include "yml/task_parser.hpp"
@@ -39,9 +39,22 @@ namespace {
     };
 
     void setupLogging(bool verbose) {
-        fmtlog::setLogLevel(verbose ? fmtlog::DBG : fmtlog::INF);
-        fmtlog::setHeaderPattern("[{l}] ");
-        fmtlog::startPollingThread();
+        // Create default logger with console sink
+        tlog_config_t config = {
+            .min_level = verbose ? TURBO_LOG_LEVEL_DEBUG : TURBO_LOG_LEVEL_INFO,
+            .async_mode = 0, // Sync mode for CLI tool
+            .buffer_size = 0,
+            .pool_size = 0
+        };
+        tlog_t* logger = tlog_create(&config);
+
+        turbo_console_sink_opts_t console_opts = {
+            .output = stdout,
+            .use_colors = 1,
+            .pattern = TURBO_LOG_DEFAULT_PATTERN
+        };
+        tlog_add_sink(logger, turbo_sink_console_create(&console_opts));
+        tlog_set_default(logger);
     }
 
     std::unordered_map<std::string, std::string> parseInputParams(const std::vector<std::string>& inputParams) {
@@ -156,7 +169,7 @@ int main(int argc, char* argv[]) {
                 success = runner.run(config.useConcurrent, config.maxConcurrency);
             }
         } catch (const std::exception& e) {
-            loge("Execution failed: {}", e.what());
+            loge("Execution failed: {:s}", e.what());
             return 1;
         }
 

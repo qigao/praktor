@@ -18,7 +18,7 @@
 #include "dag/variable_scope.hpp"
 #include "dag/task_registry.hpp"
 #include "util/system_info.hpp"
-#include "fmtlog.h"
+#include "util/logging.hpp"
 #include "yml/task_types.hpp"
 
 // Define WorkflowValue as jsoncons::json
@@ -336,7 +336,7 @@ public:
     }
 
     void setCurrentTaskOutput(const std::string& key, const WorkflowValue& value) {
-        logd("setCurrentTaskOutput: key={}, stack_size={}", key, task_scope_stack_.size());
+        logd("setCurrentTaskOutput: key={:s}, stack_size=%zu", key.c_str(), task_scope_stack_.size());
         if (task_scope_stack_.empty()) {
             logd("setCurrentTaskOutput: empty stack, using __root__");
             setTaskOutput("__root__", key, value);
@@ -344,8 +344,8 @@ public:
         }
 
         const auto& scope = task_scope_stack_.back();
-        logd("setCurrentTaskOutput: scope.first={}, scope.second={}", scope.first,
-                 (scope.second ? scope.second.value() : "nullopt"));
+        logd("setCurrentTaskOutput: scope.first={:s}, scope.second={:s}", scope.first.c_str(),
+                 (scope.second ? scope.second.value().c_str() : "nullopt"));
 
         // Set output for the actual task name
         setTaskOutput(scope.first, key, value);
@@ -353,7 +353,7 @@ public:
 
         // If there's an alias (e.g., for nested workflows), also set output for alias
         if (scope.second && scope.second.value() != scope.first) {
-            logd("setCurrentTaskOutput: also setting alias={}", scope.second.value());
+            logd("setCurrentTaskOutput: also setting alias={:s}", scope.second.value().c_str());
             setTaskOutput(scope.second.value(), key, value);
             setValue("tasks." + scope.second.value() + ".outputs." + key, value);
         }

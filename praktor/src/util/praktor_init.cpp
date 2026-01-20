@@ -1,7 +1,7 @@
 #include "util/praktor_init.hpp"
+#include "util/logging.hpp"
 #include <filesystem>
 #include <fstream>
-#include <iostream>
 #include <string>
 #include <vector>
 
@@ -11,7 +11,7 @@ namespace Utils {
 bool PraktorInit::initialize(const std::string &template_name) {
   std::string filename = "praktor.yml";
   if (std::filesystem::exists(filename)) {
-    std::cerr << "Error: " << filename << " already exists." << std::endl;
+    loge("Error: {} already exists.", filename);
     return false;
   }
 
@@ -33,19 +33,18 @@ bool PraktorInit::initialize(const std::string &template_name) {
   }
 
   if (templatePath.empty()) {
-    std::cerr << "Error: Template '" << template_name << "' not found." << std::endl;
-    std::cerr << "Available templates: basic, cpp-library" << std::endl;
+    loge("Error: Template '{}' not found.", template_name);
+    loge("Available templates: basic, cpp-library");
     return false;
   }
 
   try {
     std::filesystem::copy_file(templatePath, filename);
-    std::cout << "Successfully initialized " << filename << " using '" << template_name
-              << "' template." << std::endl;
-    std::cout << "Source: " << templatePath.string() << std::endl;
+    logi("Successfully initialized {} using '{}' template.", filename, template_name);
+    logi("Source: {}", templatePath.string());
     return true;
   } catch (const std::exception &e) {
-    std::cerr << "Error copying template: " << e.what() << std::endl;
+    loge("Error copying template: {}", e.what());
     return false;
   }
 }

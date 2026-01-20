@@ -14,7 +14,7 @@
 #include <tao/pegtl/contrib/abnf.hpp>
 #include <tao/pegtl/contrib/analyze.hpp>
 
-#include "fmtlog.h"
+#include "util/logging.hpp"
 
 namespace Praktor::Util
 {
@@ -57,9 +57,6 @@ struct VariableNode : ASTNode
 
   LiteralValue evaluate(const WorkflowContext& context) const override
   {
-    std::cout << "DEBUG: VariableNode evaluating - original name: '" << name
-              << "'" << std::endl;
-
     // Trim whitespace from variable name since PEGTL might include spaces
     std::string trimmed_name = name;
     trimmed_name.erase(
@@ -74,27 +71,11 @@ struct VariableNode : ASTNode
             .base(),
         trimmed_name.end());
 
-    std::cout << "DEBUG: VariableNode evaluating - trimmed name: '"
-              << trimmed_name << "'" << std::endl;
-
-    // Debug: Check context state
-    auto allVars = context.getAllVariables();
-    std::cout << "DEBUG: Context has " << allVars.size()
-              << " variables:" << std::endl;
-    for (const auto& [key, value] : allVars) {
-      std::cout << "DEBUG:   '" << key << "' = '" << value << "'" << std::endl;
-    }
-
     if (context.hasKey(trimmed_name)) {
-      std::cout << "DEBUG: Found variable '" << trimmed_name << "' in context"
-                << std::endl;
       auto value = context.getValueOrDefault<std::string>(trimmed_name, "");
-      std::cout << "DEBUG: Retrieved value: '" << value << "'" << std::endl;
       return value;
     }
-    std::cout << "DEBUG: Variable '" << trimmed_name << "' not found in context"
-              << std::endl;
-    logw("Expression variable '{}' not found in context, evaluating as empty string.", trimmed_name);
+    TLOG_WARN("Expression variable '{}' not found in context, evaluating as empty string.", trimmed_name);
     return {};
   }
 };
@@ -390,8 +371,6 @@ struct action<grammar::variable_content>
   template<typename Input>
   static void apply(const Input& in, ast_builder& state)
   {
-    std::cout << "DEBUG PEGTL: Parsed variable_content: '" << in.string() << "'"
-              << std::endl;
     state.nodes.push(std::make_unique<VariableNode>(in.string()));
   }
 };

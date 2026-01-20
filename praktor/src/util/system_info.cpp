@@ -1,6 +1,6 @@
 #include <uv.h> // Required for uv_os_get_passwd_alloc and uv_free_passwd
 #include "util/system_info.hpp"
-#include "fmtlog.h"
+#include "util/logging.hpp"
 #include <cstring>
 #include <sstream>
 #include <thread>
@@ -41,7 +41,7 @@ void SystemInfoProvider::initializeLoop() {
         if (result != 0) {
             delete loop_;
             loop_ = nullptr;
-            loge("Failed to initialize libuv loop: {}", uvErrorToString(result));
+            TLOG_ERROR("Failed to initialize libuv loop: {}", uvErrorToString(result));
             return;
         }
         owns_loop_ = true;
@@ -64,7 +64,7 @@ std::string SystemInfoProvider::getOSName() const {
     uv_utsname_t utsname;
     int result = uv_os_uname(&utsname);
     if (result != 0) {
-        logw("Failed to get OS name via libuv: {}", uvErrorToString(result));
+        TLOG_WARN("Failed to get OS name via libuv: {}", uvErrorToString(result));
         return "unknown";
     }
 
@@ -84,7 +84,7 @@ std::string SystemInfoProvider::getOSVersion() const {
     uv_utsname_t utsname;
     int result = uv_os_uname(&utsname);
     if (result != 0) {
-        logw("Failed to get OS version via libuv: {}", uvErrorToString(result));
+        TLOG_WARN("Failed to get OS version via libuv: {}", uvErrorToString(result));
         return "unknown";
     }
     return std::string(utsname.release);
@@ -94,7 +94,7 @@ std::string SystemInfoProvider::getArchitecture() const {
     uv_utsname_t utsname;
     int result = uv_os_uname(&utsname);
     if (result != 0) {
-        logw("Failed to get architecture via libuv: {}", uvErrorToString(result));
+        TLOG_WARN("Failed to get architecture via libuv: {}", uvErrorToString(result));
         return "unknown";
     }
     return std::string(utsname.machine);
@@ -129,7 +129,7 @@ std::string SystemInfoProvider::getUsername() const {
      uv_passwd_t pwd;
     int result = uv_os_get_passwd(&pwd); // Pass the address of the pointer
     if (result != 0) {
-        logw("Failed to get username via libuv: {}", uvErrorToString(result));
+        TLOG_WARN("Failed to get username via libuv: {}", uvErrorToString(result));
         return "unknown";
     }
     std::string username = pwd.username;
@@ -142,7 +142,7 @@ std::string SystemInfoProvider::getHostname() const {
     size_t size = sizeof(hostname);
     int result = uv_os_gethostname(hostname, &size);
     if (result != 0) {
-        logw("Failed to get hostname via libuv: {}", uvErrorToString(result));
+        TLOG_WARN("Failed to get hostname via libuv: {}", uvErrorToString(result));
         return "unknown";
     }
     return std::string(hostname);
@@ -156,7 +156,7 @@ SystemInfoProvider::CPUInfo SystemInfoProvider::getCPUInfo() const {
     CPUInfo info{"unknown", 0, 0.0};
 
     if (result != 0) {
-        logw("Failed to get CPU info via libuv: {}", uvErrorToString(result));
+        TLOG_WARN("Failed to get CPU info via libuv: {}", uvErrorToString(result));
         return info;
     }
 
@@ -188,7 +188,7 @@ std::vector<SystemInfoProvider::NetworkInterface> SystemInfoProvider::getNetwork
     int result = uv_interface_addresses(&addresses, &count);
 
     if (result != 0) {
-        logw("Failed to get network interfaces via libuv: {}", uvErrorToString(result));
+        TLOG_WARN("Failed to get network interfaces via libuv: {}", uvErrorToString(result));
         return interfaces;
     }
 
@@ -254,7 +254,7 @@ std::unordered_map<std::string, std::string> SystemInfoProvider::getEnvironmentV
     int result = uv_os_environ(&env_items, &count);
 
     if (result != 0) {
-        logw("Failed to get environment variables via libuv: {}", uvErrorToString(result));
+        TLOG_WARN("Failed to get environment variables via libuv: {}", uvErrorToString(result));
         return env_vars;
     }
 

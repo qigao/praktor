@@ -13,7 +13,7 @@
 #include <tao/pegtl.hpp>
 #include <tao/pegtl/contrib/parse_tree.hpp>
 
-#include "fmtlog.h"
+#include "util/logging.hpp"
 #include <regex>
 
 namespace Praktor::Expressions {
@@ -218,7 +218,7 @@ std::string convert<std::string>(const Value &value) {
   return std::visit(Overloaded{
     [](std::monostate) { return std::string{}; },
     [](bool b) { return b ? std::string("true") : std::string("false"); },
-    [](double d) { 
+    [](double d) {
       std::ostringstream oss;
       oss << d;
       return oss.str();
@@ -241,7 +241,7 @@ bool convert<bool>(const Value &value) {
       return !(lowered == "false" || lowered == "0" || lowered == "null");
     }
   }, value);
-  logd("Expression to_bool: '{}' -> {}", convert<std::string>(value), res);
+  logd("Expression to_bool: '{:s}' -> {:d}", convert<std::string>(value).c_str(), res);
   return res;
 }
 
@@ -452,7 +452,7 @@ Value resolve_variable(const WorkflowContext &context, const std::string &raw_na
   // Note: getVariable returns "" for non-existent variables, but we need to
   // distinguish between "variable exists with empty value" vs "variable doesn't exist"
   // Since getValueByPath already returned empty, the variable truly doesn't exist
-  logi("Expression variable '{}' not found in context, returning monostate", name);
+  logi("Expression variable '{:s}' not found in context, returning monostate", name.c_str());
   return Value{};
 }
 
@@ -731,7 +731,7 @@ public:
       return (*fn)(evaluated, context);
     }
 
-    throw std::runtime_error(fmt::format("Unknown function '{}'", name_));
+    throw std::runtime_error("Unknown function '" + name_ + "'");
   }
 
 private:
@@ -796,12 +796,12 @@ build_binary_sequence(const pegtl::parse_tree::node &node,
   if (node.children.empty()) {
     return std::make_unique<LiteralNode>(Value{});
   }
-  
+
   auto result = build_node(unwrap(*node.children.front()));
-  
+
   for (std::size_t i = 1; i < node.children.size(); ++i) {
     const auto &tail = *node.children[i];
-    
+
     // Simple case: tail has operator and RHS
     if (tail.children.size() >= 2) {
       BinaryOp op = operator_selector(*tail.children.front());
@@ -868,7 +868,7 @@ std::unique_ptr<ASTNode> build_node(const pegtl::parse_tree::node &raw) {
   }
 
   // Variables - all variable types handled the same way
-  if (node.is_type<grammar::moustache_inner>() || 
+  if (node.is_type<grammar::moustache_inner>() ||
       node.is_type<grammar::moustache_body>() ||
       node.is_type<grammar::bare_variable>()) {
     return std::make_unique<VariableNode>(node.string());
@@ -931,7 +931,7 @@ Value ExpressionEvaluator::evaluate(const std::string &expression, const Workflo
       log_tree(*c, depth + 1);
     }
   };
-  logd("evaluate: Parse tree for '{}':", expression);
+  logd("evaluate: Parse tree for '{:s}':", expression.c_str());
   log_tree(*root, 0);
 
   // The root node should have the top-level expression as its only child (if folded)
@@ -939,7 +939,7 @@ Value ExpressionEvaluator::evaluate(const std::string &expression, const Workflo
   for (const auto &child : root->children) {
     if (auto ast = build_node(*child)) {
       Value val = ast->evaluate(context, registry);
-      logd("Expression final result: '{}'", to_string_value(val));
+      logd("Expression final result: '{:s}'", to_string_value(val).c_str());
       return val;
     }
   }

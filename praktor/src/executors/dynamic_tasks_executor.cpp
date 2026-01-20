@@ -1,6 +1,6 @@
 #include "executors/dynamic_tasks_executor.hpp"
 
-#include "fmtlog.h"
+#include "util/logging.hpp"
 #include "util/variable_substitution.hpp"
 
 #include <jsoncons/json.hpp>
@@ -13,7 +13,7 @@ namespace Praktor::Execution
 
 TaskResult DynamicTasksExecutor::execute(const Task& task, WorkflowContext& context)
 {
-    logi("Executing dynamic_tasks: {}", task.name);
+    TLOG_INFO("Executing dynamic_tasks: {}", task.name);
 
     if (!subtask_callback_) {
         return TaskResult(false, "DynamicTasksExecutor requires subtask_callback to be set");
@@ -41,33 +41,31 @@ TaskResult DynamicTasksExecutor::execute(const Task& task, WorkflowContext& cont
         jsoncons::json items_json;
         try {
             items_json = context.getValueByPath(items_var);
-            logi("Retrieved items_variable '{}': is_null={}, is_array={}, type={}", 
+            TLOG_INFO("Retrieved items_variable '{}': is_null={}, is_array={}, type={}",
                  items_var, items_json.is_null(), items_json.is_array(), (int)items_json.type());
         } catch (const std::exception& e) {
-            return TaskResult(false, fmt::format("dynamic_tasks items_variable '{}' not found in context: {}", 
-                                items_var, e.what()));
+            return TaskResult(false, "dynamic_tasks items_variable '" + items_var + "' not found in context: " + e.what());
         }
 
         if (items_json.is_null()) {
-            return TaskResult(false, fmt::format("dynamic_tasks items_variable '{}' resolved to null", items_var));
+            return TaskResult(false, "dynamic_tasks items_variable '" + items_var + "' resolved to null");
         }
 
         if (!items_json.is_array()) {
-            return TaskResult(false, fmt::format("dynamic_tasks items_variable '{}' must be a JSON array, got: {}", 
-                                items_var, items_json.to_string()));
+            return TaskResult(false, "dynamic_tasks items_variable '" + items_var + "' must be a JSON array, got: " + items_json.to_string());
         }
 
-        logi("Generating {} tasks from template", items_json.size());
+        TLOG_INFO("Generating {} tasks from template", items_json.size());
 
         // Generate and execute tasks
         size_t index = 0;
         for (const auto& item : items_json.array_range()) {
             Task generated = generateTask(params.task_template, item, index, context);
-            logi("Executing generated task: {}", generated.name);
+            TLOG_INFO("Executing generated task: {}", generated.name);
 
             bool success = subtask_callback_(generated, context);
             if (!success) {
-                return TaskResult(false, fmt::format("Generated task '{}' failed", generated.name));
+                return TaskResult(false, "Generated task '" + generated.name + "' failed");
             }
 
             ++index;
@@ -76,9 +74,9 @@ TaskResult DynamicTasksExecutor::execute(const Task& task, WorkflowContext& cont
         return TaskResult(true);
 
     } catch (const std::bad_variant_access& e) {
-        return TaskResult(false, fmt::format("Task does not contain DynamicTasksParams: {}", e.what()));
+        return TaskResult(false, "Task does not contain DynamicTasksParams: " + std::string(e.what()));
     } catch (const std::exception& e) {
-        return TaskResult(false, fmt::format("DynamicTasks execution failed: {}", e.what()));
+        return TaskResult(false, "DynamicTasks execution failed: " + std::string(e.what()));
     }
 }
 

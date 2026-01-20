@@ -1,6 +1,6 @@
 #include "executors/file_operation_executors.hpp"
 #include "util/variable_substitution.hpp"
-#include "fmtlog.h"
+#include "util/logging.hpp"
 
 #include <filesystem>
 #include <variant>
@@ -8,7 +8,7 @@
 namespace Praktor::Execution {
 
 TaskResult CopyFileExecutor::execute(const Task& task, WorkflowContext& context) {
-    logi("Copying file for task: {}", task.name);
+    TLOG_INFO("Copying file for task: {:s}", task.name.c_str());
 
     try {
         const auto& params = std::get<CopyFileParams>(task.specifics);
@@ -25,23 +25,23 @@ TaskResult CopyFileExecutor::execute(const Task& task, WorkflowContext& context)
                     : std::filesystem::copy_options::none
             );
 
-            logi("Successfully copied file from {} to {}", source, destination);
+            TLOG_INFO("Successfully copied file from {:s} to {:s}", source.c_str(), destination.c_str());
             return TaskResult(true);
         } else {
-            return TaskResult(false, fmt::format("Destination file exists and overwrite is false: {}", destination));
+            return TaskResult(false, "Destination file exists and overwrite is false: " + destination);
         }
 
     } catch (const std::bad_variant_access& e) {
-        return TaskResult(false, fmt::format("Task does not contain CopyFileParams: {}", e.what()));
+        return TaskResult(false, "Task does not contain CopyFileParams: " + std::string(e.what()));
     } catch (const std::filesystem::filesystem_error& e) {
-        return TaskResult(false, fmt::format("File copy failed: {}", e.what()));
+        return TaskResult(false, "File copy failed: " + std::string(e.what()));
     } catch (const std::exception& e) {
-        return TaskResult(false, fmt::format("Copy file execution failed: {}", e.what()));
+        return TaskResult(false, "Copy file execution failed: " + std::string(e.what()));
     }
 }
 
 TaskResult MoveFileExecutor::execute(const Task& task, WorkflowContext& context) {
-    logi("Moving file for task: {}", task.name);
+    TLOG_INFO("Moving file for task: {:s}", task.name.c_str());
 
     try {
         const auto& params = std::get<MoveFileParams>(task.specifics);
@@ -55,20 +55,20 @@ TaskResult MoveFileExecutor::execute(const Task& task, WorkflowContext& context)
 
         std::filesystem::rename(source, destination);
 
-        logi("Successfully moved file from {} to {}", source, destination);
+        TLOG_INFO("Successfully moved file from {:s} to {:s}", source.c_str(), destination.c_str());
         return TaskResult(true);
 
     } catch (const std::bad_variant_access& e) {
-        return TaskResult(false, fmt::format("Task does not contain MoveFileParams: {}", e.what()));
+        return TaskResult(false, "Task does not contain MoveFileParams: " + std::string(e.what()));
     } catch (const std::filesystem::filesystem_error& e) {
-        return TaskResult(false, fmt::format("File move failed: {}", e.what()));
+        return TaskResult(false, "File move failed: " + std::string(e.what()));
     } catch (const std::exception& e) {
-        return TaskResult(false, fmt::format("Move file execution failed: {}", e.what()));
+        return TaskResult(false, "Move file execution failed: " + std::string(e.what()));
     }
 }
 
 TaskResult CreateDirectoryExecutor::execute(const Task& task, WorkflowContext& context) {
-    logi("Creating directory for task: {}", task.name);
+    TLOG_INFO("Creating directory for task: {:s}", task.name.c_str());
 
     try {
         const auto& params = std::get<CreateDirectoryParams>(task.specifics);
@@ -83,18 +83,18 @@ TaskResult CreateDirectoryExecutor::execute(const Task& task, WorkflowContext& c
         }
 
         if (!std::filesystem::exists(dirPath)) {
-            return TaskResult(false, fmt::format("Failed to create directory: {}", path));
+            return TaskResult(false, "Failed to create directory: " + path);
         }
 
-        logi("Successfully created directory: {}", path);
+        TLOG_INFO("Successfully created directory: {:s}", path.c_str());
         return TaskResult(true);
 
     } catch (const std::bad_variant_access& e) {
-        return TaskResult(false, fmt::format("Task does not contain CreateDirectoryParams: {}", e.what()));
+        return TaskResult(false, "Task does not contain CreateDirectoryParams: " + std::string(e.what()));
     } catch (const std::filesystem::filesystem_error& e) {
-        return TaskResult(false, fmt::format("Directory creation failed: {}", e.what()));
+        return TaskResult(false, "Directory creation failed: " + std::string(e.what()));
     } catch (const std::exception& e) {
-        return TaskResult(false, fmt::format("Create directory execution failed: {}", e.what()));
+        return TaskResult(false, "Create directory execution failed: " + std::string(e.what()));
     }
 }
 
