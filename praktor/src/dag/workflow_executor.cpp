@@ -4,6 +4,7 @@
 #include "dag/trigger_executor.hpp"
 #include "executors/command_executor.hpp"
 #include "executors/dynamic_tasks_executor.hpp"
+#include "executors/http_executor.hpp"
 #include "executors/script_executor.hpp"
 #include "executors/uses_executor.hpp"
 #include "expressions/expression_evaluator.hpp"
@@ -13,10 +14,10 @@
 #include "util/variable_substitution.hpp"
 #include "yml/task_parser.hpp"
 
+#include "util/logging.hpp"
 #include <algorithm>
 #include <chrono>
 #include <filesystem>
-#include "util/logging.hpp"
 #include <fstream>
 #include <jsoncons/json.hpp>
 #include <optional>
@@ -61,7 +62,8 @@ void sleepWithDelay(const std::string &delay) {
   }
 }
 
-std::vector<jsoncons::json> generateMatrixCombinations(const std::unordered_map<std::string, StrList> &matrix) {
+std::vector<jsoncons::json>
+generateMatrixCombinations(const std::unordered_map<std::string, StrList> &matrix) {
   if (matrix.empty())
     return {};
 
@@ -132,6 +134,7 @@ WorkflowExecutor::WorkflowExecutor(DependencyGraph<Task> &graph,
     return this->executeTask(task, ctx, std::nullopt);
   });
   executors_[TaskAction::DynamicTasks] = std::move(dynamic_executor);
+  executors_[TaskAction::Http] = Praktor::Execution::createHttpExecutor();
 }
 
 void WorkflowExecutor::execute(WorkflowContext &context, std::optional<std::string> alias) {
@@ -398,9 +401,12 @@ bool WorkflowExecutor::executeTask(const Task &task, WorkflowContext &context,
   return overall_success;
 }
 
-std::pair<bool, std::string> WorkflowExecutor::executeTaskInternal(const Task &task, WorkflowContext &context,
-                                           std::optional<std::string> alias, bool ignore_when) {
-  logi("Executing task: {} (action={}, ignore_when={})", task.name, static_cast<int>(task.action), ignore_when);
+std::pair<bool, std::string> WorkflowExecutor::executeTaskInternal(const Task &task,
+                                                                   WorkflowContext &context,
+                                                                   std::optional<std::string> alias,
+                                                                   bool ignore_when) {
+  logi("Executing task: {} (action={}, ignore_when={})", task.name, static_cast<int>(task.action),
+       ignore_when);
   context.pushTaskScope(task.name, alias);
   ScopedVariables scoped_vars(context, task.vars);
 
@@ -504,9 +510,10 @@ void WorkflowExecutor::executeTriggers(const Task &task, bool success, WorkflowC
   try {
     // Get all tasks from the graph
     auto all_tasks = graph_.getNodes();
-    trigger_executor_.executeTriggers(task, success, context, all_tasks, [this, &context](const Task &t) {
-      return this->executeTask(t, context, std::nullopt, true); // Force execute trigger tasks
-    });
+    trigger_executor_.executeTriggers(
+        task, success, context, all_tasks, [this, &context](const Task &t) {
+          return this->executeTask(t, context, std::nullopt, true); // Force execute trigger tasks
+        });
   } catch (const std::exception &e) {
     logw("Trigger execution encountered an error: {}", e.what());
   }

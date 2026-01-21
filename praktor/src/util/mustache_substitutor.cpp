@@ -42,9 +42,8 @@ static int bridge_dump(void* node_ptr, int (*out_fn)(const char*, size_t, void*)
 
 static void* bridge_get_root(void* provider_data) {
     MustacheContext* ctx = static_cast<MustacheContext*>(provider_data);
-    // Root doesn't have a value per se, it's the context itself.
-    // We'll return a special null node or a placeholder.
-    return ctx->createNode(WorkflowValue::null(), "");
+    // Root represents the global context. We give it a dummy object value so checks pass.
+    return ctx->createNode(jsoncons::json::object(), "");
 }
 
 static void *bridge_get_child_by_name(void *node_ptr, const char *name, size_t size, void *provider_data) {
@@ -57,7 +56,7 @@ static void *bridge_get_child_by_name(void *node_ptr, const char *name, size_t s
 
     WorkflowValue val = ctx->workflow_context.getValueByPath(new_path);
     if (!val.is_null()) {
-        logd("bridge_get_child_by_name: found value at path='{}'", new_path);
+        // TLOG_INFO("mustache: found path='{}', val='{}'", new_path, val.to_string());
         return ctx->createNode(val, new_path);
     }
     

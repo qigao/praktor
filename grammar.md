@@ -162,6 +162,7 @@ Every task must have a `name` and exactly one runner (`command`, `script`, or `u
 - `script` (Object): Execute JavaScript code. See Section 7.2.
 - `uses` (String): Execute a reusable workflow file. See Section 6.
 - `dynamic_tasks` (Object): Execute tasks generated at runtime. See Section 7.3.
+- `http` (Object): Execute HTTP requests with optional JavaScript hooks. See Section 7.4.
 
 ### 5.2. Control Flow & Resilience
 
@@ -393,6 +394,133 @@ tasks:
 - Process files found by a previous task
 - Run tests for dynamically discovered modules
 - Fan-out operations based on API responses
+
+### 7.4. Runner: `http` (HTTP Requests)
+
+Executes HTTP requests with support for JavaScript hooks to modify requests and validate responses.
+
+**Attributes:**
+- `http.url` (String, **Required**): The HTTP endpoint URL. Supports variable substitution.
+- `http.method` (String, Optional): HTTP method. Default: `GET`. Case-insensitive.
+  - Supported: `GET`, `POST`, `PUT`, `DELETE`, `PATCH`, `HEAD`, `OPTIONS`
+- `http.headers` (Map<String, String>, Optional): Request headers.
+- `http.body` (String, Optional): Request body (for POST, PUT, PATCH).
+- `http.timeout_ms` (Integer, Optional): Request timeout in milliseconds.
+- `http.follow_redirects` (Boolean, Optional): Follow HTTP redirects.
+- `http.auth_user` (String, Optional): Basic authentication username.
+- `http.auth_pass` (String, Optional): Basic authentication password.
+- `http.bearer_token` (String, Optional): Bearer token for Authorization header.
+- `http.script` (String, Optional): Pre-request JavaScript hook to modify the request.
+- `http.test` (String, Optional): Post-response JavaScript hook to validate the response.
+
+**Output Capture:**
+- Status code: `{{ tasks.<task_name>.outputs.status }}`
+- Response body: `{{ tasks.<task_name>.outputs.body }}`
+- Parsed JSON: `{{ tasks.<task_name>.outputs.data }}` (if Content-Type is JSON)
+- Success flag: `{{ tasks.<task_name>.outputs.success }}`
+
+**JavaScript Hooks:**
+
+*Pre-Request Hook (`script`):*
+Modify the request before it's sent. Available object: `request`
+- `request.url` (read/write): Request URL
+- `request.method` (read/write): HTTP method
+- `request.body` (read/write): Request body
+- `request.addHeader(key, value)`: Add a request header
+
+*Post-Response Hook (`test`):*
+Validate the response. Available object: `response`
+- `response.status` (read-only): HTTP status code
+- `response.body` (read-only): Response body as string
+
+When a `test` script passes, the task is marked successful regardless of HTTP status code, enabling validation of error responses.
+
+**Example:**
+```yaml
+tasks:
+  # Basic GET request
+  - name: fetch_users
+    http:
+      url: "https://api.example.com/users"
+      method: GET
+      headers:
+        Authorization: "Bearer {{ secrets.api_token }}"
+    # Output: tasks.fetch_users.outputs.data.users
+
+  # POST with authentication
+  - name: create_user
+    http:
+      url: "https://api.example.com/users"
+      method: POST
+      bearer_token: "{{ secrets.api_token }}"
+      headers:
+        Content-Type: "application/json"
+      body: |
+        {
+          "name": "{{ user_name }}",
+          "email": "{{ user_email }}"
+        }
+
+  # Request modification with script hook
+  - name: dynamic_request
+    http:
+      url: "https://api.example.com/search"
+      method: GET
+      script: |
+        // Modify URL with query parameters
+        request.url = request.url + "?q=test&limit=10";
+        
+        // Add custom headers
+        request.addHeader("X-Request-ID", Date.now().toString());
+        request.addHeader("X-Client-Version", "1.0");
+
+  # Response validation with test hook
+  - name: validated_request
+    http:
+      url: "https://api.example.com/users"
+      method: GET
+      test: |
+        // Validate status
+        if (response.status !== 200) {
+            fail("Expected 200 OK, got " + response.status);
+        }
+        
+        // Parse and validate JSON
+        var data = JSON.parse(response.body);
+        if (!data.users || data.users.length === 0) {
+            fail("No users returned");
+        }
+
+  # Chained requests with context
+  - name: login
+    http:
+      url: "https://api.example.com/auth/login"
+      method: POST
+      body: |
+        {
+          "username": "{{ env.API_USER }}",
+          "password": "{{ env.API_PASS }}"
+        }
+      test: |
+        var data = JSON.parse(response.body);
+        if (!data.token) {
+            fail("No token in response");
+        }
+
+  - name: get_protected_data
+    depends_on: [login]
+    http:
+      url: "https://api.example.com/protected/data"
+      method: GET
+      headers:
+        Authorization: "Bearer {{ tasks.login.outputs.data.token }}"
+```
+
+**Limitations:**
+- Response bodies containing null bytes (`\0`) will be truncated at the first null byte
+- For binary data, ensure the API returns base64-encoded content in JSON responses
+- Response properties (`status`, `body`) are non-enumerable for technical reasons
+
 
 ## 8. Event-Driven Triggers
 
@@ -864,6 +992,12 @@ tasks:
       template:
         name: "subtask_{{ item }}"
         command: "echo {{ item }}"
+    # OR
+    http:
+      url: "https://api.example.com/data"
+      method: GET
+      headers:
+        Authorization: "Bearer {{ token }}"
 
     # Optional triggers
     triggers:
@@ -880,5 +1014,6 @@ tasks:
 | `script` | JavaScript data transformation | `tasks.<name>.outputs.<key>` (via `context.set`) |
 | `uses` | Execute reusable workflow | `tasks.<name>.outputs.*` (from nested tasks) |
 | `dynamic_tasks` | Runtime task generation | Outputs from each generated task |
+| `http` | HTTP requests with hooks | `tasks.<name>.outputs.status`, `.body`, `.data` |
 
 ---

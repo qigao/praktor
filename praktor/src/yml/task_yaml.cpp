@@ -236,6 +236,63 @@ RunCommandParams parse_run_command_params(const ryml::ConstNodeRef& node) {
     return params;
 }
 
+HttpParams parse_http_params(const ryml::ConstNodeRef& node) {
+    if (!node.is_map()) {
+        throw_parse_error(node, "http must be a map");
+    }
+
+    HttpParams params;
+    if (node.has_child("url")) {
+        node["url"] >> params.url;
+    } else {
+        throw_parse_error(node, "http task requires a 'url'");
+    }
+
+    if (node.has_child("method")) node["method"] >> params.method;
+    if (node.has_child("body")) node["body"] >> params.body;
+    if (node.has_child("follow_redirects")) {
+        std::string val;
+        node["follow_redirects"] >> val;
+        params.follow_redirects = (to_lower_copy(val) == "true" || val == "1");
+    }
+    if (node.has_child("timeout_ms")) node["timeout_ms"] >> params.timeout_ms;
+
+    if (node.has_child("headers")) {
+        params.headers = node_to_string_map(node["headers"]);
+    }
+
+    if (node.has_child("auth")) {
+        const auto& auth = node["auth"];
+        if (auth.has_child("user")) {
+            std::string user;
+            auth["user"] >> user;
+            params.auth_user = user;
+        }
+        if (auth.has_child("pass")) {
+            std::string pass;
+            auth["pass"] >> pass;
+            params.auth_pass = pass;
+        }
+        if (auth.has_child("bearer")) {
+            std::string bearer;
+            auth["bearer"] >> bearer;
+            params.bearer_token = bearer;
+        }
+    }
+
+    if (node.has_child("script")) {
+        std::string script;
+        node["script"] >> script;
+        params.script = script;
+    }
+    if (node.has_child("test")) {
+        std::string test;
+        node["test"] >> test;
+        params.test = test;
+    }
+
+    return params;
+}
 
 ScriptParams parse_script_params(const ryml::ConstNodeRef& node) {
     if (!node.is_map()) {
@@ -367,7 +424,7 @@ Task parse_task(const ryml::ConstNodeRef& node, const std::string& source_path) 
         "name", "description", "depends_on", "vars", "env", "dotEnv", "when",
         "each", "retries", "timeout", "triggers", "continue_on_error",
         "working_dir", "silent", "sources", "generates", "finally",
-        "command", "script", "uses", "dynamic_tasks", "output_format"
+        "command", "script", "uses", "dynamic_tasks", "http", "output_format"
     };
     check_unknown_keys(node, allowed_task_keys);
 
@@ -499,8 +556,14 @@ Task parse_task(const ryml::ConstNodeRef& node, const std::string& source_path) 
         ++action_count;
     }
 
+    if (node.has_child("http")) {
+        task.action = TaskAction::Http;
+        task.specifics = parse_http_params(node["http"]);
+        ++action_count;
+    }
+
     if (action_count == 0) {
-        throw_parse_error(node, "task '" + task.name + "' must declare exactly one runner (command/script/uses/dynamic_tasks)");
+        throw_parse_error(node, "task '" + task.name + "' must declare exactly one runner (command/script/uses/dynamic_tasks/http)");
     }
     if (action_count > 1) {
         throw_parse_error(node, "task '" + task.name + "' declares multiple runners");

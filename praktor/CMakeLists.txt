@@ -16,7 +16,9 @@ set(SOURCE_FILES
     src/dag/task_executor_pool.cpp
     src/executors/command_executor.cpp
     src/executors/dynamic_tasks_executor.cpp
+    src/executors/http_executor.cpp
     src/executors/script_executor.cpp
+    src/executors/script_evaluator.cpp
     src/executors/uses_executor.cpp
     src/expressions/expression_evaluator.cpp
     src/util/expression_evaluator.cpp
@@ -50,6 +52,7 @@ target_link_libraries(
            TurboNet::Quick
            TurboNet::Utils
            TurboNet::Mustache
+           TurboNet::HTTP
            cxxopts::cxxopts
            pubcxx
 )

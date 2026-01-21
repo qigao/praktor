@@ -7,9 +7,9 @@
 namespace Praktor {
 namespace Execution {
 
-void TriggerExecutor::executeTriggers(
-    const Task &task, bool success, WorkflowContext &context,
-    const std::vector<Task> &all_tasks, ExecutionCallback callback) {
+void TriggerExecutor::executeTriggers(const Task &task, bool success, WorkflowContext &context,
+                                      const std::vector<Task> &all_tasks,
+                                      ExecutionCallback callback) {
   if (!task.triggers || task.triggers->empty()) {
     return;
   }
@@ -40,29 +40,29 @@ void TriggerExecutor::executeTriggers(
   }
 }
 
-void TriggerExecutor::executeTriggerAction(
-    const TriggerAction &action, WorkflowContext &context,
-    const std::vector<Task> &all_tasks, ExecutionCallback callback) {
-  
+void TriggerExecutor::executeTriggerAction(const TriggerAction &action, WorkflowContext &context,
+                                           const std::vector<Task> &all_tasks,
+                                           ExecutionCallback callback) {
+
   // TriggerAction is now just a task name string
   std::string task_name = substituteVariables(action, context);
-  
+
   logi("Executing trigger action: {}", task_name);
-  
+
   // Find the task by name
-  const Task* trigger_task = nullptr;
-  for (const auto& t : all_tasks) {
+  const Task *trigger_task = nullptr;
+  for (const auto &t : all_tasks) {
     if (t.name == task_name) {
       trigger_task = &t;
       break;
     }
   }
-  
+
   if (!trigger_task) {
     loge("Trigger task not found: {}", task_name);
     throw std::runtime_error("Trigger task not found: " + task_name);
   }
-  
+
   logd("Executing trigger task '{}'", task_name);
   bool success = callback(*trigger_task);
   if (!success) {

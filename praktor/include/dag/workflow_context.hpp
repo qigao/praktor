@@ -237,21 +237,45 @@ public:
     auto last = trimmed_path.find_last_not_of(" \t\r\n");
     if (last != std::string::npos) trimmed_path.erase(last + 1);
 
+        if (trimmed_path == "tasks") {
+            // TLOG_INFO("getValueByPath: returning whole registry for 'tasks'");
+            return task_registry_->toJson();
+        }
+
         if (trimmed_path.rfind("tasks.", 0) == 0) {
             auto first_dot = trimmed_path.find('.', 6);
-            if (first_dot == std::string::npos) return task_registry_->toJson();
+            if (first_dot == std::string::npos) {
+                return task_registry_->toJson();
+            }
             std::string task_name = trimmed_path.substr(6, first_dot - 6);
             std::string rest = trimmed_path.substr(first_dot + 1);
             if (rest == "status") return WorkflowValue(task_registry_->getStatus(task_name));
             if (rest.rfind("outputs.", 0) == 0) {
-                try { 
-                    WorkflowValue val = task_registry_->getOutput(task_name, rest.substr(8)); 
-                    logd("getValueByPath: 'tasks.{}.outputs.{}' found, value='{}'", task_name, rest.substr(8), val.to_string());
-                    return val;
-                } catch(...) {}
+                std::string output_path = rest.substr(8);
+                // Split output_path to support nested JSON traversal: data.field.subfield
+                size_t path_dot = output_path.find('.');
+                std::string base_key = output_path.substr(0, path_dot);
+                
+                try {
+                    WorkflowValue current = task_registry_->getOutput(task_name, base_key);
+                    if (path_dot != std::string::npos) {
+                        // Traverse nested JSON segments
+                        std::stringstream ss(output_path.substr(path_dot + 1));
+                        std::string segment;
+                        while (std::getline(ss, segment, '.')) {
+                            if (current.is_object() && current.contains(segment)) {
+                                current = current.at(segment);
+                            } else {
+                                return WorkflowValue::null();
+                            }
+                        }
+                    }
+                    return current;
+                } catch(const std::exception& e) {
+                   TLOG_WARN("getValueByPath: exception lookup for '{}': {}", output_path, e.what());
+                }
             } else if (rest == "outputs") {
                 WorkflowValue outputs = task_registry_->getAllOutputs(task_name);
-                logd("getValueByPath: 'tasks.{}.outputs' found, value='{}'", task_name, outputs.to_string());
                 return outputs;
             }
         }

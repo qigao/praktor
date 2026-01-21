@@ -249,6 +249,7 @@ TaskResult ScriptExecutor::execute(const Task &task, WorkflowContext &context) {
     const char *msg = JS_ToCString(ctx, exception);
     task_result.success = false;
     task_result.error_message = msg ? msg : "Unknown script error";
+    TLOG_ERROR("Script Error in task '{}': {}", task.name, task_result.error_message);
     JS_FreeCString(ctx, msg);
 
     // Also get line number if available

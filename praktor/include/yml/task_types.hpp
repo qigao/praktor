@@ -11,7 +11,7 @@ using Vars = std::unordered_map<std::string, std::string>;
 using StrList = std::vector<std::string>;
 using DotEnv = std::vector<std::string>;
 
-enum class TaskAction { None, RunCommand, Script, Uses, DynamicTasks };
+enum class TaskAction { None, RunCommand, Script, Uses, DynamicTasks, Http };
 
 enum class CommandOutputFormat { Text, Json };
 
@@ -20,6 +20,20 @@ struct RunCommandParams {
   CommandOutputFormat output_format = CommandOutputFormat::Text;
   std::string working_directory;
   Vars environment;
+};
+
+struct HttpParams {
+  std::string url;
+  std::string method = "GET";
+  Vars headers;
+  std::string body;
+  bool follow_redirects = true;
+  int timeout_ms = 30000;
+  std::optional<std::string> auth_user;
+  std::optional<std::string> auth_pass;
+  std::optional<std::string> bearer_token;
+  std::optional<std::string> script; // pre-request JavaScript
+  std::optional<std::string> test;   // post-response JavaScript
 };
 
 struct ScriptParams {
@@ -105,6 +119,6 @@ struct TaskDefaults {
   std::optional<std::string> timeout;
 };
 
-using TaskSpecifics = std::variant<std::monostate, RunCommandParams, ScriptParams, UsesParams, DynamicTasksParams>;
+using TaskSpecifics = std::variant<std::monostate, RunCommandParams, ScriptParams, UsesParams, DynamicTasksParams, HttpParams>;
 
 #endif // __TASK_TYPES_H__

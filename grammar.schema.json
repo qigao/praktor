@@ -307,6 +307,61 @@
           },
           "required": ["items_variable", "template"],
           "additionalProperties": false
+        },
+        "http": {
+          "type": "object",
+          "description": "Execute HTTP requests with optional JavaScript hooks.",
+          "properties": {
+            "url": {
+              "type": "string",
+              "description": "The HTTP endpoint URL. Supports variable substitution."
+            },
+            "method": {
+              "type": "string",
+              "description": "HTTP method (case-insensitive). Default: GET.",
+              "enum": ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS", "get", "post", "put", "delete", "patch", "head", "options"]
+            },
+            "headers": {
+              "$ref": "#/$defs/stringMap",
+              "description": "Request headers."
+            },
+            "body": {
+              "type": "string",
+              "description": "Request body (for POST, PUT, PATCH)."
+            },
+            "timeout_ms": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Request timeout in milliseconds."
+            },
+            "follow_redirects": {
+              "type": "boolean",
+              "description": "Follow HTTP redirects.",
+              "default": true
+            },
+            "auth_user": {
+              "type": "string",
+              "description": "Basic authentication username."
+            },
+            "auth_pass": {
+              "type": "string",
+              "description": "Basic authentication password."
+            },
+            "bearer_token": {
+              "type": "string",
+              "description": "Bearer token for Authorization header."
+            },
+            "script": {
+              "type": "string",
+              "description": "Pre-request JavaScript hook to modify the request. Access via 'request' object."
+            },
+            "test": {
+              "type": "string",
+              "description": "Post-response JavaScript hook to validate the response. Access via 'response' object."
+            }
+          },
+          "required": ["url"],
+          "additionalProperties": false
         }
       },
       "required": [
@@ -331,6 +386,11 @@
         {
           "required": [
             "dynamic_tasks"
+          ]
+        },
+        {
+          "required": [
+            "http"
           ]
         }
       ],
