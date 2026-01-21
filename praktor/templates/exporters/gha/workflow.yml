@@ -1,4 +1,4 @@
-name: {{ WORKFLOW_NAME }}
+name: {{#name}}{{name}}{{/name}}{{^name}}Praktor Workflow{{/name}}
 
 on:
   push:
@@ -13,4 +13,13 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
-{{ STEPS }}
+{{#tasks}}
+      - name: {{name}}
+        run: |
+          echo "Executing Praktor task: {{name}}"
+          {{#command}}{{.}}{{/command}}
+          {{#script}}echo "Running script task"{{/script}}
+        {{#depends_on.0}}
+        # depends_on: {{#depends_on}}{{.}} {{/depends_on}}
+        {{/depends_on.0}}
+{{/tasks}}

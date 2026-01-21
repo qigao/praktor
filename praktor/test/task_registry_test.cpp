@@ -34,20 +34,25 @@ TEST_CASE("TaskRegistry State Machine", "[registry]") {
         REQUIRE(registry.getFailureReason("task_a") == "something went wrong");
     }
 
-    SECTION("Cannot start already running task") {
+    SECTION("Task re-entry support") {
         registry.startTask("task_a");
-        REQUIRE_THROWS_WITH(registry.startTask("task_a"),
-            Catch::Matchers::ContainsSubstring("already running"));
+        registry.markCompleted("task_a");
+        REQUIRE(registry.isCompleted("task_a"));
+
+        // Restarting already completed task should work
+        registry.startTask("task_a");
+        REQUIRE(registry.getState("task_a") == TaskState::Running);
+        REQUIRE_FALSE(registry.isCompleted("task_a"));
+
+        registry.markFailed("task_a", "re-entry failure");
+        REQUIRE(registry.isFailed("task_a"));
+        REQUIRE(registry.getFailureReason("task_a") == "re-entry failure");
     }
 
-    SECTION("Cannot complete non-running task") {
-        REQUIRE_THROWS_WITH(registry.markCompleted("task_a"),
-            Catch::Matchers::ContainsSubstring("not running"));
-    }
-
-    SECTION("Cannot fail non-running task") {
-        REQUIRE_THROWS_WITH(registry.markFailed("task_a", "error"),
-            Catch::Matchers::ContainsSubstring("not running"));
+    SECTION("startTask can be called multiple times") {
+        registry.startTask("task_a");
+        REQUIRE_NOTHROW(registry.startTask("task_a"));
+        REQUIRE(registry.getState("task_a") == TaskState::Running);
     }
 }
 

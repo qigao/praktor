@@ -20,37 +20,13 @@ std::filesystem::path writeTempWorkflow(const std::string& name, const std::stri
 }
 }
 
-TEST_CASE("parse @praktor trigger shorthand and mapping")
+
+TEST_CASE("parse trigger with task name reference")
 {
     const std::string content =
         "tasks:\n"
-        "  - name: notify\n"
-        "    command: echo ok\n"
-        "    triggers:\n"
-        "      on_success:\n"
-        "        - \"@praktor Hello World\"\n"
-        "      on_failure:\n"
-        "        - praktor:\n"
-        "            message: Oops\n";
-
-    auto wf = writeTempWorkflow("trigger_praktor.yml", content);
-    Workflow workflow = TaskParser::parseFile(wf.string());
-    REQUIRE(workflow.tasks.size() == 1);
-    const Task& t = workflow.tasks[0];
-    REQUIRE(t.triggers.has_value());
-    const Triggers& tr = *t.triggers;
-    REQUIRE(tr.on_success.size() == 1);
-    REQUIRE(tr.on_failure.size() == 1);
-
-    CHECK(std::holds_alternative<PraktorNotifyTrigger>(tr.on_success[0]));
-    CHECK(std::holds_alternative<PraktorNotifyTrigger>(tr.on_failure[0]));
-}
-
-
-TEST_CASE("parse run_task trigger shorthand string")
-{
-    const std::string content =
-        "tasks:\n"
+        "  - name: rollback\n"
+        "    command: echo rollback\n"
         "  - name: build\n"
         "    command: echo build\n"
         "    triggers:\n"
@@ -59,39 +35,36 @@ TEST_CASE("parse run_task trigger shorthand string")
 
     auto wf = writeTempWorkflow("trigger_run_task.yml", content);
     Workflow workflow = TaskParser::parseFile(wf.string());
-    REQUIRE(workflow.tasks.size() == 1);
-    const Task& task = workflow.tasks[0];
+    REQUIRE(workflow.tasks.size() == 2);
+    const Task& task = workflow.tasks[1];
     REQUIRE(task.triggers.has_value());
     const auto& actions = task.triggers->on_failure;
     REQUIRE(actions.size() == 1);
-    REQUIRE(std::holds_alternative<RunTaskTrigger>(actions[0]));
-    CHECK(std::get<RunTaskTrigger>(actions[0]).task_name == "rollback");
+    CHECK(actions[0] == "rollback");
 }
 
-TEST_CASE("parse write_file trigger object")
+TEST_CASE("parse trigger with script task reference")
 {
     const std::string content =
         "tasks:\n"
+        "  - name: write_report\n"
+        "    script:\n"
+        "      source: |\n"
+        "        const fs = require('fs');\n"
+        "        fs.writeFileSync('./out.txt', 'done', {flag: 'a'});\n"
         "  - name: report\n"
         "    command: echo done\n"
         "    triggers:\n"
         "      on_complete:\n"
-        "        - write_file:\n"
-        "            path: ./out.txt\n"
-        "            content: done\n"
-        "            mode: append\n";
+        "        - write_report\n";
 
     auto wf = writeTempWorkflow("trigger_write_file.yml", content);
     Workflow workflow = TaskParser::parseFile(wf.string());
-    REQUIRE(workflow.tasks.size() == 1);
-    const Task& task = workflow.tasks[0];
+    REQUIRE(workflow.tasks.size() == 2);
+    const Task& task = workflow.tasks[1];
     REQUIRE(task.triggers.has_value());
     const auto& actions = task.triggers->on_complete;
     REQUIRE(actions.size() == 1);
-    REQUIRE(std::holds_alternative<WriteFileTrigger>(actions[0]));
-    const auto& trigger = std::get<WriteFileTrigger>(actions[0]);
-    CHECK(trigger.path == "./out.txt");
-    CHECK(trigger.content == "done");
-    CHECK(trigger.mode == WriteFileMode::Append);
+    CHECK(actions[0] == "write_report");
 }
 

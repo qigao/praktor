@@ -1,18 +1,36 @@
 name: "Matrix Build"
-description: "Demonstrates parallel execution using the 'each' matrix"
+description: "Demonstrates parallel execution using 'each' with both items and matrix modes"
 
 tasks:
-  - name: build_platform
-    description: "Multi-platform build simulation"
+  # Example 1: Simple list iteration with 'each.items'
+  - name: test_services
+    description: "Test each service independently"
     each:
-      matrix:
+      items: ["auth", "api", "worker"]
+      as: "service"
+    command: "echo Testing {{ service }} service..."
+
+  # Example 2: Matrix iteration with 'each.matrix' (cartesian product)
+  - name: write_build_result
+    script:
+      source: |
+        import fs from 'turbo:fs';
+        const path = `./builds/{{ platform.os }}-{{ platform.arch }}.txt`;
+        
+        if (!fs.exists("./builds")) {
+          fs.mkdir("./builds");
+        }
+        
+        fs.writeFile(path, "Build successful for {{ platform.os }} {{ platform.arch }}");
+
+  - name: build_all_platforms
+    description: "Build for all OS/architecture combinations (6 total: 3 OS × 2 arch)"
+    depends_on: [test_services]
+    each:
+      matrix:                    # 'matrix' creates cartesian product
         os: ["linux", "windows", "macos"]
         arch: ["amd64", "arm64"]
-      as: "cfg"
-    command: "echo Building for {{ cfg.os }} on {{ cfg.arch }}..."
+      as: "platform"             # Each combination available as 'platform.os' and 'platform.arch'
+    command: "echo Building for {{ platform.os }} on {{ platform.arch }}..."
     triggers:
-      on_success:
-        - write_file:
-            path: "./builds/{{ cfg.os }}-{{ cfg.arch }}.txt"
-            content: "Build successful for {{ cfg.os }} {{ cfg.arch }}"
-            mode: overwrite
+      on_success: [write_build_result]

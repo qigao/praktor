@@ -76,29 +76,9 @@ struct Each {
   bool enabled() const { return hasItems() || hasMatrix(); }
 };
 
-enum class WriteFileMode { Overwrite, Append };
-
-struct HttpPostTrigger {
-  std::string url;
-  std::optional<std::string> body;
-  std::unordered_map<std::string, std::string> headers;
-};
-
-struct WriteFileTrigger {
-  std::string path;
-  std::string content;
-  WriteFileMode mode = WriteFileMode::Overwrite;
-};
-
-struct RunTaskTrigger {
-  std::string task_name;
-};
-
-struct PraktorNotifyTrigger {
-  std::string message;
-};
-using TriggerAction =
-    std::variant<HttpPostTrigger, WriteFileTrigger, RunTaskTrigger, PraktorNotifyTrigger>;
+// Trigger actions now simply reference tasks by name
+// This allows any task type (script, command, uses, etc.) to be used as a trigger
+using TriggerAction = std::string;  // Task name to execute
 
 struct Triggers {
   std::vector<TriggerAction> on_success;

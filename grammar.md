@@ -396,53 +396,108 @@ tasks:
 
 ## 8. Event-Driven Triggers
 
-A `triggers` block defines lightweight, event-driven actions that execute after a task completes.
+A `triggers` block defines event-driven actions that execute after a task completes. Triggers simply reference other tasks by name, allowing any task type (script, command, uses) to be executed as a trigger action.
 
 **Events:**
 - `on_success`: Fires when the task completes successfully.
 - `on_failure`: Fires when the task fails (after all retries).
 - `on_complete`: Fires regardless of success or failure.
 
-**Actions:**
+**Trigger Actions:**
 
-### 8.1. `http_post` - Send HTTP Webhook
+Triggers are specified as an array of task names (strings). When a trigger event fires, the referenced tasks are looked up and executed.
+
+**Example:**
 ```yaml
-triggers:
-  on_success:
-    - http_post:
-        url: "https://hooks.slack.com/services/..."
-        body: '{"text": "Build completed: {{ tasks.build.outputs.version }}"}'
-        headers:
-          Content-Type: "application/json"
+tasks:
+  # Define notification tasks
+  - name: notify_slack
+    script:
+      source: |
+        import { post } from 'turbo:http';
+        const webhook = context.get("env.SLACK_WEBHOOK");
+        const message = context.get("tasks.deploy.outputs.version");
+        post(webhook, JSON.stringify({text: `Deployed ${message}`}));
+
+  - name: write_log
+    script:
+      source: |
+        import fs from 'turbo:fs';
+        const output = context.get("tasks.deploy.outputs.stdout");
+        fs.writeFile("./logs/deploy.log", output);
+
+  - name: rollback
+    command: "./rollback.sh --reason 'Deploy failed'"
+
+  # Main task with triggers
+  - name: deploy
+    command: "./deploy.sh --env production"
+    retries:
+      count: 3
+      delay: "10s"
+    triggers:
+      on_success: 
+        - notify_slack
+        - write_log
+      on_failure:
+        - rollback
+        - notify_slack
 ```
 
-### 8.2. `write_file` - Create File Artifact
-```yaml
-triggers:
-  on_complete:
-    - write_file:
-        path: "./logs/build.log"
-        content: "{{ tasks.build.outputs.stdout }}"
-        mode: overwrite  # or "append"
-```
+### 8.1. Simple Trigger References
 
-### 8.3. `run_task` - Execute Recovery Task
-```yaml
-triggers:
-  on_failure:
-    - run_task:
-        task_name: rollback_deployment
-```
-
-**Shorthand:** For `run_task`, you can use a string directly:
+The simplest form is a list of task names:
 ```yaml
 triggers:
   on_failure: [rollback_deployment, alert_team]
+  on_success: [update_dashboard]
 ```
 
-### 8.5. Failure Context Variables
+### 8.2. Writing Files as Triggers
 
-When a task fails, the following variables are available in `on_failure` triggers to provide diagnostic information:
+Instead of specialized `write_file` trigger actions, use a script task:
+```yaml
+tasks:
+  - name: save_build_log
+    script:
+      source: |
+        import fs from 'turbo:fs';
+        const buildLog = context.get("tasks.build.outputs.stdout");
+        fs.writeFile("./logs/build.log", buildLog);
+
+  - name: build
+    command: "npm run build"
+    triggers:
+      on_complete: [save_build_log]
+```
+
+### 8.3. HTTP Notifications as Triggers
+
+Instead of specialized `http_post` trigger actions, use a script task:
+```yaml
+tasks:
+  - name: notify_webhook
+    script:
+      source: |
+        import { post } from 'turbo:http';
+        const url = context.get("env.WEBHOOK_URL");
+        const status = context.get("tasks.deploy.status");
+        const body = JSON.stringify({
+          text: `Deployment ${status}`,
+          version: context.get("tasks.deploy.outputs.version")
+        });
+        post(url, body, {"Content-Type": "application/json"});
+
+  - name: deploy
+    command: "./deploy.sh"
+    triggers:
+      on_success: [notify_webhook]
+      on_failure: [notify_webhook]
+```
+
+### 8.4. Failure Context Variables
+
+When a task fails, the following variables are available in triggered tasks to provide diagnostic information:
 
 | Variable | Description |
 | :--- | :--- |
@@ -453,99 +508,95 @@ When a task fails, the following variables are available in `on_failure` trigger
 | `failed_task_stderr` | The captured standard error of the failed task. |
 | `failed_task_error` | The primary error message describing the failure. |
 
-These variables can be used in trigger actions like `http_post` bodies or `write_file` content using the standard `{{ variable_name }}` syntax.
+These variables can be accessed in triggered tasks using the standard `{{ variable_name }}` syntax or via `context.get()`.
 
-
-### 8.4. `@praktor` - Praktor Notification Shortcut
-A convenience action to notify the Praktor assistant or a configured webhook.
-
-Write a scalar beginning with `@praktor` to send a notification message:
+**Example:**
 ```yaml
-triggers:
-  on_success:
-    - "@praktor Build {{ VERSION }} deployed to {{ env.DEPLOY_ENV }}"
+tasks:
+  - name: alert_on_failure
+    script:
+      source: |
+        import { post } from 'turbo:http';
+        const taskName = context.get("failed_task_name");
+        const error = context.get("failed_task_error");
+        const stderr = context.get("failed_task_stderr");
+        
+        const message = `Task '${taskName}' failed: ${error}\n\nStderr:\n${stderr}`;
+        post(context.get("env.ALERT_WEBHOOK"), JSON.stringify({text: message}));
+
+  - name: deploy
+    command: "./deploy.sh"
+    triggers:
+      on_failure: [alert_on_failure]
 ```
 
-Equivalent long form:
+## 9. Templating and Expressions
+
+Praktor uses a two-tier system for dynamic values:
+1. **Mustache Templating**: Used for variable substitution in strings (commands, paths, messages).
+2. **Expression Evaluation**: Used for logical conditions (the `when` clause).
+
+### 9.1. Mustache Templating
+
+Standard string substitution uses the [Mustache](https://mustache.github.io/) templating engine. This provides powerful formatting capabilities beyond simple variable replacement.
+
+**Basic Variables:**
+- `{{ VERSION }}` - Global variable
+- `{{ tasks.build.outputs.stdout }}` - Task output
+- `{{ env.HOME }}` - Environment variable
+
+**Sections and Loops:**
+Sections can be used to iterate over arrays or conditionally render blocks.
 ```yaml
-triggers:
-  on_success:
-    - praktor:
-        message: "Build {{ VERSION }} deployed to {{ env.DEPLOY_ENV }}"
+# Iterating over a list of artifacts
+command: |
+  echo "Build Artifacts:"
+  {{#tasks.build.outputs.data.artifacts}}
+  echo "- {{name}} ({{size}} bytes)"
+  {{/tasks.build.outputs.data.artifacts}}
 ```
 
-Behavior:
-- If `PRAKTOR_WEBHOOK` (or `PRAKTOR_NOTIFY_URL`) is present in environment, performs an HTTP POST with JSON `{ "text": "<message>" }`.
-- Otherwise, logs the message to the workflow log as an info entry.
-- All variables support standard substitution.
-## 9. Expression Language
+**Inverted Sections:**
+Only rendered if the value is `false`, `null`, `undefined`, or an empty list.
+```yaml
+# Show a message if no tests were run
+triggers:
+  on_success:
+    - script:
+        source: |
+          console.log("{{^tasks.test.outputs.data.results}}No tests were executed.{{/tasks.test.outputs.data.results}}");
+```
 
-Expressions enable dynamic values and conditional logic throughout the workflow. The expression evaluator has been optimized for performance and maintainability while supporting all existing functionality.
+**Object Access:**
+You can access nested fields using dot notation: `{{ tasks.fetch.outputs.data.user.id }}`.
+
+### 9.2. Expression Language (for `when`)
+
+The `when` clause uses a specialized expression evaluator that supports logical and arithmetic operations.
 
 **Syntax:** Expressions are wrapped in `{{ ... }}`.
 
-**Variable Access:**
-- Simple variables: `{{ VERSION }}`
-- Nested paths: `{{ tasks.build.outputs.version }}`
-- Environment variables: `{{ env.NODE_ENV }}`
-- System variables: `{{ os.name }}`, `{{ os.arch }}`
-
-**Operators (in `when` clauses):**
+**Operators:**
 - **Comparison**: `==`, `!=`, `<`, `>`, `<=`, `>=`
 - **Logical**: `and`, `or`, `not` (also supports `!` for negation)
-- **String Operations**: 
-  - `contains` - Check if string contains substring
-  - `starts_with` or `startswith` - Check if string starts with prefix
-  - `ends_with` or `endswith` - Check if string ends with suffix
-  - `in` - Check if substring exists in string
-  - `matches` - Regular expression matching
-- **Arithmetic**: `+`, `-`, `*`, `/`, `%` (for numeric values)
-- **Grouping**: `(`, `)` for precedence control
-
-**Type Conversion:**
-The expression evaluator automatically handles type conversions:
-- Strings to numbers when used in arithmetic operations
-- Numbers to strings when used in string operations
-- Truthiness evaluation for conditional logic
-- Empty strings, zero values, and `null` evaluate to `false`
+- **String Operations**: `contains`, `starts_with`, `ends_with`, `in`, `matches` (Regex)
+- **Arithmetic**: `+`, `-`, `*`, `/`, `%`
+- **Grouping**: `(`, `)`
 
 **Built-in Functions:**
-- `len(value)` - Get length of string or array
+- `len(value)` - Length of string or array
 - `empty(value)` - Check if value is empty
 - `abs(number)` - Absolute value
 - `bool(value)` - Convert to boolean
 
-**JMESPath Queries:**
-For complex JSON data, use JMESPath syntax:
-```yaml
-vars:
-  latest_version: "{{ tasks.fetch_config.outputs.data.releases[0].version }}"
-```
-
-**Examples:**
+**Example with both:**
 ```yaml
 tasks:
-  - name: conditional_deploy
-    command: "./deploy.sh"
-    when: "{{ ENVIRONMENT }} == 'production' and {{ tasks.test.outputs.exit_code }} == 0"
-
-  - name: string_operations
-    command: "echo Processing"
-    when: "{{ tasks.fetch.outputs.data }} contains 'success' and {{ VERSION }} starts_with 'v'"
-
-  - name: regex_validation
-    command: "./validate.sh"
-    when: "{{ EMAIL }} matches '.*@.*\\.com'"
-
-  - name: use_output
-    command: "echo Deploying version {{ tasks.build.outputs.version }}"
-
-  - name: arithmetic_example
-    script:
-      source: |
-        const total = {{ tasks.count.outputs.value }} + 10;
-        context.set("total_count", total);
+  - name: deploy
+    command: "./deploy.sh --env {{ ENVIRONMENT }}" # Mustache substitution
+    when: "{{ ENVIRONMENT }} == 'production' and not empty({{ API_KEY }})" # Expression
 ```
+
 
 **Performance Notes:**
 - Expression parsing uses optimized PEG grammar for fast evaluation
@@ -628,15 +679,20 @@ tasks:
       TAG: "{{ tasks.get_version.outputs.stdout }}"
       REGISTRY_URL: "{{ REGISTRY }}"
 
+  - name: notify_slack
+    script:
+      source: |
+        import { post } from 'turbo:http';
+        const url = context.get("env.SLACK_WEBHOOK_URL");
+        const image = context.get("tasks.build_image.outputs.full_image_tag");
+        post(url, JSON.stringify({text: `Deployment failed for ${image}`}));
+
   - name: deploy
     depends_on: [build_image]
     command: "./scripts/deploy.sh --image {{ tasks.build_image.outputs.full_image_tag }}"
     when: "{{ ENVIRONMENT }} == 'production'"
     triggers:
-      on_failure:
-        - http_post:
-            url: "{{ env.SLACK_WEBHOOK_URL }}"
-            body: '{"text": "Deployment failed for {{ tasks.build_image.outputs.full_image_tag }}"}'
+      on_failure: [notify_slack]
 ```
 
 ### 11.3. Data Transformation with Script
@@ -689,6 +745,24 @@ tasks:
 
 ```yaml
 tasks:
+  - name: save_deploy_log
+    script:
+      source: |
+        import fs from 'turbo:fs';
+        const output = context.get("tasks.deploy_app.outputs.stdout");
+        fs.writeFile("./logs/deploy-success.log", `Deployed at ${output}`);
+
+  - name: notify_team
+    script:
+      source: |
+        import { post } from 'turbo:http';
+        const webhook = context.get("env.SLACK_WEBHOOK");
+        const error = context.get("failed_task_error") || "Success";
+        post(webhook, JSON.stringify({text: `Deploy status: ${error}`}));
+
+  - name: rollback
+    command: "./rollback.sh --reason 'Deploy failed'"
+
   - name: deploy_app
     command: "./deploy.sh --env production"
     retries:
@@ -696,18 +770,7 @@ tasks:
       delay: "10s"
     triggers:
       on_failure: [rollback, notify_team]
-      on_success:
-        - write_file:
-            path: "./logs/deploy-success.log"
-            content: "Deployed at {{ tasks.deploy_app.outputs.stdout }}"
-
-  - name: rollback
-    command: "./rollback.sh --reason 'Deploy failed'"
-
-  - name: notify_team
-    command: |
-      curl -X POST {{ env.SLACK_WEBHOOK }} \
-        -d '{"text": "Deploy failed: {{ failed_task_error }}"}'
+      on_success: [save_deploy_log, notify_team]
 ```
 
 ## 12. Security and Secrets Management

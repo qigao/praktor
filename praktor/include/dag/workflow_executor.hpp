@@ -24,8 +24,8 @@ public:
     void execute(WorkflowContext& context, std::optional<std::string> alias = std::nullopt);
 
 private:
-    bool executeTask(const Task& task, WorkflowContext& context, std::optional<std::string> alias = std::nullopt);
-    std::pair<bool, std::string> executeTaskInternal(const Task& task, WorkflowContext& context, std::optional<std::string> alias = std::nullopt);
+    bool executeTask(const Task& task, WorkflowContext& context, std::optional<std::string> alias = std::nullopt, bool ignore_when = false);
+    std::pair<bool, std::string> executeTaskInternal(const Task& task, WorkflowContext& context, std::optional<std::string> alias = std::nullopt, bool ignore_when = false);
     bool evaluateWhen(const Task& task, WorkflowContext& context) const;
     void executeTriggers(const Task& task, bool success, WorkflowContext& context);
     std::unordered_map<std::string, std::string> buildTaskEnvironment(

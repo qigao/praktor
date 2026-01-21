@@ -3,6 +3,7 @@
 
 // Standard library includes
 #include <optional>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
@@ -225,10 +226,16 @@ public:
 
     WorkflowValue getValueByPath(const std::string& path) const {
         if (path.empty()) return WorkflowValue::null();
-        std::string trimmed_path = path;
-        trimmed_path.erase(0, trimmed_path.find_first_not_of(" \t\r\n"));
-        auto last = trimmed_path.find_last_not_of(" \t\r\n");
-        if (last != std::string::npos) trimmed_path.erase(last + 1);
+        if (!scope_) {
+            logw("getValueByPath: scope_ is null");
+            return WorkflowValue::null();
+        }
+        size_t first = path.find_first_not_of(" \t\r\n");
+    if (first == std::string::npos) return WorkflowValue::null();
+    
+    std::string trimmed_path = path.substr(first);
+    auto last = trimmed_path.find_last_not_of(" \t\r\n");
+    if (last != std::string::npos) trimmed_path.erase(last + 1);
 
         if (trimmed_path.rfind("tasks.", 0) == 0) {
             auto first_dot = trimmed_path.find('.', 6);
@@ -237,17 +244,30 @@ public:
             std::string rest = trimmed_path.substr(first_dot + 1);
             if (rest == "status") return WorkflowValue(task_registry_->getStatus(task_name));
             if (rest.rfind("outputs.", 0) == 0) {
-                try { return task_registry_->getOutput(task_name, rest.substr(8)); } catch(...) {}
+                try { 
+                    WorkflowValue val = task_registry_->getOutput(task_name, rest.substr(8)); 
+                    logd("getValueByPath: 'tasks.{}.outputs.{}' found, value='{}'", task_name, rest.substr(8), val.to_string());
+                    return val;
+                } catch(...) {}
             } else if (rest == "outputs") {
-                return task_registry_->getAllOutputs(task_name);
+                WorkflowValue outputs = task_registry_->getAllOutputs(task_name);
+                logd("getValueByPath: 'tasks.{}.outputs' found, value='{}'", task_name, outputs.to_string());
+                return outputs;
             }
         }
 
         // Check if the exact path exists as a key
         if (scope_->has(trimmed_path)) {
-            try { return scope_->get(trimmed_path); } catch (...) {}
+            try { 
+                auto val = scope_->get(trimmed_path);
+                logd("getValueByPath: basic key '{}' found, value='{}'", trimmed_path, val.to_string());
+                return val;
+            } catch (...) {
+                logd("getValueByPath: basic key '{}' found but failed to retrieve", trimmed_path);
+            }
         }
 
+        logd("getValueByPath: key '{}' not found in scope, trying dotted traversal", trimmed_path);
         // Handle dotted paths by traversing nested objects
         if (trimmed_path.find('.') != std::string::npos) {
             std::vector<std::string> segments;
@@ -259,22 +279,27 @@ public:
 
             if (segments.size() >= 2 && scope_->has(segments[0])) {
                 try {
-                    WorkflowValue val = scope_->get(segments[0]);
-                     for (size_t i = 1; i < segments.size(); ++i) {
-                         if (!val.is_object()) {
+                    WorkflowValue current = scope_->get(segments[0]);
+                    logd("getValueByPath: starting dotted traversal from base key '{}', value='{}'", segments[0], current.to_string());
+                    for (size_t i = 1; i < segments.size(); ++i) {
+                        if (!current.is_object() || !current.contains(segments[i])) {
+                            logd("getValueByPath: dotted traversal failed at segment '{}', current is not object or does not contain key", segments[i]);
                             return WorkflowValue::null();
                         }
-                        if (!val.contains(segments[i])) {
-                             return WorkflowValue::null();
-                        }
-                        val = val.at(segments[i]);
+                        WorkflowValue next = current.at(segments[i]);
+                        logd("getValueByPath: traversed to segment '{}', current value='{}'", segments[i], next.to_string());
+                        current = std::move(next);
                     }
-                      return val;
+                    logd("getValueByPath: dotted traversal successful for '{}', final value='{}'", trimmed_path, current.to_string());
+                    return current;
                 } catch (const std::exception& e) {
-                    logw("getValueByPath: exception during traversal: {}", e.what());
+                    logw("getValueByPath: exception during traversal for '{}': {}", trimmed_path, e.what());
                 }
+            } else {
+                logd("getValueByPath: dotted path '{}' has less than 2 segments or base key '{}' not found in scope", trimmed_path, segments[0]);
             }
         }
+        logd("getValueByPath: key '{}' not found after all attempts, returning null", trimmed_path);
         return WorkflowValue::null();
     }
 
@@ -286,6 +311,7 @@ public:
      * Now uses VariableScope.getAllVisible().
      */
     std::unordered_map<std::string, std::string> getAllVariables() const {
+        logd("getAllVariables: retrieving all visible string variables");
         std::unordered_map<std::string, std::string> result;
         auto all_visible = scope_->getAllVisible();
         for (auto const& [key, value] : all_visible) {
@@ -293,6 +319,7 @@ public:
                 result[key] = value.as<std::string>();
             }
         }
+        logd("getAllVariables: retrieved {} string variables", result.size());
         return result;
     }
 
@@ -302,6 +329,7 @@ public:
      * Returns all variables visible in current scope (including inherited from parent scopes).
      */
     std::unordered_map<std::string, WorkflowValue> getAllVisibleValues() const {
+        logd("getAllVisibleValues: retrieving all visible WorkflowValues");
         return scope_->getAllVisible();
     }
 
@@ -311,41 +339,54 @@ public:
      * Fully delegates to TaskRegistry.
      */
     void setTaskStatus(const std::string& taskName, const std::string& status) {
+        logd("setTaskStatus: task='{}', status='{}'", taskName, status);
         task_registry_->setStatus(taskName, status);
     }
 
     std::string getTaskStatus(const std::string& taskName) const {
-        return task_registry_->getStatus(taskName);
+        std::string status = task_registry_->getStatus(taskName);
+        logd("getTaskStatus: task='{}', status='{}'", taskName, status);
+        return status;
     }
 
     void setTaskOutput(const std::string& taskName, const std::string& key, const WorkflowValue& value) {
+        logd("setTaskOutput: task='{}', key='{}', value='{}'", taskName, key, value.to_string());
         task_registry_->setOutput(taskName, key, value);
     }
 
     void mergeTaskOutputs(const std::string& taskName, const WorkflowValue& outputs) {
+        logd("mergeTaskOutputs: task='{}', outputs='{}'", taskName, outputs.to_string());
         task_registry_->mergeOutputs(taskName, outputs);
     }
     void pushTaskScope(const std::string& taskName, std::optional<std::string> alias = std::nullopt) {
+        std::string alias_str = alias.has_value() ? alias.value() : "nullopt";
+        logd("pushTaskScope: taskName='{}', alias='{}', stack_size={}", taskName, alias_str, task_scope_stack_.size() + 1);
         task_scope_stack_.emplace_back(taskName, alias);
     }
 
     void popTaskScope() {
         if (!task_scope_stack_.empty()) {
+            const auto& scope = task_scope_stack_.back();
+            std::string alias_str = scope.second.has_value() ? scope.second.value() : "nullopt";
+            logd("popTaskScope: popping task='{}', alias='{}', stack_size={}", scope.first, alias_str, task_scope_stack_.size() - 1);
             task_scope_stack_.pop_back();
+        } else {
+            logw("popTaskScope: attempt to pop from empty task_scope_stack_");
         }
     }
 
     void setCurrentTaskOutput(const std::string& key, const WorkflowValue& value) {
-        logd("setCurrentTaskOutput: key={:s}, stack_size=%zu", key.c_str(), task_scope_stack_.size());
+        logd("setCurrentTaskOutput: key='{}', value='{}', stack_size={}", key, value.to_string(), task_scope_stack_.size());
         if (task_scope_stack_.empty()) {
-            logd("setCurrentTaskOutput: empty stack, using __root__");
+            logd("setCurrentTaskOutput: empty stack, using __root__ task");
             setTaskOutput("__root__", key, value);
+            setValue("tasks.__root__.outputs." + key, value);
             return;
         }
 
         const auto& scope = task_scope_stack_.back();
-        logd("setCurrentTaskOutput: scope.first={:s}, scope.second={:s}", scope.first.c_str(),
-                 (scope.second ? scope.second.value().c_str() : "nullopt"));
+        std::string scope_second_str = scope.second.value_or("nullopt");
+        logd("setCurrentTaskOutput: current task scope: task='{}', alias='{}'", scope.first, scope_second_str);
 
         // Set output for the actual task name
         setTaskOutput(scope.first, key, value);
@@ -353,7 +394,7 @@ public:
 
         // If there's an alias (e.g., for nested workflows), also set output for alias
         if (scope.second && scope.second.value() != scope.first) {
-            logd("setCurrentTaskOutput: also setting alias={:s}", scope.second.value().c_str());
+            logi("setCurrentTaskOutput: also setting alias={} for task={}", scope.second.value(), scope.first);
             setTaskOutput(scope.second.value(), key, value);
             setValue("tasks." + scope.second.value() + ".outputs." + key, value);
         }
@@ -455,7 +496,7 @@ public:
     }
 
 private:
-    // Core components (Phase 4: data_ removed!)
+    // Core components
     std::unique_ptr<VariableScope> scope_;
     std::shared_ptr<TaskRegistry> task_registry_;
 

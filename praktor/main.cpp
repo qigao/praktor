@@ -169,7 +169,7 @@ int main(int argc, char* argv[]) {
                 success = runner.run(config.useConcurrent, config.maxConcurrency);
             }
         } catch (const std::exception& e) {
-            loge("Execution failed: {:s}", e.what());
+            loge("Execution failed: {}", e.what());
             return 1;
         }
 

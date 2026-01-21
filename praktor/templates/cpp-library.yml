@@ -30,5 +30,9 @@ tasks:
     depends_on: [package]
     command: "echo Build completed successfully"
     triggers:
-      on_success:
-        - "@praktor Build and test for {{ PROJECT_NAME }} completed successfully!"
+      on_success: [notify_success]
+
+  - name: notify_success
+    script:
+      source: |
+        print("Build and test for {{ PROJECT_NAME }} completed successfully!");

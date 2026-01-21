@@ -23,6 +23,7 @@ set(SOURCE_FILES
     src/util/system_info.cpp
     src/util/praktor_init.cpp
     src/util/file_hash.cpp
+    src/util/mustache_substitutor.cpp
 )
 
 add_library(${TARGET_NAME_LIB} ${SOURCE_FILES})
@@ -48,6 +49,7 @@ target_link_libraries(
            qjs
            TurboNet::Quick
            TurboNet::Utils
+           TurboNet::Mustache
            cxxopts::cxxopts
            pubcxx
 )
@@ -64,6 +66,4 @@ file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/templates
 
 set_target_properties(${TARGET_NAME_EXE} PROPERTIES FOLDER ${folder_name})
 set_target_properties(${TARGET_NAME_LIB} PROPERTIES FOLDER ${folder_name})
-if(ENABLE_TESTS)
-    add_subdirectory(test)
-endif()
+add_subdirectory(test)

@@ -46,166 +46,23 @@ CommandOutputFormat parse_output_format(const ryml::ConstNodeRef& node, const st
     throw_parse_error(node, "Unsupported output_format value: '" + value + "'");
 }
 
-WriteFileMode parse_write_file_mode(const ryml::ConstNodeRef& node, const std::string& value) {
-    std::string lowered = to_lower_copy(value);
-    if (lowered == "overwrite" || lowered.empty()) {
-        return WriteFileMode::Overwrite;
-    }
-    if (lowered == "append") {
-        return WriteFileMode::Append;
-    }
-    throw_parse_error(node, "Unsupported write_file mode: '" + value + "'");
-}
-
-HttpPostTrigger parse_http_post_trigger(const ryml::ConstNodeRef& node) {
-    if (!node.is_map()) {
-        throw_parse_error(node, "http_post trigger must be a map");
-    }
-
-    HttpPostTrigger trigger;
-    if (!node.has_child("url")) {
-        throw_parse_error(node, "http_post trigger requires a 'url'");
-    }
-    node["url"] >> trigger.url;
-    if (trigger.url.empty()) {
-        throw_parse_error(node["url"], "http_post trigger 'url' cannot be empty");
-    }
-
-    if (node.has_child("body")) {
-        std::string body;
-        node["body"] >> body;
-        trigger.body = body;
-    }
-
-    if (node.has_child("headers")) {
-        const auto& headers_node = node["headers"];
-        if (!headers_node.is_map()) {
-            throw_parse_error(headers_node, "http_post trigger 'headers' must be a map");
-        }
-        for (const auto& header : headers_node) {
-            std::string key(header.key().str, header.key().len);
-            std::string value;
-            header >> value;
-            trigger.headers[key] = value;
-        }
-    }
-
-    return trigger;
-}
-
-WriteFileTrigger parse_write_file_trigger(const ryml::ConstNodeRef& node) {
-    if (!node.is_map()) {
-        throw_parse_error(node, "write_file trigger must be a map");
-    }
-
-    WriteFileTrigger trigger;
-    if (!node.has_child("path") || !node.has_child("content")) {
-        throw_parse_error(node, "write_file trigger requires 'path' and 'content'");
-    }
-    node["path"] >> trigger.path;
-    node["content"] >> trigger.content;
-
-    if (trigger.path.empty()) {
-        throw_parse_error(node["path"], "write_file trigger 'path' cannot be empty");
-    }
-
-    if (node.has_child("mode")) {
-        std::string mode;
-        node["mode"] >> mode;
-        trigger.mode = parse_write_file_mode(node["mode"], mode);
-    }
-
-    return trigger;
-}
-
-
-PraktorNotifyTrigger parse_praktor_notify_trigger(const ryml::ConstNodeRef& node) {
-    PraktorNotifyTrigger trigger;
-    if (node.is_val()) {
-        std::string value;
-        node >> value;
-        std::string trimmed = trim_copy(value);
-        const std::string prefix = "@praktor";
-        if (trimmed.rfind(prefix, 0) == 0) {
-            std::string msg = trim_copy(trimmed.substr(prefix.size()));
-            if (!msg.empty() && (msg[0] == ':' || msg[0] == '-')) {
-                msg = trim_copy(msg.substr(1));
-            }
-            trigger.message = std::move(msg);
-        } else {
-            trigger.message = std::move(trimmed);
-        }
-    } else if (node.is_map()) {
-        if (!node.has_child("message")) {
-            throw_parse_error(node, "praktor trigger requires 'message'");
-        }
-        node["message"] >> trigger.message;
-    } else {
-        throw_parse_error(node, "praktor trigger must be a string or map");
-    }
-
-    if (trigger.message.empty()) {
-        throw_parse_error(node, "praktor trigger 'message' cannot be empty");
-    }
-    return trigger;
-}RunTaskTrigger parse_run_task_trigger(const ryml::ConstNodeRef& node) {
-    RunTaskTrigger trigger;
-    if (node.is_val()) {
-        node >> trigger.task_name;
-    } else if (node.is_map()) {
-        if (!node.has_child("task_name")) {
-            throw_parse_error(node, "run_task trigger requires 'task_name'");
-        }
-        node["task_name"] >> trigger.task_name;
-    } else {
-        throw_parse_error(node, "run_task trigger must be a string or map");
-    }
-
-    if (trigger.task_name.empty()) {
-        throw_parse_error(node, "run_task trigger 'task_name' cannot be empty");
-    }
-
-    return trigger;
-}
 
 TriggerAction parse_trigger_action_node(const ryml::ConstNodeRef& node) {
-    if (node.is_val()) {
-        std::string scalar;
-        node >> scalar;
-        std::string trimmed = trim_copy(scalar);
-        if (trimmed.rfind("@praktor", 0) == 0) {
-            return TriggerAction{parse_praktor_notify_trigger(node)};
-        }
-        return TriggerAction{parse_run_task_trigger(node)};
+    if (!node.has_val()) {
+        throw_parse_error(node, "Trigger action must be a task name (string)");
     }
-
-    if (!node.is_map()) {
-        throw_parse_error(node, "Trigger action must be a string or single-key map");
+    
+    std::string task_name;
+    node >> task_name;
+    
+    if (task_name.empty()) {
+        throw_parse_error(node, "Trigger action task name cannot be empty");
     }
+    
+    return task_name;
+}
 
-    if (node.num_children() != 1) {
-        throw_parse_error(node, "Trigger action map must contain exactly one action");
-    }
-
-    for (const auto& child : node) {
-        std::string key(child.key().str, child.key().len);
-        if (key == "http_post") {
-            return TriggerAction{parse_http_post_trigger(child)};
-        }
-        if (key == "write_file") {
-            return TriggerAction{parse_write_file_trigger(child)};
-        }
-        if (key == "run_task") {
-            return TriggerAction{parse_run_task_trigger(child)};
-        }
-        if (key == "praktor" || key == "@praktor") {
-            return TriggerAction{parse_praktor_notify_trigger(child)};
-        }
-        throw_parse_error(child, "Unsupported trigger action: '" + key + "'");
-    }
-
-    throw_parse_error(node, "Failed to parse trigger action");
-}std::vector<TriggerAction> parse_trigger_action_list(const ryml::ConstNodeRef& node) {
+std::vector<TriggerAction> parse_trigger_action_list(const ryml::ConstNodeRef& node) {
     if (!node.is_seq()) {
         throw_parse_error(node, "Trigger action list must be a sequence");
     }
@@ -216,6 +73,7 @@ TriggerAction parse_trigger_action_node(const ryml::ConstNodeRef& node) {
     }
     return actions;
 }
+
 
 } // namespace
 

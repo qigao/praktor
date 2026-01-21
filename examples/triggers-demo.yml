@@ -6,21 +6,61 @@ env:
   SLACK_WEBHOOK: "https://hooks.slack.com/services/YOUR/WEBHOOK/URL"
 
 tasks:
-  # Task 1: Build with success trigger
+  # Reusable trigger tasks
+  - name: write_build_success_log
+    script:
+      source: |
+        import fs from 'turbo:fs';
+        const content = `Build completed successfully\nApp: {{ APP_NAME }}\nVersion: {{ VERSION }}\nTimestamp: {{ tasks.build.outputs.stdout }}`;
+        fs.writeFile("./build-success.log", content);
+
+  - name: write_test_failure_log
+    script:
+      source: |
+        import fs from 'turbo:fs';
+        const existing = fs.exists("./test-failure.log") ? fs.readFile("./test-failure.log") : "";
+        fs.writeFile("./test-failure.log", existing + "Tests failed: {{ failed_task_error }}\n");
+
+  - name: notify_deploy_success
+    script:
+      source: |
+        import { post } from 'turbo:http';
+        const body = JSON.stringify({text: "✅ Deployment successful: {{ APP_NAME }} v{{ VERSION }}"});
+        post(process.env.SLACK_WEBHOOK, body, {"Content-Type": "application/json"});
+
+  - name: write_deploy_history
+    script:
+      source: |
+        import fs from 'turbo:fs';
+        const existing = fs.exists("./deploy-history.log") ? fs.readFile("./deploy-history.log") : "";
+        const content = existing + "Deployed {{ APP_NAME }} v{{ VERSION }} at {{ tasks.deploy.outputs.stdout }}\n";
+        fs.writeFile("./deploy-history.log", content);
+
+  - name: notify_deploy_failure
+    script:
+      source: |
+        import { post } from 'turbo:http';
+        const body = JSON.stringify({text: "❌ Deployment failed: {{ failed_task_error }}"});
+        post(process.env.SLACK_WEBHOOK, body, {"Content-Type": "application/json"});
+
+  - name: write_deploy_complete_log
+    script:
+      source: |
+        import fs from 'turbo:fs';
+        fs.writeFile("./deploy-complete.log", "Deploy task completed with status: {{ tasks.deploy.status }}");
+
+  - name: write_rollback_log
+    script:
+      source: |
+        import fs from 'turbo:fs';
+        fs.writeFile("./rollback.log", "Rollback executed");
+
+  # Main workflow tasks
   - name: build
     command: "echo Building {{ APP_NAME }} version {{ VERSION }}"
     triggers:
-      on_success:
-        - write_file:
-            path: "./build-success.log"
-            content: |
-              Build completed successfully
-              App: {{ APP_NAME }}
-              Version: {{ VERSION }}
-              Timestamp: {{ tasks.build.outputs.stdout }}
-            mode: overwrite
+      on_success: [write_build_success_log]
 
-  # Task 2: Test with failure handling
   - name: test
     depends_on: [build]
     command: "echo Running tests && exit 0"
@@ -28,50 +68,21 @@ tasks:
       count: 2
       delay: "2s"
     triggers:
-      on_failure:
-        - write_file:
-            path: "./test-failure.log"
-            content: "Tests failed: {{ failed_task_error }}"
-            mode: append
-        - run_task:
-            task_name: notify_failure
+      on_failure: [write_test_failure_log, notify_failure]
 
-  # Task 3: Deploy with multiple triggers
   - name: deploy
     depends_on: [test]
     command: "echo Deploying {{ APP_NAME }} to production"
     triggers:
-      on_success:
-        - http_post:
-            url: "{{ env.SLACK_WEBHOOK }}"
-            body: '{"text": "✅ Deployment successful: {{ APP_NAME }} v{{ VERSION }}"}'
-            headers:
-              Content-Type: "application/json"
-        - write_file:
-            path: "./deploy-history.log"
-            content: "Deployed {{ APP_NAME }} v{{ VERSION }} at {{ tasks.deploy.outputs.stdout }}\n"
-            mode: append
-      on_failure:
-        - http_post:
-            url: "{{ env.SLACK_WEBHOOK }}"
-            body: '{"text": "❌ Deployment failed: {{ failed_task_error }}"}'
-        - run_task:
-            task_name: rollback
-      on_complete:
-        - write_file:
-            path: "./deploy-complete.log"
-            content: "Deploy task completed with status: {{ tasks.deploy.status }}"
-            mode: overwrite
+      on_success: [notify_deploy_success, write_deploy_history]
+      on_failure: [notify_deploy_failure, rollback]
+      on_complete: [write_deploy_complete_log]
 
   # Recovery task (triggered on failure)
   - name: rollback
     command: "echo Rolling back deployment"
     triggers:
-      on_complete:
-        - write_file:
-            path: "./rollback.log"
-            content: "Rollback executed"
-            mode: overwrite
+      on_complete: [write_rollback_log]
 
   # Notification task (triggered on test failure)
   - name: notify_failure

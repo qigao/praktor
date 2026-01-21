@@ -8,7 +8,7 @@
 namespace Praktor::Execution {
 
 TaskResult CopyFileExecutor::execute(const Task& task, WorkflowContext& context) {
-    TLOG_INFO("Copying file for task: {:s}", task.name.c_str());
+    TLOG_INFO("Copying file for task: {}", task.name);
 
     try {
         const auto& params = std::get<CopyFileParams>(task.specifics);
@@ -25,7 +25,7 @@ TaskResult CopyFileExecutor::execute(const Task& task, WorkflowContext& context)
                     : std::filesystem::copy_options::none
             );
 
-            TLOG_INFO("Successfully copied file from {:s} to {:s}", source.c_str(), destination.c_str());
+            TLOG_INFO("Successfully copied file from {} to {}", source, destination);
             return TaskResult(true);
         } else {
             return TaskResult(false, "Destination file exists and overwrite is false: " + destination);
@@ -41,7 +41,7 @@ TaskResult CopyFileExecutor::execute(const Task& task, WorkflowContext& context)
 }
 
 TaskResult MoveFileExecutor::execute(const Task& task, WorkflowContext& context) {
-    TLOG_INFO("Moving file for task: {:s}", task.name.c_str());
+    TLOG_INFO("Moving file for task: {}", task.name);
 
     try {
         const auto& params = std::get<MoveFileParams>(task.specifics);
@@ -55,7 +55,7 @@ TaskResult MoveFileExecutor::execute(const Task& task, WorkflowContext& context)
 
         std::filesystem::rename(source, destination);
 
-        TLOG_INFO("Successfully moved file from {:s} to {:s}", source.c_str(), destination.c_str());
+        TLOG_INFO("Successfully moved file from {} to {}", source, destination);
         return TaskResult(true);
 
     } catch (const std::bad_variant_access& e) {
@@ -68,7 +68,7 @@ TaskResult MoveFileExecutor::execute(const Task& task, WorkflowContext& context)
 }
 
 TaskResult CreateDirectoryExecutor::execute(const Task& task, WorkflowContext& context) {
-    TLOG_INFO("Creating directory for task: {:s}", task.name.c_str());
+    TLOG_INFO("Creating directory for task: {}", task.name);
 
     try {
         const auto& params = std::get<CreateDirectoryParams>(task.specifics);
@@ -86,7 +86,7 @@ TaskResult CreateDirectoryExecutor::execute(const Task& task, WorkflowContext& c
             return TaskResult(false, "Failed to create directory: " + path);
         }
 
-        TLOG_INFO("Successfully created directory: {:s}", path.c_str());
+        TLOG_INFO("Successfully created directory: {}", path);
         return TaskResult(true);
 
     } catch (const std::bad_variant_access& e) {

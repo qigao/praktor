@@ -3,7 +3,8 @@
 
 #include "yml/task.hpp"
 #include "util/template_loader.hpp"
-#include "util/string_utils.hpp"
+#include "util/mustache_substitutor.hpp"
+#include <jsoncons/json.hpp>
 #include <fstream>
 #include <iostream>
 #include <string>
@@ -16,38 +17,46 @@ class GithubActionsExporter {
 public:
     static bool exportToYaml(const Workflow& workflow, const std::string& output_path) {
         std::string workflowTmpl = TemplateLoader::loadTemplate("exporters/gha", "workflow.yml");
-        std::string stepTmpl = TemplateLoader::loadTemplate("exporters/gha", "step.yml");
 
-        if (workflowTmpl.empty() || stepTmpl.empty()) {
+        if (workflowTmpl.empty()) {
             return false;
         }
 
-        std::string steps_content;
+        // Convert workflow to JSON for Mustache
+        jsoncons::json data = jsoncons::json::object();
+        data["name"] = workflow.name.empty() ? "Praktor Workflow" : workflow.name;
+        
+        jsoncons::json tasks = jsoncons::json::array();
         for (const auto& task : workflow.tasks) {
-            std::string step = stepTmpl;
-            step = Praktor::util::replaceAll(step, "{{ TASK_NAME }}", task.name);
+            jsoncons::json t = jsoncons::json::object();
+            t["name"] = task.name;
             
-            std::string cmd_str;
             if (task.action == TaskAction::RunCommand) {
-                cmd_str = "echo 'Running command task'";
+                // If it's a string, use it. If it's a list, join it.
+                if (std::holds_alternative<std::string>(std::get<RunCommandParams>(task.specifics).command)) {
+                    t["command"] = std::get<std::string>(std::get<RunCommandParams>(task.specifics).command);
+                } else {
+                    t["command"] = "echo 'Complex command list'"; // Simplified for exporter
+                }
             } else if (task.action == TaskAction::Script) {
-                 cmd_str = "echo 'Running script task'";
+                t["script"] = true;
             }
-            step = Praktor::util::replaceAll(step, "{{ TASK_COMMAND }}", cmd_str);
 
-            std::string deps;
-            if (!task.depends_on.empty()) {
-                deps = "        # depends_on: " + joinStrings(task.depends_on);
+            jsoncons::json deps = jsoncons::json::array();
+            for (const auto& dep : task.depends_on) {
+                deps.push_back(dep);
             }
-            step = Praktor::util::replaceAll(step, "{{ TASK_DEPENDS }}", deps);
-            
-            steps_content += step + "\n";
+            t["depends_on"] = deps;
+            tasks.push_back(t);
+        }
+        data["tasks"] = tasks;
+
+        Praktor::Util::WorkflowContext context;
+        for (auto const& [key, value] : data.object_range()) {
+            context.setValue(key, value);
         }
 
-        std::string final_content = workflowTmpl;
-        final_content = Praktor::util::replaceAll(final_content, "{{ WORKFLOW_NAME }}", 
-                                                 workflow.name.empty() ? "Praktor Workflow" : workflow.name);
-        final_content = Praktor::util::replaceAll(final_content, "{{ STEPS }}", steps_content);
+        std::string final_content = Praktor::Util::substituteMustache(workflowTmpl, context);
 
         std::ofstream file(output_path);
         if (!file.is_open()) return false;
@@ -56,16 +65,6 @@ public:
 
         std::cout << "Successfully exported to GitHub Actions: " << output_path << std::endl;
         return true;
-    }
-
-private:
-    static std::string joinStrings(const std::vector<std::string>& vec) {
-        std::string result;
-        for (size_t i = 0; i < vec.size(); ++i) {
-            result += vec[i];
-            if (i < vec.size() - 1) result += ", ";
-        }
-        return result;
     }
 };
 

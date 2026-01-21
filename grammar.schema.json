@@ -14,7 +14,7 @@
     },
     "variables": {
       "$ref": "#/$defs/stringMap",
-      "description": "Global, read-only variables for expression interpolation."
+      "description": "Global variables available for Mustache templating and expression evaluation."
     },
     "env": {
       "$ref": "#/$defs/stringMap",
@@ -73,6 +73,7 @@
     },
     "stringMap": {
       "type": "object",
+      "description": "A mapping of keys to values. Values support Mustache templating and variable interpolation.",
       "additionalProperties": {
         "type": "string"
       }
@@ -117,127 +118,30 @@
       ],
       "additionalProperties": false
     },
-    "triggerAction": {
-      "type": "object",
-      "description": "A single, self-contained action to perform when a trigger fires.",
-      "properties": {
-        "http_post": {
-          "type": "object",
-          "properties": {
-            "url": {
-              "type": "string",
-              "format": "uri"
-            },
-            "body": {
-              "type": "string"
-            },
-            "headers": {
-              "$ref": "#/$defs/stringMap"
-            }
-          },
-          "required": [
-            "url"
-          ],
-          "additionalProperties": false
-        },
-        "write_file": {
-          "type": "object",
-          "properties": {
-            "path": {
-              "type": "string"
-            },
-            "content": {
-              "type": "string"
-            },
-            "mode": {
-              "enum": [
-                "overwrite",
-                "append"
-              ]
-            }
-          },
-          "required": [
-            "path",
-            "content"
-          ],
-          "additionalProperties": false
-        },
-        "run_task": {
-          "type": "object",
-          "properties": {
-            "task_name": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "task_name"
-          ],
-          "additionalProperties": false
-        },
-        "praktor": {
-          "type": "object",
-          "properties": {
-            "message": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "message"
-          ],
-          "additionalProperties": false
-        }
-      },
-      "oneOf": [
-        {
-          "required": [
-            "http_post"
-          ]
-        },
-        {
-          "required": [
-            "write_file"
-          ]
-        },
-        {
-          "required": [
-            "run_task"
-          ]
-        },
-        {
-          "required": [
-            "praktor"
-          ]
-        }
-      ],
-      "additionalProperties": false
-    },
     "triggerActionList": {
       "type": "array",
+      "description": "A list of task names to execute when a trigger event fires.",
       "items": {
-        "oneOf": [
-          {
-            "type": "string",
-            "description": "Shorthand for a 'run_task' action or praktor notification."
-          },
-          {
-            "$ref": "#/$defs/triggerAction"
-          }
-        ]
+        "type": "string",
+        "description": "Name of a task to execute as a trigger action."
       },
       "minItems": 1
     },
     "triggersBlock": {
       "type": "object",
-      "description": "Defines event-driven actions to take upon task completion.",
+      "description": "Defines event-driven actions to take upon task completion. Each action is a task name reference.",
       "properties": {
         "on_success": {
-          "$ref": "#/$defs/triggerActionList"
+          "$ref": "#/$defs/triggerActionList",
+          "description": "Tasks to execute when the task completes successfully."
         },
         "on_failure": {
-          "$ref": "#/$defs/triggerActionList"
+          "$ref": "#/$defs/triggerActionList",
+          "description": "Tasks to execute when the task fails (after all retries)."
         },
         "on_complete": {
-          "$ref": "#/$defs/triggerActionList"
+          "$ref": "#/$defs/triggerActionList",
+          "description": "Tasks to execute regardless of success or failure."
         }
       },
       "additionalProperties": false

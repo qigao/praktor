@@ -9,14 +9,11 @@
 /**
  * @class VariableScope
  * @brief Manages variable scoping with parent chain support
- *
- * Linus principle: "Use the right data structure to eliminate special cases"
  * 
  * This class implements a scope chain where child scopes can access parent variables
  * but modifications only affect the current scope. This is how proper lexical scoping works.
  *
- * Before: Global flat dictionary with manual save/restore
- * After: Tree structure with automatic inheritance
+ * Tree structure with automatic inheritance
  *
  * Example:
  *   Root scope: { APP_NAME: "myapp", VERSION: "1.0" }

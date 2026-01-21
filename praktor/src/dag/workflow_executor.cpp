@@ -271,7 +271,7 @@ void WorkflowExecutor::loadCache(const std::string &workflow_path) {
       cache_[task_name] = std::move(state);
     }
   } catch (...) {
-    logw("Failed to load cache from {:s}", cache_file_.c_str());
+    logw("Failed to load cache from {}", cache_file_);
   }
 }
 
@@ -296,7 +296,7 @@ void WorkflowExecutor::saveCache() {
     std::ofstream os(cache_file_);
     os << jsoncons::pretty_print(j);
   } catch (...) {
-    logw("Failed to save cache to {:s}", cache_file_.c_str());
+    logw("Failed to save cache to {}", cache_file_);
   }
 }
 
@@ -326,7 +326,7 @@ bool WorkflowExecutor::checkSkipTask(const Task &task, WorkflowContext &context)
     }
   }
 
-  logi("Skipping task '{:s}' (already up to date)", task.name.c_str());
+  logi("Skipping task '{}' (already up to date)", task.name);
   return true;
 }
 
@@ -346,7 +346,7 @@ void WorkflowExecutor::updateTaskCache(const Task &task, WorkflowContext &contex
 }
 
 bool WorkflowExecutor::executeTask(const Task &task, WorkflowContext &context,
-                                   std::optional<std::string> alias) {
+                                   std::optional<std::string> alias, bool ignore_when) {
   // Mark as running in registry to allow setOutput calls
   context.setTaskStatus(task.name, "running");
   if (alias && alias.value() != task.name) {
@@ -358,7 +358,7 @@ bool WorkflowExecutor::executeTask(const Task &task, WorkflowContext &context,
 
   if (task.each && task.each->enabled()) {
     auto combinations = generateEachCombinations(*task.each);
-    logi("Executing task '{:s}' for %zu combinations", task.name.c_str(), combinations.size());
+    logi("Executing task '{}' for {} combinations", task.name, combinations.size());
 
     bool all_success = true;
     bool any_executed = false;
@@ -369,7 +369,7 @@ bool WorkflowExecutor::executeTask(const Task &task, WorkflowContext &context,
         child_context->setValue(task.each->index_variable, std::to_string(i));
       }
 
-      auto [success, status] = executeTaskInternal(task, *child_context, alias);
+      auto [success, status] = executeTaskInternal(task, *child_context, alias, ignore_when);
       if (!success) {
         all_success = false;
       }
@@ -384,7 +384,7 @@ bool WorkflowExecutor::executeTask(const Task &task, WorkflowContext &context,
       final_status = overall_success ? "success" : "failed";
     }
   } else {
-    auto [success, status] = executeTaskInternal(task, context, alias);
+    auto [success, status] = executeTaskInternal(task, context, alias, ignore_when);
     overall_success = success;
     final_status = status;
   }
@@ -399,7 +399,8 @@ bool WorkflowExecutor::executeTask(const Task &task, WorkflowContext &context,
 }
 
 std::pair<bool, std::string> WorkflowExecutor::executeTaskInternal(const Task &task, WorkflowContext &context,
-                                           std::optional<std::string> alias) {
+                                           std::optional<std::string> alias, bool ignore_when) {
+  logi("Executing task: {} (action={}, ignore_when={})", task.name, static_cast<int>(task.action), ignore_when);
   context.pushTaskScope(task.name, alias);
   ScopedVariables scoped_vars(context, task.vars);
 
@@ -410,7 +411,7 @@ std::pair<bool, std::string> WorkflowExecutor::executeTaskInternal(const Task &t
   std::string status = "skipped";
 
   try {
-    if (!evaluateWhen(task, context)) {
+    if (!ignore_when && !evaluateWhen(task, context)) {
       success = true;
       status = "skipped";
     } else if (checkSkipTask(task, context)) {
@@ -426,7 +427,7 @@ std::pair<bool, std::string> WorkflowExecutor::executeTaskInternal(const Task &t
 
       for (int attempt = 0; attempt < attempts; ++attempt) {
         if (attempt > 0) {
-          logw("Retrying task '{:s}' ({:d}/{:d})", task.name.c_str(), attempt, attempts - 1);
+          logw("Retrying task '{}' ({}/{})", task.name, attempt, attempts - 1);
           sleepWithDelay(retries.delay);
         }
 
@@ -445,7 +446,7 @@ std::pair<bool, std::string> WorkflowExecutor::executeTaskInternal(const Task &t
       }
     }
   } catch (const std::exception &e) {
-    loge("Task '{:s}' failed: {:s}", task.name.c_str(), e.what());
+    loge("Task '{}' failed: {}", task.name, e.what());
     success = false;
     status = "failed";
   }
@@ -464,7 +465,7 @@ bool WorkflowExecutor::evaluateWhen(const Task &task, WorkflowContext &context) 
   try {
     return Praktor::Expressions::ExpressionEvaluator{}.evaluateAsBool(*task.when, context);
   } catch (const std::exception &e) {
-    loge("Failed to evaluate 'when' expression for task '{:s}': {:s}", task.name.c_str(), e.what());
+    loge("Failed to evaluate 'when' expression for task '{}': {}", task.name, e.what());
     return false;
   }
 }
@@ -482,7 +483,7 @@ std::unordered_map<std::string, std::string> WorkflowExecutor::buildTaskEnvironm
         env[key] = substituteVariables(value, context);
       }
     } catch (const std::exception &e) {
-      logw("Failed to load task dotEnv file '{:s}': {:s}", env_path.string().c_str(), e.what());
+      logw("Failed to load task dotEnv file '{}': {}", env_path.string(), e.what());
     }
   }
 
@@ -498,11 +499,15 @@ void WorkflowExecutor::executeTriggers(const Task &task, bool success, WorkflowC
     return;
   }
 
-  logd("Executing triggers for task '{:s}' (success={:d})", task.name.c_str(), success);
+  logd("Executing triggers for task '{}' (success={})", task.name, success);
 
   try {
-    trigger_executor_.executeTriggers(task, success, context, base_environment_);
+    // Get all tasks from the graph
+    auto all_tasks = graph_.getNodes();
+    trigger_executor_.executeTriggers(task, success, context, all_tasks, [this, &context](const Task &t) {
+      return this->executeTask(t, context, std::nullopt, true); // Force execute trigger tasks
+    });
   } catch (const std::exception &e) {
-    logw("Trigger execution encountered an error: {:s}", e.what());
+    logw("Trigger execution encountered an error: {}", e.what());
   }
 }

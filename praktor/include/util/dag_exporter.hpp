@@ -1,12 +1,13 @@
 #ifndef __DAG_EXPORTER_HPP__
 #define __DAG_EXPORTER_HPP__
 
-#include "util/string_utils.hpp"
+#include "util/mustache_substitutor.hpp"
 #include "util/template_loader.hpp"
 #include "yml/task.hpp"
 #include <fstream>
 #include <iostream>
 #include <string>
+#include <jsoncons/json.hpp>
 
 
 namespace Praktor {
@@ -16,42 +17,44 @@ class DagExporter {
 public:
   static bool exportToDot(const Workflow &workflow, const std::string &output_path) {
     std::string graphTmpl = TemplateLoader::loadTemplate("exporters/dot", "graph.dot");
-    std::string nodeTmpl = TemplateLoader::loadTemplate("exporters/dot", "node.dot");
-    std::string edgeTmpl = TemplateLoader::loadTemplate("exporters/dot", "edge.dot");
 
-    if (graphTmpl.empty() || nodeTmpl.empty() || edgeTmpl.empty()) {
+    if (graphTmpl.empty()) {
       return false;
     }
 
-    std::string nodes_content;
+    // Convert workflow to JSON for Mustache
+    jsoncons::json data = jsoncons::json::object();
+    data["name"] = workflow.name.empty() ? "Praktor Workflow" : workflow.name;
+    
+    jsoncons::json tasks = jsoncons::json::array();
     for (const auto &task : workflow.tasks) {
-      std::string node = nodeTmpl;
-      node = Praktor::util::replaceAll(node, "{{ NODE_ID }}", task.name);
-
-      std::string label = task.name;
-      if (!task.description.empty()) {
-        label += "\\n(" + task.description + ")";
-      }
-      node = Praktor::util::replaceAll(node, "{{ NODE_LABEL }}", label);
-      nodes_content += node;
-    }
-
-    std::string edges_content;
-    for (const auto &task : workflow.tasks) {
+      jsoncons::json t = jsoncons::json::object();
+      t["name"] = task.name;
+      t["description"] = task.description;
+      
+      jsoncons::json deps = jsoncons::json::array();
       for (const auto &dep : task.depends_on) {
-        std::string edge = edgeTmpl;
-        edge = Praktor::util::replaceAll(edge, "{{ SOURCE_ID }}", dep);
-        edge = Praktor::util::replaceAll(edge, "{{ TARGET_ID }}", task.name);
-        edges_content += edge;
+        deps.push_back(dep);
       }
+      t["depends_on"] = deps;
+      tasks.push_back(t);
+    }
+    data["tasks"] = tasks;
+
+    // We need a context to use substituteMustache. 
+    // Since we just want to render a static structure, we'll put the whole 'data' into a variable.
+    Praktor::Util::WorkflowContext context;
+    // context.setValue("workflow", data);
+    
+    // Adjust template slightly to use the 'workflow' prefix or just wrap the data
+    // Actually, I'll just put the fields directly into the context root-level scope if possible.
+    // WorkflowContext::setValue takes a string value or json.
+    
+    for (auto const& [key, value] : data.object_range()) {
+        context.setValue(key, value);
     }
 
-    std::string final_content = graphTmpl;
-    final_content =
-        Praktor::util::replaceAll(final_content, "{{ WORKFLOW_NAME }}",
-                                  workflow.name.empty() ? "Praktor Workflow" : workflow.name);
-    final_content = Praktor::util::replaceAll(final_content, "{{ NODES }}", nodes_content);
-    final_content = Praktor::util::replaceAll(final_content, "{{ EDGES }}", edges_content);
+    std::string final_content = Praktor::Util::substituteMustache(graphTmpl, context);
 
     std::ofstream file(output_path);
     if (!file.is_open())

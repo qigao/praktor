@@ -145,23 +145,30 @@ TEST_CASE("parse task triggers and environment")
 {
     const std::string content =
         "tasks:\n"
-        "  - name: notify\n"
+        "  - name: notify_http\n"
+        "    script:\n"
+        "      source: |\n"
+        "        // Send HTTP notification\n"
+        "        context.set(\"sent\", \"true\");\n"
+        "    env:\n"
+        "      URL: \"{{ URL }}\"\n"
+        "  - name: build\n"
         "    command: echo done\n"
         "    env:\n"
         "      URL: https://example.com\n"
         "    triggers:\n"
         "      on_failure:\n"
-        "        - http_post:\n"
-        "            url: \"{{ URL }}\"\n";
+        "        - notify_http\n";
 
     auto wf = writeTempWorkflow("triggers.yml", content);
 
     Workflow workflow = TaskParser::parseFile(wf.string());
-    REQUIRE(workflow.tasks.size() == 1);
-    const Task& notify = workflow.tasks[0];
-    REQUIRE(notify.triggers.has_value());
-    const Triggers& triggers = *notify.triggers;
+    REQUIRE(workflow.tasks.size() == 2);
+    const Task& build = workflow.tasks[1];
+    REQUIRE(build.triggers.has_value());
+    const Triggers& triggers = *build.triggers;
     REQUIRE(triggers.on_failure.size() == 1);
+    CHECK(triggers.on_failure[0] == "notify_http");
 }
 
 TEST_CASE("parse continue_on_error attribute")

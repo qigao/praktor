@@ -48,10 +48,21 @@ tasks:
       as: "cfg"
     command: "echo Building for {{ cfg.os }} on {{ cfg.arch }}"
     triggers:
-      on_success:
-        - write_file:
-            path: "./builds/{{ cfg.os }}-{{ cfg.arch }}.txt"
-            content: "Build successful for {{ cfg.os }} {{ cfg.arch }}"
+      on_success: [write_build_result]
+
+  - name: write_build_result
+    when: false # Don't run as standalone task
+    script:
+      source: |
+        import fs from 'turbo:fs';
+        if (fs.stat("./builds") == null) {
+            fs.mkdir("./builds");
+        }
+        const path = `./builds/{{ cfg.os }}-{{ cfg.arch }}.txt`;
+        const content = "Build successful for {{ cfg.os }} {{ cfg.arch }}";
+        if (!fs.writeFile(path, content)) {
+            throw new Error("Failed to write file: " + path);
+        }
 )"
         );
 
@@ -79,10 +90,18 @@ tasks:
       index_variable: "idx"
     command: "echo {{ idx }}: {{ val }}"
     triggers:
-      on_success:
-        - write_file:
-            path: "out_{{ val }}.txt"
-            content: "{{ idx }}: {{ val }}"
+      on_success: [write_item_file]
+
+  - name: write_item_file
+    when: false # Don't run as standalone task
+    script:
+      source: |
+        import fs from 'turbo:fs';
+        const path = `out_{{ val }}.txt`;
+        const content = "{{ idx }}: {{ val }}";
+        if (!fs.writeFile(path, content)) {
+            throw new Error("Failed to write file: " + path);
+        }
 )"
         );
 

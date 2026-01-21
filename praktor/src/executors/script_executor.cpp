@@ -173,7 +173,7 @@ TaskResult ScriptExecutor::execute(const Task &task, WorkflowContext &context) {
   opaque.task = &task;
   JS_SetContextOpaque(ctx, &opaque);
 
-  // Initialize TurboNet modules
+  logd("Initializing TurboNet module");
   js_init_turbo_module(ctx);
 
   JSValue global_obj = JS_GetGlobalObject(ctx);
@@ -205,6 +205,7 @@ TaskResult ScriptExecutor::execute(const Task &task, WorkflowContext &context) {
   for (const auto &module_name : params.modules) {
     const EmbeddedModule *module = context.getEmbeddedModule(module_name);
     if (module && module->language == "javascript") {
+      logd("Loading embedded module: {}", module_name);
       std::string source = substituteVariables(module->source, context);
       JSValue val =
           JS_Eval(ctx, source.c_str(), source.size(), module_name.c_str(), JS_EVAL_TYPE_GLOBAL);
@@ -228,11 +229,15 @@ TaskResult ScriptExecutor::execute(const Task &task, WorkflowContext &context) {
   // Detect if source uses ES6 modules
   bool is_module = hasES6Import(source);
   int eval_flags = is_module ? JS_EVAL_TYPE_MODULE : JS_EVAL_TYPE_GLOBAL;
+  
+  logd("Evaluating script source");
   JSValue result_val = JS_Eval(ctx, source.c_str(), source.size(), task.name.c_str(), eval_flags);
+  logd("Script evaluation finished");
 
   // For modules, the result is a promise that resolves when the module is loaded
   // We need to process pending jobs to execute the module
   if (is_module && !JS_IsException(result_val)) {
+    logd("Processing pending jobs for module");
     js_turbo_process_events(ctx);
   }
 
@@ -279,9 +284,11 @@ TaskResult ScriptExecutor::execute(const Task &task, WorkflowContext &context) {
   JS_FreeRuntime(rt);
 
   if (task_result.success) {
+    logd("Applying script outputs for task: {}", task.name);
     applyOutputs(task, task_result, context);
   }
 
+  logd("Script task '{}' finished with success={}", task.name, task_result.success);
   return task_result;
 }
 

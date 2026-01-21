@@ -241,7 +241,7 @@ bool convert<bool>(const Value &value) {
       return !(lowered == "false" || lowered == "0" || lowered == "null");
     }
   }, value);
-  logd("Expression to_bool: '{:s}' -> {:d}", convert<std::string>(value).c_str(), res);
+  logd("Expression to_bool: '{}' -> {}", convert<std::string>(value), res);
   return res;
 }
 
@@ -452,7 +452,7 @@ Value resolve_variable(const WorkflowContext &context, const std::string &raw_na
   // Note: getVariable returns "" for non-existent variables, but we need to
   // distinguish between "variable exists with empty value" vs "variable doesn't exist"
   // Since getValueByPath already returned empty, the variable truly doesn't exist
-  logi("Expression variable '{:s}' not found in context, returning monostate", name.c_str());
+  logi("Expression variable '{}' not found in context, returning monostate", name);
   return Value{};
 }
 
@@ -931,7 +931,7 @@ Value ExpressionEvaluator::evaluate(const std::string &expression, const Workflo
       log_tree(*c, depth + 1);
     }
   };
-  logd("evaluate: Parse tree for '{:s}':", expression.c_str());
+  logd("evaluate: Parse tree for '{}':", expression);
   log_tree(*root, 0);
 
   // The root node should have the top-level expression as its only child (if folded)
@@ -939,7 +939,7 @@ Value ExpressionEvaluator::evaluate(const std::string &expression, const Workflo
   for (const auto &child : root->children) {
     if (auto ast = build_node(*child)) {
       Value val = ast->evaluate(context, registry);
-      logd("Expression final result: '{:s}'", to_string_value(val).c_str());
+      logd("Expression final result: '{}'", to_string_value(val));
       return val;
     }
   }

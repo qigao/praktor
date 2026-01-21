@@ -6,7 +6,47 @@ variables:
   BUILD_TYPE: "Release"
   BUILD_DIR: "out/build"
 
+env:
+  NOTIFICATION_WEBHOOK: "https://hooks.example.com/notify"  # Optional: set your webhook URL
+
 tasks:
+  # Notification tasks
+  - name: notify_test_failure
+    script:
+      source: |
+        const project = context.get("PROJECT_NAME");
+        const error = context.get("failed_task_error") || "Unknown error";
+        console.log(`❌ Tests failed for ${project}!`);
+        console.log(`Error: ${error}`);
+        
+        // Optionally send to webhook if configured
+        const webhook = context.get("env.NOTIFICATION_WEBHOOK");
+        if (webhook && webhook !== "https://hooks.example.com/notify") {
+          import { post } from 'turbo:http';
+          const body = JSON.stringify({
+            text: `❌ Tests failed for ${project}!`,
+            error: error
+          });
+          post(webhook, body, {"Content-Type": "application/json"});
+        }
+
+  - name: notify_test_success
+    script:
+      source: |
+        const project = context.get("PROJECT_NAME");
+        console.log(`✅ Build and tests passed for ${project}!`);
+        
+        // Optionally send to webhook if configured
+        const webhook = context.get("env.NOTIFICATION_WEBHOOK");
+        if (webhook && webhook !== "https://hooks.example.com/notify") {
+          import { post } from 'turbo:http';
+          const body = JSON.stringify({
+            text: `✅ Build and tests passed for ${project}!`
+          });
+          post(webhook, body, {"Content-Type": "application/json"});
+        }
+
+  # Build pipeline tasks
   - name: clean
     description: "Remove old build artifacts"
     command: "rm -rf {{ BUILD_DIR }}"
@@ -31,7 +71,5 @@ tasks:
       count: 1
       delay: "5s"
     triggers:
-      on_failure:
-        - "@praktor ❌ Tests failed for {{ PROJECT_NAME }}!"
-      on_success:
-        - "@praktor ✅ Build and tests passed for {{ PROJECT_NAME }}!"
+      on_failure: [notify_test_failure]
+      on_success: [notify_test_success]

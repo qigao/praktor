@@ -1,54 +1,62 @@
 # Praktor Triggers Quick Start
-# This workflow demonstrates the three trigger types with minimal examples
+# This workflow demonstrates trigger usage with the new task-based system
 
 variables:
   APP_NAME: "quickstart-app"
 
 tasks:
-  # Example 1: Write file on success
+  # Define reusable trigger tasks
+  - name: write_build_success
+    script:
+      source: |
+        import fs from 'turbo:fs';
+        fs.writeFile("./build-success.txt", "Build completed for {{ APP_NAME }}");
+
+  - name: write_test_failure
+    script:
+      source: |
+        import fs from 'turbo:fs';
+        fs.writeFile("./test-failure.txt", "Tests failed: {{ failed_task_error }}");
+
+  - name: write_deploy_log
+    script:
+      source: |
+        import fs from 'turbo:fs';
+        const existing = fs.exists("./deploy-log.txt") ? fs.readFile("./deploy-log.txt") : "";
+        fs.writeFile("./deploy-log.txt", existing + "Deployed successfully\n");
+
+  - name: write_workflow_complete
+    script:
+      source: |
+        import fs from 'turbo:fs';
+        const content = "Workflow completed\nStatus: {{ tasks.cleanup.status }}\nApp: {{ APP_NAME }}";
+        fs.writeFile("./workflow-complete.txt", content);
+
+  # Main workflow tasks
   - name: build
     command: "echo Building application..."
     triggers:
-      on_success:
-        - write_file:
-            path: "./build-success.txt"
-            content: "Build completed for {{ APP_NAME }}"
+      on_success: [write_build_success]
 
-  # Example 2: Send webhook on failure
   - name: test
     depends_on: [build]
     command: "echo Running tests... && exit 0"
     triggers:
-      on_failure:
-        - write_file:
-            path: "./test-failure.txt"
-            content: "Tests failed: {{ failed_task_error }}"
+      on_failure: [write_test_failure]
 
-  # Example 3: Run recovery task on failure
   - name: deploy
     depends_on: [test]
     command: "echo Deploying {{ APP_NAME }}..."
     triggers:
-      on_failure: [rollback]  # Shorthand syntax
-      on_success:
-        - write_file:
-            path: "./deploy-log.txt"
-            content: "Deployed successfully"
-            mode: append
+      on_failure: [rollback]  # Task name reference
+      on_success: [write_deploy_log]
 
   # Recovery task
   - name: rollback
     command: "echo Rolling back deployment..."
 
-  # Example 4: Multiple triggers on complete
   - name: cleanup
     depends_on: [deploy]
     command: "echo Cleaning up temporary files..."
     triggers:
-      on_complete:
-        - write_file:
-            path: "./workflow-complete.txt"
-            content: |
-              Workflow completed
-              Status: {{ tasks.cleanup.status }}
-              App: {{ APP_NAME }}
+      on_complete: [write_workflow_complete]

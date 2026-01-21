@@ -1,10 +1,16 @@
 digraph PraktorWorkflow {
     rankdir=LR;
     node [shape=box, style=rounded, fontname="Arial"];
-    label="{{ WORKFLOW_NAME }}";
+    label="{{#name}}{{name}}{{/name}}{{^name}}Praktor Workflow{{/name}}";
     labelloc="t";
 
-{{ NODES }}
+{{#tasks}}
+    "{{name}}" [label="{{name}}{{#description}}\n({{description}}){{/description}}"];
+{{/tasks}}
 
-{{ EDGES }}
+{{#tasks}}
+{{#depends_on}}
+    "{{.}}" -> "{{name}}";
+{{/depends_on}}
+{{/tasks}}
 }

@@ -56,47 +56,32 @@ public:
     TaskRegistry() = default;
 
     /**
-     * @brief Start a task (transitions from Pending to Running)
-     * @throws std::runtime_error if task is not in Pending state
+     * @brief Start a task (transitions from any state to Running)
+     * 
+     * Now allows re-entry for trigger tasks and 'each' iterations.
+     * When a task starts, it is removed from completed/failed sets.
      */
     void startTask(const std::string& task_name) {
         std::lock_guard<std::mutex> lock(mutex_);
-        TaskState current = getStateInternal(task_name);
-        if (current != TaskState::Pending) {
-            throw std::runtime_error(
-                "Cannot start task '" + task_name + "': already " + taskStateToString(current));
-        }
         task_state_[task_name] = TaskState::Running;
+        completed_tasks_.erase(task_name);
+        failed_tasks_.erase(task_name);
     }
 
     /**
      * @brief Record that a task completed successfully (locks outputs)
-     * @throws std::runtime_error if task is not in Running state
      */
     void markCompleted(const std::string& task_name) {
         std::lock_guard<std::mutex> lock(mutex_);
-        TaskState current = getStateInternal(task_name);
-        if (current != TaskState::Running) {
-            throw std::runtime_error(
-                "Cannot complete task '" + task_name + "': not running (state: " +
-                taskStateToString(current) + ")");
-        }
         task_state_[task_name] = TaskState::Completed;
         completed_tasks_.insert(task_name);
     }
 
     /**
      * @brief Record that a task failed (locks outputs)
-     * @throws std::runtime_error if task is not in Running state
      */
     void markFailed(const std::string& task_name, const std::string& error_message) {
         std::lock_guard<std::mutex> lock(mutex_);
-        TaskState current = getStateInternal(task_name);
-        if (current != TaskState::Running) {
-            throw std::runtime_error(
-                "Cannot fail task '" + task_name + "': not running (state: " +
-                taskStateToString(current) + ")");
-        }
         task_state_[task_name] = TaskState::Failed;
         failed_tasks_[task_name] = error_message;
     }
@@ -118,21 +103,16 @@ public:
 
     /**
      * @brief Set task status (for backward compatibility with older code)
-     * @deprecated Use startTask/markCompleted/markFailed instead
      */
     void setStatus(const std::string& task_name, const std::string& status) {
-        std::lock_guard<std::mutex> lock(mutex_);
         if (status == "running") {
-            if (getStateInternal(task_name) == TaskState::Pending) {
-                task_state_[task_name] = TaskState::Running;
-            }
+            startTask(task_name);
         } else if (status == "success" || status == "completed") {
-            task_state_[task_name] = TaskState::Completed;
-            completed_tasks_.insert(task_name);
+            markCompleted(task_name);
         } else if (status == "failed") {
-            task_state_[task_name] = TaskState::Failed;
+            markFailed(task_name, "Task explicitly set to failed status");
         } else if (status == "skipped") {
-            // Skipped tasks use their own state but are treated as completed for dependency purposes
+            std::lock_guard<std::mutex> lock(mutex_);
             task_state_[task_name] = TaskState::Skipped;
             completed_tasks_.insert(task_name);
         }
