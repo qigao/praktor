@@ -1,0 +1,19 @@
+name: Host Reboot Example
+description: |
+  Minimal wrapper around the reusable host reboot template.
+
+variables:
+  DELAY_MINUTES: "5"
+  MESSAGE: "Scheduled reboot by Praktor example"
+
+tasks:
+  - name: host_reboot
+    uses: ../templates/host-reboot.yml
+    vars:
+      DELAY_MINUTES: "{{ DELAY_MINUTES }}"
+      MESSAGE: "{{ MESSAGE }}"
+
+  - name: emit_result
+    depends_on: [host_reboot]
+    script: |
+      ctx.output("result", ctx.get("tasks.host_reboot.outputs.result"));

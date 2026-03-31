@@ -8,52 +8,39 @@ env:
 tasks:
   # Reusable trigger tasks
   - name: write_build_success_log
-    script:
-      source: |
-        import fs from 'turbo:fs';
-        const content = `Build completed successfully\nApp: {{ APP_NAME }}\nVersion: {{ VERSION }}\nTimestamp: {{ tasks.build.outputs.stdout }}`;
-        fs.writeFile("./build-success.log", content);
+    command: "echo Build completed successfully for {{ APP_NAME }} v{{ VERSION }}"
+    script: |
+      fs.write("./build-success.log", "Build completed successfully\nApp: {{ APP_NAME }}\nVersion: {{ VERSION }}");
 
   - name: write_test_failure_log
-    script:
-      source: |
-        import fs from 'turbo:fs';
-        const existing = fs.exists("./test-failure.log") ? fs.readFile("./test-failure.log") : "";
-        fs.writeFile("./test-failure.log", existing + "Tests failed: {{ failed_task_error }}\n");
+    command: "echo Tests failed"
+    script: |
+      fs.append("./test-failure.log", "Tests failed: {{ failed_task_error }}\n");
 
   - name: notify_deploy_success
-    script:
-      source: |
-        import { post } from 'turbo:http';
-        const body = JSON.stringify({text: "✅ Deployment successful: {{ APP_NAME }} v{{ VERSION }}"});
-        post(process.env.SLACK_WEBHOOK, body, {"Content-Type": "application/json"});
+    command: "echo Deploy success notification sent"
+    script: |
+      http.post("{{ SLACK_WEBHOOK }}", json.stringify({"text": "Deployment successful: {{ APP_NAME }} v{{ VERSION }}"}));
 
   - name: write_deploy_history
-    script:
-      source: |
-        import fs from 'turbo:fs';
-        const existing = fs.exists("./deploy-history.log") ? fs.readFile("./deploy-history.log") : "";
-        const content = existing + "Deployed {{ APP_NAME }} v{{ VERSION }} at {{ tasks.deploy.outputs.stdout }}\n";
-        fs.writeFile("./deploy-history.log", content);
+    command: "echo Logging deploy history"
+    script: |
+      fs.append("./deploy-history.log", "Deployed {{ APP_NAME }} v{{ VERSION }}\n");
 
   - name: notify_deploy_failure
-    script:
-      source: |
-        import { post } from 'turbo:http';
-        const body = JSON.stringify({text: "❌ Deployment failed: {{ failed_task_error }}"});
-        post(process.env.SLACK_WEBHOOK, body, {"Content-Type": "application/json"});
+    command: "echo Deploy failure notification sent"
+    script: |
+      http.post("{{ SLACK_WEBHOOK }}", json.stringify({"text": "Deployment failed: {{ failed_task_error }}"}));
 
   - name: write_deploy_complete_log
-    script:
-      source: |
-        import fs from 'turbo:fs';
-        fs.writeFile("./deploy-complete.log", "Deploy task completed with status: {{ tasks.deploy.status }}");
+    command: "echo Deploy task completed"
+    script: |
+      fs.write("./deploy-complete.log", "Deploy task completed");
 
   - name: write_rollback_log
-    script:
-      source: |
-        import fs from 'turbo:fs';
-        fs.writeFile("./rollback.log", "Rollback executed");
+    command: "echo Rollback executed"
+    script: |
+      fs.write("./rollback.log", "Rollback executed");
 
   # Main workflow tasks
   - name: build

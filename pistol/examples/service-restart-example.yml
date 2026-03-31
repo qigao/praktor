@@ -1,0 +1,17 @@
+name: Service Restart Example
+description: |
+  Minimal wrapper around the reusable service restart template.
+
+variables:
+  SERVICE_NAME: "nginx"
+
+tasks:
+  - name: service_restart
+    uses: ../templates/service-restart.yml
+    vars:
+      SERVICE_NAME: "{{ SERVICE_NAME }}"
+
+  - name: emit_result
+    depends_on: [service_restart]
+    script: |
+      ctx.output("result", ctx.get("tasks.service_restart.outputs.result"));

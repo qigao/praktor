@@ -1,0 +1,134 @@
+name: Remote Command Receiver
+description: |
+  Polls a remote endpoint for pending commands and executes only supported actions.
+  Supported actions:
+    - run_command      params.command
+    - restart_service  params.service
+
+  Unsupported actions are reported upstream as unsupported instead of being faked as complete.
+
+variables:
+  CMD_ENDPOINT: "{{ env.CMD_ENDPOINT }}"
+  AGENT_ID: "{{ PRAKTOR_HOST }}"
+  AUTH_TOKEN: "{{ env.OPS_AUTH_TOKEN }}"
+
+tasks:
+  - name: fetch_commands
+    script: |
+      var endpoint = ctx.get("CMD_ENDPOINT");
+      var token = ctx.get("AUTH_TOKEN");
+      var agent = ctx.get("AGENT_ID");
+
+      if endpoint == "" {
+        log.warn("CMD_ENDPOINT not set, skipping remote command fetch");
+        ctx.output("commands", []);
+        ctx.output("executable_commands", []);
+        ctx.output("unsupported_results", []);
+        ctx.output("count", 0);
+        ctx.output("executable_count", 0);
+        return;
+      }
+
+      var resp = http.get(endpoint + "?agent=" + agent, {
+        "headers": {
+          "Authorization": "Bearer " + token,
+          "Accept": "application/json"
+        },
+        "timeout": 10000
+      });
+
+      if resp.status != 200 {
+        fail("Failed to fetch commands: HTTP " + resp.status);
+      }
+
+      var cmds = resp.data;
+      if not cmds {
+        cmds = [];
+      }
+
+      var executable = [];
+      var unsupported = [];
+
+      for cmd in cmds {
+        var normalized = {
+          "id": cmd.id,
+          "action": cmd.action,
+          "command": ""
+        };
+
+        if cmd.action == "run_command" and cmd.params.command {
+          normalized.command = cmd.params.command;
+          executable = executable + [normalized];
+        } else if cmd.action == "restart_service" and cmd.params.service {
+          var svc = cmd.params.service;
+          normalized.command = "systemctl restart " + svc + " || (net stop " + svc + " && net start " + svc + ")";
+          executable = executable + [normalized];
+        } else {
+          unsupported = unsupported + [{
+            "id": cmd.id,
+            "action": cmd.action,
+            "status": "unsupported",
+            "agent": agent
+          }];
+        }
+      }
+
+      ctx.output("commands", cmds);
+      ctx.output("executable_commands", executable);
+      ctx.output("unsupported_results", unsupported);
+      ctx.output("count", json.query(cmds, "length(@)"));
+      ctx.output("executable_count", json.query(executable, "length(@)"));
+      log.info("Fetched " + json.query(cmds, "length(@)") + " pending commands");
+
+  - name: dispatch_commands
+    depends_on: [fetch_commands]
+    when: "{{ tasks.fetch_commands.outputs.executable_count }} > 0"
+    dynamic_tasks:
+      items_variable: "{{ tasks.fetch_commands.outputs.executable_commands }}"
+      template:
+        name: "exec_cmd_{{ item.id }}"
+        command: "{{ item.command }}"
+    continue_on_error: true
+
+  - name: report_results
+    depends_on: [dispatch_commands]
+    script: |
+      var endpoint = ctx.get("CMD_ENDPOINT");
+      var token = ctx.get("AUTH_TOKEN");
+      var agent = ctx.get("AGENT_ID");
+
+      if endpoint == "" {
+        return;
+      }
+
+      var results = ctx.get("tasks.fetch_commands.outputs.unsupported_results");
+      if not results {
+        results = [];
+      }
+
+      var generated = ctx.get("tasks.dispatch_commands.outputs.generated_tasks");
+      if generated {
+        for item in generated {
+          results = results + [{
+            "id": item.item.id,
+            "action": item.item.action,
+            "status": item.status,
+            "agent": agent
+          }];
+        }
+      }
+
+      var body = json.stringify({"results": results});
+      var resp = http.post(endpoint + "/results", body, {
+        "headers": {
+          "Authorization": "Bearer " + token,
+          "Content-Type": "application/json"
+        }
+      });
+
+      if resp.status != 200 and resp.status != 201 {
+        log.error("Failed to report results: HTTP " + resp.status);
+      }
+
+      ctx.output("reported", results);
+      log.info("Reported " + json.query(results, "length(@)") + " command results");

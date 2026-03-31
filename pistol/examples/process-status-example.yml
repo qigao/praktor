@@ -1,0 +1,19 @@
+name: Process Status Example
+description: |
+  Minimal wrapper around the reusable process status template.
+
+variables:
+  PROCESS_NAME: "nginx"
+  PID: ""
+
+tasks:
+  - name: process_status
+    uses: ../templates/process-status.yml
+    vars:
+      PROCESS_NAME: "{{ PROCESS_NAME }}"
+      PID: "{{ PID }}"
+
+  - name: emit_result
+    depends_on: [process_status]
+    script: |
+      ctx.output("result", ctx.get("tasks.process_status.outputs.result"));

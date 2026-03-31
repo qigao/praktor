@@ -43,7 +43,7 @@ public:
 
     // We need a context to use substituteMustache. 
     // Since we just want to render a static structure, we'll put the whole 'data' into a variable.
-    Praktor::Util::WorkflowContext context;
+    WorkflowContext context;
     // context.setValue("workflow", data);
     
     // Adjust template slightly to use the 'workflow' prefix or just wrap the data

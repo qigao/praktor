@@ -1,25 +1,24 @@
 #pragma once
 
+#include <future>
 #include <string>
 #include <unordered_map>
-#include <memory>
-#include <future>
-#include <uv.h>
+#include <vector>
 
 namespace Praktor {
 namespace system {
 
 /**
- * @brief libuv-based system information provider
+ * @brief Native platform-based system information provider
  *
- * This implementation uses libuv's cross-platform system APIs for consistent
- * and efficient system information retrieval. It's non-blocking and integrates
- * well with the existing libuv event loop used for process execution.
+ * This implementation uses platform-native APIs exposed through TurboNet's
+ * platform layer for OS and hardware information, plus direct process
+ * environment access for environment variables.
  */
 class SystemInfoProvider {
 public:
-    SystemInfoProvider();
-    ~SystemInfoProvider();
+    SystemInfoProvider() = default;
+    ~SystemInfoProvider() = default;
 
     // Non-copyable, movable
     SystemInfoProvider(const SystemInfoProvider&) = delete;
@@ -28,19 +27,19 @@ public:
     SystemInfoProvider& operator=(SystemInfoProvider&&) = default;
 
     /**
-     * @brief Gets the operating system name using libuv
+     * @brief Gets the operating system name
      * @return The OS name (e.g., "windows", "linux", "darwin")
      */
     std::string getOSName() const;
 
     /**
-     * @brief Gets the operating system version using libuv
+     * @brief Gets the operating system version
      * @return The OS version string
      */
     std::string getOSVersion() const;
 
     /**
-     * @brief Gets the system architecture using libuv
+     * @brief Gets the system architecture
      * @return The architecture string (e.g., "x86_64", "arm64")
      */
     std::string getArchitecture() const;
@@ -52,19 +51,19 @@ public:
     std::string getShellName() const;
 
     /**
-     * @brief Gets the current username using libuv
+     * @brief Gets the current username
      * @return The current username
      */
     std::string getUsername() const;
 
     /**
-     * @brief Gets the hostname using libuv
+     * @brief Gets the hostname
      * @return The system hostname
      */
     std::string getHostname() const;
 
     /**
-     * @brief Gets CPU information using libuv
+     * @brief Gets CPU information
      * @return CPU model name and core count
      */
     struct CPUInfo {
@@ -75,7 +74,7 @@ public:
     CPUInfo getCPUInfo() const;
 
     /**
-     * @brief Gets memory information using libuv
+     * @brief Gets memory information
      * @return Memory information in bytes
      */
     struct MemoryInfo {
@@ -86,7 +85,7 @@ public:
     MemoryInfo getMemoryInfo() const;
 
     /**
-     * @brief Gets network interface information using libuv
+     * @brief Gets network interface information
      * @return List of network interfaces
      */
     struct NetworkInterface {
@@ -109,13 +108,13 @@ public:
     LoadAverage getLoadAverage() const;
 
     /**
-     * @brief Gets all built-in system properties using libuv APIs
+     * @brief Gets all built-in system properties
      * @return A map of system property names to values
      */
     std::unordered_map<std::string, std::string> getAllSystemProperties() const;
 
     /**
-     * @brief Gets all environment variables using libuv
+     * @brief Gets all environment variables
      * @return A map of environment variable names to values
      */
     std::unordered_map<std::string, std::string> getEnvironmentVariables() const;
@@ -127,19 +126,10 @@ public:
     std::unordered_map<std::string, std::string> getExtendedSystemProperties() const;
 
     /**
-     * @brief Async version of getAllSystemProperties for non-blocking operation
+     * @brief Async version of getAllSystemProperties
      * @return Future containing system properties
      */
     std::future<std::unordered_map<std::string, std::string>> getAllSystemPropertiesAsync() const;
-
-private:
-    mutable uv_loop_t* loop_;
-    bool owns_loop_;
-
-    // Helper methods
-    std::string uvErrorToString(int error) const;
-    void initializeLoop();
-    void cleanupLoop();
 };
 
 // Convenience functions that use a singleton instance

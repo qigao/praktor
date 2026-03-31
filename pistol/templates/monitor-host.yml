@@ -1,0 +1,134 @@
+name: Host Health Monitor
+description: |
+  Monitors host health metrics (CPU, memory, disk).
+  Run periodically via cron, systemd timer, or the ops-loop wrapper.
+  Each check runs independently; failures trigger alerts without blocking summary output.
+
+variables:
+  HOSTNAME: "{{ PRAKTOR_HOST }}"
+  CPU_THRESHOLD: "90"
+  MEM_THRESHOLD: "85"
+  DISK_THRESHOLD: "90"
+  ALERT_WEBHOOK: "{{ env.ALERT_WEBHOOK }}"
+
+tasks:
+  - name: alert_high_resource
+    script: |
+      var host = ctx.get("HOSTNAME");
+      var metric = ctx.get("failed_task_name");
+      var detail = ctx.get("failed_task_error");
+      var inner = ctx.get("failed_inner_task_name");
+      if inner {
+        metric = inner;
+      }
+      var webhook = ctx.get("ALERT_WEBHOOK");
+      var body = json.stringify({
+        "text": "[ALERT] " + host + " | " + metric + " exceeded threshold\nDetail: " + detail
+      });
+      log.warn("[ALERT] " + host + " | " + metric + ": " + detail);
+      if webhook != "" {
+        http.post(webhook, body);
+      }
+
+  - name: check_cpu
+    fallback:
+      - sequence:
+          - shell:
+              cmd: powershell -NoProfile -Command "(Get-CimInstance Win32_Processor).LoadPercentage"
+              output_key: cpu_load
+          - parse_regex:
+              input_key: cpu_load
+              pattern: "([0-9]+)"
+              capture_group: 1
+              output_key: cpu_percent
+      - sequence:
+          - shell:
+              cmd: top -bn1 | grep 'Cpu(s)' | awk '{print 100 - $8}'
+              output_key: cpu_load
+          - parse_regex:
+              input_key: cpu_load
+              pattern: "([0-9.]+)"
+              capture_group: 1
+              output_key: cpu_percent
+    script: |
+      var cpu = ctx.get("tasks.check_cpu.outputs.cpu_percent");
+      var threshold = ctx.get("CPU_THRESHOLD");
+      ctx.output("cpu_percent", cpu);
+      log.info("CPU usage: " + cpu + "% (threshold: " + threshold + "%)");
+      if math.eval(cpu + " > " + threshold) {
+        fail("CPU at " + cpu + "% exceeds threshold " + threshold + "%");
+      }
+    continue_on_error: true
+    triggers:
+      on_failure: [alert_high_resource]
+
+  - name: check_memory
+    fallback:
+      - shell:
+          cmd: powershell -NoProfile -Command "$os = Get-CimInstance Win32_OperatingSystem; [math]::Round(($os.TotalVisibleMemorySize - $os.FreePhysicalMemory) / $os.TotalVisibleMemorySize * 100)"
+          output_key: mem_percent
+      - shell:
+          cmd: free | awk '/Mem:/ {printf "%.0f", $3/$2 * 100}'
+          output_key: mem_percent
+    script: |
+      var mem = ctx.get("tasks.check_memory.outputs.mem_percent");
+      var threshold = ctx.get("MEM_THRESHOLD");
+      ctx.output("mem_percent", mem);
+      log.info("Memory usage: " + mem + "% (threshold: " + threshold + "%)");
+      if math.eval(mem + " > " + threshold) {
+        fail("Memory at " + mem + "% exceeds threshold " + threshold + "%");
+      }
+    continue_on_error: true
+    triggers:
+      on_failure: [alert_high_resource]
+
+  - name: check_disk
+    fallback:
+      - shell:
+          cmd: powershell -NoProfile -Command "Get-PSDrive C | ForEach-Object { [math]::Round(($_.Used / ($_.Used + $_.Free)) * 100) }"
+          output_key: disk_percent
+      - shell:
+          cmd: df / | tail -1 | awk '{print $5}' | tr -d '%'
+          output_key: disk_percent
+    script: |
+      var disk = ctx.get("tasks.check_disk.outputs.disk_percent");
+      var threshold = ctx.get("DISK_THRESHOLD");
+      ctx.output("disk_percent", disk);
+      log.info("Disk usage: " + disk + "% (threshold: " + threshold + "%)");
+      if math.eval(disk + " > " + threshold) {
+        fail("Disk at " + disk + "% exceeds threshold " + threshold + "%");
+      }
+    continue_on_error: true
+    triggers:
+      on_failure: [alert_high_resource]
+
+  - name: health_summary
+    depends_on: [check_cpu, check_memory, check_disk]
+    script: |
+      var status = "ok";
+      if ctx.get("tasks.check_cpu.status") == "failed" {
+        status = "degraded";
+      }
+      if ctx.get("tasks.check_memory.status") == "failed" {
+        status = "degraded";
+      }
+      if ctx.get("tasks.check_disk.status") == "failed" {
+        status = "degraded";
+      }
+
+      var summary = {
+        "host": ctx.get("HOSTNAME"),
+        "cpu_percent": ctx.get("tasks.check_cpu.outputs.cpu_percent"),
+        "mem_percent": ctx.get("tasks.check_memory.outputs.mem_percent"),
+        "disk_percent": ctx.get("tasks.check_disk.outputs.disk_percent"),
+        "status": status
+      };
+
+      ctx.output("summary", summary);
+      fs.write("./host-health.json", json.stringify(summary));
+
+      if status == "ok" {
+        log.info("All host checks passed for " + ctx.get("HOSTNAME"));
+      } else {
+        log.warn("Host checks degraded for " + ctx.get("HOSTNAME"));
+      }

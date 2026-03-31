@@ -1,0 +1,17 @@
+name: Session Lock Example
+description: |
+  Minimal wrapper around the reusable session lock template.
+
+variables:
+  MESSAGE: "Session lock requested by Praktor example"
+
+tasks:
+  - name: session_lock
+    uses: ../templates/session-lock.yml
+    vars:
+      MESSAGE: "{{ MESSAGE }}"
+
+  - name: emit_result
+    depends_on: [session_lock]
+    script: |
+      ctx.output("result", ctx.get("tasks.session_lock.outputs.result"));

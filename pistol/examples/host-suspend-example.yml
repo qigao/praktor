@@ -1,0 +1,17 @@
+name: Host Suspend Example
+description: |
+  Minimal wrapper around the reusable host suspend template.
+
+variables:
+  MESSAGE: "Suspend requested by Praktor example"
+
+tasks:
+  - name: host_suspend
+    uses: ../templates/host-suspend.yml
+    vars:
+      MESSAGE: "{{ MESSAGE }}"
+
+  - name: emit_result
+    depends_on: [host_suspend]
+    script: |
+      ctx.output("result", ctx.get("tasks.host_suspend.outputs.result"));

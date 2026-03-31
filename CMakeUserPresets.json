@@ -5,51 +5,89 @@
     ],
     "configurePresets": [
         {
-            "name": "user-paths",
+            "name": "win-paths",
             "hidden": true,
             "cacheVariables": {
-                "EXTERNAL_REPO_ROOT": "c:/projects/cpp/external/",
-                "EXTERNAL_ROOT": "c:/projects/cpp/external/pkgs",
-                "CMAKE_MAKE_PROGRAM": "C:/Users/lockg/scoop/shims/ninja.exe"
+                "TURBONET_ROOT": "c:/projects/cpp/external/pkgs/turbonet",
+                "TURBOSCRIPT_ROOT": "c:/projects/cpp/external/pkgs/turbo_script",
+                "CMAKE_MAKE_PROGRAM": "C:/Users/lockg/scoop/shims/ninja.exe",
+                "VCPKG_TARGET_TRIPLET": "x64-windows",
+                "VCPKG_MANIFEST_MODE": "ON"
             },
             "environment": {
                 "VCPKG_ROOT": "C:/tools/vcpkg"
+            },
+            "architecture": {
+                "value": "x64",
+                "strategy": "external"
+            },
+            "toolset": {
+                "value": "host=x64",
+                "strategy": "external"
+            }
+        },
+        {
+            "name": "linux-paths",
+            "hidden": true,
+            "cacheVariables": {
+                "VCPKG_TARGET_TRIPLET": "x64-linux",
+                "CMAKE_MAKE_PROGRAM": "/usr/bin/ninja"
+            },
+            "environment": {
+                "VCPKG_ROOT": "/vcpkg"
             }
         },
         {
             "name": "win-dev-user",
             "displayName": "Developer Build (Windows, User)",
-            "inherits": [
-                "dev-win-msvc-ninja",
-                "user-paths",
-                "pkg-vcpkg"
-            ],
             "cacheVariables": {
-                "VCPKG_TARGET_TRIPLET": "x64-windows"
-            }
+                "ENABLE_SANITIZER_ADDRESS": "ON"
+            },
+            "inherits": [
+                "base-win-dev-user",
+                "win-paths"
+            ]
         },
         {
             "name": "win-release-user",
             "displayName": "Release Build (Windows, User)",
             "inherits": [
-                "release-win-msvc-ninja",
-                "user-paths",
-                "pkg-vcpkg"
-            ],
-            "cacheVariables": {
-                "VCPKG_TARGET_TRIPLET": "x64-windows"
+                "base-win-release-user",
+                "win-paths"
+            ]
+        }
+    ],
+    "buildPresets": [
+        {
+            "name": "win-dev-user",
+            "configurePreset": "win-dev-user"
+        },
+        {
+            "name": "win-release-user",
+            "configurePreset": "win-release-user"
+        }
+    ],
+    "testPresets": [
+        {
+            "name": "win-dev-user",
+            "configurePreset": "win-dev-user",
+            "execution": {
+                "noTestsAction": "error",
+                "stopOnFailure": false
+            },
+            "output": {
+                "outputOnFailure": true
             }
         },
         {
-            "name": "win-dev-user-ASan",
-            "displayName": "Developer Build (Windows, ASAN,User)",
-            "inherits": [
-                "dev-win-msvc-ninja-asan",
-                "user-paths",
-                "pkg-vcpkg"
-            ],
-            "cacheVariables": {
-                "VCPKG_TARGET_TRIPLET": "x64-windows"
+            "name": "win-release-user",
+            "configurePreset": "win-release-user",
+            "execution": {
+                "noTestsAction": "error",
+                "stopOnFailure": false
+            },
+            "output": {
+                "outputOnFailure": true
             }
         }
     ]

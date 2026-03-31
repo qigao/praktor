@@ -1,0 +1,26 @@
+name: Build Pipeline with Behavior Trees
+
+description: |
+  Demonstrates basic sequence control flow for a typical build pipeline.
+  Uses behavior trees to orchestrate configure, build, and test steps.
+
+variables:
+  BUILD_TYPE: "Release"
+  BUILD_DIR: "build"
+
+tasks:
+  - name: build_project
+    sequence:
+      - shell: echo "Configuring project with CMake..."
+      - shell: cmake -B {ctx.variables.BUILD_DIR} -DCMAKE_BUILD_TYPE={ctx.variables.BUILD_TYPE}
+      - shell: echo "Building project..."
+      - shell:
+          cmd: cmake --build {ctx.variables.BUILD_DIR}
+          output_key: build_output
+      - shell: echo "Running tests..."
+      - shell: ctest --test-dir {ctx.variables.BUILD_DIR} --output-on-failure
+      - shell: echo "Build pipeline complete!"
+
+  - name: report_results
+    depends_on: [build_project]
+    command: echo "Build completed successfully. Exit code {{ tasks.build_project.outputs.shell_exit_code }}"

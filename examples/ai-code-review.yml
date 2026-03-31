@@ -1,0 +1,54 @@
+name: "AI Code Review Pipeline"
+description: "Multi-provider AI code review — send the same prompt to multiple LLMs and compare"
+
+variables:
+  OPENAI_API_KEY: "{{ env.OPENAI_API_KEY }}"
+  ANTHROPIC_API_KEY: "{{ env.ANTHROPIC_API_KEY }}"
+  GEMINI_API_KEY: "{{ env.GEMINI_API_KEY }}"
+  TARGET_FILE: "main.cpp"
+
+tasks:
+  - name: read_code
+    command: "cat {{ TARGET_FILE }}"
+
+  - name: review_openai
+    depends_on: [read_code]
+    uses: ./praktor/templates/llm-openai.yml
+    vars:
+      OPENAI_API_KEY: "{{ OPENAI_API_KEY }}"
+      OPENAI_SYSTEM_PROMPT: "You are a senior code reviewer. Be concise and direct."
+      PROMPT: "Review this code for bugs, performance issues, and style:\n\n{{ tasks.read_code.outputs.stdout }}"
+
+  - name: review_claude
+    depends_on: [read_code]
+    uses: ./praktor/templates/llm-claude.yml
+    vars:
+      ANTHROPIC_API_KEY: "{{ ANTHROPIC_API_KEY }}"
+      CLAUDE_SYSTEM_PROMPT: "You are a senior code reviewer. Be concise and direct."
+      PROMPT: "Review this code for bugs, performance issues, and style:\n\n{{ tasks.read_code.outputs.stdout }}"
+
+  - name: review_gemini
+    depends_on: [read_code]
+    uses: ./praktor/templates/llm-gemini.yml
+    vars:
+      GEMINI_API_KEY: "{{ GEMINI_API_KEY }}"
+      GEMINI_SYSTEM_PROMPT: "You are a senior code reviewer. Be concise and direct."
+      PROMPT: "Review this code for bugs, performance issues, and style:\n\n{{ tasks.read_code.outputs.stdout }}"
+
+  - name: summary
+    depends_on: [review_openai, review_claude, review_gemini]
+    script: |
+      var openai = ctx.get("tasks.review_openai.outputs.answer");
+      var claude = ctx.get("tasks.review_claude.outputs.answer");
+      var gemini = ctx.get("tasks.review_gemini.outputs.answer");
+
+      var report = "# Code Review Summary\n\n";
+      report = report + "## OpenAI (" + ctx.get("tasks.review_openai.outputs.model") + ")\n";
+      report = report + openai + "\n\n";
+      report = report + "## Claude (" + ctx.get("tasks.review_claude.outputs.model") + ")\n";
+      report = report + claude + "\n\n";
+      report = report + "## Gemini\n";
+      report = report + gemini + "\n";
+
+      fs.write("./code-review-report.md", report);
+      log.info("Review report written to ./code-review-report.md");

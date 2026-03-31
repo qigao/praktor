@@ -1,0 +1,87 @@
+name: "Behavior Tree Mustache Template Example"
+description: "Demonstrates Mustache template support in YAML behavior tree tasks for consistency with command tasks"
+
+variables:
+  PROJECT_NAME: "MyApp"
+  BUILD_DIR: "build"
+  BUILD_TYPE: "Release"
+  COMPILER: "gcc"
+  CFLAGS: "-O2 -Wall"
+
+tasks:
+  # Example 1: command task with Mustache templates
+  - name: configure_cmake
+    command: "cmake -B {{ BUILD_DIR }} -DCMAKE_BUILD_TYPE={{ BUILD_TYPE }}"
+    env:
+      CC: "{{ COMPILER }}"
+      CFLAGS: "{{ CFLAGS }}"
+
+  # Example 2: behavior tree with Mustache templates
+  - name: build_with_btdsl
+    depends_on: [configure_cmake]
+    sequence:
+      - shell:
+          cmd: "cmake --build {{ BUILD_DIR }}"
+          output_key: "build_output"
+          env:
+            CC: "{{ COMPILER }}"
+            CFLAGS: "{{ CFLAGS }}"
+
+      - parse_regex:
+          input_key: "build_output"
+          pattern: "Built target (\\w+)"
+          output_key: "target"
+
+      - shell:
+          cmd: "echo Built {{ PROJECT_NAME }} target: {target}"
+
+  # Example 3: Mixed syntax - Mustache for context, {key} for blackboard
+  - name: test_mixed_syntax
+    depends_on: [build_with_btdsl]
+    sequence:
+      - set_variable:
+          key: "test_dir"
+          value: "{{ BUILD_DIR }}/tests"
+
+      - shell:
+          cmd: "ctest --test-dir {test_dir}"
+          output_key: "test_output"
+
+      - parse_lines:
+          input_key: "test_output"
+          filter: "PASSED|FAILED"
+          output_key: "test_results"
+
+      - shell:
+          cmd: "echo {{ PROJECT_NAME }} tests completed in {test_dir}"
+
+  # Example 4: Context references still work
+  - name: deploy
+    depends_on: [test_mixed_syntax]
+    sequence:
+      - shell:
+          cmd: "echo Deploying {ctx.tasks.build_with_btdsl.outputs.target}"
+
+      - shell:
+          cmd: "echo Project: {{ PROJECT_NAME }}, Target: {ctx.tasks.build_with_btdsl.outputs.target}"
+
+# Comparison:
+#
+# BEFORE (Inconsistent):
+#   command task:   "cmake --build {{ BUILD_DIR }}"
+#   BT internals:   "cmake --build {ctx.variables.BUILD_DIR}"
+#
+# AFTER (Consistent):
+#   command task:   "cmake --build {{ BUILD_DIR }}"
+#   BT shell node:  "cmake --build {{ BUILD_DIR }}"
+#
+# Variable Resolution Order:
+#   1. {key}           -> Blackboard (BT internal state)
+#   2. {ctx.*}         -> WorkflowContext (via bridge)
+#   3. {{ variable }}  -> WorkflowContext (Mustache, preprocessed)
+#
+# Benefits:
+#   - Same syntax across command tasks and behavior-tree shell nodes
+#   - Mustache templates expanded before behavior-tree execution
+#   - Blackboard variables still work for internal state
+#   - Context bridge still works for cross-task references

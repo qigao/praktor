@@ -1,0 +1,17 @@
+name: Host Hibernate Example
+description: |
+  Minimal wrapper around the reusable host hibernate template.
+
+variables:
+  MESSAGE: "Hibernate requested by Praktor example"
+
+tasks:
+  - name: host_hibernate
+    uses: ../templates/host-hibernate.yml
+    vars:
+      MESSAGE: "{{ MESSAGE }}"
+
+  - name: emit_result
+    depends_on: [host_hibernate]
+    script: |
+      ctx.output("result", ctx.get("tasks.host_hibernate.outputs.result"));

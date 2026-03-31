@@ -1,0 +1,55 @@
+name: Parallel Test Execution
+
+description: |
+  Demonstrates parallel control flow for running multiple test suites concurrently.
+  All test suites must pass for the task to succeed.
+
+variables:
+  TEST_TIMEOUT: "300"
+
+tasks:
+  - name: setup_test_env
+    command: echo "Setting up test environment..."
+
+  - name: run_all_tests
+    depends_on: [setup_test_env]
+    parallel:
+      # Unit tests
+      - sequence:
+          - shell: echo "Running unit tests..."
+          - shell:
+              cmd: pytest tests/unit/ -v --timeout={ctx.variables.TEST_TIMEOUT}
+              output_key: unit_test_output
+          - check_exit_code: 0
+          - shell: echo "Unit tests passed"
+
+      # Integration tests
+      - sequence:
+          - shell: echo "Running integration tests..."
+          - shell:
+              cmd: pytest tests/integration/ -v --timeout={ctx.variables.TEST_TIMEOUT}
+              output_key: integration_test_output
+          - check_exit_code: 0
+          - shell: echo "Integration tests passed"
+
+      # Linting
+      - sequence:
+          - shell: echo "Running linter..."
+          - shell:
+              cmd: pylint src/ --output-format=text
+              output_key: lint_output
+          - check_exit_code: 0
+          - shell: echo "Linting passed"
+
+      # Type checking
+      - sequence:
+          - shell: echo "Running type checker..."
+          - shell:
+              cmd: mypy src/ --strict
+              output_key: type_check_output
+          - check_exit_code: 0
+          - shell: echo "Type checking passed"
+
+  - name: generate_report
+    depends_on: [run_all_tests]
+    command: echo "All tests passed! Execution time {{ tasks.run_all_tests.outputs.execution_time_ms }}ms"

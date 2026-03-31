@@ -65,11 +65,8 @@ public:
      */
     template<typename T>
     T getOr(const std::string& key, const T& default_value) const {
-        try {
-            return get(key).as<T>();
-        } catch (...) {
-            return default_value;
-        }
+        if (!has(key)) return default_value;
+        return get(key).as<T>();
     }
 
     /**

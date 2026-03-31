@@ -113,14 +113,14 @@ std::string substituteMustache(const std::string& templateStr, const WorkflowCon
     }
 
     MustacheContext ctx{context};
-    MUSTACHE_DATAPROVIDER provider;
+    MUSTACHE_DATAPROVIDER provider = {};
     provider.dump = bridge_dump;
     provider.get_root = bridge_get_root;
     provider.get_child_by_name = bridge_get_child_by_name;
     provider.get_child_by_index = bridge_get_child_by_index;
-    provider.get_partial = nullptr; // TODO: support partials?
+    provider.get_partial = nullptr;
 
-    MustacheStringRenderer renderer;
+    MustacheStringRenderer renderer = {};
     renderer.base.out_verbatim = render_verbatim;
     renderer.base.out_escaped = render_verbatim; // Don't escape for CLI/Shell
 

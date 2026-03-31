@@ -1,0 +1,56 @@
+name: "AI Chat — Single Provider"
+description: "Simple single-call example — pick your provider"
+
+# Usage:
+#   praktor -f ai-chat.yml -c -v PROMPT="Explain quicksort in 3 sentences"
+#   praktor -f ai-chat.yml -c -v PROMPT="Write a haiku about C++" -v PROVIDER=gemini
+#
+# Set your API key as an environment variable:
+#   export OPENAI_API_KEY=sk-...
+#   export ANTHROPIC_API_KEY=sk-ant-...
+#   export GEMINI_API_KEY=AI...
+
+variables:
+  PROVIDER: "openai"
+  PROMPT: "Hello, who are you?"
+  OPENAI_API_KEY: "{{ env.OPENAI_API_KEY }}"
+  ANTHROPIC_API_KEY: "{{ env.ANTHROPIC_API_KEY }}"
+  GEMINI_API_KEY: "{{ env.GEMINI_API_KEY }}"
+
+tasks:
+  - name: ask_openai
+    when: "{{ PROVIDER }} == 'openai'"
+    uses: ./praktor/templates/llm-openai.yml
+    vars:
+      OPENAI_API_KEY: "{{ OPENAI_API_KEY }}"
+      PROMPT: "{{ PROMPT }}"
+
+  - name: ask_claude
+    when: "{{ PROVIDER }} == 'claude'"
+    uses: ./praktor/templates/llm-claude.yml
+    vars:
+      ANTHROPIC_API_KEY: "{{ ANTHROPIC_API_KEY }}"
+      PROMPT: "{{ PROMPT }}"
+
+  - name: ask_gemini
+    when: "{{ PROVIDER }} == 'gemini'"
+    uses: ./praktor/templates/llm-gemini.yml
+    vars:
+      GEMINI_API_KEY: "{{ GEMINI_API_KEY }}"
+      PROMPT: "{{ PROMPT }}"
+
+  - name: print_answer
+    depends_on: [ask_openai, ask_claude, ask_gemini]
+    script: |
+      var provider = ctx.get("PROVIDER");
+      var answer = "";
+      if (provider == "openai") {
+        answer = ctx.get("tasks.ask_openai.outputs.answer");
+      }
+      if (provider == "claude") {
+        answer = ctx.get("tasks.ask_claude.outputs.answer");
+      }
+      if (provider == "gemini") {
+        answer = ctx.get("tasks.ask_gemini.outputs.answer");
+      }
+      log.info("[" + provider + "] " + answer);

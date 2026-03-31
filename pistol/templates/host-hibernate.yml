@@ -1,0 +1,32 @@
+name: Host Hibernate
+description: |
+  Requests the host to enter hibernation.
+
+  Variables:
+    MESSAGE  Optional operator-visible note for audit output only
+
+  Behavior:
+    1. Attempt the native hibernate command for the active platform
+    2. Emit a structured result if the request was accepted
+
+variables:
+  MESSAGE: "Hibernate requested by Praktor"
+
+tasks:
+  - name: hibernate_host
+    fallback:
+      - shell:
+          cmd: "powershell -NoProfile -Command \"Start-Process shutdown.exe -ArgumentList @('/h') -Wait\""
+      - shell:
+          cmd: "if command -v systemctl >/dev/null 2>&1; then systemctl hibernate; elif command -v pm-hibernate >/dev/null 2>&1; then pm-hibernate; else echo 'No supported hibernate command found' >&2; exit 1; fi"
+
+  - name: emit_result
+    depends_on: [hibernate_host]
+    script: |
+      var result = {
+        "action": "hibernate",
+        "message": ctx.get("MESSAGE"),
+        "status": "accepted"
+      };
+      ctx.output("result", json.stringify(result));
+      log.info("Hibernate requested: " + json.stringify(result));

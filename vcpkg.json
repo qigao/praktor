@@ -23,14 +23,6 @@
             "version>=": "1.5.0"
         },
         {
-            "name": "libuv",
-            "version>=": "1.48.0"
-        },
-        {
-            "name": "glaze",
-            "version>=": "5.5.4"
-        },
-        {
             "name": "jsoncons",
             "version>=": "1.3.2"
         },
@@ -43,10 +35,6 @@
             "version>=": "1.3.1"
         },
         {
-            "name": "pegtl",
-            "version>=": "3.2.8"
-        },
-        {
             "name": "magic-enum",
             "version>=": "0.9.7"
         },
@@ -55,16 +43,8 @@
             "version>=": "3.7.1"
         },
         {
-            "name": "nanobench",
-            "version>=": "4.3.11"
-        },
-        {
             "name": "xxhash",
             "version>=": "0.8.3"
-        },
-        {
-            "name": "quickjs-ng",
-            "version>=": "0.10.1"
         },
         {
             "name": "cxxopts"
@@ -80,6 +60,19 @@
         {
             "name": "aklomp-base64",
             "version>=": "0.5.2"
+        },
+        {
+            "name": "tinyxml2"
+        },
+        {
+            "name": "sqlite3"
+        },
+        {
+            "name": "zstd"
+        },
+        {
+            "name": "pcre2",
+            "version>=": "10.42"
         }
     ],
     "builtin-baseline": "b1b19307e2d2ec1eefbdb7ea069de7d4bcd31f01"

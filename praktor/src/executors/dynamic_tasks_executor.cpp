@@ -2,18 +2,74 @@
 
 #include "util/logging.hpp"
 #include "util/variable_substitution.hpp"
+#include "yml/task_yaml.hpp"
 
 #include <jsoncons/json.hpp>
 #include <regex>
 #include <sstream>
 #include <stdexcept>
+#include <unordered_set>
 
 namespace Praktor::Execution
 {
 
+namespace {
+
+std::string taskTypeName(const Task& task)
+{
+    if (!task.declared_runner.empty()) {
+        return task.declared_runner;
+    }
+
+    if (task.script && task.action == TaskAction::None) {
+        return "script";
+    }
+
+    switch (task.action) {
+        case TaskAction::Uses:
+            return "uses";
+        case TaskAction::DynamicTasks:
+            return "dynamic_tasks";
+        case TaskAction::Btdsl:
+            return "btdsl";
+        case TaskAction::None:
+            break;
+    }
+
+    return "unknown";
+}
+
+void mergeTaskOutputs(TaskFailureContext& failure, const WorkflowContext& context,
+                      const std::string& task_name)
+{
+    auto outputs = context.getValueByPath("tasks." + task_name + ".outputs");
+    if (!outputs.is_object()) {
+        return;
+    }
+
+    for (const auto& item : outputs.object_range()) {
+        failure.captured_outputs[item.key()] = item.value();
+    }
+
+    if (outputs.contains("stdout") && outputs["stdout"].is_string()) {
+        failure.stdout_data = outputs["stdout"].as<std::string>();
+    }
+    if (outputs.contains("stderr") && outputs["stderr"].is_string()) {
+        failure.stderr_data = outputs["stderr"].as<std::string>();
+    }
+    if (outputs.contains("exit_code")) {
+        try {
+            failure.exit_code = outputs["exit_code"].as<int64_t>();
+        } catch (const std::exception&) {
+        }
+    }
+}
+
+} // namespace
+
 TaskResult DynamicTasksExecutor::execute(const Task& task, WorkflowContext& context)
 {
-    TLOG_INFO("Executing dynamic_tasks: {}", task.name);
+    TLOG_DEBUG("Executing dynamic_tasks: {}", task.name);
 
     if (!subtask_callback_) {
         return TaskResult(false, "DynamicTasksExecutor requires subtask_callback to be set");
@@ -41,7 +97,7 @@ TaskResult DynamicTasksExecutor::execute(const Task& task, WorkflowContext& cont
         jsoncons::json items_json;
         try {
             items_json = context.getValueByPath(items_var);
-            TLOG_INFO("Retrieved items_variable '{}': is_null={}, is_array={}, type={}",
+            TLOG_DEBUG("Retrieved items_variable '{}': is_null={}, is_array={}, type={}",
                  items_var, items_json.is_null(), items_json.is_array(), (int)items_json.type());
         } catch (const std::exception& e) {
             return TaskResult(false, "dynamic_tasks items_variable '" + items_var + "' not found in context: " + e.what());
@@ -55,20 +111,87 @@ TaskResult DynamicTasksExecutor::execute(const Task& task, WorkflowContext& cont
             return TaskResult(false, "dynamic_tasks items_variable '" + items_var + "' must be a JSON array, got: " + items_json.to_string());
         }
 
-        TLOG_INFO("Generating {} tasks from template", items_json.size());
+        TLOG_DEBUG("Generating {} tasks from template", items_json.size());
+        jsoncons::json generated_results = jsoncons::json::array();
+        context.setCurrentTaskOutput("generated_tasks", generated_results);
+        context.setCurrentTaskOutput("generated_count", static_cast<int64_t>(0));
+        context.setCurrentTaskOutput("success_count", static_cast<int64_t>(0));
+        context.setCurrentTaskOutput("failed_count", static_cast<int64_t>(0));
+        context.setCurrentTaskOutput("skipped_count", static_cast<int64_t>(0));
 
         // Generate and execute tasks
         size_t index = 0;
+        int64_t success_count = 0;
+        int64_t failed_count = 0;
+        int64_t skipped_count = 0;
+        std::unordered_set<std::string> generated_names;
+        std::string first_failed_task;
+        std::optional<TaskFailureContext> first_failure_context;
         for (const auto& item : items_json.array_range()) {
-            Task generated = generateTask(params.task_template, item, index, context);
-            TLOG_INFO("Executing generated task: {}", generated.name);
+            Task generated = generateTask(task, params.task_template, item, index);
+            if (generated.name.empty()) {
+                return TaskResult(false, "Generated task name must not be empty");
+            }
+            if (generated.name == task.name) {
+                return TaskResult(false, "Generated task name '" + generated.name +
+                                              "' collides with parent dynamic_tasks task");
+            }
+            if (task_name_exists_callback_ && task_name_exists_callback_(generated.name)) {
+                return TaskResult(false, "Generated task name '" + generated.name +
+                                              "' collides with an existing workflow task");
+            }
+            if (!generated_names.insert(generated.name).second) {
+                return TaskResult(false, "Generated task name collision: '" + generated.name + "'");
+            }
+            TLOG_DEBUG("Executing generated task: {}", generated.name);
 
-            bool success = subtask_callback_(generated, context);
-            if (!success) {
-                return TaskResult(false, "Generated task '" + generated.name + "' failed");
+            bool callback_success = subtask_callback_(generated, context);
+            jsoncons::json generated_result =
+                buildGeneratedTaskResult(generated, item, index, callback_success, context);
+            const std::string status = generated_result["status"].as<std::string>();
+            if (status == "success") {
+                ++success_count;
+            } else if (status == "skipped") {
+                ++skipped_count;
+            } else {
+                ++failed_count;
+                if (first_failed_task.empty()) {
+                    first_failed_task = generated.name;
+                }
+                if (!first_failure_context.has_value()) {
+                    first_failure_context =
+                        buildGeneratedTaskFailureContext(generated, item, index, context);
+                }
+            }
+
+            generated_results.push_back(std::move(generated_result));
+            context.setCurrentTaskOutput("generated_tasks", generated_results);
+            context.setCurrentTaskOutput("generated_count", static_cast<int64_t>(generated_results.size()));
+            context.setCurrentTaskOutput("success_count", success_count);
+            context.setCurrentTaskOutput("failed_count", failed_count);
+            context.setCurrentTaskOutput("skipped_count", skipped_count);
+            if (!callback_success && !task.continue_on_error) {
+                TaskResult result(false, "Generated task '" + generated.name + "' failed");
+                if (first_failure_context.has_value()) {
+                    result.nested_failure_context = *first_failure_context;
+                }
+                return result;
             }
 
             ++index;
+        }
+
+        if (failed_count > 0) {
+            std::ostringstream message;
+            message << failed_count << " generated task(s) failed";
+            if (!first_failed_task.empty()) {
+                message << " (first: '" << first_failed_task << "')";
+            }
+            TaskResult result(false, message.str());
+            if (first_failure_context.has_value()) {
+                result.nested_failure_context = *first_failure_context;
+            }
+            return result;
         }
 
         return TaskResult(true);
@@ -80,18 +203,62 @@ TaskResult DynamicTasksExecutor::execute(const Task& task, WorkflowContext& cont
     }
 }
 
-Task DynamicTasksExecutor::generateTask(const DynamicTaskTemplate& tmpl,
+TaskFailureContext DynamicTasksExecutor::buildGeneratedTaskFailureContext(
+    const Task& generated_task, const jsoncons::json& item, size_t index,
+    const WorkflowContext& context) const
+{
+    TaskFailureContext failure;
+    failure.task_name = generated_task.name;
+    failure.task_type = taskTypeName(generated_task);
+
+    auto failed_tasks = context.getFailedTasks();
+    auto it = failed_tasks.find(generated_task.name);
+    if (it != failed_tasks.end()) {
+        failure.error_message = it->second;
+    }
+
+    mergeTaskOutputs(failure, context, generated_task.name);
+    failure.captured_outputs["index"] = static_cast<int64_t>(index);
+    failure.captured_outputs["item"] = item;
+    return failure;
+}
+
+jsoncons::json DynamicTasksExecutor::buildGeneratedTaskResult(const Task& generated_task,
+                                                             const jsoncons::json& item,
+                                                             size_t index,
+                                                             bool callback_success,
+                                                             WorkflowContext& context) const
+{
+    jsoncons::json result = jsoncons::json::object();
+    result["index"] = static_cast<int64_t>(index);
+    result["item"] = item;
+    result["name"] = generated_task.name;
+    std::string status = context.getTaskStatus(generated_task.name);
+    if (status == "pending" || status == "running") {
+        status = callback_success ? "success" : "failed";
+        context.setTaskStatus(generated_task.name, status);
+    }
+    result["status"] = status;
+
+    auto outputs = context.getValueByPath("tasks." + generated_task.name + ".outputs");
+    result["outputs"] = outputs.is_object() ? outputs : jsoncons::json::object();
+    return result;
+}
+
+Task DynamicTasksExecutor::generateTask(const Task& parent_task,
+                                         const DynamicTaskTemplate& tmpl,
                                          const jsoncons::json& item,
-                                         size_t index,
-                                         WorkflowContext& context)
+                                         size_t index)
 {
     Task task;
 
     // Substitute item placeholders in name
     task.name = substituteItemPlaceholders(tmpl.name, item, index);
 
-    // Set action and specifics
-    task.action = TaskAction::RunCommand;
+    // Set action and specifics using BTDSL substitution
+    task.action = TaskAction::Btdsl;
+    task.declared_runner = "command";
+    task.source_path = parent_task.source_path;
 
     RunCommandParams cmd_params;
     if (std::holds_alternative<std::string>(tmpl.command)) {
@@ -104,7 +271,7 @@ Task DynamicTasksExecutor::generateTask(const DynamicTaskTemplate& tmpl,
         }
         cmd_params.command = cmd_list;
     }
-    task.specifics = cmd_params;
+    task.specifics = desugarCommandToBtdsl(cmd_params);
 
     // Copy optional fields
     if (tmpl.timeout) {

@@ -1,0 +1,32 @@
+name: Host Suspend
+description: |
+  Requests the host to enter suspend / sleep mode.
+
+  Variables:
+    MESSAGE  Optional operator-visible note for audit output only
+
+  Behavior:
+    1. Attempt the native suspend command for the active platform
+    2. Emit a structured result if the request was accepted
+
+variables:
+  MESSAGE: "Suspend requested by Praktor"
+
+tasks:
+  - name: suspend_host
+    fallback:
+      - shell:
+          cmd: "powershell -NoProfile -Command \"Start-Process rundll32.exe -ArgumentList @('powrprof.dll,SetSuspendState', '0,1,0') -Wait\""
+      - shell:
+          cmd: "if command -v systemctl >/dev/null 2>&1; then systemctl suspend; elif command -v pm-suspend >/dev/null 2>&1; then pm-suspend; else echo 'No supported suspend command found' >&2; exit 1; fi"
+
+  - name: emit_result
+    depends_on: [suspend_host]
+    script: |
+      var result = {
+        "action": "suspend",
+        "message": ctx.get("MESSAGE"),
+        "status": "accepted"
+      };
+      ctx.output("result", json.stringify(result));
+      log.info("Suspend requested: " + json.stringify(result));

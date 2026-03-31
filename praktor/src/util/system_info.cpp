@@ -1,10 +1,16 @@
-#include <uv.h> // Required for uv_os_get_passwd_alloc and uv_free_passwd
 #include "util/system_info.hpp"
 #include "util/logging.hpp"
+#include "platform.h"
 #include <cstring>
 #include <sstream>
 #include <thread>
 #include <mutex>
+
+#ifdef _WIN32
+#include <windows.h>
+#else
+extern char **environ;
+#endif
 
 namespace Praktor {
 namespace system {
@@ -24,80 +30,34 @@ namespace {
     }
 }
 
-SystemInfoProvider::SystemInfoProvider() : loop_(nullptr), owns_loop_(false) {
-    initializeLoop();
-}
-
-SystemInfoProvider::~SystemInfoProvider() {
-    cleanupLoop();
-}
-
-void SystemInfoProvider::initializeLoop() {
-    // Try to use existing loop if available, otherwise create our own
-    loop_ = uv_default_loop();
-    if (!loop_) {
-        loop_ = new uv_loop_t;
-        int result = uv_loop_init(loop_);
-        if (result != 0) {
-            delete loop_;
-            loop_ = nullptr;
-            TLOG_ERROR("Failed to initialize libuv loop: {}", uvErrorToString(result));
-            return;
-        }
-        owns_loop_ = true;
-    }
-}
-
-void SystemInfoProvider::cleanupLoop() {
-    if (loop_ && owns_loop_) {
-        uv_loop_close(loop_);
-        delete loop_;
-        loop_ = nullptr;
-    }
-}
-
-std::string SystemInfoProvider::uvErrorToString(int error) const {
-    return std::string(uv_strerror(error)) + " (" + uv_err_name(error) + ")";
-}
-
 std::string SystemInfoProvider::getOSName() const {
-    uv_utsname_t utsname;
-    int result = uv_os_uname(&utsname);
+    char value[TURBO_PLATFORM_INFO_MAX] = {0};
+    int result = turbo_platform_os_name(value, sizeof(value));
     if (result != 0) {
-        TLOG_WARN("Failed to get OS name via libuv: {}", uvErrorToString(result));
+        TLOG_WARN("Failed to get OS name via platform API: {}", result);
         return "unknown";
     }
-
-    std::string sysname(utsname.sysname);
-
-    // Normalize OS names to match existing behavior
-    if (sysname == "Windows_NT") return "windows";
-    if (sysname == "Darwin") return "macos";
-    if (sysname == "Linux") return "linux";
-
-    // Convert to lowercase for consistency
-    std::transform(sysname.begin(), sysname.end(), sysname.begin(), ::tolower);
-    return sysname;
+    return std::string(value);
 }
 
 std::string SystemInfoProvider::getOSVersion() const {
-    uv_utsname_t utsname;
-    int result = uv_os_uname(&utsname);
+    char value[TURBO_PLATFORM_INFO_MAX] = {0};
+    int result = turbo_platform_os_version(value, sizeof(value));
     if (result != 0) {
-        TLOG_WARN("Failed to get OS version via libuv: {}", uvErrorToString(result));
+        TLOG_WARN("Failed to get OS version via platform API: {}", result);
         return "unknown";
     }
-    return std::string(utsname.release);
+    return std::string(value);
 }
 
 std::string SystemInfoProvider::getArchitecture() const {
-    uv_utsname_t utsname;
-    int result = uv_os_uname(&utsname);
+    char value[TURBO_PLATFORM_INFO_MAX] = {0};
+    int result = turbo_platform_arch(value, sizeof(value));
     if (result != 0) {
-        TLOG_WARN("Failed to get architecture via libuv: {}", uvErrorToString(result));
+        TLOG_WARN("Failed to get architecture via platform API: {}", result);
         return "unknown";
     }
-    return std::string(utsname.machine);
+    return std::string(value);
 }
 
 std::string SystemInfoProvider::getShellName() const {
@@ -125,111 +85,85 @@ std::string SystemInfoProvider::getShellName() const {
 }
 
 std::string SystemInfoProvider::getUsername() const {
-
-     uv_passwd_t pwd;
-    int result = uv_os_get_passwd(&pwd); // Pass the address of the pointer
+    char value[TURBO_PLATFORM_INFO_MAX] = {0};
+    int result = turbo_platform_username(value, sizeof(value));
     if (result != 0) {
-        TLOG_WARN("Failed to get username via libuv: {}", uvErrorToString(result));
+        TLOG_WARN("Failed to get username via platform API: {}", result);
         return "unknown";
     }
-    std::string username = pwd.username;
-    uv_os_free_passwd(&pwd);
-    return username;
+    return std::string(value);
 }
 
 std::string SystemInfoProvider::getHostname() const {
-    char hostname[256];
-    size_t size = sizeof(hostname);
-    int result = uv_os_gethostname(hostname, &size);
+    char value[TURBO_PLATFORM_INFO_MAX] = {0};
+    int result = turbo_platform_hostname(value, sizeof(value));
     if (result != 0) {
-        TLOG_WARN("Failed to get hostname via libuv: {}", uvErrorToString(result));
+        TLOG_WARN("Failed to get hostname via platform API: {}", result);
         return "unknown";
     }
-    return std::string(hostname);
+    return std::string(value);
 }
 
 SystemInfoProvider::CPUInfo SystemInfoProvider::getCPUInfo() const {
-    uv_cpu_info_t* cpu_infos;
-    int count;
-    int result = uv_cpu_info(&cpu_infos, &count);
-
     CPUInfo info{"unknown", 0, 0.0};
-
+    turbo_platform_cpu_info_t native_info{};
+    int result = turbo_platform_cpu_info(&native_info);
     if (result != 0) {
-        TLOG_WARN("Failed to get CPU info via libuv: {}", uvErrorToString(result));
+        TLOG_WARN("Failed to get CPU info via platform API: {}", result);
         return info;
     }
-
-    if (count > 0) {
-        info.model = std::string(cpu_infos[0].model);
-        info.core_count = count;
-        info.speed_mhz = cpu_infos[0].speed;
-    }
-
-    uv_free_cpu_info(cpu_infos, count);
+    info.model = native_info.model;
+    info.core_count = native_info.core_count;
+    info.speed_mhz = native_info.speed_mhz;
     return info;
 }
 
 SystemInfoProvider::MemoryInfo SystemInfoProvider::getMemoryInfo() const {
     MemoryInfo info{0, 0, 0};
-
-    info.total_memory = uv_get_total_memory();
-    info.free_memory = uv_get_free_memory();
-    info.available_memory = info.free_memory; // libuv doesn't distinguish available vs free
-
+    turbo_platform_memory_info_t native_info{};
+    int result = turbo_platform_memory_info(&native_info);
+    if (result != 0) {
+        TLOG_WARN("Failed to get memory info via platform API: {}", result);
+        return info;
+    }
+    info.total_memory = native_info.total_memory;
+    info.free_memory = native_info.free_memory;
+    info.available_memory = native_info.available_memory;
     return info;
 }
 
 std::vector<SystemInfoProvider::NetworkInterface> SystemInfoProvider::getNetworkInterfaces() const {
     std::vector<NetworkInterface> interfaces;
-
-    uv_interface_address_t* addresses;
-    int count;
-    int result = uv_interface_addresses(&addresses, &count);
-
+    turbo_platform_network_interface_t native_interfaces[64] = {};
+    size_t count = 0;
+    int result = turbo_platform_network_interfaces(native_interfaces, 64, &count);
     if (result != 0) {
-        TLOG_WARN("Failed to get network interfaces via libuv: {}", uvErrorToString(result));
+        TLOG_WARN("Failed to get network interfaces via platform API: {}", result);
         return interfaces;
     }
-
-    for (int i = 0; i < count; i++) {
+    interfaces.reserve(count);
+    for (size_t i = 0; i < count; ++i) {
         NetworkInterface iface;
-        iface.name = std::string(addresses[i].name);
-        iface.is_internal = addresses[i].is_internal != 0;
-
-        // Convert address to string
-        char addr_str[INET6_ADDRSTRLEN];
-        if (addresses[i].address.address4.sin_family == AF_INET) {
-            uv_ip4_name(&addresses[i].address.address4, addr_str, sizeof(addr_str));
-            iface.address = std::string(addr_str);
-
-            uv_ip4_name(&addresses[i].netmask.netmask4, addr_str, sizeof(addr_str));
-            iface.netmask = std::string(addr_str);
-        } else if (addresses[i].address.address6.sin6_family == AF_INET6) {
-            uv_ip6_name(&addresses[i].address.address6, addr_str, sizeof(addr_str));
-            iface.address = std::string(addr_str);
-
-            uv_ip6_name(&addresses[i].netmask.netmask6, addr_str, sizeof(addr_str));
-            iface.netmask = std::string(addr_str);
-        }
-
+        iface.name = native_interfaces[i].name;
+        iface.address = native_interfaces[i].address;
+        iface.netmask = native_interfaces[i].netmask;
+        iface.is_internal = native_interfaces[i].is_internal != 0;
         interfaces.push_back(std::move(iface));
     }
-
-    uv_free_interface_addresses(addresses, count);
     return interfaces;
 }
 
 SystemInfoProvider::LoadAverage SystemInfoProvider::getLoadAverage() const {
     LoadAverage load{0.0, 0.0, 0.0};
-
-    double avg[3];
-    uv_loadavg(avg);
-
-    load.one_minute = avg[0];
-    load.five_minutes = avg[1];
-    load.fifteen_minutes = avg[2];
-
+    turbo_platform_load_average_t native_info{};
+    int result = turbo_platform_load_average(&native_info);
+    if (result != 0) {
+        TLOG_WARN("Failed to get load average via platform API: {}", result);
+        return load;
+    }
+    load.one_minute = native_info.one_minute;
+    load.five_minutes = native_info.five_minutes;
+    load.fifteen_minutes = native_info.fifteen_minutes;
     return load;
 }
 
@@ -249,20 +183,35 @@ std::unordered_map<std::string, std::string> SystemInfoProvider::getAllSystemPro
 
 std::unordered_map<std::string, std::string> SystemInfoProvider::getEnvironmentVariables() const {
     std::unordered_map<std::string, std::string> env_vars;
-    uv_env_item_t* env_items;
-    int count;
-    int result = uv_os_environ(&env_items, &count);
 
-    if (result != 0) {
-        TLOG_WARN("Failed to get environment variables via libuv: {}", uvErrorToString(result));
+#ifdef _WIN32
+    LPCH block = GetEnvironmentStringsA();
+    if (!block) {
+        TLOG_WARN("Failed to get environment variables via Win32 API");
         return env_vars;
     }
 
-    for (int i = 0; i < count; ++i) {
-        env_vars[env_items[i].name] = env_items[i].value;
+    for (LPCH current = block; *current != '\0'; current += std::strlen(current) + 1) {
+        std::string entry(current);
+        size_t separator = entry.find('=');
+        if (separator == std::string::npos || separator == 0) {
+            continue;
+        }
+        env_vars[entry.substr(0, separator)] = entry.substr(separator + 1);
     }
 
-    uv_os_free_environ(env_items, count);
+    FreeEnvironmentStringsA(block);
+#else
+    for (char **current = environ; current && *current; ++current) {
+        std::string entry(*current);
+        size_t separator = entry.find('=');
+        if (separator == std::string::npos || separator == 0) {
+            continue;
+        }
+        env_vars[entry.substr(0, separator)] = entry.substr(separator + 1);
+    }
+#endif
+
     return env_vars;
 }
 

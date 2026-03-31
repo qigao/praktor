@@ -1,0 +1,19 @@
+name: Power Profile Example
+description: |
+  Minimal wrapper around the reusable power profile template.
+
+variables:
+  MODE: "balanced"
+  MESSAGE: "Power profile change requested by Praktor example"
+
+tasks:
+  - name: power_profile
+    uses: ../templates/power-profile.yml
+    vars:
+      MODE: "{{ MODE }}"
+      MESSAGE: "{{ MESSAGE }}"
+
+  - name: emit_result
+    depends_on: [power_profile]
+    script: |
+      ctx.output("result", ctx.get("tasks.power_profile.outputs.result"));

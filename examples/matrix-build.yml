@@ -10,27 +10,20 @@ tasks:
       as: "service"
     command: "echo Testing {{ service }} service..."
 
-  # Example 2: Matrix iteration with 'each.matrix' (cartesian product)
+  # Example 2: Write build result via fs module
   - name: write_build_result
-    script:
-      source: |
-        import fs from 'turbo:fs';
-        const path = `./builds/{{ platform.os }}-{{ platform.arch }}.txt`;
-        
-        if (!fs.exists("./builds")) {
-          fs.mkdir("./builds");
-        }
-        
-        fs.writeFile(path, "Build successful for {{ platform.os }} {{ platform.arch }}");
+    command: "echo Writing build result for {{ platform.os }}-{{ platform.arch }}"
+    script: |
+      fs.write("./builds/{{ platform.os }}-{{ platform.arch }}.txt", "Build successful for {{ platform.os }} {{ platform.arch }}");
 
   - name: build_all_platforms
-    description: "Build for all OS/architecture combinations (6 total: 3 OS × 2 arch)"
+    description: "Build for all OS/architecture combinations (6 total: 3 OS x 2 arch)"
     depends_on: [test_services]
     each:
-      matrix:                    # 'matrix' creates cartesian product
+      matrix:
         os: ["linux", "windows", "macos"]
         arch: ["amd64", "arm64"]
-      as: "platform"             # Each combination available as 'platform.os' and 'platform.arch'
+      as: "platform"
     command: "echo Building for {{ platform.os }} on {{ platform.arch }}..."
     triggers:
       on_success: [write_build_result]

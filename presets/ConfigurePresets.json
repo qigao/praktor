@@ -8,27 +8,39 @@
             "name": "dev-win-msvc-ninja",
             "hidden": true,
             "displayName": "Developer (Windows, MSVC, Ninja Multi-Config)",
-            "inherits": "base-developer-windows",
-            "generator": "Ninja"
-        },
-        {
-            "name": "dev-win-msvc-ninja-asan",
-            "hidden": true,
-            "displayName": "Developer with ASan (Windows, MSVC, Ninja)",
-            "inherits": "base-developer-windows-asan",
+            "inherits": [
+                "base-developer-windows",
+                "pkg-vcpkg"
+            ],
             "generator": "Ninja"
         },
         {
             "name": "release-win-msvc-ninja",
             "hidden": true,
             "displayName": "Release (Windows, MSVC, Ninja Multi-Config)",
-            "inherits": "base-release-windows",
+            "inherits": [
+                "base-release-windows",
+                "pkg-vcpkg"
+            ],
+            "generator": "Ninja"
+        },
+        {
+            "name": "dev-linux-ninja",
+            "hidden": false,
+            "displayName": "Developer (Linux, Ninja)",
+            "inherits": [
+                "base-developer-linux",
+                "pkg-vcpkg"
+            ],
             "generator": "Ninja"
         },
         {
             "name": "release-linux-ninja",
             "displayName": "Release (Linux, Ninja)",
-            "inherits": "base-release-linux",
+            "inherits": [
+                "base-release-linux",
+                "pkg-vcpkg"
+            ],
             "generator": "Ninja"
         },
         {

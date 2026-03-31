@@ -1,0 +1,65 @@
+name: Version Extraction with Context Bridge
+
+description: |
+  Demonstrates context bridge usage for data flow between tasks.
+  Extracts version from git, parses it, and uses it in subsequent tasks.
+
+variables:
+  PROJECT_NAME: "myproject"
+
+tasks:
+  - name: extract_version
+    sequence:
+      # Step 1: Get raw version from git
+      - shell:
+          cmd: git describe --tags --always
+          output_key: version_raw
+
+      # Step 2: Parse version using regex
+      - parse_regex:
+          input_key: version_raw
+          pattern: v?([0-9]+\.[0-9]+\.[0-9]+)
+          capture_group: 1
+          output_key: version
+
+      # Step 3: Extract major version
+      - parse_regex:
+          input_key: version
+          pattern: ^([0-9]+)\.
+          capture_group: 1
+          output_key: major_version
+
+      # Step 4: Extract minor version
+      - parse_regex:
+          input_key: version
+          pattern: ^[0-9]+\.([0-9]+)\.
+          capture_group: 1
+          output_key: minor_version
+
+      - shell: echo "Extracted version {ctx.tasks.extract_version.outputs.version}"
+
+  - name: build_with_version
+    depends_on: [extract_version]
+    sequence:
+      - shell: echo "Building {ctx.variables.PROJECT_NAME} version {ctx.tasks.extract_version.outputs.version}"
+      - shell: make VERSION={ctx.tasks.extract_version.outputs.version} PROJECT={ctx.variables.PROJECT_NAME}
+      - shell:
+          cmd: echo "Build artifact {ctx.variables.PROJECT_NAME}-{ctx.tasks.extract_version.outputs.version}.tar.gz"
+          output_key: artifact_name
+
+  - name: tag_docker_image
+    depends_on: [build_with_version]
+    sequence:
+      - shell: echo "Tagging Docker image with version {ctx.tasks.extract_version.outputs.version}"
+      - shell: docker tag {ctx.variables.PROJECT_NAME}:latest {ctx.variables.PROJECT_NAME}:{ctx.tasks.extract_version.outputs.version}
+      - shell: docker tag {ctx.variables.PROJECT_NAME}:latest {ctx.variables.PROJECT_NAME}:{ctx.tasks.extract_version.outputs.major_version}
+      - shell: echo "Tagged images with version {ctx.tasks.extract_version.outputs.version} and major version {ctx.tasks.extract_version.outputs.major_version}"
+
+  - name: create_release_notes
+    depends_on: [extract_version]
+    command: |
+      echo "Release Notes for v{{ tasks.extract_version.outputs.version }}" > RELEASE_NOTES.md
+      echo "" >> RELEASE_NOTES.md
+      echo "Major Version: {{ tasks.extract_version.outputs.major_version }}" >> RELEASE_NOTES.md
+      echo "Minor Version: {{ tasks.extract_version.outputs.minor_version }}" >> RELEASE_NOTES.md
+      echo "Artifact: {{ tasks.build_with_version.outputs.artifact_name }}" >> RELEASE_NOTES.md

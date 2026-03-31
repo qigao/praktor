@@ -11,37 +11,43 @@ using Vars = std::unordered_map<std::string, std::string>;
 using StrList = std::vector<std::string>;
 using DotEnv = std::vector<std::string>;
 
-enum class TaskAction { None, RunCommand, Script, Uses, DynamicTasks, Http };
+enum class TaskAction { None, Uses, DynamicTasks, Btdsl };
 
 enum class CommandOutputFormat { Text, Json };
+
+struct ParseRegexConfig {
+  std::string pattern;
+  int capture_group = 1;
+  std::string output_key;
+};
+
+struct ParseJsonConfig {
+  std::string path;
+  std::string output_key;
+};
+
+struct ParseLinesConfig {
+  std::string filter;  // optional regex filter
+  std::string output_key;
+};
+
+struct ParseKeyValueConfig {
+  std::string delimiter = "=";
+  std::string line_separator = "\n";
+  std::string output_key;
+};
 
 struct RunCommandParams {
   std::variant<std::string, StrList> command;
   CommandOutputFormat output_format = CommandOutputFormat::Text;
   std::string working_directory;
   Vars environment;
-};
 
-struct HttpParams {
-  std::string url;
-  std::string method = "GET";
-  Vars headers;
-  std::string body;
-  bool follow_redirects = true;
-  int timeout_ms = 30000;
-  std::optional<std::string> auth_user;
-  std::optional<std::string> auth_pass;
-  std::optional<std::string> bearer_token;
-  std::optional<std::string> script; // pre-request JavaScript
-  std::optional<std::string> test;   // post-response JavaScript
-};
-
-struct ScriptParams {
-  std::string source;
-  std::string language = "javascript";
-  Vars environment;
-  Vars globals;
-  StrList modules;
+  // Parser options (only one can be set)
+  std::optional<ParseRegexConfig> parse_regex;
+  std::optional<ParseJsonConfig> parse_json;
+  std::optional<ParseLinesConfig> parse_lines;
+  std::optional<ParseKeyValueConfig> parse_keyvalue;
 };
 
 struct UsesParams {
@@ -90,8 +96,8 @@ struct Each {
   bool enabled() const { return hasItems() || hasMatrix(); }
 };
 
-// Trigger actions now simply reference tasks by name
-// This allows any task type (script, command, uses, etc.) to be used as a trigger
+// Trigger actions reference tasks by name
+// Any task type (command, btdsl, uses, dynamic_tasks, script-only) can be used as a trigger
 using TriggerAction = std::string;  // Task name to execute
 
 struct Triggers {
@@ -102,23 +108,66 @@ struct Triggers {
   bool empty() const { return on_success.empty() && on_failure.empty() && on_complete.empty(); }
 };
 
-struct Outputs {
-  std::string stdout_to_variable;
-  std::string stderr_to_variable;
-  std::string exit_code_to_variable;
-  std::string output_json_to_variable;
-};
-
 struct EmbeddedModule {
   std::string language = "javascript";
   std::string source;
+  std::string path;  // External file path (alternative to inline source)
+
+  bool isExternal() const { return !path.empty(); }
 };
+
+// Import configuration for external modules
+struct ModuleImports {
+  StrList files;  // List of .yml or .js files to import modules from
+
+  bool empty() const { return files.empty(); }
+};
+
+// Native module (DLL/SO) configuration
+struct NativeModule {
+  std::string name;           // Module name for native call dispatch
+  std::string path;           // Path to .dll/.so file
+  std::unordered_map<std::string, std::string> hooks;  // hook_name -> symbol_name
+};
+
+using NativeModules = std::vector<NativeModule>;
+
+// BTDSL Node Type Registry
+struct BtdslNodeSpec {
+  std::string name;
+  bool isControl;
+  std::vector<std::string> requiredParams;
+  std::vector<std::string> optionalParams;
+  bool allowsChildren;
+};
+
+struct BtdslNode {
+  std::string type;  // Node type: Sequence, Fallback, Shell, etc.
+  std::unordered_map<std::string, std::string> params;  // Node parameters
+  std::vector<BtdslNode> children;  // Child nodes for control flow
+  
+  // Helper methods for node classification
+  bool isControlNode() const;
+  bool isLeafNode() const;
+  bool hasChildren() const { return !children.empty(); }
+  bool hasParams() const { return !params.empty(); }
+};
+
+struct BtdslParams {
+  BtdslNode root;  // Root node of the behavior tree (parsed from YAML)
+};
+
+// NODE_REGISTRY: Registry of all supported BTDSL node types
+extern const std::unordered_map<std::string, BtdslNodeSpec> NODE_REGISTRY;
+
+// Lookup node spec by name (case-insensitive)
+const BtdslNodeSpec* findNodeSpec(const std::string& name);
 
 struct TaskDefaults {
   std::optional<RetryPolicy> retries;
   std::optional<std::string> timeout;
 };
 
-using TaskSpecifics = std::variant<std::monostate, RunCommandParams, ScriptParams, UsesParams, DynamicTasksParams, HttpParams>;
+using TaskSpecifics = std::variant<std::monostate, UsesParams, DynamicTasksParams, BtdslParams>;
 
 #endif // __TASK_TYPES_H__

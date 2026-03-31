@@ -28,11 +28,4 @@ tasks:
   - name: notify
     description: "Notify team of success"
     depends_on: [package]
-    command: "echo Build completed successfully"
-    triggers:
-      on_success: [notify_success]
-
-  - name: notify_success
-    script:
-      source: |
-        print("Build and test for {{ PROJECT_NAME }} completed successfully!");
+    command: "echo Build and test for {{ PROJECT_NAME }} completed successfully"

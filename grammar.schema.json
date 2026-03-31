@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "Praktor Workflow Specification",
-  "description": "A schema for defining Praktor DSL (v7.0) workflow files.",
+  "description": "A schema for defining Praktor DSL (v9.0) workflow files.",
   "type": "object",
   "properties": {
     "name": {
@@ -37,11 +37,11 @@
       },
       "additionalProperties": false
     },
-    "embedded": {
-      "type": "object",
-      "description": "Embedded script modules available to script tasks.",
-      "additionalProperties": {
-        "$ref": "#/$defs/embeddedModule"
+    "native_modules": {
+      "type": "array",
+      "description": "Native DLL/SO modules to load for script execution.",
+      "items": {
+        "$ref": "#/$defs/nativeModule"
       }
     },
     "tasks": {
@@ -94,6 +94,23 @@
         "delay": {
           "$ref": "#/$defs/durationString",
           "description": "The delay between attempts."
+        },
+        "on_exit_codes": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          },
+          "description": "Only retry if exit code matches one of these values. If omitted, retries on any non-zero exit code."
+        },
+        "on_stderr_pattern": {
+          "type": "string",
+          "description": "Only retry if stderr matches this regex pattern. Useful for retrying on specific error messages."
+        },
+        "backoff": {
+          "type": "string",
+          "enum": ["linear", "exponential"],
+          "default": "linear",
+          "description": "Backoff strategy: 'linear' (constant delay) or 'exponential' (delay doubles each retry)."
         }
       },
       "required": [
@@ -101,21 +118,27 @@
       ],
       "additionalProperties": false
     },
-    "embeddedModule": {
+    "nativeModule": {
       "type": "object",
+      "description": "A native DLL/SO module loaded at startup.",
       "properties": {
-        "language": {
+        "name": {
           "type": "string",
-          "description": "Execution language for the module (default: javascript)."
+          "description": "Module name for identification."
         },
-        "source": {
+        "path": {
           "type": "string",
-          "description": "Module source code."
+          "description": "Path to the DLL (Windows) or SO (Linux/macOS) file."
+        },
+        "hooks": {
+          "type": "object",
+          "description": "Hook function mappings.",
+          "additionalProperties": {
+            "type": "string"
+          }
         }
       },
-      "required": [
-        "source"
-      ],
+      "required": ["name", "path"],
       "additionalProperties": false
     },
     "triggerActionList": {
@@ -129,7 +152,7 @@
     },
     "triggersBlock": {
       "type": "object",
-      "description": "Defines event-driven actions to take upon task completion. Each action is a task name reference.",
+      "description": "Defines event-driven actions to take upon task completion.",
       "properties": {
         "on_success": {
           "$ref": "#/$defs/triggerActionList",
@@ -250,34 +273,8 @@
           ]
         },
         "script": {
-          "type": "object",
-          "properties": {
-            "source": {
-              "type": "string",
-              "description": "The JavaScript code to execute."
-            },
-            "language": {
-              "type": "string",
-              "description": "Execution language (default: javascript)."
-            },
-            "modules": {
-              "type": "array",
-              "items": { "type": "string" },
-              "description": "List of embedded module names to load before execution."
-            },
-            "globals": {
-              "$ref": "#/$defs/stringMap",
-              "description": "Global variables to inject into the script environment."
-            },
-            "env": {
-              "$ref": "#/$defs/stringMap",
-              "description": "Environment variables for script execution."
-            }
-          },
-          "required": [
-            "source"
-          ],
-          "additionalProperties": false
+          "type": "string",
+          "description": "Post-processing script executed after the task action completes. Uses the built-in scripting language with access to ctx, json, dll, http, and log modules."
         },
         "uses": {
           "type": "string"
@@ -308,60 +305,53 @@
           "required": ["items_variable", "template"],
           "additionalProperties": false
         },
-        "http": {
-          "type": "object",
-          "description": "Execute HTTP requests with optional JavaScript hooks.",
-          "properties": {
-            "url": {
-              "type": "string",
-              "description": "The HTTP endpoint URL. Supports variable substitution."
-            },
-            "method": {
-              "type": "string",
-              "description": "HTTP method (case-insensitive). Default: GET.",
-              "enum": ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS", "get", "post", "put", "delete", "patch", "head", "options"]
-            },
-            "headers": {
-              "$ref": "#/$defs/stringMap",
-              "description": "Request headers."
-            },
-            "body": {
-              "type": "string",
-              "description": "Request body (for POST, PUT, PATCH)."
-            },
-            "timeout_ms": {
-              "type": "integer",
-              "minimum": 0,
-              "description": "Request timeout in milliseconds."
-            },
-            "follow_redirects": {
-              "type": "boolean",
-              "description": "Follow HTTP redirects.",
-              "default": true
-            },
-            "auth_user": {
-              "type": "string",
-              "description": "Basic authentication username."
-            },
-            "auth_pass": {
-              "type": "string",
-              "description": "Basic authentication password."
-            },
-            "bearer_token": {
-              "type": "string",
-              "description": "Bearer token for Authorization header."
-            },
-            "script": {
-              "type": "string",
-              "description": "Pre-request JavaScript hook to modify the request. Access via 'request' object."
-            },
-            "test": {
-              "type": "string",
-              "description": "Post-response JavaScript hook to validate the response. Access via 'response' object."
-            }
-          },
-          "required": ["url"],
-          "additionalProperties": false
+        "sequence": {
+          "$ref": "#/$defs/orchestrationNodeChildren"
+        },
+        "fallback": {
+          "$ref": "#/$defs/orchestrationNodeChildren"
+        },
+        "parallel": {
+          "$ref": "#/$defs/orchestrationNodeChildren"
+        },
+        "reactive_sequence": {
+          "$ref": "#/$defs/orchestrationNodeChildren"
+        },
+        "reactive_fallback": {
+          "$ref": "#/$defs/orchestrationNodeChildren"
+        },
+        "shell": {
+          "$ref": "#/$defs/orchestrationShellNode"
+        },
+        "parse_json": {
+          "$ref": "#/$defs/orchestrationParseJsonNode"
+        },
+        "parse_regex": {
+          "$ref": "#/$defs/orchestrationParseRegexNode"
+        },
+        "parse_lines": {
+          "$ref": "#/$defs/orchestrationParseLinesNode"
+        },
+        "parse_keyvalue": {
+          "$ref": "#/$defs/orchestrationParseKeyValueNode"
+        },
+        "check_exit_code": {
+          "$ref": "#/$defs/orchestrationCheckExitCodeNode"
+        },
+        "wait_event": {
+          "$ref": "#/$defs/orchestrationWaitEventNode"
+        },
+        "file_exists": {
+          "$ref": "#/$defs/orchestrationFileExistsNode"
+        },
+        "sleep": {
+          "$ref": "#/$defs/orchestrationSleepNode"
+        },
+        "set_variable": {
+          "$ref": "#/$defs/orchestrationSetVariableNode"
+        },
+        "subtree": {
+          "$ref": "#/$defs/orchestrationSubTreeNode"
         }
       },
       "required": [
@@ -371,11 +361,6 @@
         {
           "required": [
             "command"
-          ]
-        },
-        {
-          "required": [
-            "script"
           ]
         },
         {
@@ -390,10 +375,376 @@
         },
         {
           "required": [
-            "http"
+            "sequence"
+          ]
+        },
+        {
+          "required": [
+            "fallback"
+          ]
+        },
+        {
+          "required": [
+            "parallel"
+          ]
+        },
+        {
+          "required": [
+            "reactive_sequence"
+          ]
+        },
+        {
+          "required": [
+            "reactive_fallback"
+          ]
+        },
+        {
+          "required": [
+            "shell"
+          ]
+        },
+        {
+          "required": [
+            "parse_json"
+          ]
+        },
+        {
+          "required": [
+            "parse_regex"
+          ]
+        },
+        {
+          "required": [
+            "parse_lines"
+          ]
+        },
+        {
+          "required": [
+            "parse_keyvalue"
+          ]
+        },
+        {
+          "required": [
+            "check_exit_code"
+          ]
+        },
+        {
+          "required": [
+            "wait_event"
+          ]
+        },
+        {
+          "required": [
+            "file_exists"
+          ]
+        },
+        {
+          "required": [
+            "sleep"
+          ]
+        },
+        {
+          "required": [
+            "set_variable"
+          ]
+        },
+        {
+          "required": [
+            "script"
+          ]
+        },
+        {
+          "required": [
+            "subtree"
           ]
         }
       ],
+      "additionalProperties": false
+    },
+    "orchestrationNode": {
+      "oneOf": [
+        { "$ref": "#/$defs/orchestrationControlNode" },
+        { "$ref": "#/$defs/orchestrationLeafNode" }
+      ]
+    },
+    "orchestrationControlNode": {
+      "oneOf": [
+        { "type": "object", "properties": { "sequence": { "$ref": "#/$defs/orchestrationNodeChildren" } }, "required": ["sequence"], "additionalProperties": false },
+        { "type": "object", "properties": { "fallback": { "$ref": "#/$defs/orchestrationNodeChildren" } }, "required": ["fallback"], "additionalProperties": false },
+        { "type": "object", "properties": { "parallel": { "$ref": "#/$defs/orchestrationNodeChildren" } }, "required": ["parallel"], "additionalProperties": false },
+        { "type": "object", "properties": { "reactive_sequence": { "$ref": "#/$defs/orchestrationNodeChildren" } }, "required": ["reactive_sequence"], "additionalProperties": false },
+        { "type": "object", "properties": { "reactive_fallback": { "$ref": "#/$defs/orchestrationNodeChildren" } }, "required": ["reactive_fallback"], "additionalProperties": false }
+      ]
+    },
+    "orchestrationLeafNode": {
+      "oneOf": [
+        { "type": "object", "properties": { "shell": { "$ref": "#/$defs/orchestrationShellNode" } }, "required": ["shell"], "additionalProperties": false },
+        { "type": "object", "properties": { "parse_json": { "$ref": "#/$defs/orchestrationParseJsonNode" } }, "required": ["parse_json"], "additionalProperties": false },
+        { "type": "object", "properties": { "parse_regex": { "$ref": "#/$defs/orchestrationParseRegexNode" } }, "required": ["parse_regex"], "additionalProperties": false },
+        { "type": "object", "properties": { "parse_lines": { "$ref": "#/$defs/orchestrationParseLinesNode" } }, "required": ["parse_lines"], "additionalProperties": false },
+        { "type": "object", "properties": { "parse_keyvalue": { "$ref": "#/$defs/orchestrationParseKeyValueNode" } }, "required": ["parse_keyvalue"], "additionalProperties": false },
+        { "type": "object", "properties": { "check_exit_code": { "$ref": "#/$defs/orchestrationCheckExitCodeNode" } }, "required": ["check_exit_code"], "additionalProperties": false },
+        { "type": "object", "properties": { "wait_event": { "$ref": "#/$defs/orchestrationWaitEventNode" } }, "required": ["wait_event"], "additionalProperties": false },
+        { "type": "object", "properties": { "file_exists": { "$ref": "#/$defs/orchestrationFileExistsNode" } }, "required": ["file_exists"], "additionalProperties": false },
+        { "type": "object", "properties": { "sleep": { "$ref": "#/$defs/orchestrationSleepNode" } }, "required": ["sleep"], "additionalProperties": false },
+        { "type": "object", "properties": { "set_variable": { "$ref": "#/$defs/orchestrationSetVariableNode" } }, "required": ["set_variable"], "additionalProperties": false },
+        { "type": "object", "properties": { "subtree": { "$ref": "#/$defs/orchestrationSubTreeNode" } }, "required": ["subtree"], "additionalProperties": false }
+      ]
+    },
+    "orchestrationNodeChildren": {
+      "oneOf": [
+        {
+          "type": "array",
+          "items": { "$ref": "#/$defs/orchestrationNode" },
+          "minItems": 1
+        },
+        { "$ref": "#/$defs/orchestrationNode" }
+      ]
+    },
+    "orchestrationShellNode": {
+      "oneOf": [
+        {
+          "type": "string",
+          "description": "Simple syntax: shell command as a string"
+        },
+        {
+          "type": "object",
+          "description": "Map syntax: shell command with parameters",
+          "properties": {
+            "cmd": {
+              "type": "string",
+              "description": "Shell command to execute"
+            },
+            "output_key": {
+              "type": "string",
+              "description": "Blackboard key to store stdout"
+            },
+            "timeout": {
+              "oneOf": [
+                { "type": "string" },
+                { "type": "number" }
+              ],
+              "description": "Execution timeout"
+            }
+          },
+          "required": ["cmd"],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "orchestrationParseJsonNode": {
+      "type": "object",
+      "properties": {
+        "input_key": {
+          "type": "string",
+          "description": "Blackboard key containing JSON data"
+        },
+        "path": {
+          "type": "string",
+          "description": "JSONPath expression to extract data"
+        },
+        "output_key": {
+          "type": "string",
+          "description": "Blackboard key to store extracted data"
+        }
+      },
+      "required": ["input_key"],
+      "additionalProperties": false
+    },
+    "orchestrationParseRegexNode": {
+      "type": "object",
+      "properties": {
+        "input_key": {
+          "type": "string",
+          "description": "Blackboard key containing text data"
+        },
+        "pattern": {
+          "type": "string",
+          "description": "Regular expression pattern"
+        },
+        "capture_group": {
+          "oneOf": [
+            { "type": "string" },
+            { "type": "number" }
+          ],
+          "description": "Capture group to extract (default: 0)"
+        },
+        "output_key": {
+          "type": "string",
+          "description": "Blackboard key to store extracted data"
+        }
+      },
+      "required": ["input_key", "pattern"],
+      "additionalProperties": false
+    },
+    "orchestrationParseLinesNode": {
+      "type": "object",
+      "properties": {
+        "input_key": {
+          "type": "string",
+          "description": "Blackboard key containing text data"
+        },
+        "filter": {
+          "type": "string",
+          "description": "Optional regex filter for matching lines"
+        },
+        "output_key": {
+          "type": "string",
+          "description": "Blackboard key to store extracted lines"
+        }
+      },
+      "required": ["input_key"],
+      "additionalProperties": false
+    },
+    "orchestrationParseKeyValueNode": {
+      "type": "object",
+      "properties": {
+        "input_key": {
+          "type": "string",
+          "description": "Blackboard key containing key/value text"
+        },
+        "delimiter": {
+          "type": "string",
+          "description": "Key/value delimiter"
+        },
+        "line_separator": {
+          "type": "string",
+          "description": "Line separator"
+        },
+        "output_key": {
+          "type": "string",
+          "description": "Blackboard key to store parsed key/value data"
+        }
+      },
+      "required": ["input_key"],
+      "additionalProperties": false
+    },
+    "orchestrationCheckExitCodeNode": {
+      "type": "object",
+      "properties": {
+        "input_key": {
+          "type": "string",
+          "description": "Blackboard key containing exit code"
+        },
+        "expected": {
+          "oneOf": [
+            { "type": "string" },
+            { "type": "number" }
+          ],
+          "description": "Expected exit code value"
+        }
+      },
+      "required": ["expected"],
+      "additionalProperties": false
+    },
+    "orchestrationWaitEventNode": {
+      "type": "object",
+      "properties": {
+        "event": {
+          "type": "string",
+          "description": "Event name to wait for"
+        },
+        "timeout": {
+          "oneOf": [
+            { "type": "string" },
+            { "type": "number" }
+          ],
+          "description": "Wait timeout"
+        }
+      },
+      "required": ["event"],
+      "additionalProperties": false
+    },
+    "orchestrationFileExistsNode": {
+      "oneOf": [
+        {
+          "type": "string",
+          "description": "Simple syntax: file path to check"
+        },
+        {
+          "type": "object",
+          "description": "Map syntax: file check with parameters",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "File path to check (supports {ctx.*} syntax)"
+            },
+            "output_key": {
+              "type": "string",
+              "description": "Blackboard key to store result (true/false)"
+            },
+            "fail_if_missing": {
+              "type": "boolean",
+              "default": true,
+              "description": "Fail the node if file doesn't exist (default: true)"
+            }
+          },
+          "required": ["path"],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "orchestrationSleepNode": {
+      "oneOf": [
+        {
+          "type": "number",
+          "description": "Simple syntax: sleep duration in milliseconds"
+        },
+        {
+          "type": "string",
+          "description": "Simple syntax: sleep duration as string (e.g., '5s', '100ms')"
+        },
+        {
+          "type": "object",
+          "description": "Map syntax: sleep with parameters",
+          "properties": {
+            "duration": {
+              "oneOf": [
+                { "type": "number" },
+                { "type": "string" }
+              ],
+              "description": "Sleep duration (number in ms or string like '5s')"
+            },
+            "reason": {
+              "type": "string",
+              "description": "Optional reason for the delay (for logging)"
+            }
+          },
+          "required": ["duration"],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "orchestrationSetVariableNode": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string",
+          "description": "Blackboard key to set"
+        },
+        "value": {
+          "description": "Value to set (supports {ctx.*} syntax)"
+        },
+        "from_context": {
+          "type": "string",
+          "description": "Alternative: copy value from context path"
+        }
+      },
+      "oneOf": [
+        { "required": ["key", "value"] },
+        { "required": ["key", "from_context"] }
+      ],
+      "additionalProperties": false
+    },
+    "orchestrationSubTreeNode": {
+      "type": "object",
+      "properties": {
+        "ID": {
+          "type": "string",
+          "description": "Registered subtree identifier"
+        }
+      },
+      "required": ["ID"],
       "additionalProperties": false
     }
   }

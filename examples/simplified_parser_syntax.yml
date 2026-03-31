@@ -1,0 +1,110 @@
+name: "Simplified Parser Syntax Examples"
+description: "Demonstrates the new flat parser syntax"
+
+tasks:
+  # Example 1: Regex parser (2 levels instead of 3!)
+  - name: extract_target
+    command: "cmake --build build"
+    parse_regex:
+      pattern: "Built target (\\w+)"
+      output_key: "target"
+
+  # Example 2: JSON parser
+  - name: fetch_status
+    command: 'curl -s https://api.example.com/status'
+    parse_json:
+      path: "status"
+      output_key: "api_status"
+
+  # Example 3: Lines parser with filter
+  - name: filter_errors
+    command: "cat build.log"
+    parse_lines:
+      filter: "ERROR|FATAL"
+      output_key: "errors"
+
+  # Example 4: Lines parser without filter (all lines)
+  - name: get_all_lines
+    command: "cat output.txt"
+    parse_lines:
+      output_key: "all_lines"
+
+  # Example 5: KeyValue parser
+  - name: parse_env
+    command: "cat .env"
+    parse_keyvalue:
+      output_key: "env_vars"
+
+  # Example 6: KeyValue with custom delimiter
+  - name: parse_config
+    command: "cat config.ini"
+    parse_keyvalue:
+      delimiter: ":"
+      output_key: "config"
+
+  # Example 7: Regex with custom capture group
+  - name: extract_version
+    command: "cat version.txt"
+    parse_regex:
+      pattern: "v(\\d+)\\.(\\d+)\\.(\\d+)"
+      capture_group: 2  # Extract minor version
+      output_key: "minor_version"
+
+  # Example 8: Use parsed output in next task
+  - name: deploy
+    depends_on: [extract_target]
+    command: 'echo "Deploying {{ tasks.extract_target.outputs.target }}"'
+
+  # Example 9: behavior tree task accessing parsed output
+  - name: verify_status
+    depends_on: [fetch_status]
+    sequence:
+      - shell:
+          cmd: "echo Status: {ctx.tasks.fetch_status.outputs.api_status}"
+      - if_then_else:
+          condition: "{ctx.tasks.fetch_status.outputs.api_status}"
+          then:
+            - shell: "echo Service is healthy"
+          else:
+            - shell: "echo Service is down"
+
+  # Example 10: Multiple parsers in pipeline
+  - name: build_and_extract
+    command: "cmake --build build 2>&1"
+    parse_regex:
+      pattern: "Built target (\\w+)"
+      output_key: "target"
+
+  - name: test_and_filter
+    depends_on: [build_and_extract]
+    command: "ctest --test-dir build --output-on-failure"
+    parse_lines:
+      filter: "PASSED|FAILED"
+      output_key: "test_results"
+
+  - name: coverage_and_extract
+    depends_on: [test_and_filter]
+    command: "gcov -r *.cpp"
+    parse_regex:
+      pattern: "Lines executed:(\\d+\\.\\d+)%"
+      capture_group: 1
+      output_key: "coverage_percent"
+
+  # Example 11: Legacy JSON parsing (still works)
+  - name: legacy_json
+    command: 'curl -s https://api.example.com/data'
+    output_format: json  # Stores in tasks.legacy_json.outputs.data
+
+# Comparison:
+#
+# CURRENT SYNTAX (2 levels):
+#   parse_regex:
+#     pattern: "Built target (\\w+)"
+#     output_key: "target"
+#
+# Benefits:
+# - 33% less nesting
+# - Named parameters (self-documenting)
+# - No parser plugin indirection
+# - Consistent with behavior-tree task style
+# - More readable

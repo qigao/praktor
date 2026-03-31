@@ -84,12 +84,11 @@ TEST_CASE("DynamicTasksExecutor placeholder substitution", "[dynamic_tasks]") {
         CHECK(generated_tasks[1].name == "start_api");
 
         // Check command contains substituted values
-        const auto& cmd0 = std::get<RunCommandParams>(generated_tasks[0].specifics);
-        REQUIRE(std::holds_alternative<std::string>(cmd0.command));
-        CHECK(std::get<std::string>(cmd0.command) == "./start.sh --name web --port 8080");
+        const auto& bt0 = std::get<BtdslParams>(generated_tasks[0].specifics);
+        CHECK(bt0.root.children[0].params.at("cmd") == "./start.sh --name web --port 8080");
 
-        const auto& cmd1 = std::get<RunCommandParams>(generated_tasks[1].specifics);
-        CHECK(std::get<std::string>(cmd1.command) == "./start.sh --name api --port 3000");
+        const auto& bt1 = std::get<BtdslParams>(generated_tasks[1].specifics);
+        CHECK(bt1.root.children[0].params.at("cmd") == "./start.sh --name api --port 3000");
     }
 
     SECTION("{{ index }} placeholder") {
@@ -119,8 +118,8 @@ TEST_CASE("DynamicTasksExecutor placeholder substitution", "[dynamic_tasks]") {
         CHECK(generated_tasks[0].name == "task_0");
         CHECK(generated_tasks[1].name == "task_1");
 
-        const auto& cmd0 = std::get<RunCommandParams>(generated_tasks[0].specifics);
-        CHECK(std::get<std::string>(cmd0.command) == "echo a at index 0");
+        const auto& bt0 = std::get<BtdslParams>(generated_tasks[0].specifics);
+        CHECK(bt0.root.children[0].params.at("cmd") == "echo a at index 0");
     }
 }
 
@@ -336,14 +335,11 @@ TEST_CASE("DynamicTasksExecutor template fields", "[dynamic_tasks]") {
         auto result = executor->execute(task, context);
 
         REQUIRE(result.success);
-        const auto& cmd = std::get<RunCommandParams>(generated[0].specifics);
-        REQUIRE(std::holds_alternative<StrList>(cmd.command));
-
-        const auto& cmd_list = std::get<StrList>(cmd.command);
-        REQUIRE(cmd_list.size() == 3);
-        CHECK(cmd_list[0] == "bash");
-        CHECK(cmd_list[1] == "-c");
-        CHECK(cmd_list[2] == "echo x");
+        const auto& bt = std::get<BtdslParams>(generated[0].specifics);
+        REQUIRE(bt.root.children.size() == 3);
+        CHECK(bt.root.children[0].params.at("cmd") == "bash");
+        CHECK(bt.root.children[1].params.at("cmd") == "-c");
+        CHECK(bt.root.children[2].params.at("cmd") == "echo x");
     }
 }
 
@@ -412,4 +408,136 @@ TEST_CASE("DynamicTasksExecutor empty items array", "[dynamic_tasks]") {
 
     REQUIRE(result.success);
     CHECK(callback_count == 0);  // No tasks generated
+}
+
+TEST_CASE("DynamicTasksExecutor aggregates generated task results", "[dynamic_tasks]") {
+    auto executor = createDynamicTasksExecutor();
+    auto* dt_executor = static_cast<DynamicTasksExecutor*>(executor.get());
+
+    std::vector<Task> generated_tasks;
+    dt_executor->setSubTaskCallback([&](const Task& task, WorkflowContext& context) {
+        generated_tasks.push_back(task);
+        context.setTaskStatus(task.name, "running");
+        context.setTaskOutput(task.name, "stdout", task.name + "_done");
+        context.setTaskStatus(task.name, task.name == "deploy_b" ? "failed" : "success");
+        return task.name != "deploy_b";
+    });
+
+    WorkflowContext context;
+    context.setTaskStatus("deploy_all", "running");
+    context.pushTaskScope("deploy_all");
+
+    jsoncons::json items = jsoncons::json::array({"a", "b", "c"});
+    context.setValue("items", items);
+
+    Task task;
+    task.name = "deploy_all";
+    task.action = TaskAction::DynamicTasks;
+    task.source_path = "C:/tmp/workflow.yml";
+
+    DynamicTasksParams params;
+    params.items_variable = "items";
+    params.task_template.name = "deploy_{{ item }}";
+    params.task_template.command = std::string("./deploy.sh {{ item }}");
+    task.specifics = params;
+
+    auto result = executor->execute(task, context);
+    context.popTaskScope();
+
+    REQUIRE_FALSE(result.success);
+    REQUIRE(generated_tasks.size() == 2);
+    CHECK(generated_tasks[0].declared_runner == "command");
+    CHECK(generated_tasks[0].source_path == "C:/tmp/workflow.yml");
+
+    auto aggregated = context.getValueByPath("tasks.deploy_all.outputs.generated_tasks");
+    REQUIRE(aggregated.is_array());
+    REQUIRE(aggregated.size() == 2);
+    CHECK(aggregated[0]["name"].as<std::string>() == "deploy_a");
+    CHECK(aggregated[0]["status"].as<std::string>() == "success");
+    CHECK(aggregated[0]["outputs"]["stdout"].as<std::string>() == "deploy_a_done");
+    CHECK(aggregated[1]["name"].as<std::string>() == "deploy_b");
+    CHECK(aggregated[1]["status"].as<std::string>() == "failed");
+    CHECK(context.getValueByPath("tasks.deploy_all.outputs.generated_count").as<int64_t>() == 2);
+    CHECK(context.getValueByPath("tasks.deploy_all.outputs.success_count").as<int64_t>() == 1);
+    CHECK(context.getValueByPath("tasks.deploy_all.outputs.failed_count").as<int64_t>() == 1);
+    CHECK(context.getValueByPath("tasks.deploy_all.outputs.skipped_count").as<int64_t>() == 0);
+}
+
+TEST_CASE("DynamicTasksExecutor rejects duplicate generated task names", "[dynamic_tasks]") {
+    auto executor = createDynamicTasksExecutor();
+    auto* dt_executor = static_cast<DynamicTasksExecutor*>(executor.get());
+    dt_executor->setSubTaskCallback([](const Task&, WorkflowContext&) { return true; });
+
+    WorkflowContext context;
+    context.setTaskStatus("deploy_all", "running");
+    context.pushTaskScope("deploy_all");
+    context.setValue("items", jsoncons::json::array({"dup", "dup"}));
+
+    Task task;
+    task.name = "deploy_all";
+    task.action = TaskAction::DynamicTasks;
+
+    DynamicTasksParams params;
+    params.items_variable = "items";
+    params.task_template.name = "deploy_{{ item }}";
+    params.task_template.command = std::string("echo {{ item }}");
+    task.specifics = params;
+
+    auto result = executor->execute(task, context);
+    context.popTaskScope();
+
+    REQUIRE_FALSE(result.success);
+    CHECK(result.error_message.find("collision") != std::string::npos);
+}
+
+TEST_CASE("DynamicTasksExecutor continue_on_error aggregates all failures", "[dynamic_tasks]") {
+    auto executor = createDynamicTasksExecutor();
+    auto* dt_executor = static_cast<DynamicTasksExecutor*>(executor.get());
+
+    std::vector<std::string> executed;
+    dt_executor->setSubTaskCallback([&](const Task& task, WorkflowContext& context) {
+        executed.push_back(task.name);
+        context.setTaskStatus(task.name, "running");
+        context.setTaskOutput(task.name, "stdout", task.name);
+        if (task.name == "job_b") {
+            context.setTaskStatus(task.name, "failed");
+            return false;
+        }
+        if (task.name == "job_c") {
+            context.setTaskStatus(task.name, "skipped");
+            return true;
+        }
+        context.setTaskStatus(task.name, "success");
+        return true;
+    });
+
+    WorkflowContext context;
+    context.setTaskStatus("fanout_jobs", "running");
+    context.pushTaskScope("fanout_jobs");
+    context.setValue("items", jsoncons::json::array({"a", "b", "c"}));
+
+    Task task;
+    task.name = "fanout_jobs";
+    task.action = TaskAction::DynamicTasks;
+    task.continue_on_error = true;
+
+    DynamicTasksParams params;
+    params.items_variable = "items";
+    params.task_template.name = "job_{{ item }}";
+    params.task_template.command = std::string("echo {{ item }}");
+    task.specifics = params;
+
+    auto result = executor->execute(task, context);
+    context.popTaskScope();
+
+    REQUIRE_FALSE(result.success);
+    CHECK(result.error_message.find("1 generated task(s) failed") != std::string::npos);
+    REQUIRE(executed.size() == 3);
+    CHECK(executed[0] == "job_a");
+    CHECK(executed[1] == "job_b");
+    CHECK(executed[2] == "job_c");
+    CHECK(context.getValueByPath("tasks.fanout_jobs.outputs.generated_count").as<int64_t>() == 3);
+    CHECK(context.getValueByPath("tasks.fanout_jobs.outputs.success_count").as<int64_t>() == 1);
+    CHECK(context.getValueByPath("tasks.fanout_jobs.outputs.failed_count").as<int64_t>() == 1);
+    CHECK(context.getValueByPath("tasks.fanout_jobs.outputs.skipped_count").as<int64_t>() == 1);
 }

@@ -1,0 +1,17 @@
+name: Service Stop Example
+description: |
+  Minimal wrapper around the reusable service stop template.
+
+variables:
+  SERVICE_NAME: "nginx"
+
+tasks:
+  - name: service_stop
+    uses: ../templates/service-stop.yml
+    vars:
+      SERVICE_NAME: "{{ SERVICE_NAME }}"
+
+  - name: emit_result
+    depends_on: [service_stop]
+    script: |
+      ctx.output("result", ctx.get("tasks.service_stop.outputs.result"));

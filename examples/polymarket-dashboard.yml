@@ -1,0 +1,49 @@
+name: Polymarket Dashboard
+description: Fetch trending prediction markets from Polymarket Gamma API
+
+variables:
+  GAMMA_API: "https://gamma-api.polymarket.com"
+  MARKET_LIMIT: "10"
+
+tasks:
+  # 1. Fetch top active markets by volume
+  - name: fetch_top_markets
+    script: |
+      var resp = http.get("{{ GAMMA_API }}/markets?limit={{ MARKET_LIMIT }}&active=true&closed=false&order=volumeNum&ascending=false");
+      var status = resp.status;
+      if (status != 200) {
+        fail("Gamma API returned " + status);
+      }
+      ctx.output("status", status);
+      ctx.output("data", resp.body);
+
+  # 2. Fetch trending events
+  - name: fetch_events
+    script: |
+      var resp = http.get("{{ GAMMA_API }}/events?limit=2&active=true&closed=false&order=volume24hr&ascending=false");
+      var status = resp.status;
+      if (status != 200) {
+        fail("Events API returned " + status);
+      }
+      ctx.output("status", status);
+      ctx.output("data", resp.body);
+
+  # 3. Build dashboard report
+  - name: build_report
+    depends_on: [fetch_top_markets, fetch_events]
+    command: "echo Building polymarket report"
+    script: |
+      var markets = ctx.get("tasks.fetch_top_markets.outputs.data");
+      var events = ctx.get("tasks.fetch_events.outputs.data");
+      var mc = json.query(markets, "length(@)");
+      var ec = json.query(events, "length(@)");
+      ctx.output("market_count", mc);
+      ctx.output("event_count", ec);
+      log.info("Dashboard: " + mc + " markets, " + ec + " events");
+      fs.write("./polymarket-report.json", json.stringify({
+        "market_count": mc,
+        "event_count": ec,
+        "markets": markets,
+        "events": events
+      }));
+      log.info("Report written to ./polymarket-report.json");

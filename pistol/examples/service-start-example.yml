@@ -1,0 +1,17 @@
+name: Service Start Example
+description: |
+  Minimal wrapper around the reusable service start template.
+
+variables:
+  SERVICE_NAME: "nginx"
+
+tasks:
+  - name: service_start
+    uses: ../templates/service-start.yml
+    vars:
+      SERVICE_NAME: "{{ SERVICE_NAME }}"
+
+  - name: emit_result
+    depends_on: [service_start]
+    script: |
+      ctx.output("result", ctx.get("tasks.service_start.outputs.result"));

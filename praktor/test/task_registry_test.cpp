@@ -36,6 +36,7 @@ TEST_CASE("TaskRegistry State Machine", "[registry]") {
 
     SECTION("Task re-entry support") {
         registry.startTask("task_a");
+        registry.setOutput("task_a", "before", jsoncons::json("stale"));
         registry.markCompleted("task_a");
         REQUIRE(registry.isCompleted("task_a"));
 
@@ -43,6 +44,7 @@ TEST_CASE("TaskRegistry State Machine", "[registry]") {
         registry.startTask("task_a");
         REQUIRE(registry.getState("task_a") == TaskState::Running);
         REQUIRE_FALSE(registry.isCompleted("task_a"));
+        REQUIRE(registry.getAllOutputs("task_a").empty());
 
         registry.markFailed("task_a", "re-entry failure");
         REQUIRE(registry.isFailed("task_a"));

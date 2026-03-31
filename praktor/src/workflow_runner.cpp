@@ -2,6 +2,8 @@
 #include "util/env_parser.hpp"
 #include "util/logging.hpp"
 #include "util/file_utils.hpp"
+#include "util/native_loader.hpp"
+#include "util/system_info.hpp"
 #include "yml/task_parser.hpp"
 #include "dag/workflow_executor.hpp"
 
@@ -16,11 +18,22 @@
 
 namespace {
 
+std::filesystem::path resolveRelativePath(const std::string& source_path, const std::string& child) {
+    std::filesystem::path relative(child);
+    if (relative.is_absolute()) {
+        return relative.lexically_normal();
+    }
+
+    std::filesystem::path base =
+        source_path.empty() ? std::filesystem::current_path() : std::filesystem::path(source_path).parent_path();
+    return (base / relative).lexically_normal();
+}
+
 std::unordered_map<std::string, std::string> collectWorkflowEnvironment(const Workflow& workflow) {
     std::unordered_map<std::string, std::string> env_values;
 
     for (const auto& env_path_str : workflow.dot_env) {
-        std::filesystem::path env_path(env_path_str);
+        std::filesystem::path env_path = resolveRelativePath(workflow.source_path, env_path_str);
         if (!std::filesystem::exists(env_path)) {
             TLOG_WARN("dotEnv file not found: {}", env_path.string());
             continue;
@@ -31,7 +44,7 @@ std::unordered_map<std::string, std::string> collectWorkflowEnvironment(const Wo
             for (auto& [key, value] : parsed) {
                 env_values[key] = value;
             }
-            TLOG_INFO("Loaded dotEnv file: {}", env_path.string());
+            TLOG_DEBUG("Loaded dotEnv file: {}", env_path.string());
         } catch (const std::exception& e) {
             TLOG_WARN("Failed to load dotEnv file '{}': {}", env_path.string(), e.what());
         }
@@ -44,53 +57,62 @@ std::unordered_map<std::string, std::string> collectWorkflowEnvironment(const Wo
     return env_values;
 }
 
-bool setProcessEnvironmentVariable(const std::string& key, const std::string& value) {
-#ifdef _WIN32
-    return _putenv_s(key.c_str(), value.c_str()) == 0;
-#else
-    return setenv(key.c_str(), value.c_str(), 1) == 0;
-#endif
-}
-
-void applyProcessEnvironmentOverrides(const std::unordered_map<std::string, std::string>& env_values) {
-    for (const auto& [key, value] : env_values) {
-        if (!setProcessEnvironmentVariable(key, value)) {
-            TLOG_WARN("Failed to set environment variable '{}'", key);
+void mergeEnvironmentOverrides(std::unordered_map<std::string, std::string>& target,
+                               const std::unordered_map<std::string, std::string>& source) {
+    for (const auto& [key, value] : source) {
+        if (value.empty()) {
+            target.erase(key);
         } else {
-            TLOG_DEBUG("Set environment variable '{}'", key);
+            target[key] = value;
         }
     }
 }
 
-void applyDefaults(Task& task, const TaskDefaults& defaults) {
-    if (!task.retries && defaults.retries) {
-        task.retries = defaults.retries;
-        TLOG_INFO("Applied default retries to task '{}': count={}, delay={}", task.name,
-                defaults.retries->count, defaults.retries->delay);
-    }
+void setWorkflowVariable(WorkflowContext& context, const std::string& key, const std::string& value) {
+    context.setValue(key, value);
+    context.setValue("variables." + key, value);
+}
 
-    if (!task.timeout && defaults.timeout) {
-        task.timeout = defaults.timeout;
-        TLOG_INFO("Applied default timeout to task '{}': {}", task.name, defaults.timeout.value());
+void setWorkflowEnvironmentValue(WorkflowContext& context, const std::string& key, const std::string& value) {
+    context.setValue("env." + key, value);
+}
+
+std::unordered_map<std::string, std::string> buildRuntimeEnvironment(
+    const Workflow& workflow,
+    const std::unordered_map<std::string, std::string>& base_environment) {
+    auto runtime_environment = Praktor::system::getEnvironmentVariables();
+    auto workflow_environment = collectWorkflowEnvironment(workflow);
+    mergeEnvironmentOverrides(runtime_environment, workflow_environment);
+    mergeEnvironmentOverrides(runtime_environment, base_environment);
+    return runtime_environment;
+}
+
+void populateWorkflowEnvironmentContext(
+    WorkflowContext& context,
+    const std::unordered_map<std::string, std::string>& runtime_environment) {
+    for (const auto& [key, value] : runtime_environment) {
+        setWorkflowEnvironmentValue(context, key, value);
     }
 }
 
 } // namespace
 
-WorkflowRunner::WorkflowRunner(std::string const& yamlPath, std::unordered_map<std::string, std::string> inputValues)
+WorkflowRunner::WorkflowRunner(std::string const& yamlPath,
+                               std::unordered_map<std::string, std::string> inputValues,
+                               std::unordered_map<std::string, std::string> baseEnvironment)
     : yamlPath_(yamlPath)
     , inputValues_(std::move(inputValues))
+    , baseEnvironment_(std::move(baseEnvironment))
     , base_directory_(std::filesystem::path(yamlPath).parent_path()) {}
 
 WorkflowRunner::~WorkflowRunner() = default;
 
 bool WorkflowRunner::run(bool useConcurrent, int maxConcurrency) {
     try {
-        TLOG_INFO("Loading workflow from: {}", yamlPath_);
+        TLOG_DEBUG("Loading workflow from: {}", yamlPath_);
         Workflow workflow = TaskParser::parseFileWithImports(yamlPath_, base_directory_.string());
 
-        auto env_overrides = collectWorkflowEnvironment(workflow);
-        applyProcessEnvironmentOverrides(env_overrides);
+        auto runtime_environment = buildRuntimeEnvironment(workflow, baseEnvironment_);
 
         auto workflow_dir = std::filesystem::path(workflow.source_path).parent_path();
         if (workflow_dir.empty()) {
@@ -99,35 +121,60 @@ bool WorkflowRunner::run(bool useConcurrent, int maxConcurrency) {
 
         WorkflowContext context(inputValues_);
         context.setEmbeddedModules(workflow.embedded);
+        context.setNativeModules(workflow.native_modules);
+        context.setSourcePath(workflow.source_path);
+        populateWorkflowEnvironmentContext(context, runtime_environment);
 
-        TLOG_INFO("Initializing workflow context...");
+        // Pre-load native module DLLs (dlopen + resolve hooks)
+        if (!workflow.native_modules.empty()) {
+            TLOG_DEBUG("Pre-loading {} native module libraries", workflow.native_modules.size());
+            Praktor::Native::NativeLoader::instance().loadModuleLibraries(
+                workflow.native_modules, workflow.source_path);
+        }
+
+        TLOG_DEBUG("Initializing workflow context...");
         for (const auto& [key, value] : inputValues_) {
-            TLOG_INFO("Set input variable: {} = {}", key, value);
+            setWorkflowVariable(context, key, value);
+            TLOG_DEBUG("Set input variable: {} = {}", key, value);
         }
         for (const auto& [key, value] : workflow.variables) {
-            context.setValue(key, value);
-            TLOG_INFO("Set variable: {} = {}", key, value);
+            if (inputValues_.find(key) == inputValues_.end()) {
+                setWorkflowVariable(context, key, value);
+                TLOG_DEBUG("Set variable: {} = {}", key, value);
+            } else {
+                TLOG_DEBUG("Preserved input override for variable: {}", key);
+            }
         }
 
-        for (const auto& [key, value] : env_overrides) {
-            context.setValue(key, value);
-            TLOG_DEBUG("Set environment variable override: {} = {}", key, value);
+        for (const auto& [key, value] : runtime_environment) {
+            TLOG_DEBUG("Set workflow environment: {} = {}", key, value);
         }
 
-        TLOG_INFO("Building task graph...");
+        TLOG_DEBUG("Building task graph...");
         DependencyGraph<Task> graph = TaskParser::buildGraph(workflow);
 
-        TLOG_INFO("Starting workflow execution...");
-        WorkflowExecutor executor(graph, env_overrides, useConcurrent ? maxConcurrency : 1);
+        TLOG_DEBUG("Starting workflow execution...");
+        WorkflowExecutor executor(
+            graph,
+            workflow.tasks,
+            runtime_environment,
+            useConcurrent ? maxConcurrency : 1,
+            false);
         executor.execute(context);
 
         std::string status = context.getValueOrDefault<std::string>("workflow_status", "unknown");
         if (status == "failed") {
+            if (!Praktor::Logging::isVerboseEnabled()) {
+                Praktor::Logging::printWorkflowStatus("FAILED");
+            }
             TLOG_ERROR("Workflow execution failed.");
             return false;
         }
 
-        TLOG_INFO("Workflow finished successfully.");
+        if (!Praktor::Logging::isVerboseEnabled()) {
+            Praktor::Logging::printWorkflowStatus("SUCCESS");
+        }
+        TLOG_DEBUG("Workflow finished successfully.");
         return true;
 
     } catch (const std::exception& e) {
@@ -138,11 +185,10 @@ bool WorkflowRunner::run(bool useConcurrent, int maxConcurrency) {
 
 bool WorkflowRunner::runTask(std::string const& taskName, bool useConcurrent, int maxConcurrency) {
     try {
-        TLOG_INFO("Loading workflow to run single task: {}", taskName);
+        TLOG_DEBUG("Loading workflow to run single task: {}", taskName);
         Workflow workflow = TaskParser::parseFileWithImports(yamlPath_, base_directory_.string());
 
-        auto env_overrides = collectWorkflowEnvironment(workflow);
-        applyProcessEnvironmentOverrides(env_overrides);
+        auto runtime_environment = buildRuntimeEnvironment(workflow, baseEnvironment_);
 
         auto workflow_dir = std::filesystem::path(workflow.source_path).parent_path();
         if (workflow_dir.empty()) {
@@ -157,23 +203,41 @@ bool WorkflowRunner::runTask(std::string const& taskName, bool useConcurrent, in
         }
 
         DependencyGraph<Task> fullGraph = TaskParser::buildGraph(workflow);
-        TLOG_INFO("Creating subgraph for task: {}", taskName);
+        TLOG_DEBUG("Creating subgraph for task: {}", taskName);
         DependencyGraph<Task> subgraph = fullGraph.createSubgraphFor(*targetTaskIt);
 
         WorkflowContext context(inputValues_);
         context.setEmbeddedModules(workflow.embedded);
-        for (const auto& [key, value] : workflow.variables) {
-            context.setValue(key, value);
-        }
-        for (const auto& [key, value] : env_overrides) {
-            context.setValue(key, value);
+        context.setNativeModules(workflow.native_modules);
+        context.setSourcePath(workflow.source_path);
+        populateWorkflowEnvironmentContext(context, runtime_environment);
+
+        // Pre-load native module DLLs (dlopen + resolve hooks)
+        if (!workflow.native_modules.empty()) {
+            TLOG_DEBUG("Pre-loading {} native module libraries", workflow.native_modules.size());
+            Praktor::Native::NativeLoader::instance().loadModuleLibraries(
+                workflow.native_modules, workflow.source_path);
         }
 
-        TLOG_INFO("Executing subgraph for task: {}", taskName);
-        WorkflowExecutor executor(subgraph, env_overrides, useConcurrent ? maxConcurrency : 1);
+        for (const auto& [key, value] : workflow.variables) {
+            if (inputValues_.find(key) == inputValues_.end()) {
+                setWorkflowVariable(context, key, value);
+            }
+        }
+
+        TLOG_DEBUG("Executing subgraph for task: {}", taskName);
+        WorkflowExecutor executor(
+            subgraph,
+            workflow.tasks,
+            runtime_environment,
+            useConcurrent ? maxConcurrency : 1,
+            true);
         executor.execute(context);
 
         std::string status = context.getValueOrDefault<std::string>("workflow_status", "unknown");
+        if (!Praktor::Logging::isVerboseEnabled()) {
+            Praktor::Logging::printWorkflowStatus(status == "failed" ? "FAILED" : "SUCCESS");
+        }
         return status != "failed";
 
     } catch (const std::exception& e) {

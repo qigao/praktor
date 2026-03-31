@@ -24,11 +24,20 @@ RetryPolicy parse_retry_policy(const ryml::ConstNodeRef& node);
 Each parse_each(const ryml::ConstNodeRef& node);
 Triggers parse_triggers(const ryml::ConstNodeRef& node);
 RunCommandParams parse_run_command_params(const ryml::ConstNodeRef& node);
-ScriptParams parse_script_params(const ryml::ConstNodeRef& node);
 UsesParams parse_uses_params(const ryml::ConstNodeRef& node);
+BtdslParams parse_btdsl_params(const ryml::ConstNodeRef& task_node, const std::string& node_type);
 TaskDefaults parse_defaults(const ryml::ConstNodeRef& node);
+
+// BTDSL node type detection functions
+bool isBtdslControlNode(const ryml::ConstNodeRef& node);
+bool isBtdslLeafNode(const ryml::ConstNodeRef& node);
+BtdslNode parseBtdslNode(const ryml::ConstNodeRef& yaml, int depth = 0);
 
 Task parse_task(const ryml::ConstNodeRef& node, const std::string& source_path);
 Workflow parse_workflow(const ryml::ConstNodeRef& node, const std::string& source_path);
+
+// Desugars a RunCommandParams into a BtdslParams tree.
+// Converts command: tasks into equivalent behavior tree nodes at parse time.
+BtdslParams desugarCommandToBtdsl(const RunCommandParams& params);
 
 #endif // __TASK_YAML_HPP__

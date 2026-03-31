@@ -2,8 +2,10 @@
 #define __USES_EXECUTOR_HPP__
 
 #include "dag/task_executor.hpp"
+#include "yml/task.hpp"
 #include "yml/task_types.hpp"
 
+#include <memory>
 #include <unordered_map>
 #include <string>
 
@@ -14,8 +16,10 @@ namespace Praktor::Execution
  * @class UsesExecutor
  * @brief Executor for "uses" tasks that invoke reusable workflows
  *
- * This executor handles nested workflow execution with proper variable scoping
- * and environment inheritance.
+ * Executes nested workflows in complete isolation:
+ * - Independent WorkflowContext (not shared with parent)
+ * - Own variables, env, embedded modules
+ * - Outputs exported back to parent after completion
  */
 class UsesExecutor : public TaskExecutor
 {
@@ -28,8 +32,28 @@ public:
     std::string getTaskType() const override { return "uses"; }
 
 private:
+    TaskFailureContext buildNestedFailureContext(const Workflow& nested,
+                                                 const WorkflowContext& nested_context) const;
+
     std::unordered_map<std::string, std::string> base_environment_;
     size_t num_threads_;
+
+    // Create isolated context with task.vars as initial variables
+    std::unique_ptr<WorkflowContext> createIsolatedContext(
+        const Task& task,
+        const Workflow& nested,
+        const WorkflowContext& parent_context);
+
+    // Build environment from nested workflow's env and dotEnv
+    std::unordered_map<std::string, std::string> buildNestedEnvironment(
+        const Workflow& nested,
+        const WorkflowContext& nested_context);
+
+    // Export nested workflow outputs to parent context
+    void exportOutputsToParent(
+        const std::string& task_name,
+        const WorkflowContext& nested_context,
+        WorkflowContext& parent_context);
 };
 
 std::unique_ptr<TaskExecutor> createUsesExecutor(

@@ -1,0 +1,40 @@
+name: Service Start
+description: |
+  Starts a named service and verifies that it is running.
+
+variables:
+  SERVICE_NAME: ""
+
+tasks:
+  - name: validate_request
+    script: |
+      var serviceName = ctx.get("SERVICE_NAME");
+      if (serviceName == "") {
+        fail("SERVICE_NAME is required");
+      }
+
+  - name: start_service
+    depends_on: [validate_request]
+    fallback:
+      - shell:
+          cmd: "powershell -NoProfile -Command \"if (Get-Command Start-Service -ErrorAction SilentlyContinue) { Start-Service -Name '{{ SERVICE_NAME }}' } elseif (Get-Command systemctl -ErrorAction SilentlyContinue) { systemctl start '{{ SERVICE_NAME }}' } else { exit 1 }\""
+      - shell:
+          cmd: "if command -v systemctl >/dev/null 2>&1; then systemctl start '{{ SERVICE_NAME }}'; elif command -v service >/dev/null 2>&1; then service '{{ SERVICE_NAME }}' start; else exit 1; fi"
+
+  - name: verify_running
+    depends_on: [start_service]
+    fallback:
+      - shell:
+          cmd: "powershell -NoProfile -Command \"if (Get-Command Get-Service -ErrorAction SilentlyContinue) { if ((Get-Service -Name '{{ SERVICE_NAME }}' -ErrorAction Stop).Status -ne 'Running') { Write-Error 'Service did not start'; exit 1 } } elseif (Get-Command systemctl -ErrorAction SilentlyContinue) { if ((systemctl is-active '{{ SERVICE_NAME }}') -ne 'active') { exit 1 } } else { Get-Process -Name '{{ SERVICE_NAME }}' -ErrorAction Stop | Out-Null }\""
+      - shell:
+          cmd: "if command -v systemctl >/dev/null 2>&1; then [ \"$(systemctl is-active '{{ SERVICE_NAME }}' 2>/dev/null || true)\" = \"active\" ]; elif command -v service >/dev/null 2>&1; then service '{{ SERVICE_NAME }}' status >/dev/null 2>&1; else pgrep -x '{{ SERVICE_NAME }}' >/dev/null 2>&1; fi"
+
+  - name: emit_result
+    depends_on: [verify_running]
+    script: |
+      var result = {
+        "service": ctx.get("SERVICE_NAME"),
+        "status": "running"
+      };
+      ctx.output("result", json.stringify(result));
+      log.info("Service started: " + json.stringify(result));

@@ -13,7 +13,9 @@
 
 class WorkflowRunner {
 public:
-    explicit WorkflowRunner(std::string const& yamlPath, std::unordered_map<std::string, std::string> inputValues = {});
+    explicit WorkflowRunner(std::string const& yamlPath,
+                            std::unordered_map<std::string, std::string> inputValues = {},
+                            std::unordered_map<std::string, std::string> baseEnvironment = {});
     ~WorkflowRunner(); // Declared destructor
 
     bool run(bool useConcurrent = false, int maxConcurrency = 4);
@@ -22,6 +24,7 @@ public:
 private:
     std::string yamlPath_;
     std::unordered_map<std::string, std::string> inputValues_;  // New: store input values
+    std::unordered_map<std::string, std::string> baseEnvironment_;
     std::filesystem::path base_directory_; // New: store the base directory for the workflow
 };
 

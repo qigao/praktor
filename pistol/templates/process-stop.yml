@@ -1,0 +1,43 @@
+name: Process Stop
+description: |
+  Stops a process by PID or by exact name and verifies that it is gone.
+
+variables:
+  PROCESS_NAME: ""
+  PID: ""
+
+tasks:
+  - name: validate_request
+    script: |
+      var processName = ctx.get("PROCESS_NAME");
+      var processId = ctx.get("PID");
+      if (processName == "" && processId == "") {
+        fail("PROCESS_NAME or PID is required");
+      }
+
+  - name: stop_process
+    depends_on: [validate_request]
+    fallback:
+      - shell:
+          cmd: "powershell -NoProfile -Command \"$pidValue = '{{ PID }}'; if ($pidValue -ne '') { Stop-Process -Id $pidValue -Force -ErrorAction Stop } else { Stop-Process -Name '{{ PROCESS_NAME }}' -Force -ErrorAction Stop }\""
+      - shell:
+          cmd: "pid='{{ PID }}'; if [ -n \"$pid\" ]; then kill -TERM \"$pid\" || kill -KILL \"$pid\"; else pkill -TERM -x '{{ PROCESS_NAME }}' || pkill -KILL -x '{{ PROCESS_NAME }}'; fi"
+
+  - name: verify_stopped
+    depends_on: [stop_process]
+    fallback:
+      - shell:
+          cmd: "powershell -NoProfile -Command \"$pidValue = '{{ PID }}'; if ($pidValue -ne '') { if (Get-Process -Id $pidValue -ErrorAction SilentlyContinue) { Write-Error 'Process still running'; exit 1 } } else { if (Get-Process -Name '{{ PROCESS_NAME }}' -ErrorAction SilentlyContinue) { Write-Error 'Process still running'; exit 1 } }\""
+      - shell:
+          cmd: "pid='{{ PID }}'; if [ -n \"$pid\" ]; then ! ps -p \"$pid\" >/dev/null 2>&1; else ! pgrep -x '{{ PROCESS_NAME }}' >/dev/null 2>&1; fi"
+
+  - name: emit_result
+    depends_on: [verify_stopped]
+    script: |
+      var result = {
+        "process_name": ctx.get("PROCESS_NAME"),
+        "pid": ctx.get("PID"),
+        "status": "stopped"
+      };
+      ctx.output("result", json.stringify(result));
+      log.info("Process stopped: " + json.stringify(result));

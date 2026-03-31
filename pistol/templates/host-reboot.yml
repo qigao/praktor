@@ -1,0 +1,58 @@
+name: Host Reboot
+description: |
+  Schedules a host reboot with an explicit delay.
+
+  Variables:
+    DELAY_MINUTES  Non-negative integer delay before reboot
+    MESSAGE        Optional operator-visible message
+
+  Behavior:
+    1. Validate inputs
+    2. Normalize the platform-specific delay argument
+    3. Schedule the reboot
+    4. Emit a structured result
+
+variables:
+  DELAY_MINUTES: "1"
+  MESSAGE: "Scheduled reboot by Praktor"
+
+tasks:
+  - name: validate_request
+    fallback:
+      - shell:
+          cmd: "powershell -NoProfile -Command \"if ('{{ DELAY_MINUTES }}' -notmatch '^[0-9]+$') { Write-Error 'DELAY_MINUTES must be a non-negative integer'; exit 1 }\""
+      - shell:
+          cmd: "case '{{ DELAY_MINUTES }}' in ''|*[!0-9]*) echo 'DELAY_MINUTES must be a non-negative integer' >&2; exit 1;; esac"
+
+  - name: plan_schedule
+    depends_on: [validate_request]
+    script: |
+      var delay = ctx.get("DELAY_MINUTES");
+      var unixArg = "now";
+      if delay != "0" {
+        unixArg = "+" + delay;
+      }
+
+      var result = {
+        "action": "reboot",
+        "delay_minutes": delay,
+        "message": ctx.get("MESSAGE"),
+        "status": "scheduled"
+      };
+
+      ctx.output("unix_delay_arg", unixArg);
+      ctx.output("result", json.stringify(result));
+
+  - name: schedule_reboot
+    depends_on: [plan_schedule]
+    fallback:
+      - shell:
+          cmd: "powershell -NoProfile -Command \"$args = @('/r', '/t', [string]([int]'{{ DELAY_MINUTES }}' * 60), '/c', '{{ MESSAGE }}'); Start-Process shutdown.exe -ArgumentList $args -Wait\""
+      - shell:
+          cmd: "if command -v shutdown >/dev/null 2>&1; then shutdown -r {{ tasks.plan_schedule.outputs.unix_delay_arg }} \"{{ MESSAGE }}\"; elif command -v systemctl >/dev/null 2>&1; then systemctl reboot; else echo 'No reboot command found' >&2; exit 1; fi"
+
+  - name: emit_result
+    depends_on: [schedule_reboot]
+    script: |
+      ctx.output("result", ctx.get("tasks.plan_schedule.outputs.result"));
+      log.info("Reboot scheduled: " + json.stringify(ctx.get("tasks.plan_schedule.outputs.result")));

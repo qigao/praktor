@@ -8,24 +8,91 @@ Praktor is a high-performance, concurrent workflow engine written in modern C++2
 - **📝 Declarative YAML Syntax**: Define your workflows in a simple, human-readable YAML format
 - **⚡ Concurrent Execution**: DAG-based executor runs independent tasks in parallel to maximize performance
 - **📦 Reusable Workflows**: Compose complex pipelines using the `uses` keyword to execute external workflow files
+- **🔧 Built-in Script Engine**: Post-processing scripts with `ctx`, `json`, `http`, `fs`, `base64`, `math`, `log`, and `dll` modules (re2c + lemon parser)
 - **🎯 Advanced Control Flow**:
     - `depends_on`: Define a Directed Acyclic Graph (DAG) of task dependencies
     - `when`: Use powerful conditional expressions (e.g., `"{{env}} == 'prod' and {{tag}} != 'latest'"`) to control task execution
     - `each`: Loop over lists or matrices and run tasks for each item
     - `retries`: Automatic retry with configurable delays and backoff
-- **🔧 Integrated Runners**:
+- **🔌 Integrated Runners**:
     - `command`: Native execution of external programs and shell scripts
-    - `script`: In-memory data transformation using a high-performance JavaScript engine (QuickJS-ng)
+    - `btdsl`: Explicit behavior-tree orchestration for shell/script driven workflows
     - `dynamic_tasks`: Generate and execute tasks at runtime based on data from the context
 - **📊 Output Capture**: Intelligent capture of stdout, stderr, and JSON data into the shared context
 - **🛡️ Resilience & Triggers**: Event-driven actions (`on_success`, `on_failure`) for notifications and automated recovery
+
+## Two-Level Orchestration Model
+
+Praktor has two distinct orchestration levels:
+
+1. **Workflow organization (DAG level)**:
+   flow-level task properties such as `depends_on`, `when`, `each`, `retries`, `triggers`, and `script` organize how a task is scheduled and completed.
+2. **Task execution (runner level)**:
+   each task chooses one runner to do the actual work.
+
+Common runners include:
+
+- **`command`**: call an external process.
+- **`btdsl`**: define internal behavior-tree control flow for one task.
+- **`uses` / `dynamic_tasks`**: compose or generate more tasks at runtime.
+
+Important semantic rule:
+
+- `when`, `each`, `retries`, `triggers`, and `script` are flow-level task properties. They apply to all task kinds, including BT tasks.
+- `command` is just a runner for external process execution. It is not part of BT grammar.
+- YAML is the only authoring grammar for workflows and BT tasks.
+- BT node syntax is task-internal. BT nodes do not have their own DAG-level `when` or `each`.
+
+Visual summary:
+
+```text
+Workflow (DAG)
+  ├─ task properties: depends_on / when / each / retries / triggers / script
+  └─ Task
+      ├─ runner: command
+      ├─ runner: btdsl
+      ├─ runner: uses
+      └─ runner: dynamic_tasks
+
+Inside btdsl only:
+  sequence / fallback / retry / shell / parse_*
+```
+
+Minimal examples:
+
+```yaml
+tasks:
+  - name: build_once
+    when: "{{ ENV }} == 'prod'"
+    command: "./build.sh"
+
+  - name: deploy_many
+    each:
+      items: ["api", "worker"]
+      as: service
+    btdsl:
+      sequence:
+        - shell:
+            cmd: "./deploy.sh {{ service }}"
+        - parse_json:
+            path: "$.status"
+            output_key: "deploy_status"
+```
+
+In the example above:
+
+- `when` belongs to the workflow layer and decides whether `build_once` runs.
+- `each` belongs to the workflow layer and repeats the whole `deploy_many` task.
+- `command` is an external-process runner, not a BT node.
+- `sequence`, `shell`, and `parse_json` belong to the BT layer inside one task execution.
 
 ## Technology Stack
 
 - **C++20**: Modern C++ features for performance and safety
 - **ryml (Rapid YAML)**: Ultra-fast YAML parsing library (5-10x faster than yaml-cpp)
 - **jsoncons**: Powers JMESPath queries and advanced JSON context management
-- **QuickJS-ng**: High-performance, embedded JavaScript engine for scriptable tasks
+- **re2c + lemon**: Lexer and parser generator for the built-in script engine
+- **exprtk**: Expression evaluation for `when` conditions
 - **vcpkg**: Modern C++ package management for easy dependency resolution
 
 ## Quick Start
@@ -47,15 +114,14 @@ tasks:
     depends_on: [setup]
     command: "curl -s https://api.example.com/config"
     output_format: json
-    # Result stored in tasks.fetch_config.outputs.data
 
   - name: process_config
     depends_on: [fetch_config]
-    script:
-      source: |
-        const cfg = context.get("tasks.fetch_config.outputs.data");
-        context.set("api_endpoint", cfg.endpoint);
-        context.set("is_secure", cfg.port === 443);
+    command: "echo Processing config"
+    script: |
+      var cfg = ctx.get("tasks.fetch_config.outputs.data");
+      ctx.output("api_endpoint", cfg.endpoint);
+      ctx.output("is_secure", cfg.port == 443);
 
   - name: build
     depends_on: [process_config]
@@ -134,6 +200,92 @@ tasks:
 - ✅ **Namespaced Outputs**: Module results available via `{{ tasks.<task_name>.outputs.<key> }}`
 - ✅ **Clean Pipelines**: Keep your main workflow high-level and readable
 
+## Post-Processing Script Engine
+
+Any task can include a `script:` block that runs after the task action completes. A task can also be script-only (no `command:` required). The script uses a custom language built with re2c (lexer) and lemon (parser).
+
+### Built-in Modules
+
+| Module | Functions | Purpose |
+|--------|-----------|---------|
+| `ctx` | `get(path)`, `output(key, val)`, `set(path, val)` | Read/write workflow context |
+| `json` | `parse(str)`, `stringify(val)`, `query(val, jmespath)` | JSON operations via jsoncons |
+| `http` | `get(url)`, `post(url, body)`, `put/del/patch/head/options` | Async HTTP client (TurboNet) |
+| `fs` | `read(path)`, `write(path, data)`, `append(path, data)`, `exists/stat/mkdir/remove` | File system via turbo_fs |
+| `base64` | `encode(str)`, `decode(str)` | Base64 encoding/decoding |
+| `math` | `abs`, `ceil`, `floor`, `round`, `sqrt`, `pow`, `sin`, `cos`, `tan`, `log`, `exp`, `min`, `max`, `clamp`, `random`, `eval(expr [, vars])` | Math functions + exprtk expressions |
+| `log` | `info(msg)`, `warn(msg)`, `error(msg)`, `debug(msg)` | Logging |
+| `dll` | `call(module, function, ...args)` | Call native DLL/SO modules |
+
+### Example
+
+```yaml
+tasks:
+  - name: fetch_data
+    command: "curl -s https://api.example.com/data"
+    output_format: json
+    script: |
+      var data = ctx.get("tasks.fetch_data.outputs.data");
+      var active = json.query(data, "[?status=='active']");
+      ctx.output("active_count", json.query(active, "length(@)"));
+      for item in active {
+        log.info("Active: " + item.name);
+      }
+```
+
+### Script-Only Task
+
+Tasks can use `script:` as the sole action — no `command:` required:
+
+```yaml
+tasks:
+  - name: aggregate_data
+    depends_on: [fetch_users, fetch_orders]
+    script: |
+      var users = ctx.get("tasks.fetch_users.outputs.data");
+      var orders = ctx.get("tasks.fetch_orders.outputs.data");
+      var summary = {
+        user_count: json.query(users, "length(@)"),
+        order_total: json.query(orders, "sum([].amount)")
+      };
+      fs.write("./report.json", json.stringify(summary));
+      ctx.output("summary", summary);
+```
+
+### LLM Templates (Prompt + Template)
+
+Built-in templates for calling AI APIs — just pass a prompt:
+
+```yaml
+# Call Claude with a prompt
+- name: ask_claude
+  uses: ./praktor/templates/llm-claude.yml
+  vars:
+    ANTHROPIC_API_KEY: "{{ env.ANTHROPIC_API_KEY }}"
+    CLAUDE_SYSTEM_PROMPT: "You are a helpful assistant."
+    PROMPT: "Explain quicksort in 3 sentences"
+
+# Call OpenAI
+- name: ask_openai
+  uses: ./praktor/templates/llm-openai.yml
+  vars:
+    OPENAI_API_KEY: "{{ env.OPENAI_API_KEY }}"
+    PROMPT: "Write a haiku about C++"
+
+# Call Gemini
+- name: ask_gemini
+  uses: ./praktor/templates/llm-gemini.yml
+  vars:
+    GEMINI_API_KEY: "{{ env.GEMINI_API_KEY }}"
+    PROMPT: "What is the meaning of life?"
+```
+
+All templates output `answer`, `model`, and `usage` — access via `tasks.<name>.outputs.answer`.
+
+Available templates: `llm-openai.yml`, `llm-claude.yml`, `llm-gemini.yml`
+
+See `examples/ai-chat.yml`, `examples/ai-code-review.yml`, `examples/ai-translation.yml` for full workflows.
+
 ## Architecture Overview
 
 Praktor is designed with performance and modularity in mind:
@@ -149,13 +301,19 @@ Praktor is designed with performance and modularity in mind:
 │ Task Execution  │◀───│  Thread Pool     │◀───│  Workflow Executor  │
 │   (Commands)    │    │  (Concurrent)    │    │   (Orchestrator)    │
 └─────────────────┘    └──────────────────┘    └─────────────────────┘
+         │
+         ▼
+┌─────────────────┐
+│  Script Engine  │
+│ (re2c + lemon)  │
+└─────────────────┘
 ```
 
 **Core Components:**
 - **Task Parser**: High-speed YAML engine using `ryml` for zero-allocation parsing
 - **Enhanced Graph**: Advanced DAG orchestration with cycle detection and parallel scheduling
 - **Workflow Executor**: Concurrent runtime that manages thread pools and execution context
-- **Script Runner**: Embedded QuickJS runtime for complex data manipulation without external tools
+- **Script Engine**: Built-in scripting language (re2c lexer + lemon parser + tree-walking interpreter)
 - **Expression Engine**: Powerful interpolation engine supporting variables, environment, and task outputs
 
 ## Advanced Features
@@ -169,7 +327,7 @@ defaults:
 tasks:
   - name: scoped_task
     vars:
-      LOCAL_VAR: "only in this task"  # Overrides global if same name
+      LOCAL_VAR: "only in this task"
     command: "echo {{GLOBAL_VAR}} and {{LOCAL_VAR}}"
 ```
 
@@ -194,20 +352,22 @@ tasks:
 ### Error Handling & Triggers
 ```yaml
 tasks:
+  - name: notify_failure
+    script: |
+      var error = ctx.get("failed_task_error");
+      http.post("{{ env.SLACK_WEBHOOK }}", {"text": "Deployment failed: " + error});
+
+  - name: rollback
+    command: "./rollback.sh"
+
   - name: deploy
     command: "./deploy.sh"
     retries:
       count: 3
       delay: "30s"
     triggers:
-      on_failure:
-        - http_post:
-            url: "{{ env.SLACK_WEBHOOK }}"
-            body: '{"text": "Deployment failed: {{ failed_task_error }}"}'
-        - run_task:
-            task_name: rollback
-      on_success:
-        - "@praktor Deployment of {{ VERSION }} succeeded!"
+      on_failure: [rollback, notify_failure]
+      on_success: [notify_success]
 ```
 
 ### Output Chaining
@@ -215,12 +375,10 @@ tasks:
 tasks:
   - name: get_version
     command: "git describe --tags"
-    outputs:
-      stdout_to_variable: "version"
 
   - name: tag_image
     depends_on: [get_version]
-    command: "docker tag myapp:latest myapp:{{version}}"
+    command: "docker tag myapp:latest myapp:{{ tasks.get_version.outputs.stdout }}"
 ```
 
 ## Documentation
@@ -253,6 +411,7 @@ praktor/
 ├── praktor/           # Core library and CLI
 │   ├── include/       # Public headers
 │   ├── src/           # Implementation
+│   │   └── script/    # Script engine (re2c + lemon)
 │   └── test/          # Unit tests (Catch2)
 ├── docs/              # System & feature documentation
 ├── examples/          # Sample workflow files
@@ -272,6 +431,8 @@ Praktor is actively developed and production-ready. The core engine is feature-c
 - ✅ Full YAML workflow specification support
 - ✅ Cross-file imports and modular design
 - ✅ Thread-safe concurrent execution
+- ✅ Built-in script engine with JSON, HTTP, file system, base64, math (exprtk), and logging modules
+- ✅ Script-only tasks (no command action required)
 - ✅ Comprehensive error handling and logging
 - ✅ Windows/Linux/macOS compatibility
 
@@ -302,7 +463,6 @@ Praktor is actively developed and production-ready. The core engine is feature-c
   - [ ] Secrets manager integration (Azure KeyVault, AWS Secrets Manager)
   - [ ] Policy enforcement and governance
   - [ ] Audit logging and compliance reporting
-  - [ ] SOX, GDPR, HIPAA compliance workflows
 - [ ] **Advanced Authentication**
   - [ ] LDAP/Active Directory integration
   - [ ] OAuth2/OIDC support
@@ -313,7 +473,6 @@ Praktor is actively developed and production-ready. The core engine is feature-c
   - [ ] Native K8s operator for workflow execution
   - [ ] Distributed task execution across pods
   - [ ] Auto-scaling based on workload
-  - [ ] Resource quotas and limits
 - [ ] **Multi-Cloud Support**
   - [ ] AWS ECS/Fargate execution
   - [ ] Azure Container Instances
@@ -323,12 +482,10 @@ Praktor is actively developed and production-ready. The core engine is feature-c
 - [ ] **Advanced Execution**
   - [ ] Result caching between workflow runs
   - [ ] Task pipelining and streaming
-  - [ ] GPU-accelerated tasks
   - [ ] Incremental execution (only run changed tasks)
 - [ ] **Resource Management**
   - [ ] Dynamic load balancing
   - [ ] Intelligent task scheduling
-  - [ ] Memory and CPU optimization
 
 ### 📊 Observability & Analytics
 - [ ] **Monitoring Integration**
@@ -336,60 +493,6 @@ Praktor is actively developed and production-ready. The core engine is feature-c
   - [ ] Grafana dashboard templates
   - [ ] Jaeger distributed tracing
   - [ ] Custom webhook notifications
-- [ ] **Workflow Analytics**
-  - [ ] Execution time analysis
-  - [ ] Resource usage profiling
-  - [ ] Failure pattern detection
-  - [ ] Performance regression tracking
-
-### 📚 Extended Collections Library
-- [ ] **Web Development**
-  - [ ] React/Vue/Angular build pipelines
-  - [ ] Node.js deployment workflows
-  - [ ] Static site generation (Gatsby, Next.js)
-- [ ] **Machine Learning**
-  - [ ] Model training pipelines
-  - [ ] MLOps workflows (MLflow, Kubeflow)
-  - [ ] Data preprocessing and feature engineering
-- [ ] **Data Engineering**
-  - [ ] Apache Spark job orchestration
-  - [ ] ETL pipeline templates
-  - [ ] Data warehouse integration
-- [ ] **Mobile Development**
-  - [ ] React Native build and deploy
-  - [ ] Flutter cross-platform workflows
-  - [ ] iOS/Android native builds
-- [ ] **Game Development**
-  - [ ] Unity build and asset pipelines
-  - [ ] Unreal Engine workflows
-  - [ ] Multi-platform game deployment
-- [ ] **Security & DevSecOps**
-  - [ ] Automated vulnerability scanning
-  - [ ] Penetration testing workflows
-  - [ ] Security compliance automation
-
-### 🌍 Community & Ecosystem
-- [ ] **Praktor Hub - Community Platform**
-  - [ ] Collection marketplace with ratings/reviews
-  - [ ] Easy sharing and contribution workflows
-  - [ ] Semantic versioning for collections
-  - [ ] Enterprise collection licensing
-- [ ] **Developer Community**
-  - [ ] Community Discord/Slack
-  - [ ] Monthly community calls
-  - [ ] Contribution recognition program
-  - [ ] Praktor certification program
-
-### 🔧 Runtime Enhancements
-- [ ] **Dynamic Workflows**
-  - [ ] Runtime workflow modification API
-  - [ ] Conditional workflow generation
-  - [ ] Template parameterization system
-- [ ] **Advanced Control Flow**
-  - [ ] Workflow loops and iterations
-  - [ ] Dynamic task generation
-  - [ ] Event-driven task execution
-  - [ ] Workflow composition and nesting
 
 ### 🎯 Platform Integrations
 - [ ] **CI/CD Platforms**
@@ -397,10 +500,6 @@ Praktor is actively developed and production-ready. The core engine is feature-c
   - [ ] GitLab CI export
   - [ ] Jenkins pipeline conversion
   - [ ] Azure DevOps integration
-- [ ] **Development Tools**
-  - [ ] Docker Compose integration
-  - [ ] Helm chart deployment
-  - [ ] Terraform workspace management
 
 ## 🤝 How to Contribute to the Roadmap
 
@@ -415,24 +514,6 @@ Praktor is actively developed and production-ready. The core engine is feature-c
 3. **Submit a PR** with your implementation
 4. **Get recognition** in our contributors hall of fame
 
-### Suggest New Features
-1. **Open an issue** with the "enhancement" label
-2. **Describe the problem** you're trying to solve
-3. **Propose a solution** with examples
-4. **Engage with the community** for feedback
-
-### Priority Levels
-- 🟢 **High Priority**: Core functionality, high community demand
-- 🟡 **Medium Priority**: Nice-to-have features, moderate demand
-- 🟠 **Low Priority**: Experimental features, niche use cases
-
-**Current Focus Areas** (actively being developed):
-- 🟢 Enhanced collections library (web, mobile, ML)
-- 🟢 VS Code extension for improved developer experience
-- 🟢 Kubernetes operator for cloud-native execution
-
 ---
 
 **Join the Journey!** Praktor is more than a tool - it's a community building the future of workflow orchestration. Every contribution, big or small, makes a difference.
-
-**Get Started Contributing**: Check our [Contributing Guide](CONTRIBUTING.md) and pick your first issue!

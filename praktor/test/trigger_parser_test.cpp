@@ -43,15 +43,12 @@ TEST_CASE("parse trigger with task name reference")
     CHECK(actions[0] == "rollback");
 }
 
-TEST_CASE("parse trigger with script task reference")
+TEST_CASE("parse trigger with command task reference")
 {
     const std::string content =
         "tasks:\n"
         "  - name: write_report\n"
-        "    script:\n"
-        "      source: |\n"
-        "        const fs = require('fs');\n"
-        "        fs.writeFileSync('./out.txt', 'done', {flag: 'a'});\n"
+        "    command: echo done > out.txt\n"
         "  - name: report\n"
         "    command: echo done\n"
         "    triggers:\n"
@@ -68,3 +65,39 @@ TEST_CASE("parse trigger with script task reference")
     CHECK(actions[0] == "write_report");
 }
 
+TEST_CASE("build graph rejects unknown static trigger target")
+{
+    const std::string content =
+        "tasks:\n"
+        "  - name: build\n"
+        "    command: echo build\n"
+        "    triggers:\n"
+        "      on_failure:\n"
+        "        - missing_task\n";
+
+    auto wf = writeTempWorkflow("trigger_missing_task.yml", content);
+    Workflow workflow = TaskParser::parseFile(wf.string());
+
+    REQUIRE_THROWS_WITH(TaskParser::buildGraph(workflow),
+        Catch::Matchers::ContainsSubstring("references unknown task 'missing_task'"));
+}
+
+TEST_CASE("build graph allows dynamic trigger target")
+{
+    const std::string content =
+        "variables:\n"
+        "  HANDLER: rollback\n"
+        "tasks:\n"
+        "  - name: rollback\n"
+        "    command: echo rollback\n"
+        "  - name: build\n"
+        "    command: echo build\n"
+        "    triggers:\n"
+        "      on_failure:\n"
+        "        - \"{{ HANDLER }}\"\n";
+
+    auto wf = writeTempWorkflow("trigger_dynamic_task.yml", content);
+    Workflow workflow = TaskParser::parseFile(wf.string());
+
+    REQUIRE_NOTHROW(TaskParser::buildGraph(workflow));
+}

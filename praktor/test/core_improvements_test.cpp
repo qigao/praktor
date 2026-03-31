@@ -114,3 +114,43 @@ TEST_CASE("Execution Engine - Task Caching", "[execution][caching]") {
     if (fs::exists(wf_path)) fs::remove(wf_path);
     if (fs::exists(wf_path.parent_path() / ".praktor_cache")) fs::remove(wf_path.parent_path() / ".praktor_cache");
 }
+
+TEST_CASE("Execution Engine - Each outputs are aggregated", "[execution][each]") {
+    fs::path wf_path = fs::absolute("each_outputs_wf.yml");
+
+    {
+        std::ofstream(wf_path) <<
+            "tasks:\n"
+            "  - name: fanout\n"
+            "    each:\n"
+            "      items: [alpha, beta, gamma]\n"
+            "      as: item\n"
+            "    command: echo {{ item }}\n";
+    }
+
+    Workflow wf = TaskParser::parseFile(wf_path.string());
+    DependencyGraph<Task> graph = TaskParser::buildGraph(wf);
+    WorkflowContext context;
+    WorkflowExecutor executor(graph, wf.tasks, {}, 1, false);
+
+    executor.execute(context);
+
+    auto outputs = context.getValueByPath("tasks.fanout.outputs");
+    REQUIRE(outputs.is_object());
+    REQUIRE(outputs.contains("stdout"));
+    CHECK(outputs["stdout"].as<std::string>().find("gamma") != std::string::npos);
+    REQUIRE(outputs.contains("iterations"));
+    REQUIRE(outputs["iterations"].is_array());
+    REQUIRE(outputs["iterations"].size() == 3);
+
+    auto first = outputs["iterations"][0];
+    auto second = outputs["iterations"][1];
+    auto third = outputs["iterations"][2];
+
+    CHECK(first["status"].as<std::string>() == "success");
+    CHECK(first["outputs"]["stdout"].as<std::string>().find("alpha") != std::string::npos);
+    CHECK(second["outputs"]["stdout"].as<std::string>().find("beta") != std::string::npos);
+    CHECK(third["outputs"]["stdout"].as<std::string>().find("gamma") != std::string::npos);
+
+    if (fs::exists(wf_path)) fs::remove(wf_path);
+}

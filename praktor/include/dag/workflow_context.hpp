@@ -6,6 +6,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -38,13 +39,26 @@ struct TaskFailureContext {
     std::string stdout_data;         // Standard output captured
     std::string stderr_data;         // Standard error captured
     std::string error_message;       // Error message from TaskResult
+    std::string inner_task_name;     // Name of the first nested failed task, if any
+    std::string inner_task_type;     // Type of the nested failed task
+    int64_t inner_exit_code = -1;    // Exit code of the nested failed task
+    std::string inner_stdout_data;   // Nested task stdout
+    std::string inner_stderr_data;   // Nested task stderr
+    std::string inner_error_message; // Nested task error message
 
     // Variables that were captured by the failed task before failure
     std::unordered_map<std::string, WorkflowValue> captured_outputs;
+    std::unordered_map<std::string, WorkflowValue> inner_captured_outputs;
+
+    bool hasInnerFailure() const {
+        return !inner_task_name.empty();
+    }
 
     // Convert to variables that can be accessed in on_failure tasks
     std::unordered_map<std::string, WorkflowValue> toFailureVariables() const {
         std::unordered_map<std::string, WorkflowValue> failure_vars;
+        WorkflowValue failed_outputs = jsoncons::json::object();
+        WorkflowValue failed_task = jsoncons::json::object();
 
         failure_vars["failed_task_name"] = task_name;
         failure_vars["failed_task_type"] = task_type;
@@ -56,6 +70,44 @@ struct TaskFailureContext {
         // Add captured outputs with prefix for easy access
         for (const auto& [key, value] : captured_outputs) {
             failure_vars["failed_task_outputs." + key] = value;
+            failed_outputs[key] = value;
+        }
+
+        failed_task["name"] = task_name;
+        failed_task["type"] = task_type;
+        failed_task["exit_code"] = exit_code;
+        failed_task["stdout"] = stdout_data;
+        failed_task["stderr"] = stderr_data;
+        failed_task["error"] = error_message;
+        failed_task["outputs"] = failed_outputs;
+        failure_vars["failed_task_outputs"] = failed_outputs;
+        failure_vars["failed_task"] = failed_task;
+
+        if (hasInnerFailure()) {
+            WorkflowValue failed_inner_outputs = jsoncons::json::object();
+            WorkflowValue failed_inner_task = jsoncons::json::object();
+
+            failure_vars["failed_inner_task_name"] = inner_task_name;
+            failure_vars["failed_inner_task_type"] = inner_task_type;
+            failure_vars["failed_inner_task_exit_code"] = std::to_string(inner_exit_code);
+            failure_vars["failed_inner_task_stdout"] = inner_stdout_data;
+            failure_vars["failed_inner_task_stderr"] = inner_stderr_data;
+            failure_vars["failed_inner_task_error"] = inner_error_message;
+
+            for (const auto& [key, value] : inner_captured_outputs) {
+                failure_vars["failed_inner_task_outputs." + key] = value;
+                failed_inner_outputs[key] = value;
+            }
+
+            failed_inner_task["name"] = inner_task_name;
+            failed_inner_task["type"] = inner_task_type;
+            failed_inner_task["exit_code"] = inner_exit_code;
+            failed_inner_task["stdout"] = inner_stdout_data;
+            failed_inner_task["stderr"] = inner_stderr_data;
+            failed_inner_task["error"] = inner_error_message;
+            failed_inner_task["outputs"] = failed_inner_outputs;
+            failure_vars["failed_inner_task_outputs"] = failed_inner_outputs;
+            failure_vars["failed_inner_task"] = failed_inner_task;
         }
 
         return failure_vars;
@@ -156,11 +208,10 @@ public:
      */
     template <typename ValueType>
     ValueType getValueOrDefault(std::string const& key, ValueType const& defaultValue) const {
-        try {
-            return getValue<ValueType>(key);
-        } catch (...) {
+        if (!hasKey(key)) {
             return defaultValue;
         }
+        return getValue<ValueType>(key);
     }
 
     /**
@@ -201,7 +252,7 @@ public:
                 try {
                     task_registry_->getOutput(task_name, output_key);
                     return true;
-                } catch (...) {
+                } catch (const std::exception&) {
                     return false;
                 }
             }
@@ -225,106 +276,23 @@ public:
     }
 
     WorkflowValue getValueByPath(const std::string& path) const {
-        if (path.empty()) return WorkflowValue::null();
-        if (!scope_) {
-            logw("getValueByPath: scope_ is null");
-            return WorkflowValue::null();
-        }
-        size_t first = path.find_first_not_of(" \t\r\n");
-    if (first == std::string::npos) return WorkflowValue::null();
-    
-    std::string trimmed_path = path.substr(first);
-    auto last = trimmed_path.find_last_not_of(" \t\r\n");
-    if (last != std::string::npos) trimmed_path.erase(last + 1);
+        std::string_view trimmed = trimPath(path);
+        if (trimmed.empty() || !scope_) return WorkflowValue::null();
 
-        if (trimmed_path == "tasks") {
-            // TLOG_INFO("getValueByPath: returning whole registry for 'tasks'");
-            return task_registry_->toJson();
+        // 1. Task registry lookup: "tasks" or "tasks.xxx.yyy"
+        if (trimmed.substr(0, 5) == "tasks") {
+            return resolveTaskPath(trimmed);
         }
 
-        if (trimmed_path.rfind("tasks.", 0) == 0) {
-            auto first_dot = trimmed_path.find('.', 6);
-            if (first_dot == std::string::npos) {
-                return task_registry_->toJson();
-            }
-            std::string task_name = trimmed_path.substr(6, first_dot - 6);
-            std::string rest = trimmed_path.substr(first_dot + 1);
-            if (rest == "status") return WorkflowValue(task_registry_->getStatus(task_name));
-            if (rest.rfind("outputs.", 0) == 0) {
-                std::string output_path = rest.substr(8);
-                // Split output_path to support nested JSON traversal: data.field.subfield
-                size_t path_dot = output_path.find('.');
-                std::string base_key = output_path.substr(0, path_dot);
-                
-                try {
-                    WorkflowValue current = task_registry_->getOutput(task_name, base_key);
-                    if (path_dot != std::string::npos) {
-                        // Traverse nested JSON segments
-                        std::stringstream ss(output_path.substr(path_dot + 1));
-                        std::string segment;
-                        while (std::getline(ss, segment, '.')) {
-                            if (current.is_object() && current.contains(segment)) {
-                                current = current.at(segment);
-                            } else {
-                                return WorkflowValue::null();
-                            }
-                        }
-                    }
-                    return current;
-                } catch(const std::exception& e) {
-                   TLOG_WARN("getValueByPath: exception lookup for '{}': {}", output_path, e.what());
-                }
-            } else if (rest == "outputs") {
-                WorkflowValue outputs = task_registry_->getAllOutputs(task_name);
-                return outputs;
-            }
+        // 2. Direct scope lookup
+        std::string key(trimmed);
+        if (scope_->has(key)) {
+            try { return scope_->get(key); }
+            catch (const std::exception&) { /* fall through to nested lookup */ }
         }
 
-        // Check if the exact path exists as a key
-        if (scope_->has(trimmed_path)) {
-            try { 
-                auto val = scope_->get(trimmed_path);
-                logd("getValueByPath: basic key '{}' found, value='{}'", trimmed_path, val.to_string());
-                return val;
-            } catch (...) {
-                logd("getValueByPath: basic key '{}' found but failed to retrieve", trimmed_path);
-            }
-        }
-
-        logd("getValueByPath: key '{}' not found in scope, trying dotted traversal", trimmed_path);
-        // Handle dotted paths by traversing nested objects
-        if (trimmed_path.find('.') != std::string::npos) {
-            std::vector<std::string> segments;
-            std::string segment;
-            std::stringstream ss(trimmed_path);
-            while (std::getline(ss, segment, '.')) {
-                if (!segment.empty()) segments.push_back(segment);
-            }
-
-            if (segments.size() >= 2 && scope_->has(segments[0])) {
-                try {
-                    WorkflowValue current = scope_->get(segments[0]);
-                    logd("getValueByPath: starting dotted traversal from base key '{}', value='{}'", segments[0], current.to_string());
-                    for (size_t i = 1; i < segments.size(); ++i) {
-                        if (!current.is_object() || !current.contains(segments[i])) {
-                            logd("getValueByPath: dotted traversal failed at segment '{}', current is not object or does not contain key", segments[i]);
-                            return WorkflowValue::null();
-                        }
-                        WorkflowValue next = current.at(segments[i]);
-                        logd("getValueByPath: traversed to segment '{}', current value='{}'", segments[i], next.to_string());
-                        current = std::move(next);
-                    }
-                    logd("getValueByPath: dotted traversal successful for '{}', final value='{}'", trimmed_path, current.to_string());
-                    return current;
-                } catch (const std::exception& e) {
-                    logw("getValueByPath: exception during traversal for '{}': {}", trimmed_path, e.what());
-                }
-            } else {
-                logd("getValueByPath: dotted path '{}' has less than 2 segments or base key '{}' not found in scope", trimmed_path, segments[0]);
-            }
-        }
-        logd("getValueByPath: key '{}' not found after all attempts, returning null", trimmed_path);
-        return WorkflowValue::null();
+        // 3. Nested object traversal: "foo.bar.baz"
+        return traverseNestedPath(trimmed);
     }
 
 
@@ -382,6 +350,12 @@ public:
         logd("mergeTaskOutputs: task='{}', outputs='{}'", taskName, outputs.to_string());
         task_registry_->mergeOutputs(taskName, outputs);
     }
+
+    void clearTaskOutputs(const std::string& taskName) {
+        logd("clearTaskOutputs: task='{}'", taskName);
+        task_registry_->clearOutputs(taskName);
+    }
+
     void pushTaskScope(const std::string& taskName, std::optional<std::string> alias = std::nullopt) {
         std::string alias_str = alias.has_value() ? alias.value() : "nullopt";
         logd("pushTaskScope: taskName='{}', alias='{}', stack_size={}", taskName, alias_str, task_scope_stack_.size() + 1);
@@ -418,7 +392,7 @@ public:
 
         // If there's an alias (e.g., for nested workflows), also set output for alias
         if (scope.second && scope.second.value() != scope.first) {
-            logi("setCurrentTaskOutput: also setting alias={} for task={}", scope.second.value(), scope.first);
+            logd("setCurrentTaskOutput: also setting alias={} for task={}", scope.second.value(), scope.first);
             setTaskOutput(scope.second.value(), key, value);
             setValue("tasks." + scope.second.value() + ".outputs." + key, value);
         }
@@ -519,6 +493,22 @@ public:
         return embedded_modules_;
     }
 
+    void setNativeModules(const NativeModules& modules) {
+        native_modules_ = modules;
+    }
+
+    const NativeModules& getNativeModules() const {
+        return native_modules_;
+    }
+
+    void setSourcePath(const std::string& path) {
+        source_path_ = path;
+    }
+
+    const std::string& getSourcePath() const {
+        return source_path_;
+    }
+
 private:
     // Core components
     std::unique_ptr<VariableScope> scope_;
@@ -527,7 +517,87 @@ private:
     // Supporting members
     std::vector<std::pair<std::string, std::optional<std::string>>> task_scope_stack_;
     std::unordered_map<std::string, EmbeddedModule> embedded_modules_;
+    NativeModules native_modules_;
+    std::string source_path_;
     std::optional<TaskFailureContext> current_failure_context_;
+
+    // Path resolution helpers - each does ONE thing
+    static std::string_view trimPath(const std::string& path) {
+        size_t first = path.find_first_not_of(" \t\r\n");
+        if (first == std::string::npos) return {};
+        size_t last = path.find_last_not_of(" \t\r\n");
+        return std::string_view(path).substr(first, last - first + 1);
+    }
+
+    WorkflowValue resolveTaskPath(std::string_view path) const {
+        // "tasks" -> entire registry
+        if (path == "tasks" || path == "tasks.") {
+            return task_registry_->toJson();
+        }
+
+        // "tasks.taskname..." -> parse task name and rest
+        auto dot1 = path.find('.', 6); // skip "tasks."
+        if (dot1 == std::string::npos) {
+            return task_registry_->toJson();
+        }
+
+        std::string task_name(path.substr(6, dot1 - 6));
+        std::string_view rest = path.substr(dot1 + 1);
+
+        if (rest == "status") {
+            return WorkflowValue(task_registry_->getStatus(task_name));
+        }
+        if (rest == "outputs") {
+            return task_registry_->getAllOutputs(task_name);
+        }
+        if (rest.substr(0, 8) == "outputs.") {
+            return resolveTaskOutput(task_name, rest.substr(8));
+        }
+        return WorkflowValue::null();
+    }
+
+    WorkflowValue resolveTaskOutput(const std::string& task_name, std::string_view output_path) const {
+        auto dot = output_path.find('.');
+        std::string base_key(output_path.substr(0, dot));
+
+        WorkflowValue current = task_registry_->getOutput(task_name, base_key);
+        if (dot == std::string_view::npos) {
+            return current;
+        }
+        return traverseJson(current, output_path.substr(dot + 1));
+    }
+
+    WorkflowValue traverseNestedPath(std::string_view path) const {
+        auto dot = path.find('.');
+        if (dot == std::string_view::npos) {
+            return WorkflowValue::null();
+        }
+
+        std::string base_key(path.substr(0, dot));
+        if (!scope_->has(base_key)) {
+            throw std::runtime_error("Context path not found: " + base_key);
+        }
+
+        WorkflowValue current = scope_->get(base_key);
+        return traverseJson(current, path.substr(dot + 1));
+    }
+
+    static WorkflowValue traverseJson(WorkflowValue current, std::string_view remaining_path) {
+        size_t start = 0;
+        while (start < remaining_path.size()) {
+            auto dot = remaining_path.find('.', start);
+            size_t end = (dot == std::string_view::npos) ? remaining_path.size() : dot;
+            std::string segment(remaining_path.substr(start, end - start));
+
+            if (!current.is_object() || !current.contains(segment)) {
+                return WorkflowValue::null();
+            }
+            WorkflowValue next = current.at(segment);
+            current = std::move(next);
+            start = (dot == std::string_view::npos) ? remaining_path.size() : dot + 1;
+        }
+        return current;
+    }
 };
 
 #endif   // __WORKFLOW_CONTEXT_HPP__

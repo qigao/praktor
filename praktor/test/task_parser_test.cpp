@@ -41,30 +41,26 @@ TEST_CASE("parse minimal run_command task")
     REQUIRE(workflow.tasks.size() == 1);
     const Task& build = workflow.tasks[0];
     CHECK(build.name == "build");
-    CHECK(build.action == TaskAction::RunCommand);
-    REQUIRE(std::holds_alternative<RunCommandParams>(build.specifics));
-    const auto& params = std::get<RunCommandParams>(build.specifics);
-    REQUIRE(std::holds_alternative<std::string>(params.command));
-    CHECK(std::get<std::string>(params.command) == "echo building");
+    CHECK(build.action == TaskAction::Btdsl);
+    REQUIRE(std::holds_alternative<BtdslParams>(build.specifics));
+    const auto& params = std::get<BtdslParams>(build.specifics);
+    REQUIRE(!params.root.children.empty());
+    CHECK(params.root.children[0].params.at("cmd") == "echo building");
     CHECK(build.vars.at("MESSAGE") == "{{ APP_NAME }}");
     CHECK(build.when.has_value());
 }
 
-TEST_CASE("parse script and uses tasks")
+TEST_CASE("parse uses tasks")
 {
     auto reused = writeTempWorkflow("reusable.yml",
         "tasks:\n"
         "  - name: step\n"
-        "    script:\n"
-        "      source: |\n"
-        "        context.set(\"result\", \"from reusable\");\n");
+        "    command: echo from reusable\n");
 
     std::string main_content =
         "tasks:\n"
         "  - name: step-one\n"
-        "    script:\n"
-        "      source: |\n"
-        "        context.set(\"value\", \"inline\");\n";
+        "    command: echo inline\n";
     main_content += "  - name: run-reusable\n";
     main_content += "    uses: " + reused.generic_string() + "\n";
     main_content += "    vars:\n      INPUT: data\n";
@@ -74,10 +70,9 @@ TEST_CASE("parse script and uses tasks")
     Workflow workflow = TaskParser::parseFile(wf.string());
     REQUIRE(workflow.tasks.size() == 2);
 
-    const Task& scriptTask = workflow.tasks[0];
-    CHECK(scriptTask.action == TaskAction::Script);
-    REQUIRE(std::holds_alternative<ScriptParams>(scriptTask.specifics));
-    CHECK(std::get<ScriptParams>(scriptTask.specifics).source.find("inline") != std::string::npos);
+    const Task& cmdTask = workflow.tasks[0];
+    CHECK(cmdTask.action == TaskAction::Btdsl);
+    REQUIRE(std::holds_alternative<BtdslParams>(cmdTask.specifics));
 
     const Task& usesTask = workflow.tasks[1];
     CHECK(usesTask.action == TaskAction::Uses);
@@ -99,9 +94,7 @@ TEST_CASE("parse workflow embedded modules")
         "      }\n"
         "tasks:\n"
         "  - name: consumer\n"
-        "    script:\n"
-        "      source: |\n"
-        "        context.set(\"used\", \"module\");\n";
+        "    command: echo using module\n";
 
     auto wf = writeTempWorkflow("embedded.yml", content);
 
@@ -146,10 +139,7 @@ TEST_CASE("parse task triggers and environment")
     const std::string content =
         "tasks:\n"
         "  - name: notify_http\n"
-        "    script:\n"
-        "      source: |\n"
-        "        // Send HTTP notification\n"
-        "        context.set(\"sent\", \"true\");\n"
+        "    command: echo sending notification\n"
         "    env:\n"
         "      URL: \"{{ URL }}\"\n"
         "  - name: build\n"
@@ -238,4 +228,137 @@ TEST_CASE("parse silent attribute")
 
     CHECK(workflow.tasks[0].silent == false);  // default
     CHECK(workflow.tasks[1].silent == true);
+}
+
+TEST_CASE("top-level defaults apply to included tasks")
+{
+    auto included = writeTempWorkflow("defaults_included.yml",
+        "tasks:\n"
+        "  - name: included_step\n"
+        "    command: echo included\n");
+
+    std::string content =
+        "defaults:\n"
+        "  retries:\n"
+        "    count: 2\n"
+        "    delay: 5s\n"
+        "  timeout: 30s\n"
+        "includes:\n"
+        "  child: " + included.filename().generic_string() + "\n"
+        "tasks:\n"
+        "  - name: root_step\n"
+        "    command: echo root\n";
+
+    auto wf = writeTempWorkflow("defaults_main.yml", content);
+
+    Workflow workflow = TaskParser::parseFile(wf.string());
+    auto it = std::find_if(workflow.tasks.begin(), workflow.tasks.end(),
+        [](const Task& task) { return task.name == "included_step"; });
+
+    REQUIRE(it != workflow.tasks.end());
+    REQUIRE(it->retries.has_value());
+    CHECK(it->retries->count == 2);
+    CHECK(it->retries->delay == "5s");
+    REQUIRE(it->timeout.has_value());
+    CHECK(it->timeout.value() == "30s");
+}
+
+TEST_CASE("build graph rejects duplicate task names")
+{
+    const std::string content =
+        "tasks:\n"
+        "  - name: duplicate\n"
+        "    command: echo first\n"
+        "  - name: duplicate\n"
+        "    command: echo second\n";
+
+    auto wf = writeTempWorkflow("duplicate_names.yml", content);
+    Workflow workflow = TaskParser::parseFile(wf.string());
+
+    REQUIRE_THROWS_WITH(TaskParser::buildGraph(workflow),
+        Catch::Matchers::ContainsSubstring("Duplicate task name: 'duplicate'"));
+}
+
+TEST_CASE("parse rejects http_request BT node in workflow grammar")
+{
+    const std::string content =
+        "tasks:\n"
+        "  - name: api_call\n"
+        "    sequence:\n"
+        "      - http_request:\n"
+        "          method: GET\n"
+        "          url: https://example.com/data\n";
+
+    auto wf = writeTempWorkflow("http_request_forbidden.yml", content);
+
+    REQUIRE_THROWS_WITH(TaskParser::parseFile(wf.string()),
+        Catch::Matchers::ContainsSubstring("Unknown BTDSL node type: 'http_request'"));
+}
+
+TEST_CASE("parse accepts snake_case BT leaf nodes in explicit YAML trees")
+{
+    const std::string content =
+        "tasks:\n"
+        "  - name: inspect_json\n"
+        "    sequence:\n"
+        "      - shell:\n"
+        "          cmd: echo {\\\"value\\\":7}\n"
+        "          output_key: stdout\n"
+        "      - parse_json:\n"
+        "          input_key: stdout\n"
+        "          output_key: data\n";
+
+    auto wf = writeTempWorkflow("snake_case_bt_leaf.yml", content);
+
+    Workflow workflow = TaskParser::parseFile(wf.string());
+    REQUIRE(workflow.tasks.size() == 1);
+    REQUIRE(std::holds_alternative<BtdslParams>(workflow.tasks[0].specifics));
+
+    const auto& params = std::get<BtdslParams>(workflow.tasks[0].specifics);
+    REQUIRE(params.root.children.size() == 2);
+    CHECK(params.root.children[0].type == "Shell");
+    CHECK(params.root.children[1].type == "ParseJson");
+    CHECK(params.root.children[1].params.at("input_key") == "stdout");
+    CHECK(params.root.children[1].params.at("output_key") == "data");
+    CHECK(params.root.children[1].params.find("path") == params.root.children[1].params.end());
+}
+
+TEST_CASE("parse accepts BT shorthand leaf roots")
+{
+    const std::string content =
+        "tasks:\n"
+        "  - name: wait_briefly\n"
+        "    sleep: \"1s\"\n"
+        "  - name: check_config\n"
+        "    file_exists: ./config.yml\n";
+
+    auto wf = writeTempWorkflow("bt_shorthand_leaf_roots.yml", content);
+
+    Workflow workflow = TaskParser::parseFile(wf.string());
+    REQUIRE(workflow.tasks.size() == 2);
+
+    REQUIRE(std::holds_alternative<BtdslParams>(workflow.tasks[0].specifics));
+    REQUIRE(std::holds_alternative<BtdslParams>(workflow.tasks[1].specifics));
+
+    const auto& sleep_params = std::get<BtdslParams>(workflow.tasks[0].specifics);
+    const auto& file_params = std::get<BtdslParams>(workflow.tasks[1].specifics);
+
+    CHECK(sleep_params.root.type == "Sleep");
+    CHECK(sleep_params.root.params.at("duration") == "1s");
+    CHECK(file_params.root.type == "FileExists");
+    CHECK(file_params.root.params.at("path") == "./config.yml");
+}
+
+TEST_CASE("parse rejects text btdsl blocks in workflow grammar")
+{
+    const std::string content =
+        "tasks:\n"
+        "  - name: legacy_bt\n"
+        "    btdsl: |\n"
+        "      tree Main { Shell(cmd=\\\"echo legacy\\\") }\n";
+
+    auto wf = writeTempWorkflow("legacy_text_btdsl.yml", content);
+
+    REQUIRE_THROWS_WITH(TaskParser::parseFile(wf.string()),
+        Catch::Matchers::ContainsSubstring("btdsl must be a map"));
 }

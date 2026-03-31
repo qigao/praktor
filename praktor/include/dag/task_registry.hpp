@@ -66,6 +66,7 @@ public:
         task_state_[task_name] = TaskState::Running;
         completed_tasks_.erase(task_name);
         failed_tasks_.erase(task_name);
+        task_outputs_.erase(task_name);
     }
 
     /**
@@ -156,6 +157,11 @@ public:
             // Better: use internal helper.
             setOutputInternal(task_name, item.key(), item.value());
         }
+    }
+
+    void clearOutputs(const std::string& task_name) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        task_outputs_.erase(task_name);
     }
 
     /**

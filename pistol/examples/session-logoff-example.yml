@@ -1,0 +1,19 @@
+name: Session Logoff Example
+description: |
+  Minimal wrapper around the reusable session logoff template.
+
+variables:
+  SESSION_ID: "{{ env.XDG_SESSION_ID }}"
+  MESSAGE: "Session logoff requested by Praktor example"
+
+tasks:
+  - name: session_logoff
+    uses: ../templates/session-logoff.yml
+    vars:
+      SESSION_ID: "{{ SESSION_ID }}"
+      MESSAGE: "{{ MESSAGE }}"
+
+  - name: emit_result
+    depends_on: [session_logoff]
+    script: |
+      ctx.output("result", ctx.get("tasks.session_logoff.outputs.result"));

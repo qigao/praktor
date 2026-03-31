@@ -1,0 +1,116 @@
+name: Conditional Retry Strategies
+
+description: |
+  Demonstrates enhanced error handling with conditional retries (v9.1+).
+  Shows different retry strategies for different failure scenarios.
+
+variables:
+  API_URL: "https://api.example.com"
+  MAX_RETRIES: "5"
+
+tasks:
+  # Strategy 1: Retry only on specific exit codes
+  - name: network_operation
+    command: curl -f {$API_URL}/data
+    retries:
+      count: 3
+      delay: "5s"
+      # Only retry on network errors (exit code 7) and timeouts (exit code 28)
+      on_exit_codes: [7, 28]
+      backoff: "exponential"  # 5s → 10s → 20s
+
+  # Strategy 2: Retry on stderr pattern match
+  - name: database_query
+    command: psql -c "SELECT * FROM users"
+    retries:
+      count: 5
+      delay: "2s"
+      # Retry on transient database errors
+      on_stderr_pattern: "connection refused|deadlock detected|timeout"
+      backoff: "linear"  # Constant 2s delay
+
+  # Strategy 3: Exponential backoff for rate-limited API
+  - name: rate_limited_api
+    sequence:
+      - shell:
+          cmd: curl -f -s {$API_URL}/rate-limited-endpoint
+          output_key: api_response
+    retries:
+      count: 5
+      delay: "1s"
+      on_exit_codes: [22]  # curl maps HTTP 4xx/5xx failures to exit 22 with -f
+      backoff: "exponential"  # 1s → 2s → 4s → 8s → 16s
+
+  # Strategy 4: No retries for permanent failures
+  - name: validate_input
+    command: ./validate.sh input.json
+    retries:
+      count: 3
+      delay: "1s"
+      # Don't retry on validation errors (exit code 1)
+      # Only retry on system errors (exit codes 2, 255)
+      on_exit_codes: [2, 255]
+
+  # Strategy 5: Complex deployment with fallback and retry
+  - name: deploy_with_retry
+    fallback:
+      # Try primary deployment with retries
+      - sequence:
+          - shell: kubectl apply -f deployment.yml --context=primary
+          - check_exit_code: 0
+        retries:
+          count: 3
+          delay: "10s"
+          on_stderr_pattern: "connection refused|timeout"
+          backoff: "exponential"
+
+      # Fallback to secondary deployment
+      - sequence:
+          - shell: echo "Primary failed, trying secondary..."
+          - shell: kubectl apply -f deployment.yml --context=secondary
+          - check_exit_code: 0
+        retries:
+          count: 2
+          delay: "5s"
+          backoff: "linear"
+
+      # Final fallback: log error
+      - shell: echo "All deployment attempts failed!" && exit 1
+
+  # Strategy 6: Retry with increasing timeout
+  - name: long_running_task
+    command: ./process-large-file.sh
+    timeout: "5m"
+    retries:
+      count: 3
+      delay: "30s"
+      on_exit_codes: [124]  # Timeout exit code
+      backoff: "exponential"
+    # Note: Each retry gets the same timeout, but exponential backoff
+    # gives the system more time to recover between attempts
+
+# Comparison: Before vs After
+#
+# BEFORE (v9.0 - retry on any failure):
+# retries:
+#   count: 3
+#   delay: "10s"
+# Problem: Retries even on permanent failures, wastes time
+#
+# AFTER (v9.1 - conditional retry):
+# retries:
+#   count: 3
+#   delay: "10s"
+#   on_exit_codes: [7, 28]  # Only network errors
+#   backoff: "exponential"
+# Benefit: Faster failure on permanent errors, better handling of transient errors
+
+# Exit Code Reference:
+# 0   - Success
+# 1   - General error (often permanent)
+# 2   - Misuse of shell command
+# 7   - curl: Failed to connect
+# 28  - curl: Timeout
+# 124 - Timeout (from timeout command)
+# 255 - SSH/network error
+# 429 - HTTP Too Many Requests (rate limit)

@@ -1,0 +1,19 @@
+name: Host Shutdown Example
+description: |
+  Minimal wrapper around the reusable host shutdown template.
+
+variables:
+  DELAY_MINUTES: "5"
+  MESSAGE: "Scheduled shutdown by Praktor example"
+
+tasks:
+  - name: host_shutdown
+    uses: ../templates/host-shutdown.yml
+    vars:
+      DELAY_MINUTES: "{{ DELAY_MINUTES }}"
+      MESSAGE: "{{ MESSAGE }}"
+
+  - name: emit_result
+    depends_on: [host_shutdown]
+    script: |
+      ctx.output("result", ctx.get("tasks.host_shutdown.outputs.result"));

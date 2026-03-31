@@ -11,6 +11,7 @@
 struct Task {
     std::string name;
     TaskAction action = TaskAction::None;
+    std::string declared_runner;  // Preserves the user-declared runner after internal desugaring.
 
     StrList depends_on;
     Vars vars;
@@ -25,7 +26,6 @@ struct Task {
 
     // Control flow
     bool continue_on_error = false;  // If true, workflow continues even if this task fails
-    std::optional<std::string> finally_task;  // Task to run after this task completes (success or failure)
 
     // Execution context
     std::optional<std::string> working_dir;  // Working directory for command execution
@@ -36,7 +36,7 @@ struct Task {
     StrList generates;  // Output files - checked for existence and freshness
 
     TaskSpecifics specifics = std::monostate{};
-    Outputs outputs;
+    std::optional<std::string> script;  // Inline script source (replaces old ProcessDsl)
 
     std::string description;
     std::string source_path;
@@ -57,6 +57,8 @@ struct Workflow {
     TaskDefaults defaults;
     std::vector<Task> tasks;
     std::unordered_map<std::string, EmbeddedModule> embedded;
+    ModuleImports imports;      // External module imports
+    NativeModules native_modules;  // Native DLL/SO modules
 
     std::string name;
     std::string description;

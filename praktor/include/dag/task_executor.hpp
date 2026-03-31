@@ -4,6 +4,7 @@
 #include "workflow_context.hpp"
 #include "yml/task.hpp"
 
+#include <optional>
 #include <string>
 
 /**
@@ -16,6 +17,8 @@ struct TaskResult {
   int64_t exit_code = 0;
   std::string stdout_data;
   std::string stderr_data;
+  bool output_streamed_live = false;
+  std::optional<TaskFailureContext> nested_failure_context;
 
   TaskResult(bool s = true, std::string msg = "")
       : success(s), error_message(std::move(msg)), exit_code(s ? 0 : -1) {}

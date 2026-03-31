@@ -1,4 +1,5 @@
-#include <pubcxx/thread_pool.hpp>
+#include "util/thread_pool.hpp"
+
 
 #include <catch2/catch_all.hpp>
 #include <atomic>
@@ -18,7 +19,7 @@ TEST_CASE("ThreadPool Tests", "[thread_pool]") {
         }
 
         // The destructor of the pool will wait for all tasks to complete.
-        // We need a better way to synchronize, but for a simple test, 
+        // We need a better way to synchronize, but for a simple test,
         // we can create a temporary pool and let it go out of scope.
         {
             pubcxx::ThreadPool local_pool(2);
@@ -31,7 +32,7 @@ TEST_CASE("ThreadPool Tests", "[thread_pool]") {
                 });
             }
         } // Destructor called here, blocks until tasks are done.
-        
+
         // This is a check for the local_pool that went out of scope
         // We can't easily check the main `pool` without a sync mechanism.
         // This test implicitly tests the destructor's blocking behavior.

@@ -1,0 +1,40 @@
+name: Service Stop
+description: |
+  Stops a named service and verifies that it is no longer running.
+
+variables:
+  SERVICE_NAME: ""
+
+tasks:
+  - name: validate_request
+    script: |
+      var serviceName = ctx.get("SERVICE_NAME");
+      if (serviceName == "") {
+        fail("SERVICE_NAME is required");
+      }
+
+  - name: stop_service
+    depends_on: [validate_request]
+    fallback:
+      - shell:
+          cmd: "powershell -NoProfile -Command \"if (Get-Command Stop-Service -ErrorAction SilentlyContinue) { Stop-Service -Name '{{ SERVICE_NAME }}' -Force } elseif (Get-Command systemctl -ErrorAction SilentlyContinue) { systemctl stop '{{ SERVICE_NAME }}' } else { exit 1 }\""
+      - shell:
+          cmd: "if command -v systemctl >/dev/null 2>&1; then systemctl stop '{{ SERVICE_NAME }}'; elif command -v service >/dev/null 2>&1; then service '{{ SERVICE_NAME }}' stop; else exit 1; fi"
+
+  - name: verify_stopped
+    depends_on: [stop_service]
+    fallback:
+      - shell:
+          cmd: "powershell -NoProfile -Command \"if (Get-Command Get-Service -ErrorAction SilentlyContinue) { if ((Get-Service -Name '{{ SERVICE_NAME }}' -ErrorAction Stop).Status -ne 'Stopped') { Write-Error 'Service still running'; exit 1 } } elseif (Get-Command systemctl -ErrorAction SilentlyContinue) { if ((systemctl is-active '{{ SERVICE_NAME }}' 2>$null) -eq 'active') { exit 1 } } else { if (Get-Process -Name '{{ SERVICE_NAME }}' -ErrorAction SilentlyContinue) { exit 1 } }\""
+      - shell:
+          cmd: "if command -v systemctl >/dev/null 2>&1; then [ \"$(systemctl is-active '{{ SERVICE_NAME }}' 2>/dev/null || true)\" != \"active\" ]; elif command -v service >/dev/null 2>&1; then ! service '{{ SERVICE_NAME }}' status >/dev/null 2>&1; else ! pgrep -x '{{ SERVICE_NAME }}' >/dev/null 2>&1; fi"
+
+  - name: emit_result
+    depends_on: [verify_stopped]
+    script: |
+      var result = {
+        "service": ctx.get("SERVICE_NAME"),
+        "status": "stopped"
+      };
+      ctx.output("result", json.stringify(result));
+      log.info("Service stopped: " + json.stringify(result));

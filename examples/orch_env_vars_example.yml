@@ -1,0 +1,99 @@
+name: "Behavior Tree Environment Variables Example"
+description: "Demonstrates environment variable propagation to YAML behavior tree nodes"
+
+variables:
+  PROJECT_NAME: "MyApp"
+  BUILD_TYPE: "Release"
+
+# Workflow-level dotEnv (sets process environment variables)
+dotEnv:
+  - .env.global
+
+env:
+  WORKFLOW_VAR: "from_workflow"
+
+tasks:
+  # Example 1: Task-level env propagates to behavior tree nodes
+  - name: btdsl_with_task_env
+    dotEnv:
+      - .env.task
+    env:
+      TASK_VAR: "from_task"
+      BUILD_DIR: "build"
+    sequence:
+      - shell:
+          cmd: "echo WORKFLOW_VAR=$WORKFLOW_VAR"  # From workflow dotEnv
+          output_key: "workflow_output"
+
+      - shell:
+          cmd: "echo TASK_VAR=$TASK_VAR"  # From task env
+          output_key: "task_output"
+
+      - shell:
+          cmd: "echo BUILD_DIR=$BUILD_DIR"  # From task env
+          output_key: "build_output"
+
+  # Example 2: Mustache templates
+  - name: btdsl_with_mustache
+    env:
+      DEPLOY_ENV: "production"
+    sequence:
+      - shell:
+          cmd: "echo Project: {{ PROJECT_NAME }}"  # Mustache from context
+          output_key: "project_output"
+
+      - shell:
+          cmd: "echo Type: {{ BUILD_TYPE }}"  # Mustache from context
+          output_key: "type_output"
+
+  # Example 3: Mixed - env vars + Mustache
+  - name: btdsl_mixed
+    env:
+      COMPILER: "gcc"
+      CFLAGS: "-O2 -Wall"
+    sequence:
+      - shell:
+          cmd: "echo Compiling {{ PROJECT_NAME }} with $COMPILER $CFLAGS"
+          output_key: "compile_output"
+
+  # Example 4: Environment variables in nested sequence
+  - name: btdsl_nested
+    env:
+      DB_HOST: "localhost"
+      DB_PORT: "5432"
+    sequence:
+      - sequence:
+          - shell:
+              cmd: "echo Connecting to $DB_HOST:$DB_PORT"
+              output_key: "connect_output"
+
+          - shell:
+              cmd: "echo Database: {{ PROJECT_NAME }}_db"
+              output_key: "db_output"
+
+  # Example 5: Verify task env doesn't leak to other tasks
+  - name: verify_isolation
+    depends_on: [btdsl_with_task_env]
+    sequence:
+      - shell:
+          cmd: "echo TASK_VAR=$TASK_VAR"  # Should be empty (not inherited)
+          output_key: "isolation_output"
+
+# Expected behavior:
+#
+# btdsl_with_task_env:
+#   - WORKFLOW_VAR is accessible (from workflow dotEnv/env)
+#   - TASK_VAR is accessible (from task env)
+#   - BUILD_DIR is accessible (from task env)
+#
+# btdsl_with_mustache:
+#   - {{ PROJECT_NAME }} expands to "MyApp"
+#   - {{ BUILD_TYPE }} expands to "Release"
+#
+# btdsl_mixed:
+#   - {{ PROJECT_NAME }} expands to "MyApp"
+#   - $COMPILER expands to "gcc"
+#   - $CFLAGS expands to "-O2 -Wall"
+#
+# verify_isolation:
+#   - TASK_VAR is empty (task env doesn't leak)

@@ -34,7 +34,7 @@ public:
             if (context_.hasKey(key)) {
                 try {
                     original_values_[key] = context_.getValue<WorkflowValue>(key);
-                } catch (...) {
+                } catch (const std::exception&) {
                     original_values_[key] = WorkflowValue();
                 }
             } else {

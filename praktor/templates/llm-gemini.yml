@@ -1,0 +1,41 @@
+name: "Gemini Chat Completion"
+description: "Reusable template for Google Gemini API calls"
+
+variables:
+  GEMINI_MODEL: "gemini-2.0-flash"
+  GEMINI_MAX_TOKENS: "1024"
+  GEMINI_TEMPERATURE: "0.7"
+  GEMINI_SYSTEM_PROMPT: ""
+
+tasks:
+  - name: call_gemini
+    script: |
+      var model = ctx.get("GEMINI_MODEL");
+      var key = ctx.get("GEMINI_API_KEY");
+      var url = "https://generativelanguage.googleapis.com/v1beta/models/" + model + ":generateContent?key=" + key;
+
+      var body = {
+        "contents": [{"parts": [{"text": ctx.get("PROMPT")}]}],
+        "generationConfig": {
+          "maxOutputTokens": json.parse(ctx.get("GEMINI_MAX_TOKENS")),
+          "temperature": json.parse(ctx.get("GEMINI_TEMPERATURE"))
+        }
+      };
+
+      var sys = ctx.get("GEMINI_SYSTEM_PROMPT");
+      if (sys != "" && sys != null) {
+        body.systemInstruction = {"parts": [{"text": sys}]};
+      }
+
+      var resp = http.post(url, body, {
+        "headers": {"Content-Type": "application/json"}
+      });
+
+      if (resp.status != 200) {
+        fail("Gemini API error " + resp.status + ": " + json.stringify(resp.data));
+      }
+
+      var answer = resp.data.candidates[0].content.parts[0].text;
+      ctx.output("answer", answer);
+      ctx.output("model", model);
+      ctx.output("usage", resp.data.usageMetadata);

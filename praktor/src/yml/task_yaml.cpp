@@ -17,7 +17,7 @@ std::string to_lower_copy(std::string value) {
     return value;
 }
 
-[[noreturn]] void throw_parse_error(const ryml::ConstNodeRef& node, const std::string& message) {
+[[noreturn]] void throw_parse_error(const ryml::ConstNodeRef& /*node*/, const std::string& message) {
     throw std::runtime_error("Parse error: " + message);
 }
 
@@ -233,79 +233,278 @@ RunCommandParams parse_run_command_params(const ryml::ConstNodeRef& node) {
         params.output_format = parse_output_format(node["output_format"], format);
     }
 
+    // Parse parse_regex
+    if (node.has_child("parse_regex")) {
+        const auto& pr = node["parse_regex"];
+        if (!pr.is_map()) {
+            throw_parse_error(pr, "parse_regex must be a map");
+        }
+
+        ParseRegexConfig config;
+
+        if (!pr.has_child("pattern")) {
+            throw_parse_error(pr, "parse_regex requires 'pattern' field");
+        }
+        pr["pattern"] >> config.pattern;
+
+        if (pr.has_child("capture_group")) {
+            pr["capture_group"] >> config.capture_group;
+        }
+
+        if (!pr.has_child("output_key")) {
+            throw_parse_error(pr, "parse_regex requires 'output_key' field");
+        }
+        pr["output_key"] >> config.output_key;
+
+        params.parse_regex = config;
+    }
+
+    // Parse parse_json
+    if (node.has_child("parse_json")) {
+        const auto& pj = node["parse_json"];
+        if (!pj.is_map()) {
+            throw_parse_error(pj, "parse_json must be a map");
+        }
+
+        ParseJsonConfig config;
+
+        if (!pj.has_child("path")) {
+            throw_parse_error(pj, "parse_json requires 'path' field");
+        }
+        pj["path"] >> config.path;
+
+        if (!pj.has_child("output_key")) {
+            throw_parse_error(pj, "parse_json requires 'output_key' field");
+        }
+        pj["output_key"] >> config.output_key;
+
+        params.parse_json = config;
+    }
+
+    // Parse parse_lines
+    if (node.has_child("parse_lines")) {
+        const auto& pl = node["parse_lines"];
+        if (!pl.is_map()) {
+            throw_parse_error(pl, "parse_lines must be a map");
+        }
+
+        ParseLinesConfig config;
+
+        if (pl.has_child("filter")) {
+            pl["filter"] >> config.filter;
+        }
+
+        if (!pl.has_child("output_key")) {
+            throw_parse_error(pl, "parse_lines requires 'output_key' field");
+        }
+        pl["output_key"] >> config.output_key;
+
+        params.parse_lines = config;
+    }
+
+    // Parse parse_keyvalue
+    if (node.has_child("parse_keyvalue")) {
+        const auto& pkv = node["parse_keyvalue"];
+        if (!pkv.is_map()) {
+            throw_parse_error(pkv, "parse_keyvalue must be a map");
+        }
+
+        ParseKeyValueConfig config;
+
+        if (pkv.has_child("delimiter")) {
+            pkv["delimiter"] >> config.delimiter;
+        }
+
+        if (pkv.has_child("line_separator")) {
+            pkv["line_separator"] >> config.line_separator;
+        }
+
+        if (!pkv.has_child("output_key")) {
+            throw_parse_error(pkv, "parse_keyvalue requires 'output_key' field");
+        }
+        pkv["output_key"] >> config.output_key;
+
+        params.parse_keyvalue = config;
+    }
+
     return params;
 }
 
-HttpParams parse_http_params(const ryml::ConstNodeRef& node) {
-    if (!node.is_map()) {
-        throw_parse_error(node, "http must be a map");
+// Parse BTDSL node recursively with validation
+BtdslNode parse_btdsl_node(const ryml::ConstNodeRef& node, int depth = 0) {
+    // Task 2.1: Enforce maximum nesting depth of 100 levels
+    const int MAX_NESTING_DEPTH = 100;
+    if (depth > MAX_NESTING_DEPTH) {
+        throw_parse_error(node, "Maximum nesting depth of " + std::to_string(MAX_NESTING_DEPTH) + " exceeded");
     }
 
-    HttpParams params;
-    if (node.has_child("url")) {
-        node["url"] >> params.url;
+    BtdslNode btdsl_node;
+
+    if (node.is_map()) {
+        // Map format: { type: { params } } or { type: [ children ] } or { type: "value" }
+        if (node.num_children() != 1) {
+            throw_parse_error(node, "BTDSL node must have exactly one key (node type)");
+        }
+
+        auto child = node.first_child();
+        std::string node_type(child.key().str, child.key().len);
+        std::string node_type_lower = to_lower_copy(node_type);
+
+        // Task 2.1: Validate node type against NODE_REGISTRY
+        auto* spec_ptr = findNodeSpec(node_type);
+        if (spec_ptr == nullptr) {
+            std::string supported_types;
+            for (const auto& [key, spec] : NODE_REGISTRY) {
+                if (!supported_types.empty()) supported_types += ", ";
+                supported_types += key;
+            }
+            throw_parse_error(node, "Unknown BTDSL node type: '" + node_type + "'. Supported types: " + supported_types);
+        }
+
+        const BtdslNodeSpec& spec = *spec_ptr;
+        btdsl_node.type = spec.name;  // Use normalized name from registry
+
+        if (child.is_map()) {
+            // Task 2.2: Leaf node with parameters (map syntax): shell: {cmd: "...", output_key: "..."}
+            for (const auto& param : child) {
+                std::string key(param.key().str, param.key().len);
+                std::string value;
+                param >> value;
+                
+                // Task 2.3: Enforce maximum parameter length of 10KB
+                const size_t MAX_PARAM_LENGTH = 10 * 1024;
+                if (value.length() > MAX_PARAM_LENGTH) {
+                    throw_parse_error(param, "Parameter '" + key + "' exceeds maximum length of " + std::to_string(MAX_PARAM_LENGTH) + " bytes");
+                }
+                
+                btdsl_node.params[key] = value;
+            }
+            
+            // Task 2.3: Validate required parameters are present
+            for (const auto& required_param : spec.requiredParams) {
+                if (btdsl_node.params.find(required_param) == btdsl_node.params.end()) {
+                    std::string required_list;
+                    for (const auto& rp : spec.requiredParams) {
+                        if (!required_list.empty()) required_list += ", ";
+                        required_list += rp;
+                    }
+                    throw_parse_error(child, "Missing required parameter '" + required_param + "' for node type '" + node_type_lower + "'. Required parameters: " + required_list);
+                }
+            }
+            
+            // Validate this is a leaf node (should not have children)
+            if (spec.isControl) {
+                throw_parse_error(child, "Control node '" + node_type_lower + "' cannot use map syntax. Use sequence syntax: " + node_type_lower + ": [...]");
+            }
+        } else if (child.is_seq()) {
+            // Task 2.1: Control node with children: sequence: [...]
+            if (!spec.isControl) {
+                throw_parse_error(child, "Leaf node '" + node_type_lower + "' cannot have children");
+            }
+            
+            for (const auto& child_node : child) {
+                btdsl_node.children.push_back(parse_btdsl_node(child_node, depth + 1));
+            }
+            
+            // Validate control node has at least one child
+            if (btdsl_node.children.empty()) {
+                throw_parse_error(child, "Control node '" + node_type_lower + "' must have at least one child");
+            }
+        } else if (child.has_val()) {
+            // Task 2.2: Simplified syntax (single parameter): shell: "echo hello" → shell: {cmd: "echo hello"}
+            std::string value;
+            child >> value;
+            
+            // Task 2.3: Enforce maximum parameter length
+            const size_t MAX_PARAM_LENGTH = 10 * 1024;
+            if (value.length() > MAX_PARAM_LENGTH) {
+                throw_parse_error(child, "Parameter value exceeds maximum length of " + std::to_string(MAX_PARAM_LENGTH) + " bytes");
+            }
+            
+            // Validate this is a leaf node
+            if (spec.isControl) {
+                throw_parse_error(child, "Control node '" + node_type_lower + "' cannot use simple string syntax. Use sequence syntax: " + node_type_lower + ": [...]");
+            }
+            
+            // For simplified syntax, use the first required parameter as the key
+            if (spec.requiredParams.empty()) {
+                throw_parse_error(child, "Node type '" + node_type_lower + "' does not support simplified syntax (no required parameters)");
+            }
+            
+            btdsl_node.params[spec.requiredParams[0]] = value;
+            
+            // Validate all required parameters are satisfied (simplified syntax only works for single required param)
+            if (spec.requiredParams.size() > 1) {
+                std::string required_list;
+                for (const auto& rp : spec.requiredParams) {
+                    if (!required_list.empty()) required_list += ", ";
+                    required_list += rp;
+                }
+                throw_parse_error(child, "Node type '" + node_type_lower + "' requires multiple parameters (" + required_list + "). Use map syntax: " + node_type_lower + ": {" + required_list + "}");
+            }
+        } else {
+            throw_parse_error(child, "BTDSL node value must be a map (params), sequence (children), or string (simplified syntax)");
+        }
     } else {
-        throw_parse_error(node, "http task requires a 'url'");
+        throw_parse_error(node, "BTDSL node must be a map");
     }
 
-    if (node.has_child("method")) node["method"] >> params.method;
-    if (node.has_child("body")) node["body"] >> params.body;
-    if (node.has_child("follow_redirects")) {
-        std::string val;
-        node["follow_redirects"] >> val;
-        params.follow_redirects = (to_lower_copy(val) == "true" || val == "1");
-    }
-    if (node.has_child("timeout_ms")) node["timeout_ms"] >> params.timeout_ms;
-
-    if (node.has_child("headers")) {
-        params.headers = node_to_string_map(node["headers"]);
-    }
-
-    if (node.has_child("auth")) {
-        const auto& auth = node["auth"];
-        if (auth.has_child("user")) {
-            std::string user;
-            auth["user"] >> user;
-            params.auth_user = user;
-        }
-        if (auth.has_child("pass")) {
-            std::string pass;
-            auth["pass"] >> pass;
-            params.auth_pass = pass;
-        }
-        if (auth.has_child("bearer")) {
-            std::string bearer;
-            auth["bearer"] >> bearer;
-            params.bearer_token = bearer;
-        }
-    }
-
-    if (node.has_child("script")) {
-        std::string script;
-        node["script"] >> script;
-        params.script = script;
-    }
-    if (node.has_child("test")) {
-        std::string test;
-        node["test"] >> test;
-        params.test = test;
-    }
-
-    return params;
+    return btdsl_node;
 }
 
-ScriptParams parse_script_params(const ryml::ConstNodeRef& node) {
-    if (!node.is_map()) {
-        throw_parse_error(node, "script must be a map");
-    }
-    if (!node.has_child("source")) {
-        throw_parse_error(node, "script requires a 'source'");
+BtdslParams parse_btdsl_params(const ryml::ConstNodeRef& task_node, const std::string& node_type) {
+    BtdslParams params;
+
+    // Create root node with the detected type
+    params.root.type = node_type;
+
+    // Normalize type using NODE_REGISTRY
+    auto* spec = findNodeSpec(node_type);
+    if (spec != nullptr) {
+        params.root.type = spec->name;  // Use normalized name from registry
+    } else {
+        // Fallback to simple capitalization if not in registry
+        if (!params.root.type.empty()) {
+            params.root.type[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(params.root.type[0])));
+        }
     }
 
-    ScriptParams params;
-    node["source"] >> params.source;
-    if (params.source.empty()) {
-        throw_parse_error(node["source"], "script source cannot be empty");
+    // Access child node using c_str()
+    const auto& node = task_node[node_type.c_str()];
+
+    if (node.is_map()) {
+        // Leaf node: shell: {cmd: "..."}
+        for (const auto& param : node) {
+            std::string key(param.key().str, param.key().len);
+            std::string value;
+            param >> value;
+            params.root.params[key] = value;
+        }
+    } else if (node.is_seq()) {
+        // Control node: sequence: [...]
+        for (const auto& child_node : node) {
+            params.root.children.push_back(parse_btdsl_node(child_node, 1));  // Start depth at 1
+        }
+    } else if (node.has_val()) {
+        // Simplified syntax: use the first required parameter for scalar roots too.
+        std::string value;
+        node >> value;
+        if (spec == nullptr || spec->requiredParams.empty()) {
+            throw_parse_error(node, "BT node type '" + params.root.type + "' does not support simplified scalar syntax");
+        }
+        if (spec->requiredParams.size() > 1) {
+            std::string required_list;
+            for (const auto& rp : spec->requiredParams) {
+                if (!required_list.empty()) required_list += ", ";
+                required_list += rp;
+            }
+            throw_parse_error(node, "BT node type '" + to_lower_copy(params.root.type) +
+                                   "' requires multiple parameters (" + required_list +
+                                   "). Use map syntax instead");
+        }
+        params.root.params[spec->requiredParams[0]] = value;
+    } else {
+        throw_parse_error(node, "BTDSL node must be a map (params), sequence (children), or string (cmd)");
     }
 
     return params;
@@ -397,6 +596,93 @@ DynamicTasksParams parse_dynamic_tasks_params(const ryml::ConstNodeRef& node) {
     return params;
 }
 
+/**
+ * @brief Desugars a RunCommandParams into a BtdslParams tree.
+ *
+ * Converts a `command:` task into an equivalent behavior tree:
+ *   - Single command string   -> Sequence { Shell(cmd) }
+ *   - Command list            -> Sequence { Shell(cmd1), Shell(cmd2), ... }
+ *   - With parse_regex        -> Sequence { Shell(cmd), ParseRegex(...) }
+ *   - With parse_json         -> Sequence { Shell(cmd), ParseJson(...) }
+ *   - With parse_lines        -> Sequence { Shell(cmd), ParseLines(...) }
+ *   - With parse_keyvalue     -> Sequence { Shell(cmd), ParseKeyValue(...) }
+ *   - With output_format:json -> Sequence { Shell(cmd), ParseJson(path=$, output_key=data) }
+ *
+ * This unifies all command execution through the BT executor.
+ */
+BtdslParams desugarCommandToBtdsl(const RunCommandParams& params) {
+    BtdslParams bt;
+    bt.root.type = "Sequence";
+
+    // Build Shell node(s) from command
+    if (std::holds_alternative<StrList>(params.command)) {
+        // Command list -> multiple Shell nodes in sequence
+        const auto& cmds = std::get<StrList>(params.command);
+        for (size_t i = 0; i < cmds.size(); ++i) {
+            BtdslNode shell_node;
+            shell_node.type = "Shell";
+            shell_node.params["cmd"] = cmds[i];
+            // Last command captures stdout for post-processing
+            if (i == cmds.size() - 1) {
+                shell_node.params["output_key"] = "stdout";
+            }
+            bt.root.children.push_back(std::move(shell_node));
+        }
+    } else {
+        // Single command string -> one Shell node
+        BtdslNode shell_node;
+        shell_node.type = "Shell";
+        shell_node.params["cmd"] = std::get<std::string>(params.command);
+        shell_node.params["output_key"] = "stdout";
+        bt.root.children.push_back(std::move(shell_node));
+    }
+
+    // Append post-processing nodes (mutually exclusive in the grammar)
+    if (params.parse_regex) {
+        BtdslNode parse_node;
+        parse_node.type = "ParseRegex";
+        parse_node.params["input_key"] = "stdout";
+        parse_node.params["pattern"] = params.parse_regex->pattern;
+        parse_node.params["capture_group"] = std::to_string(params.parse_regex->capture_group);
+        parse_node.params["output_key"] = params.parse_regex->output_key;
+        bt.root.children.push_back(std::move(parse_node));
+    } else if (params.parse_json) {
+        BtdslNode parse_node;
+        parse_node.type = "ParseJson";
+        parse_node.params["input_key"] = "stdout";
+        parse_node.params["path"] = params.parse_json->path;
+        parse_node.params["output_key"] = params.parse_json->output_key;
+        bt.root.children.push_back(std::move(parse_node));
+    } else if (params.parse_lines) {
+        BtdslNode parse_node;
+        parse_node.type = "ParseLines";
+        parse_node.params["input_key"] = "stdout";
+        if (!params.parse_lines->filter.empty()) {
+            parse_node.params["filter"] = params.parse_lines->filter;
+        }
+        parse_node.params["output_key"] = params.parse_lines->output_key;
+        bt.root.children.push_back(std::move(parse_node));
+    } else if (params.parse_keyvalue) {
+        BtdslNode parse_node;
+        parse_node.type = "ParseKeyValue";
+        parse_node.params["input_key"] = "stdout";
+        parse_node.params["delimiter"] = params.parse_keyvalue->delimiter;
+        parse_node.params["line_separator"] = params.parse_keyvalue->line_separator;
+        parse_node.params["output_key"] = params.parse_keyvalue->output_key;
+        bt.root.children.push_back(std::move(parse_node));
+    } else if (params.output_format == CommandOutputFormat::Json) {
+        // output_format: json -> ParseJson node extracting entire object
+        BtdslNode json_node;
+        json_node.type = "ParseJson";
+        json_node.params["input_key"] = "stdout";
+        json_node.params["path"] = "$";
+        json_node.params["output_key"] = "data";
+        bt.root.children.push_back(std::move(json_node));
+    }
+
+    return bt;
+}
+
 
 TaskDefaults parse_defaults(const ryml::ConstNodeRef& node) {
     if (!node.is_map()) {
@@ -415,6 +701,7 @@ TaskDefaults parse_defaults(const ryml::ConstNodeRef& node) {
     return defaults;
 }
 
+
 Task parse_task(const ryml::ConstNodeRef& node, const std::string& source_path) {
     if (!node.is_map()) {
         throw_parse_error(node, "task must be a map");
@@ -424,7 +711,15 @@ Task parse_task(const ryml::ConstNodeRef& node, const std::string& source_path) 
         "name", "description", "depends_on", "vars", "env", "dotEnv", "when",
         "each", "retries", "timeout", "triggers", "continue_on_error",
         "working_dir", "silent", "sources", "generates", "finally",
-        "command", "script", "uses", "dynamic_tasks", "http", "output_format"
+        "command", "uses", "dynamic_tasks", "output_format",
+        "parse_regex", "parse_json", "parse_lines", "parse_keyvalue",
+        "script", "btdsl",
+        // BT node shorthand keys
+        "sequence", "fallback", "parallel", "reactive_sequence", "reactive_fallback",
+        "retry", "inverter", "force_success", "force_failure", "repeat",
+        "timeout", "delay", "switch", "while_do", "if_then_else",
+        "shell", "parse_json", "parse_regex", "parse_lines", "parse_keyvalue",
+        "check_exit_code", "wait_event", "file_exists", "sleep", "set_variable", "subtree"
     };
     check_unknown_keys(node, allowed_task_keys);
 
@@ -523,28 +818,49 @@ Task parse_task(const ryml::ConstNodeRef& node, const std::string& source_path) 
         std::string finally_task;
         node["finally"] >> finally_task;
         if (!finally_task.empty()) {
-            task.finally_task = finally_task;
+            if (!task.triggers) {
+                task.triggers = Triggers{};
+            }
+            auto& on_complete = task.triggers->on_complete;
+            if (std::find(on_complete.begin(), on_complete.end(), finally_task) == on_complete.end()) {
+                on_complete.push_back(finally_task);
+            }
         }
     }
 
     int action_count = 0;
 
     if (node.has_child("command")) {
-        task.action = TaskAction::RunCommand;
-        task.specifics = parse_run_command_params(node);
+        // Desugar command: into a BT tree — unified execution through BT executor
+        auto cmd_params = parse_run_command_params(node);
+        task.action = TaskAction::Btdsl;
+        task.declared_runner = "command";
+        task.specifics = desugarCommandToBtdsl(cmd_params);
         ++action_count;
     }
 
-    if (node.has_child("script")) {
-        const auto& script_node = node["script"];
-        task.action = TaskAction::Script;
-        task.specifics = parse_script_params(script_node);
+    if (node.has_child("btdsl")) {
+        task.action = TaskAction::Btdsl;
+        task.declared_runner = "btdsl";
+        BtdslParams btdsl_params;
+        const auto& bt_node = node["btdsl"];
+        if (bt_node.is_map()) {
+            // Object-based BT: btdsl: { Sequence: [...] }
+            if (bt_node.num_children() != 1) {
+                throw_parse_error(bt_node, "btdsl object must have exactly one root node (e.g., Sequence)");
+            }
+            btdsl_params.root = parse_btdsl_node(bt_node);
+        } else {
+            throw_parse_error(bt_node, "btdsl must be a map");
+        }
+        task.specifics = btdsl_params;
         ++action_count;
     }
 
     if (node.has_child("uses")) {
         const auto& uses_node = node["uses"];
         task.action = TaskAction::Uses;
+        task.declared_runner = "uses";
         task.specifics = parse_uses_params(uses_node);
         ++action_count;
     }
@@ -552,21 +868,88 @@ Task parse_task(const ryml::ConstNodeRef& node, const std::string& source_path) 
     if (node.has_child("dynamic_tasks")) {
         const auto& dt_node = node["dynamic_tasks"];
         task.action = TaskAction::DynamicTasks;
+        task.declared_runner = "dynamic_tasks";
         task.specifics = parse_dynamic_tasks_params(dt_node);
         ++action_count;
     }
 
-    if (node.has_child("http")) {
-        task.action = TaskAction::Http;
-        task.specifics = parse_http_params(node["http"]);
-        ++action_count;
+    // Check for BTDSL node types (control flow and leaf nodes)
+    const std::vector<std::string> btdsl_control_nodes = {
+        "sequence", "fallback", "parallel", "reactive_sequence", "reactive_fallback"
+    };
+    const std::vector<std::string> btdsl_leaf_nodes = {
+        "shell", "parse_json", "parse_regex", "parse_lines", "parse_keyvalue",
+        "check_exit_code", "wait_event", "file_exists", "sleep", "set_variable", "subtree"
+    };
+    const std::vector<std::string> btdsl_decorator_nodes = {
+        "retry", "inverter", "force_success", "force_failure", "repeat",
+        "timeout", "delay"
+    };
+    const std::vector<std::string> btdsl_advanced_nodes = {
+        "switch", "while_do", "if_then_else"
+    };
+
+    // Check if any BTDSL node type is present
+        for (const auto& bt_type : btdsl_control_nodes) {
+            if (node.has_child(bt_type.c_str())) {
+                task.action = TaskAction::Btdsl;
+                task.declared_runner = "btdsl";
+                task.specifics = parse_btdsl_params(node, bt_type);
+                ++action_count;
+                break;
+        }
+    }
+    if (task.action != TaskAction::Btdsl) {
+        for (const auto& bt_type : btdsl_leaf_nodes) {
+            if (node.has_child(bt_type.c_str())) {
+                task.action = TaskAction::Btdsl;
+                task.declared_runner = "btdsl";
+                task.specifics = parse_btdsl_params(node, bt_type);
+                ++action_count;
+                break;
+            }
+        }
+    }
+    if (task.action != TaskAction::Btdsl) {
+        for (const auto& bt_type : btdsl_decorator_nodes) {
+            if (node.has_child(bt_type.c_str())) {
+                task.action = TaskAction::Btdsl;
+                task.declared_runner = "btdsl";
+                task.specifics = parse_btdsl_params(node, bt_type);
+                ++action_count;
+                break;
+            }
+        }
+    }
+    if (task.action != TaskAction::Btdsl) {
+        for (const auto& bt_type : btdsl_advanced_nodes) {
+            if (node.has_child(bt_type.c_str())) {
+                task.action = TaskAction::Btdsl;
+                task.declared_runner = "btdsl";
+                task.specifics = parse_btdsl_params(node, bt_type);
+                ++action_count;
+                break;
+            }
+        }
     }
 
-    if (action_count == 0) {
-        throw_parse_error(node, "task '" + task.name + "' must declare exactly one runner (command/script/uses/dynamic_tasks/http)");
+    if (action_count == 0 && !node.has_child("script")) {
+        throw_parse_error(node, "task '" + task.name + "' must declare a runner (command/uses/dynamic_tasks/btdsl) or script");
     }
     if (action_count > 1) {
         throw_parse_error(node, "task '" + task.name + "' declares multiple runners");
+    }
+
+    // Parse script: inline script source (does not count as an action — it's post-processing)
+    if (node.has_child("script")) {
+        std::string script_src;
+        node["script"] >> script_src;
+        if (!script_src.empty()) {
+            task.script = script_src;
+            if (action_count == 0) {
+                task.declared_runner = "script";
+            }
+        }
     }
 
     task.source_path = source_path;
@@ -611,14 +994,67 @@ Workflow parse_workflow(const ryml::ConstNodeRef& node, const std::string& sourc
             }
             EmbeddedModule module;
             module.language = get_optional<std::string>(module_node, "language", std::string("javascript"));
-            if (!module_node.has_child("source")) {
-                throw std::runtime_error("Embedded module '" + module_name + "' requires a 'source' field");
+
+            // Support both inline source and external path
+            if (module_node.has_child("source")) {
+                module_node["source"] >> module.source;
             }
-            module_node["source"] >> module.source;
-            if (module.source.empty()) {
-                throw std::runtime_error("Embedded module '" + module_name + "' cannot have an empty source");
+            if (module_node.has_child("path")) {
+                module_node["path"] >> module.path;
+            }
+
+            if (module.source.empty() && module.path.empty()) {
+                throw std::runtime_error("Embedded module '" + module_name + "' requires either 'source' or 'path' field");
             }
             workflow.embedded[module_name] = std::move(module);
+        }
+    }
+
+    // Parse imports section
+    if (node.has_child("imports")) {
+        const auto& imports_node = node["imports"];
+        if (imports_node.is_map() && imports_node.has_child("modules")) {
+            workflow.imports.files = node_to_string_vector(imports_node["modules"]);
+        } else if (imports_node.is_seq()) {
+            // Allow shorthand: imports: [file1.yml, file2.js]
+            workflow.imports.files = node_to_string_vector(imports_node);
+        }
+    }
+
+    // Parse native_modules section
+    if (node.has_child("native_modules")) {
+        const auto& native_node = node["native_modules"];
+        if (!native_node.is_seq()) {
+            throw std::runtime_error("'native_modules' must be a sequence");
+        }
+        for (const auto& mod_node : native_node) {
+            if (!mod_node.is_map()) {
+                throw std::runtime_error("Each native module must be a map");
+            }
+            NativeModule native_mod;
+            if (!mod_node.has_child("name")) {
+                throw std::runtime_error("Native module requires 'name' field");
+            }
+            mod_node["name"] >> native_mod.name;
+
+            if (!mod_node.has_child("path")) {
+                throw std::runtime_error("Native module '" + native_mod.name + "' requires 'path' field");
+            }
+            mod_node["path"] >> native_mod.path;
+
+            if (mod_node.has_child("hooks")) {
+                native_mod.hooks = node_to_string_map(mod_node["hooks"]);
+            } else if (mod_node.has_child("init")) {
+                // Backward compatibility: convert old init: field to hooks["init"]
+                std::string init_func;
+                mod_node["init"] >> init_func;
+                native_mod.hooks["init"] = init_func;
+            } else {
+                // Default init function name: js_init_<name>
+                native_mod.hooks["init"] = "js_init_" + native_mod.name;
+            }
+
+            workflow.native_modules.push_back(std::move(native_mod));
         }
     }
 
@@ -646,3 +1082,42 @@ Workflow parse_workflow(const ryml::ConstNodeRef& node, const std::string& sourc
     return workflow;
 }
 
+
+// BTDSL node type detection functions
+bool isBtdslControlNode(const ryml::ConstNodeRef& node) {
+    if (!node.is_map()) {
+        return false;
+    }
+    
+    // Check if any child key matches a control node type in NODE_REGISTRY
+    for (const auto& child : node) {
+        std::string key(child.key().str, child.key().len);
+        auto* spec = findNodeSpec(key);
+        if (spec && spec->isControl) {
+            return true;
+        }
+    }
+    
+    return false;
+}
+
+bool isBtdslLeafNode(const ryml::ConstNodeRef& node) {
+    if (!node.is_map()) {
+        return false;
+    }
+    
+    // Check if any child key matches a leaf node type in NODE_REGISTRY
+    for (const auto& child : node) {
+        std::string key(child.key().str, child.key().len);
+        auto* spec = findNodeSpec(key);
+        if (spec && !spec->isControl) {
+            return true;
+        }
+    }
+    
+    return false;
+}
+
+BtdslNode parseBtdslNode(const ryml::ConstNodeRef& yaml, int depth) {
+    return parse_btdsl_node(yaml, depth);
+}

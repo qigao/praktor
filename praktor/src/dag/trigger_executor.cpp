@@ -47,7 +47,7 @@ void TriggerExecutor::executeTriggerAction(const TriggerAction &action, Workflow
   // TriggerAction is now just a task name string
   std::string task_name = substituteVariables(action, context);
 
-  logi("Executing trigger action: {}", task_name);
+  logd("Executing trigger action: {}", task_name);
 
   // Find the task by name
   const Task *trigger_task = nullptr;

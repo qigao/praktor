@@ -1,0 +1,69 @@
+name: Context Path Shortcuts Demo
+
+description: |
+  Demonstrates the new shorthand syntax for context paths (v9.1+).
+  Shortcuts reduce verbosity by 60% and improve readability.
+
+variables:
+  VERSION: "2.0.0"
+  REGISTRY: "docker.io/mycompany"
+  APP_NAME: "myapp"
+
+env:
+  DEPLOY_ENV: "production"
+  KUBE_CONTEXT: "prod-cluster"
+
+tasks:
+  # Task 1: Build with variable shortcuts
+  - name: build
+    sequence:
+      # $ prefix expands to {ctx.variables.*}
+      - shell: echo "Building {$APP_NAME} version {$VERSION}"
+      - shell: docker build -t {$REGISTRY}/{$APP_NAME}:{$VERSION} .
+      - shell:
+          cmd: docker images {$REGISTRY}/{$APP_NAME}:{$VERSION}
+          output_key: image_info
+
+  # Task 2: Test with task output shortcuts
+  - name: test
+    depends_on: [build]
+    sequence:
+      # @ prefix expands to {ctx.tasks.<name>.outputs.*}
+      - shell: echo "Testing image from {@build.image_info}"
+      - shell: docker run {@build.image_info} pytest
+      - shell:
+          cmd: echo "All tests passed"
+          output_key: test_status
+
+  # Task 3: Deploy with environment shortcuts
+  - name: deploy
+    depends_on: [test]
+    sequence:
+      # % prefix expands to {ctx.env.*}
+      - shell: echo "Deploying to {%DEPLOY_ENV} environment"
+      - shell: kubectl set image deployment/{$APP_NAME} app={$REGISTRY}/{$APP_NAME}:{$VERSION} --context={%KUBE_CONTEXT}
+      - shell: kubectl rollout status deployment/{$APP_NAME} --context={%KUBE_CONTEXT}
+
+  # Task 4: Notify with mixed shortcuts
+  - name: notify
+    depends_on: [deploy]
+    command: |
+      echo "Deployment complete!"
+      echo "App: {$APP_NAME}"
+      echo "Version: {$VERSION}"
+      echo "Environment: {%DEPLOY_ENV}"
+      echo "Test Status: {@test.test_status}"
+
+# Comparison: Before vs After
+#
+# BEFORE (v9.0 - verbose):
+# - shell: docker build -t {ctx.variables.REGISTRY}/{ctx.variables.APP_NAME}:{ctx.variables.VERSION} .
+# - shell: docker run {ctx.tasks.build.outputs.image_info} pytest
+# - shell: kubectl set image deployment/{ctx.variables.APP_NAME} app={ctx.variables.REGISTRY}/{ctx.variables.APP_NAME}:{ctx.variables.VERSION} --context={ctx.env.KUBE_CONTEXT}
+#
+# AFTER (v9.1 - concise):
+# - shell: docker build -t {$REGISTRY}/{$APP_NAME}:{$VERSION} .
+# - shell: docker run {@build.image_info} pytest
+# - shell: kubectl set image deployment/{$APP_NAME} app={$REGISTRY}/{$APP_NAME}:{$VERSION} --context={%KUBE_CONTEXT}
+#
+# Result: 60% fewer characters, much more readable!

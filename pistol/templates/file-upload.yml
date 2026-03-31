@@ -1,0 +1,66 @@
+name: File Upload
+description: |
+  Uploads a single local file to a remote endpoint with PUT or POST.
+
+  Variables:
+    SRC_PATH       Required local source path
+    URL            Required upload target URL
+    METHOD         HTTP method: PUT or POST
+    CONTENT_TYPE   Content-Type header to send
+
+  Behavior:
+    1. Validate inputs
+    2. Verify the source file exists
+    3. Upload the file with the requested method
+    4. Emit a structured result
+
+variables:
+  SRC_PATH: ""
+  URL: ""
+  METHOD: "PUT"
+  CONTENT_TYPE: "application/octet-stream"
+
+tasks:
+  - name: validate_request
+    script: |
+      var sourcePath = ctx.get("SRC_PATH");
+      var uploadUrl = ctx.get("URL");
+      var uploadMethod = ctx.get("METHOD");
+
+      if (sourcePath == "") {
+        fail("SRC_PATH is required");
+      }
+      if (uploadUrl == "") {
+        fail("URL is required");
+      }
+      if (uploadMethod != "PUT" && uploadMethod != "POST") {
+        fail("METHOD must be PUT or POST");
+      }
+
+  - name: guard_source
+    depends_on: [validate_request]
+    fallback:
+      - shell:
+          cmd: "powershell -NoProfile -Command \"if (-not (Test-Path '{{ SRC_PATH }}')) { Write-Error 'Source file missing'; exit 1 }\""
+      - shell:
+          cmd: "test -f \"{{ SRC_PATH }}\""
+
+  - name: upload_file
+    depends_on: [guard_source]
+    fallback:
+      - shell:
+          cmd: "powershell -NoProfile -Command \"Invoke-WebRequest -Uri '{{ URL }}' -Method '{{ METHOD }}' -InFile '{{ SRC_PATH }}' -ContentType '{{ CONTENT_TYPE }}' | Out-Null\""
+      - shell:
+          cmd: "curl -fsS -X \"{{ METHOD }}\" -H \"Content-Type: {{ CONTENT_TYPE }}\" --data-binary \"@{{ SRC_PATH }}\" \"{{ URL }}\""
+
+  - name: emit_result
+    depends_on: [upload_file]
+    script: |
+      var result = {
+        "source": ctx.get("SRC_PATH"),
+        "url": ctx.get("URL"),
+        "method": ctx.get("METHOD"),
+        "status": "completed"
+      };
+      ctx.output("result", json.stringify(result));
+      log.info("Upload complete: " + json.stringify(result));
