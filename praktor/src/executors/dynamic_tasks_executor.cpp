@@ -271,7 +271,7 @@ Task DynamicTasksExecutor::generateTask(const Task& parent_task,
         }
         cmd_params.command = cmd_list;
     }
-    task.specifics = desugarCommandToBtdsl(cmd_params);
+    task.specifics = desugarCommandToorch(cmd_params);
 
     // Copy optional fields
     if (tmpl.timeout) {

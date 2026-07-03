@@ -148,7 +148,7 @@ void append_sequence_children(const ryml::ConstNodeRef& seq_node,
     }
 
     for (const auto& child_node : seq_node) {
-        children.push_back(TaskYamlDetail::parse_btdsl_node(child_node, depth + 1));
+        children.push_back(TaskYamlDetail::parse_orch_node(child_node, depth + 1));
     }
 }
 
@@ -163,7 +163,7 @@ OrchNode parse_branch_node(const ryml::ConstNodeRef& node, int depth) {
         return branch;
     }
 
-    return TaskYamlDetail::parse_btdsl_node(node, depth);
+    return TaskYamlDetail::parse_orch_node(node, depth);
 }
 
 OrchNode parse_flat_if_node(const ryml::ConstNodeRef& node, int depth,
@@ -615,7 +615,7 @@ OrchNode parse_named_btdsl_node(const std::string& node_type,
         validate_boolean_like_orch_param(node, node_type_lower, spec.requiredParams[0], value);
         parsed_node.params[spec.requiredParams[0]] = std::move(value);
     } else if (node.is_map()) {
-        parse_map_style_orch_node(node, spec, parsed_node, depth, node_type_lower);
+        parse_map_style_btdsl_node(node, spec, parsed_node, depth, node_type_lower);
     } else {
         throw_parse_error(node, "Orchestration node value must be a map, sequence, or scalar");
     }
@@ -662,7 +662,7 @@ OrchNode parse_orch_node(const ryml::ConstNodeRef& node, int depth) {
 
     auto child = node.first_child();
     std::string node_type(child.key().str, child.key().len);
-    return parse_named_orch_node(node_type, child, depth);
+    return parse_named_btdsl_node(node_type, child, depth);
 }
 
 } // namespace TaskYamlDetail
@@ -740,5 +740,5 @@ bool isBtdslLeafNode(const ryml::ConstNodeRef& node) {
 }
 
 OrchNode parseOrchNode(const ryml::ConstNodeRef& yaml, int depth) {
-    return TaskYamlDetail::parse_btdsl_node(yaml, depth);
+    return TaskYamlDetail::parse_orch_node(yaml, depth);
 }

@@ -378,7 +378,7 @@ DynamicTasksParams parse_dynamic_tasks_params(const ryml::ConstNodeRef& node) {
     return params;
 }
 
-OrchParams desugarCommandToBtdsl(const RunCommandParams& params) {
+OrchParams desugarCommandToorch(const RunCommandParams& params) {
     OrchParams bt;
     bt.root.type = "Sequence";
 

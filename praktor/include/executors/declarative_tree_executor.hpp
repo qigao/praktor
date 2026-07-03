@@ -4,6 +4,7 @@
 #include "yml/task_types.hpp"
 #include "core/executor.hpp"
 
+#include <functional>
 #include <unordered_map>
 
 namespace Praktor::Execution
@@ -25,7 +26,10 @@ private:
   // Context bridge methods for {ctx.*} syntax
   bool hasContextRef(const std::string& param) const;
   std::string extractContextPath(const std::string& param) const;
-  std::string resolveContextRef(const std::string& param, const WorkflowContext& ctx) const;
+  std::string resolveContextRef(
+      const std::string& param,
+      const WorkflowContext& ctx,
+      const std::function<std::string(const std::string&)>& transform_value = {}) const;
 
   // Security controls
   bool isAllowedContextRoot(const std::string& root) const;

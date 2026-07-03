@@ -239,7 +239,10 @@ std::string DeclarativeTreeExecutor::sanitizeForShell(const std::string& value) 
 }
 
 // Task 3.2: Context bridge - resolve {ctx.*} references
-std::string DeclarativeTreeExecutor::resolveContextRef(const std::string& param, const WorkflowContext& ctx) const
+std::string DeclarativeTreeExecutor::resolveContextRef(
+    const std::string& param,
+    const WorkflowContext& ctx,
+    const std::function<std::string(const std::string&)>& transform_value) const
 {
   if (!hasContextRef(param)) {
     return param;
@@ -328,6 +331,9 @@ std::string DeclarativeTreeExecutor::resolveContextRef(const std::string& param,
     }
 
     logContextAccess(contextPath, resolved);
+    if (transform_value) {
+      resolved = transform_value(resolved);
+    }
     result.replace(open, close - open + 1, resolved);
     cursor = open + resolved.size();
   }
@@ -379,15 +385,14 @@ actions::Node DeclarativeTreeExecutor::convertNode(const OrchNode& praktor_node,
                                  "' cannot access its own outputs");
       }
       
-      substituted = resolveContextRef(substituted, context);
-      
-      // Task 3.5: Sanitize if this is a shell parameter
-      // Apply to all Shell node parameters that may be interpreted by cmd.exe
-      if (praktor_node.type == "Shell" && 
-          (key == "cmd" || key == "working_dir" || key == "input" || 
-           key == "output_key" || key == "error_key" || key == "exit_code_key")) {
-        TLOG_WARN("Using context value in shell parameter '{}'. Value has been sanitized to prevent injection.", key);
-        substituted = sanitizeForShell(substituted);
+      // Shell commands keep their command text literal; only context-sourced values are quoted.
+      if (praktor_node.type == "Shell" && key == "cmd") {
+        substituted = resolveContextRef(substituted, context, [this, &key](const std::string& resolved) {
+          TLOG_WARN("Using context value in shell parameter '{}'. Value has been sanitized to prevent injection.", key);
+          return sanitizeForShell(resolved);
+        });
+      } else {
+        substituted = resolveContextRef(substituted, context);
       }
     }
     

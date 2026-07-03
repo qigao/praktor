@@ -10,7 +10,7 @@ using Vars = std::unordered_map<std::string, std::string>;
 using StrList = std::vector<std::string>;
 using DotEnv = std::vector<std::string>;
 
-enum class TaskAction { None, Uses, DynamicTasks, orch, Program };
+enum class TaskAction { None, Uses, DynamicTasks, Orch, Program, Command };
 
 enum class CommandOutputFormat { Text, Json };
 
