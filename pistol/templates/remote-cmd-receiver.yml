@@ -15,11 +15,12 @@ variables:
 tasks:
   - name: fetch_commands
     script: |
+      import("net");
       var endpoint = ctx.get("CMD_ENDPOINT");
       var token = ctx.get("AUTH_TOKEN");
       var agent = ctx.get("AGENT_ID");
 
-      if endpoint == "" {
+      if (endpoint == "") {
         log.warn("CMD_ENDPOINT not set, skipping remote command fetch");
         ctx.output("commands", []);
         ctx.output("executable_commands", []);
@@ -29,46 +30,46 @@ tasks:
         return;
       }
 
-      var resp = http.get(endpoint + "?agent=" + agent, {
-        "headers": {
-          "Authorization": "Bearer " + token,
-          "Accept": "application/json"
+      var resp = http.get(endpoint + "?agent=" + agent, map{
+        headers: map{
+          Authorization: "Bearer " + token,
+          Accept: "application/json"
         },
-        "timeout": 10000
+        timeout: 10000
       });
 
-      if resp.status != 200 {
+      if (resp.status != 200) {
         fail("Failed to fetch commands: HTTP " + resp.status);
       }
 
       var cmds = resp.data;
-      if not cmds {
+      if (not cmds) {
         cmds = [];
       }
 
       var executable = [];
       var unsupported = [];
 
-      for cmd in cmds {
-        var normalized = {
-          "id": cmd.id,
-          "action": cmd.action,
-          "command": ""
+      for (cmd in cmds) {
+        var normalized = map{
+          id: cmd.id,
+          action: cmd.action,
+          command: ""
         };
 
-        if cmd.action == "run_command" and cmd.params.command {
+        if (cmd.action == "run_command" and cmd.params.command) {
           normalized.command = cmd.params.command;
           executable = executable + [normalized];
-        } else if cmd.action == "restart_service" and cmd.params.service {
+        } else if (cmd.action == "restart_service" and cmd.params.service) {
           var svc = cmd.params.service;
           normalized.command = "systemctl restart " + svc + " || (net stop " + svc + " && net start " + svc + ")";
           executable = executable + [normalized];
         } else {
-          unsupported = unsupported + [{
-            "id": cmd.id,
-            "action": cmd.action,
-            "status": "unsupported",
-            "agent": agent
+          unsupported = unsupported + [map{
+            id: cmd.id,
+            action: cmd.action,
+            status: "unsupported",
+            agent: agent
           }];
         }
       }
@@ -82,7 +83,7 @@ tasks:
 
   - name: dispatch_commands
     depends_on: [fetch_commands]
-    when: "{{ tasks.fetch_commands.outputs.executable_count }} > 0"
+    when: "$tasks.fetch_commands.outputs.executable_count > 0"
     dynamic_tasks:
       items_variable: "{{ tasks.fetch_commands.outputs.executable_commands }}"
       template:
@@ -93,40 +94,42 @@ tasks:
   - name: report_results
     depends_on: [dispatch_commands]
     script: |
+      import("net");
       var endpoint = ctx.get("CMD_ENDPOINT");
       var token = ctx.get("AUTH_TOKEN");
       var agent = ctx.get("AGENT_ID");
 
-      if endpoint == "" {
+      if (endpoint == "") {
         return;
       }
 
       var results = ctx.get("tasks.fetch_commands.outputs.unsupported_results");
-      if not results {
+      if (not results) {
         results = [];
       }
 
       var generated = ctx.get("tasks.dispatch_commands.outputs.generated_tasks");
-      if generated {
-        for item in generated {
-          results = results + [{
-            "id": item.item.id,
-            "action": item.item.action,
-            "status": item.status,
-            "agent": agent
+      if (generated) {
+        for (item in generated) {
+          results = results + [map{
+            id: item.item.id,
+            action: item.item.action,
+            status: item.status,
+            agent: agent
           }];
         }
       }
 
-      var body = json.stringify({"results": results});
-      var resp = http.post(endpoint + "/results", body, {
-        "headers": {
-          "Authorization": "Bearer " + token,
-          "Content-Type": "application/json"
-        }
+      var body = json.stringify(map{results: results});
+      var headers = json.parse(
+        "{\"Authorization\":" + json.stringify("Bearer " + token) +
+        ",\"Content-Type\":\"application/json\"}"
+      );
+      var resp = http.post(endpoint + "/results", body, map{
+        headers: headers
       });
 
-      if resp.status != 200 and resp.status != 201 {
+      if (resp.status != 200 and resp.status != 201) {
         log.error("Failed to report results: HTTP " + resp.status);
       }
 

@@ -38,6 +38,31 @@ void setProcessEnv(const std::string& key, const std::string& value)
 {
     _putenv_s(key.c_str(), value.c_str());
 }
+
+std::string programProbeScript()
+{
+    return R"(
+param([string]$ArgValue)
+$inputText = [Console]::In.ReadToEnd()
+if ($env:PRAKTOR_PROGRAM_ENV -ne 'raw') { exit 11 }
+if ($inputText -ne 'payload') { exit 12 }
+if ($ArgValue -ne 'alpha beta') { exit 13 }
+[Console]::Out.Write('{"source":"program","value":7}')
+)";
+}
+
+std::string programRunnerYaml(const std::filesystem::path& script)
+{
+    return
+        "    program: powershell.exe\n"
+        "    args:\n"
+        "      - -NoProfile\n"
+        "      - -ExecutionPolicy\n"
+        "      - Bypass\n"
+        "      - -File\n"
+        "      - " + script.generic_string() + "\n"
+        "      - alpha beta\n";
+}
 #else
 std::string shellEnvRef(const std::string& name)
 {
@@ -48,7 +73,55 @@ void setProcessEnv(const std::string& key, const std::string& value)
 {
     setenv(key.c_str(), value.c_str(), 1);
 }
+
+std::string programProbeScript()
+{
+    return R"(
+#!/bin/sh
+input=$(cat)
+if [ "$PRAKTOR_PROGRAM_ENV" != "raw" ]; then exit 11; fi
+if [ "$input" != "payload" ]; then exit 12; fi
+if [ "$1" != "alpha beta" ]; then exit 13; fi
+printf '{"source":"program","value":7}'
+)";
+}
+
+std::string programRunnerYaml(const std::filesystem::path& script)
+{
+    return
+        "    program: /bin/sh\n"
+        "    args:\n"
+        "      - " + script.generic_string() + "\n"
+        "      - alpha beta\n";
+}
 #endif
+
+std::string jsonEchoCommand(const std::string& json_text)
+{
+#ifdef _WIN32
+    return "echo " + json_text;
+#else
+    return "printf '%s' '" + json_text + "'";
+#endif
+}
+
+std::string writeLiteralToFileCommand(const std::filesystem::path& path, const std::string& text)
+{
+#ifdef _WIN32
+    return "echo " + text + " > " + path.generic_string();
+#else
+    return "printf '%s' \"" + text + "\" > " + path.generic_string();
+#endif
+}
+
+std::string failOnMatchCommand(const std::string& value_expr, const std::string& expected)
+{
+#ifdef _WIN32
+    return "if /I \\\"" + value_expr + "\\\"==\\\"" + expected + "\\\" (exit 1) else (echo " + value_expr + ")";
+#else
+    return "if [ " + value_expr + " = " + expected + " ]; then exit 1; else printf '%s' " + value_expr + "; fi";
+#endif
+}
 
 }
 
@@ -83,7 +156,7 @@ variables:
 
 tasks:
   - name: step
-    when: "{{ FLAG }} == 'on'"
+    when: "$FLAG == 'on'"
     command: "echo should-not-run"
 )"
     );
@@ -160,6 +233,44 @@ tasks:
     REQUIRE(runner.run());
 }
 
+TEST_CASE("uses resolves nested workflow relative paths from declaring files")
+{
+    auto dir = createTempDir();
+    auto nested_dir = dir / "nested";
+    auto nested_workdir = nested_dir / "work";
+    auto misplaced_workdir = dir / "work";
+    std::filesystem::create_directories(nested_workdir);
+
+    auto reusable_path = nested_dir / "reusable.yml";
+    auto workflow_path = dir / "main.yml";
+    auto nested_output = nested_workdir / "out.txt";
+    auto misplaced_output = misplaced_workdir / "out.txt";
+
+    writeFile(reusable_path, R"(
+tasks:
+  - name: write
+    working_dir: ./work
+    command: "echo nested > out.txt"
+)"
+    );
+
+    writeFile(workflow_path, R"(
+tasks:
+  - name: call
+    uses: ./nested/reusable.yml
+)"
+    );
+
+    WorkflowRunner runner(workflow_path.string());
+    REQUIRE(runner.run());
+    REQUIRE(std::filesystem::exists(nested_output));
+    CHECK_FALSE(std::filesystem::exists(misplaced_output));
+
+    auto content = FileUtils::readFile(nested_output.string());
+    CHECK(content.find("nested") != std::string::npos);
+    std::filesystem::remove_all(dir);
+}
+
 TEST_CASE("uses rejects alias collision with nested task names")
 {
     auto dir = createTempDir();
@@ -219,43 +330,74 @@ tasks:
     std::filesystem::remove_all(dir);
 }
 
-TEST_CASE("command and explicit btdsl expose equivalent structured outputs")
+TEST_CASE("command and explicit actions expose equivalent structured outputs")
 {
     auto dir = createTempDir();
     auto workflow_path = dir / "workflow.yml";
 
-    writeFile(workflow_path, R"(
-tasks:
-  - name: via_command
-    command: "echo {\"source\":\"command\",\"value\":7}"
-    output_format: json
+    writeFile(workflow_path,
+              "tasks:\n"
+              "  - name: via_command\n"
+              "    command: \"" + jsonEchoCommand("{\\\"source\\\":\\\"command\\\",\\\"value\\\":7}") + "\"\n"
+              "    output_format: json\n"
+              "\n"
+              "  - name: via_bt\n"
+              "    sequence:\n"
+              "      - shell:\n"
+              "          cmd: \"" + jsonEchoCommand("{\\\"source\\\":\\\"bt\\\",\\\"value\\\":7}") + "\"\n"
+              "          output_key: stdout\n"
+              "          stderr_key: stderr\n"
+              "          exit_code_key: exit_code\n"
+              "      - parse_json:\n"
+              "          input_key: stdout\n"
+              "          output_key: data\n"
+              "\n"
+              "  - name: inspect\n"
+              "    depends_on: [via_command, via_bt]\n"
+              "    command: \"echo inspect\"\n"
+              "    script: |\n"
+              "      var cmdValue = ctx.get(\"tasks.via_command.outputs.data.value\");\n"
+              "      var btValue = ctx.get(\"tasks.via_bt.outputs.data.value\");\n"
+              "      var cmdSource = ctx.get(\"tasks.via_command.outputs.data.source\");\n"
+              "      var btSource = ctx.get(\"tasks.via_bt.outputs.data.source\");\n"
+              "      if (cmdValue != 7) fail(\"command output missing expected value\");\n"
+              "      if (btValue != 7) fail(\"bt output missing expected value\");\n"
+              "      if (cmdSource != \"command\") fail(\"command source mismatch\");\n"
+              "      if (btSource != \"bt\") fail(\"bt source mismatch\");\n"
+              "      ctx.output(\"matched\", true);\n");
 
-  - name: via_bt
-    sequence:
-      - shell:
-          cmd: "echo {\"source\":\"bt\",\"value\":7}"
-          output_key: stdout
-          stderr_key: stderr
-          exit_code_key: exit_code
-      - parse_json:
-          input_key: stdout
-          output_key: data
+    WorkflowRunner runner(workflow_path.string());
+    REQUIRE(runner.run());
+    std::filesystem::remove_all(dir);
+}
 
-  - name: inspect
-    depends_on: [via_command, via_bt]
-    command: "echo inspect"
-    script: |
-      var cmdValue = ctx.get("tasks.via_command.outputs.data.value");
-      var btValue = ctx.get("tasks.via_bt.outputs.data.value");
-      var cmdSource = ctx.get("tasks.via_command.outputs.data.source");
-      var btSource = ctx.get("tasks.via_bt.outputs.data.source");
-      if (cmdValue != 7) fail("command output missing expected value");
-      if (btValue != 7) fail("bt output missing expected value");
-      if (cmdSource != "command") fail("command source mismatch");
-      if (btSource != "bt") fail("bt source mismatch");
-      ctx.output("matched", true);
-)"
-    );
+TEST_CASE("program tasks run raw process with args env stdin and structured output")
+{
+    auto dir = createTempDir();
+    auto workflow_path = dir / "workflow.yml";
+    auto script_path = dir / "program_probe.ps1";
+#ifndef _WIN32
+    script_path = dir / "program_probe.sh";
+#endif
+    writeFile(script_path, programProbeScript());
+
+    writeFile(workflow_path,
+              std::string("tasks:\n"
+              "  - name: via_program\n") +
+              programRunnerYaml(script_path) +
+              "    stdin: payload\n"
+              "    env:\n"
+              "      PRAKTOR_PROGRAM_ENV: raw\n"
+              "    output_format: json\n"
+              "\n"
+              "  - name: inspect\n"
+              "    depends_on: [via_program]\n"
+              "    script: |\n"
+              "      var source = ctx.get(\"tasks.via_program.outputs.data.source\");\n"
+              "      var value = ctx.get(\"tasks.via_program.outputs.data.value\");\n"
+              "      if (source != \"program\") fail(\"program source mismatch\");\n"
+              "      if (value != 7) fail(\"program value mismatch\");\n"
+              "      ctx.output(\"matched\", true);\n");
 
     WorkflowRunner runner(workflow_path.string());
     REQUIRE(runner.run());
@@ -268,29 +410,28 @@ TEST_CASE("script-only tasks run after dependencies")
     auto workflow_path = dir / "workflow.yml";
     auto report_path = dir / "report.txt";
 
-    writeFile(workflow_path, std::string(R"(
-variables:
-  BUILD_TARGET: all
-
-tasks:
-  - name: build
-    command: "echo build"
-
-  - name: finish_report
-    depends_on: [build]
-    script: |
-      ctx.output("report_message", "Build of target '" + ctx.get("BUILD_TARGET") + "' completed successfully.");
-
-  - name: verify_report
-    depends_on: [finish_report]
-    command: "echo {{ tasks.finish_report.outputs.report_message }} > )") + report_path.generic_string() + R"("
-)");
+    writeFile(workflow_path,
+              "variables:\n"
+              "  BUILD_TARGET: all\n"
+              "\n"
+              "tasks:\n"
+              "  - name: build\n"
+              "    command: \"echo build\"\n"
+              "\n"
+              "  - name: finish_report\n"
+              "    depends_on: [build]\n"
+              "    script: |\n"
+              "      ctx.output(\"report_message\", \"Build of target \" + ctx.get(\"BUILD_TARGET\") + \" completed successfully.\");\n"
+              "\n"
+              "  - name: verify_report\n"
+              "    depends_on: [finish_report]\n"
+              "    command: \"echo {{ tasks.finish_report.outputs.report_message }} > " + report_path.generic_string() + "\"\n");
 
     WorkflowRunner runner(workflow_path.string());
     REQUIRE(runner.run());
     REQUIRE(std::filesystem::exists(report_path));
     auto report = FileUtils::readFile(report_path.string());
-    CHECK(report.find("Build of target 'all' completed successfully.") != std::string::npos);
+    CHECK(report.find("Build of target all completed successfully.") != std::string::npos);
     std::filesystem::remove_all(dir);
 }
 
@@ -348,7 +489,7 @@ tasks:
     std::filesystem::remove_all(dir);
 }
 
-TEST_CASE("explicit btdsl tasks use the same failure trigger lifecycle")
+TEST_CASE("explicit actions tasks use the same failure trigger lifecycle")
 {
     auto dir = createTempDir();
     auto workflow_path = dir / "workflow.yml";
@@ -376,7 +517,7 @@ tasks:
     REQUIRE(std::filesystem::exists(output_path));
     auto content = FileUtils::readFile(output_path.string());
     CHECK(content.find("name=tree_fail") != std::string::npos);
-    CHECK(content.find("type=btdsl") != std::string::npos);
+    CHECK(content.find("type=actions") != std::string::npos);
     CHECK(content.find("status=failed") != std::string::npos);
     std::filesystem::remove_all(dir);
 }
@@ -387,26 +528,24 @@ TEST_CASE("dynamic_tasks failure triggers expose inner failed task")
     auto workflow_path = dir / "workflow.yml";
     auto output_path = dir / "dynamic_failure.txt";
 
-    writeFile(workflow_path, std::string(R"YML(
-tasks:
-  - name: notify
-    command: "echo outer={{ failed_task_name }} inner={{ failed_inner_task_name }} type={{ failed_inner_task_type }} > )YML") + output_path.generic_string() + R"YML("
-
-  - name: discover
-    command: "echo [\"ok\",\"fail\"]"
-    output_format: json
-
-  - name: deploy_all
-    depends_on: [discover]
-    dynamic_tasks:
-      items_variable: "{{ tasks.discover.outputs.data }}"
-      template:
-        name: "deploy_{{ item }}"
-        command: "if /I \"{{ item }}\"==\"fail\" (exit 7) else (echo {{ item }})"
-    triggers:
-      on_failure: [notify]
-)YML"
-    );
+    writeFile(workflow_path,
+              "tasks:\n"
+              "  - name: notify\n"
+              "    command: \"echo outer={{ failed_task_name }} inner={{ failed_inner_task_name }} type={{ failed_inner_task_type }} > " + output_path.generic_string() + "\"\n"
+              "\n"
+              "  - name: discover\n"
+              "    command: \"" + jsonEchoCommand("[\\\"ok\\\",\\\"fail\\\"]") + "\"\n"
+              "    output_format: json\n"
+              "\n"
+              "  - name: deploy_all\n"
+              "    depends_on: [discover]\n"
+              "    dynamic_tasks:\n"
+              "      items_variable: \"{{ tasks.discover.outputs.data }}\"\n"
+              "      template:\n"
+              "        name: \"deploy_{{ item }}\"\n"
+              "        command: \"" + failOnMatchCommand("{{ item }}", "fail") + "\"\n"
+              "    triggers:\n"
+              "      on_failure: [notify]\n");
 
     WorkflowRunner runner(workflow_path.string());
     REQUIRE_FALSE(runner.run());
@@ -587,7 +726,7 @@ TEST_CASE("each failures fire on_failure once with aggregate task context")
         "    each:\n"
         "      items: [\"ok\", \"fail\", \"later\"]\n"
         "      as: item\n"
-        "    command: \"if /I \\\"{{ item }}\\\"==\\\"fail\\\" (exit 1) else (echo {{ item }})\"\n"
+        "    command: \"" + failOnMatchCommand("{{ item }}", "fail") + "\"\n"
         "    triggers:\n"
         "      on_failure: [notify]\n";
 
@@ -648,30 +787,28 @@ TEST_CASE("dynamic_tasks reject generated names that collide with static tasks")
     auto workflow_path = dir / "workflow.yml";
     auto output_path = dir / "static_notify.txt";
 
-    writeFile(workflow_path, R"(
-tasks:
-  - name: discover_items
-    command: "echo [\"prod\"]"
-    output_format: json
-
-  - name: notify_prod
-    command: "echo static > static_notify.txt"
-
-  - name: finalize
-    depends_on: [deploy_all]
-    command: "echo done"
-    triggers:
-      on_success: [notify_prod]
-
-  - name: deploy_all
-    depends_on: [discover_items]
-    dynamic_tasks:
-      items_variable: "{{ tasks.discover_items.outputs.data }}"
-      template:
-        name: "notify_{{ item }}"
-        command: "echo {{ item }}"
-)"
-    );
+    writeFile(workflow_path,
+              "tasks:\n"
+              "  - name: discover_items\n"
+              "    command: \"" + jsonEchoCommand("[\\\"prod\\\"]") + "\"\n"
+              "    output_format: json\n"
+              "\n"
+              "  - name: notify_prod\n"
+              "    command: \"echo static > static_notify.txt\"\n"
+              "\n"
+              "  - name: finalize\n"
+              "    depends_on: [deploy_all]\n"
+              "    command: \"echo done\"\n"
+              "    triggers:\n"
+              "      on_success: [notify_prod]\n"
+              "\n"
+              "  - name: deploy_all\n"
+              "    depends_on: [discover_items]\n"
+              "    dynamic_tasks:\n"
+              "      items_variable: \"{{ tasks.discover_items.outputs.data }}\"\n"
+              "      template:\n"
+              "        name: \"notify_{{ item }}\"\n"
+              "        command: \"echo {{ item }}\"\n");
 
     WorkflowRunner runner(workflow_path.string());
     REQUIRE_FALSE(runner.run());

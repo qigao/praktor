@@ -1,5 +1,4 @@
-#ifndef __DECLARATIVE_TREE_EXECUTOR_HPP__
-#define __DECLARATIVE_TREE_EXECUTOR_HPP__
+#pragma once
 
 #include "dag/task_executor.hpp"
 #include "yml/task_types.hpp"
@@ -17,14 +16,11 @@ public:
   ~DeclarativeTreeExecutor() override = default;
 
   TaskResult execute(const Task& task, WorkflowContext& context) override;
-  std::string getTaskType() const override { return "behavior_tree"; }
+  std::string getTaskType() const override { return "action_orchestration"; }
 
 private:
-  // Convert Praktor BtdslNode to btdsl::Node with variable substitution and context bridge
-  btdsl::Node convertNode(const BtdslNode& node, const WorkflowContext& context, const std::string& taskName);
-
-  // Preprocess node parameters: expand Mustache templates {{ variable }}
-  void preprocessNodeParams(btdsl::Node& node, const WorkflowContext& context);
+  // Convert Praktor OrchNode to actions::Node with variable substitution and context bridge
+  actions::Node convertNode(const OrchNode& node, const WorkflowContext& context, const std::string& taskName);
 
   // Context bridge methods for {ctx.*} syntax
   bool hasContextRef(const std::string& param) const;
@@ -37,14 +33,14 @@ private:
   std::string sanitizeForShell(const std::string& value) const;
   void logContextAccess(const std::string& path, const std::string& value) const;
 
-  // Bridge Praktor context to BTDSL blackboard
-  void contextToBlackboard(const WorkflowContext& context, btdsl::Blackboard& bb);
+  // Bridge Praktor context to actions blackboard
+  void contextToBlackboard(const WorkflowContext& context, actions::Blackboard& bb);
 
   // Extract outputs from blackboard to context
-  void blackboardToContext(const btdsl::Blackboard& bb, WorkflowContext& context, const std::string& taskName);
+  void blackboardToContext(const actions::Blackboard& bb, WorkflowContext& context, const std::string& taskName);
 
   // Parse string value to appropriate type (string, number, bool)
-  btdsl::Value parseValue(const std::string& str) const;
+  actions::Value parseValue(const std::string& str) const;
 
   std::unordered_map<std::string, std::string> base_environment_;
 };
@@ -53,5 +49,3 @@ std::unique_ptr<TaskExecutor> createDeclarativeTreeExecutor(
     std::unordered_map<std::string, std::string> base_environment = {});
 
 }  // namespace Praktor::Execution
-
-#endif  // __DECLARATIVE_TREE_EXECUTOR_HPP__

@@ -38,9 +38,6 @@ struct ParseContext {
 };
 
 void applyTaskDefaults(Task& task, const TaskDefaults& defaults) {
-    if (!task.retries && defaults.retries) {
-        task.retries = defaults.retries;
-    }
     if (!task.timeout && defaults.timeout) {
         task.timeout = defaults.timeout;
     }

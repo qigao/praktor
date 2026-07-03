@@ -1,5 +1,4 @@
-#ifndef __TASK_H__
-#define __TASK_H__
+#pragma once
 
 #include "task_types.hpp"
 #include "dag/dependency_graph.hpp"
@@ -20,16 +19,13 @@ struct Task {
 
     std::optional<std::string> when;
     std::optional<Each> each;
-    std::optional<RetryPolicy> retries;
     std::optional<std::string> timeout;
     std::optional<Triggers> triggers;
-
-    // Control flow
-    bool continue_on_error = false;  // If true, workflow continues even if this task fails
 
     // Execution context
     std::optional<std::string> working_dir;  // Working directory for command execution
     bool silent = false;  // Suppress command output
+    bool continue_on_error = false;  // Do not fail workflow if this task fails
 
     // Incremental build
     StrList sources;    // Input files/globs - if unchanged, skip task
@@ -74,4 +70,3 @@ namespace std {
     };
 }
 
-#endif // __TASK_H__

@@ -1,5 +1,4 @@
-#ifndef __FILE_UTILS_HPP__
-#define __FILE_UTILS_HPP__
+#pragma once
 
 #include "turbo_fs.h"
 
@@ -77,5 +76,3 @@ inline std::string getFileExtension(std::string const& filePath) {
 }
 
 } // namespace FileUtils
-
-#endif // __FILE_UTILS_HPP__

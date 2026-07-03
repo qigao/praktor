@@ -9,24 +9,26 @@ tasks:
   # 1. Fetch top active markets by volume
   - name: fetch_top_markets
     script: |
-      var resp = http.get("{{ GAMMA_API }}/markets?limit={{ MARKET_LIMIT }}&active=true&closed=false&order=volumeNum&ascending=false");
+      import("net");
+      var resp = http.get("{{ GAMMA_API }}/markets?limit={{ MARKET_LIMIT }}&active=true&closed=false&order=volumeNum&ascending=false", map{});
       var status = resp.status;
       if (status != 200) {
         fail("Gamma API returned " + status);
       }
       ctx.output("status", status);
-      ctx.output("data", resp.body);
+      ctx.output("data", resp.data);
 
   # 2. Fetch trending events
   - name: fetch_events
     script: |
-      var resp = http.get("{{ GAMMA_API }}/events?limit=2&active=true&closed=false&order=volume24hr&ascending=false");
+      import("net");
+      var resp = http.get("{{ GAMMA_API }}/events?limit=2&active=true&closed=false&order=volume24hr&ascending=false", map{});
       var status = resp.status;
       if (status != 200) {
         fail("Events API returned " + status);
       }
       ctx.output("status", status);
-      ctx.output("data", resp.body);
+      ctx.output("data", resp.data);
 
   # 3. Build dashboard report
   - name: build_report
@@ -40,10 +42,10 @@ tasks:
       ctx.output("market_count", mc);
       ctx.output("event_count", ec);
       log.info("Dashboard: " + mc + " markets, " + ec + " events");
-      fs.write("./polymarket-report.json", json.stringify({
-        "market_count": mc,
-        "event_count": ec,
-        "markets": markets,
-        "events": events
+      fs.write("./polymarket-report.json", json.stringify(map{
+        market_count: mc,
+        event_count: ec,
+        markets: markets,
+        events: events
       }));
       log.info("Report written to ./polymarket-report.json");

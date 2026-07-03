@@ -10,15 +10,19 @@
 #include <algorithm>
 #include <chrono>
 #include <cctype>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <random>
 #include <string>
+#include <thread>
 #include <vector>
 
 #ifdef _WIN32
 #include <windows.h>
 #else
+#include <signal.h>
+#include <sys/wait.h>
 #include <unistd.h>
 #endif
 
@@ -67,7 +71,7 @@ bool isTruthy(const WorkflowValue& value)
         return value.as<int64_t>() != 0;
     }
     if (value.is_double()) {
-        return value.as<double>() != 0.0;
+        return std::fpclassify(value.as<double>()) != FP_ZERO;
     }
     if (value.is_string()) {
         const auto text = trim(value.as<std::string>());
@@ -130,6 +134,151 @@ long long currentProcessId()
 #endif
 }
 
+struct ManagedSleepProcess {
+    long long pid = 0;
+
+#ifdef _WIN32
+    HANDLE process_handle = nullptr;
+    HANDLE thread_handle = nullptr;
+#else
+    pid_t child_pid = -1;
+#endif
+
+    ManagedSleepProcess() = default;
+    ManagedSleepProcess(const ManagedSleepProcess&) = delete;
+    ManagedSleepProcess& operator=(const ManagedSleepProcess&) = delete;
+
+    ManagedSleepProcess(ManagedSleepProcess&& other) noexcept
+    {
+        *this = std::move(other);
+    }
+
+    ManagedSleepProcess& operator=(ManagedSleepProcess&& other) noexcept
+    {
+        if (this == &other) {
+            return *this;
+        }
+        cleanup();
+        pid = other.pid;
+#ifdef _WIN32
+        process_handle = other.process_handle;
+        thread_handle = other.thread_handle;
+        other.process_handle = nullptr;
+        other.thread_handle = nullptr;
+#else
+        child_pid = other.child_pid;
+        other.child_pid = -1;
+#endif
+        other.pid = 0;
+        return *this;
+    }
+
+    ~ManagedSleepProcess()
+    {
+        cleanup();
+    }
+
+    bool isRunning()
+    {
+#ifdef _WIN32
+        if (!process_handle) {
+            return false;
+        }
+        DWORD exit_code = 0;
+        if (!::GetExitCodeProcess(process_handle, &exit_code)) {
+            return false;
+        }
+        return exit_code == STILL_ACTIVE;
+#else
+        if (child_pid <= 0) {
+            return false;
+        }
+        int status = 0;
+        pid_t result = ::waitpid(child_pid, &status, WNOHANG);
+        return result == 0;
+#endif
+    }
+
+    void cleanup()
+    {
+#ifdef _WIN32
+        if (process_handle) {
+            if (isRunning()) {
+                ::TerminateProcess(process_handle, 1);
+                ::WaitForSingleObject(process_handle, 5000);
+            }
+            ::CloseHandle(process_handle);
+            process_handle = nullptr;
+        }
+        if (thread_handle) {
+            ::CloseHandle(thread_handle);
+            thread_handle = nullptr;
+        }
+#else
+        if (child_pid > 0) {
+            if (isRunning()) {
+                ::kill(child_pid, SIGKILL);
+                ::waitpid(child_pid, nullptr, 0);
+            }
+            child_pid = -1;
+        }
+#endif
+        pid = 0;
+    }
+};
+
+ManagedSleepProcess startSleepProcess()
+{
+    ManagedSleepProcess process;
+
+#ifdef _WIN32
+    STARTUPINFOW startup_info{};
+    startup_info.cb = sizeof(startup_info);
+    PROCESS_INFORMATION process_info{};
+    std::wstring command = L"cmd.exe /c ping -n 60 127.0.0.1 >nul";
+
+    REQUIRE(::CreateProcessW(
+        nullptr,
+        command.data(),
+        nullptr,
+        nullptr,
+        FALSE,
+        CREATE_NO_WINDOW,
+        nullptr,
+        nullptr,
+        &startup_info,
+        &process_info));
+
+    process.pid = static_cast<long long>(process_info.dwProcessId);
+    process.process_handle = process_info.hProcess;
+    process.thread_handle = process_info.hThread;
+#else
+    pid_t child = ::fork();
+    REQUIRE(child >= 0);
+    if (child == 0) {
+        ::execlp("sleep", "sleep", "60", static_cast<char*>(nullptr));
+        _exit(127);
+    }
+    process.pid = static_cast<long long>(child);
+    process.child_pid = child;
+#endif
+
+    REQUIRE(process.isRunning());
+    return process;
+}
+
+bool waitForProcessExit(ManagedSleepProcess& process, std::chrono::milliseconds timeout)
+{
+    const auto deadline = std::chrono::steady_clock::now() + timeout;
+    while (std::chrono::steady_clock::now() < deadline) {
+        if (!process.isRunning()) {
+            return true;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+    return !process.isRunning();
+}
+
 } // namespace
 
 TEST_CASE("all pistol templates and examples validate", "[pistol][templates]")
@@ -159,6 +308,23 @@ TEST_CASE("process status template reports current process by pid", "[pistol][te
     CHECK(result["status"].as<std::string>() == "running");
     CHECK(isTruthy(result["running"]));
     CHECK(trim(result["pid"].as<std::string>()) == std::to_string(currentProcessId()));
+}
+
+TEST_CASE("process stop template terminates a child process by pid", "[pistol][templates]")
+{
+    const auto template_path = pistolDir() / "templates" / "process-stop.yml";
+    auto child = startSleepProcess();
+
+    auto execution = executeWorkflow(template_path, {
+        {"PID", std::to_string(child.pid)}
+    });
+
+    REQUIRE(execution.success);
+    REQUIRE(waitForProcessExit(child, std::chrono::milliseconds(3000)));
+
+    const auto result = execution.context->getValueByPath("tasks.emit_result.outputs.result");
+    CHECK(result["status"].as<std::string>() == "stopped");
+    CHECK(trim(result["pid"].as<std::string>()) == std::to_string(child.pid));
 }
 
 TEST_CASE("archive templates create and extract zip with completed results", "[pistol][templates]")

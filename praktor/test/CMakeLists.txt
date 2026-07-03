@@ -1,4 +1,6 @@
-﻿find_package(catch2 CONFIG REQUIRED)
+find_package(Catch2 CONFIG REQUIRED)
+find_package(Python3 COMPONENTS Interpreter REQUIRED)
+string(REPLACE "\\" "\\\\" PYTHON3_EXECUTABLE_ESCAPED "${Python3_EXECUTABLE}")
 
 set(TEST_SOURCES
     dynamic_tasks_executor_test.cpp
@@ -34,6 +36,9 @@ foreach(test_source ${TEST_SOURCES})
     set(executable_name "${test_name}.${TARGET_NAME_LIB}")
     add_executable(${executable_name} ${test_source})
     target_link_libraries(${executable_name} PRIVATE Catch2::Catch2WithMain ${TARGET_NAME_LIB})
+    if(test_name STREQUAL "script_engine_test")
+        target_compile_definitions(${executable_name} PRIVATE PRAKTOR_TEST_PYTHON="${PYTHON3_EXECUTABLE_ESCAPED}")
+    endif()
     praktor_copy_runtime_artifacts(${executable_name})
     add_test(NAME ${executable_name} COMMAND ${executable_name})
     set_target_properties(${executable_name} PROPERTIES FOLDER ${folder_name}/test)
@@ -49,3 +54,8 @@ foreach(test_source ${TINYTEST_SOURCES})
     add_test(NAME ${executable_name} COMMAND ${executable_name})
     set_target_properties(${executable_name} PROPERTIES FOLDER ${folder_name}/test)
 endforeach()
+
+add_test(
+    NAME schema_validation_test
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/schema_validation_test.py
+)

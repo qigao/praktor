@@ -31,11 +31,7 @@ tasks:
 
   - name: guard_source
     depends_on: [validate_request]
-    fallback:
-      - shell:
-          cmd: "powershell -NoProfile -Command \"if (-not (Test-Path '{{ SRC_ARCHIVE }}')) { Write-Error 'Archive missing'; exit 1 }\""
-      - shell:
-          cmd: "test -f \"{{ SRC_ARCHIVE }}\""
+    file_exists: "{{ SRC_ARCHIVE }}"
 
   - name: ensure_destination_dir
     depends_on: [guard_source]
@@ -47,16 +43,16 @@ tasks:
 
   - name: extract_zip
     depends_on: [ensure_destination_dir]
-    when: "{{ FORMAT }} == 'zip'"
+    when: "$FORMAT == 'zip'"
     fallback:
       - shell:
-          cmd: "powershell -NoProfile -Command \"Expand-Archive -Path '{{ SRC_ARCHIVE }}' -DestinationPath '{{ DST_DIR }}' -Force\""
+          cmd: "powershell -NoProfile -Command \"Expand-Archive -LiteralPath '{{ SRC_ARCHIVE }}' -DestinationPath '{{ DST_DIR }}' -Force\""
       - shell:
           cmd: "unzip -o \"{{ SRC_ARCHIVE }}\" -d \"{{ DST_DIR }}\""
 
   - name: extract_tar_gz
     depends_on: [ensure_destination_dir]
-    when: "{{ FORMAT }} == 'tar.gz'"
+    when: "$FORMAT == 'tar.gz'"
     fallback:
       - shell:
           cmd: "powershell -NoProfile -Command \"tar -xzf '{{ SRC_ARCHIVE }}' -C '{{ DST_DIR }}'\""

@@ -6,6 +6,9 @@ out/
 cmake-build-*/
 conan-cache/
 coverage.xml
+.vcpkg_installed/
+vcpkg_installed/
+.codegraph/
 
 # IDE files
 .vs/

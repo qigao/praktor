@@ -32,9 +32,6 @@ tasks:
   - name: emit_result
     depends_on: [verify_running]
     script: |
-      var result = {
-        "service": ctx.get("SERVICE_NAME"),
-        "status": "running"
-      };
-      ctx.output("result", json.stringify(result));
-      log.info("Service started: " + json.stringify(result));
+      var jsonStr = "{\"service\":" + json.stringify(ctx.get("SERVICE_NAME")) + ", \"status\":" + json.stringify("running") + "}";
+      ctx.output("result", jsonStr);
+      log.info("Service started: " + jsonStr);

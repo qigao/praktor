@@ -84,10 +84,10 @@ TEST_CASE("DynamicTasksExecutor placeholder substitution", "[dynamic_tasks]") {
         CHECK(generated_tasks[1].name == "start_api");
 
         // Check command contains substituted values
-        const auto& bt0 = std::get<BtdslParams>(generated_tasks[0].specifics);
+        const auto& bt0 = std::get<OrchParams>(generated_tasks[0].specifics);
         CHECK(bt0.root.children[0].params.at("cmd") == "./start.sh --name web --port 8080");
 
-        const auto& bt1 = std::get<BtdslParams>(generated_tasks[1].specifics);
+        const auto& bt1 = std::get<OrchParams>(generated_tasks[1].specifics);
         CHECK(bt1.root.children[0].params.at("cmd") == "./start.sh --name api --port 3000");
     }
 
@@ -118,7 +118,7 @@ TEST_CASE("DynamicTasksExecutor placeholder substitution", "[dynamic_tasks]") {
         CHECK(generated_tasks[0].name == "task_0");
         CHECK(generated_tasks[1].name == "task_1");
 
-        const auto& bt0 = std::get<BtdslParams>(generated_tasks[0].specifics);
+        const auto& bt0 = std::get<OrchParams>(generated_tasks[0].specifics);
         CHECK(bt0.root.children[0].params.at("cmd") == "echo a at index 0");
     }
 }
@@ -276,28 +276,6 @@ TEST_CASE("DynamicTasksExecutor template fields", "[dynamic_tasks]") {
         CHECK(generated[0].timeout.value() == "30s");
     }
 
-    SECTION("Template with retries") {
-        generated.clear();
-
-        Task task;
-        task.name = "retry_test";
-        task.action = TaskAction::DynamicTasks;
-
-        DynamicTasksParams params;
-        params.items_variable = "items";
-        params.task_template.name = "task";
-        params.task_template.command = std::string("echo");
-        params.task_template.retries = RetryPolicy{3, "5s"};
-        task.specifics = params;
-
-        auto result = executor->execute(task, context);
-
-        REQUIRE(result.success);
-        REQUIRE(generated[0].retries.has_value());
-        CHECK(generated[0].retries->count == 3);
-        CHECK(generated[0].retries->delay == "5s");
-    }
-
     SECTION("Template with when condition") {
         generated.clear();
 
@@ -335,7 +313,7 @@ TEST_CASE("DynamicTasksExecutor template fields", "[dynamic_tasks]") {
         auto result = executor->execute(task, context);
 
         REQUIRE(result.success);
-        const auto& bt = std::get<BtdslParams>(generated[0].specifics);
+        const auto& bt = std::get<OrchParams>(generated[0].specifics);
         REQUIRE(bt.root.children.size() == 3);
         CHECK(bt.root.children[0].params.at("cmd") == "bash");
         CHECK(bt.root.children[1].params.at("cmd") == "-c");
@@ -490,7 +468,7 @@ TEST_CASE("DynamicTasksExecutor rejects duplicate generated task names", "[dynam
     CHECK(result.error_message.find("collision") != std::string::npos);
 }
 
-TEST_CASE("DynamicTasksExecutor continue_on_error aggregates all failures", "[dynamic_tasks]") {
+TEST_CASE("DynamicTasksExecutor stops at first generated task failure", "[dynamic_tasks]") {
     auto executor = createDynamicTasksExecutor();
     auto* dt_executor = static_cast<DynamicTasksExecutor*>(executor.get());
 
@@ -502,10 +480,6 @@ TEST_CASE("DynamicTasksExecutor continue_on_error aggregates all failures", "[dy
         if (task.name == "job_b") {
             context.setTaskStatus(task.name, "failed");
             return false;
-        }
-        if (task.name == "job_c") {
-            context.setTaskStatus(task.name, "skipped");
-            return true;
         }
         context.setTaskStatus(task.name, "success");
         return true;
@@ -519,7 +493,6 @@ TEST_CASE("DynamicTasksExecutor continue_on_error aggregates all failures", "[dy
     Task task;
     task.name = "fanout_jobs";
     task.action = TaskAction::DynamicTasks;
-    task.continue_on_error = true;
 
     DynamicTasksParams params;
     params.items_variable = "items";
@@ -531,13 +504,12 @@ TEST_CASE("DynamicTasksExecutor continue_on_error aggregates all failures", "[dy
     context.popTaskScope();
 
     REQUIRE_FALSE(result.success);
-    CHECK(result.error_message.find("1 generated task(s) failed") != std::string::npos);
-    REQUIRE(executed.size() == 3);
+    CHECK(result.error_message.find("Generated task 'job_b' failed") != std::string::npos);
+    REQUIRE(executed.size() == 2);
     CHECK(executed[0] == "job_a");
     CHECK(executed[1] == "job_b");
-    CHECK(executed[2] == "job_c");
-    CHECK(context.getValueByPath("tasks.fanout_jobs.outputs.generated_count").as<int64_t>() == 3);
+    CHECK(context.getValueByPath("tasks.fanout_jobs.outputs.generated_count").as<int64_t>() == 2);
     CHECK(context.getValueByPath("tasks.fanout_jobs.outputs.success_count").as<int64_t>() == 1);
     CHECK(context.getValueByPath("tasks.fanout_jobs.outputs.failed_count").as<int64_t>() == 1);
-    CHECK(context.getValueByPath("tasks.fanout_jobs.outputs.skipped_count").as<int64_t>() == 1);
+    CHECK(context.getValueByPath("tasks.fanout_jobs.outputs.skipped_count").as<int64_t>() == 0);
 }

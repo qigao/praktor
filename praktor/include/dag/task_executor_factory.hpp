@@ -1,5 +1,4 @@
-#ifndef __TASK_EXECUTOR_FACTORY_HPP__
-#define __TASK_EXECUTOR_FACTORY_HPP__
+#pragma once
 
 #include <memory>
 #include <string>
@@ -42,4 +41,3 @@ private:
 
 }  // namespace Praktor::Execution
 
-#endif  // __TASK_EXECUTOR_FACTORY_HPP__

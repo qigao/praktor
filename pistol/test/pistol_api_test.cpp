@@ -1,4 +1,5 @@
 #include "praktor_api.h"
+ 
 
 #include <catch2/catch_all.hpp>
 
@@ -97,6 +98,31 @@ TEST_CASE("pistol API preserves sequential runner defaults", "[pistol]") {
 
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
     CHECK(duration >= kSequentialMinMs);
+
+    std::filesystem::remove_all(dir);
+}
+
+TEST_CASE("pistol C++ API wraps the DLL C entrypoint", "[pistol]") {
+    auto dir = createTempDir();
+    auto workflow_path = dir / "workflow.yml";
+    auto output_path = dir / "cpp-out.txt";
+
+    writeFile(workflow_path, R"(
+tasks:
+  - name: write
+    working_dir: .
+    command: "echo {{ NAME }} > cpp-out.txt"
+)");
+
+    REQUIRE(praktor::execute_workflow(workflow_path.string(), R"({"NAME":"cpp"})")
+            == PRAKTOR_RESULT_SUCCESS);
+    REQUIRE(std::filesystem::exists(output_path));
+
+    std::ifstream input(output_path);
+    std::string content;
+    std::getline(input, content);
+    input.close();
+    CHECK(content.find("cpp") != std::string::npos);
 
     std::filesystem::remove_all(dir);
 }

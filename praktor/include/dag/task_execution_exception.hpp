@@ -1,5 +1,4 @@
-#ifndef __TASK_EXECUTION_EXCEPTION_HPP__
-#define __TASK_EXECUTION_EXCEPTION_HPP__
+#pragma once
 
 #include <stdexcept>
 #include <string>
@@ -25,4 +24,3 @@ private:
     TaskFailureContext failure_context_;
 };
 
-#endif  // __TASK_EXECUTION_EXCEPTION_HPP__

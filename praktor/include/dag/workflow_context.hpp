@@ -1,12 +1,10 @@
-#ifndef __WORKFLOW_CONTEXT_HPP__
-#define __WORKFLOW_CONTEXT_HPP__
+#pragma once
 
 // Standard library includes
+#include <memory>
 #include <optional>
-#include <sstream>
 #include <stdexcept>
 #include <string>
-#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -14,105 +12,17 @@
 
 // jsoncons includes
 #include <jsoncons/json.hpp>
-#include <jsoncons_ext/jmespath/jmespath.hpp>
 
 // Project includes
-#include "dag/variable_scope.hpp"
+#include "dag/failure_context_state.hpp"
+#include "dag/task_failure_context.hpp"
 #include "dag/task_registry.hpp"
+#include "dag/variable_scope.hpp"
+#include "dag/workflow_module_store.hpp"
 #include "util/system_info.hpp"
 #include "util/logging.hpp"
+#include "util/workflow_path_resolver.hpp"
 #include "yml/task_types.hpp"
-
-// Define WorkflowValue as jsoncons::json
-using WorkflowValue = jsoncons::json;
-
-/**
- * @struct TaskFailureContext
- * @brief Captures detailed information about a failed task for on_failure handlers
- *
- * Linus approach: "Provide the information error handling actually needs"
- */
-struct TaskFailureContext {
-    std::string task_name;           // Name of the failed task
-    std::string task_type;           // Type of the failed task
-    int64_t exit_code = -1;          // Exit code (for run_command tasks)
-    std::string stdout_data;         // Standard output captured
-    std::string stderr_data;         // Standard error captured
-    std::string error_message;       // Error message from TaskResult
-    std::string inner_task_name;     // Name of the first nested failed task, if any
-    std::string inner_task_type;     // Type of the nested failed task
-    int64_t inner_exit_code = -1;    // Exit code of the nested failed task
-    std::string inner_stdout_data;   // Nested task stdout
-    std::string inner_stderr_data;   // Nested task stderr
-    std::string inner_error_message; // Nested task error message
-
-    // Variables that were captured by the failed task before failure
-    std::unordered_map<std::string, WorkflowValue> captured_outputs;
-    std::unordered_map<std::string, WorkflowValue> inner_captured_outputs;
-
-    bool hasInnerFailure() const {
-        return !inner_task_name.empty();
-    }
-
-    // Convert to variables that can be accessed in on_failure tasks
-    std::unordered_map<std::string, WorkflowValue> toFailureVariables() const {
-        std::unordered_map<std::string, WorkflowValue> failure_vars;
-        WorkflowValue failed_outputs = jsoncons::json::object();
-        WorkflowValue failed_task = jsoncons::json::object();
-
-        failure_vars["failed_task_name"] = task_name;
-        failure_vars["failed_task_type"] = task_type;
-        failure_vars["failed_task_exit_code"] = std::to_string(exit_code);
-        failure_vars["failed_task_stdout"] = stdout_data;
-        failure_vars["failed_task_stderr"] = stderr_data;
-        failure_vars["failed_task_error"] = error_message;
-
-        // Add captured outputs with prefix for easy access
-        for (const auto& [key, value] : captured_outputs) {
-            failure_vars["failed_task_outputs." + key] = value;
-            failed_outputs[key] = value;
-        }
-
-        failed_task["name"] = task_name;
-        failed_task["type"] = task_type;
-        failed_task["exit_code"] = exit_code;
-        failed_task["stdout"] = stdout_data;
-        failed_task["stderr"] = stderr_data;
-        failed_task["error"] = error_message;
-        failed_task["outputs"] = failed_outputs;
-        failure_vars["failed_task_outputs"] = failed_outputs;
-        failure_vars["failed_task"] = failed_task;
-
-        if (hasInnerFailure()) {
-            WorkflowValue failed_inner_outputs = jsoncons::json::object();
-            WorkflowValue failed_inner_task = jsoncons::json::object();
-
-            failure_vars["failed_inner_task_name"] = inner_task_name;
-            failure_vars["failed_inner_task_type"] = inner_task_type;
-            failure_vars["failed_inner_task_exit_code"] = std::to_string(inner_exit_code);
-            failure_vars["failed_inner_task_stdout"] = inner_stdout_data;
-            failure_vars["failed_inner_task_stderr"] = inner_stderr_data;
-            failure_vars["failed_inner_task_error"] = inner_error_message;
-
-            for (const auto& [key, value] : inner_captured_outputs) {
-                failure_vars["failed_inner_task_outputs." + key] = value;
-                failed_inner_outputs[key] = value;
-            }
-
-            failed_inner_task["name"] = inner_task_name;
-            failed_inner_task["type"] = inner_task_type;
-            failed_inner_task["exit_code"] = inner_exit_code;
-            failed_inner_task["stdout"] = inner_stdout_data;
-            failed_inner_task["stderr"] = inner_stderr_data;
-            failed_inner_task["error"] = inner_error_message;
-            failed_inner_task["outputs"] = failed_inner_outputs;
-            failure_vars["failed_inner_task_outputs"] = failed_inner_outputs;
-            failure_vars["failed_inner_task"] = failed_inner_task;
-        }
-
-        return failure_vars;
-    }
-};
 
 /**
  * @class WorkflowContext
@@ -156,8 +66,9 @@ public:
         // Reset scope to be a child of this scope
         child->scope_ = std::make_unique<VariableScope>(this->scope_.get());
         child->task_registry_ = this->task_registry_;
-        child->embedded_modules_ = this->embedded_modules_;
+        child->module_store_ = this->module_store_;
         child->task_scope_stack_ = this->task_scope_stack_;
+        child->source_path_ = this->source_path_;
         // Failure context is not inherited
         return child;
     }
@@ -224,12 +135,7 @@ public:
      * Now uses VariableScope.
      */
     WorkflowValue getJsonValue(std::string const& key, std::string const& jmespath_query) const {
-        try {
-            auto value = scope_->get(key);
-            return jsoncons::jmespath::search(value, jmespath_query);
-        } catch (const jsoncons::jmespath::jmespath_error& e) {
-            throw std::runtime_error("JMESPath query failed for key '" + key + "': " + e.what());
-        }
+        return Praktor::util::WorkflowPathResolver::getJsonValue(*scope_, key, jmespath_query);
     }
 
     /**
@@ -253,7 +159,7 @@ public:
                     task_registry_->getOutput(task_name, output_key);
                     return true;
                 } catch (const std::exception&) {
-                    return false;
+                    return scope_->has("tasks." + task_name + ".outputs." + output_key);
                 }
             }
         }
@@ -267,32 +173,13 @@ public:
         setValue(key, value);
     }
 
-    /**
-     * @brief Gets a variable from the context (alias for getValueOrDefault with string).
-     */
-
     std::string getVariable(std::string const& key) const {
         return getValueOrDefault<std::string>(key, "");
     }
 
     WorkflowValue getValueByPath(const std::string& path) const {
-        std::string_view trimmed = trimPath(path);
-        if (trimmed.empty() || !scope_) return WorkflowValue::null();
-
-        // 1. Task registry lookup: "tasks" or "tasks.xxx.yyy"
-        if (trimmed.substr(0, 5) == "tasks") {
-            return resolveTaskPath(trimmed);
-        }
-
-        // 2. Direct scope lookup
-        std::string key(trimmed);
-        if (scope_->has(key)) {
-            try { return scope_->get(key); }
-            catch (const std::exception&) { /* fall through to nested lookup */ }
-        }
-
-        // 3. Nested object traversal: "foo.bar.baz"
-        return traverseNestedPath(trimmed);
+        return Praktor::util::WorkflowPathResolver::getValueByPath(
+            scope_.get(), *task_registry_, path);
     }
 
 
@@ -326,6 +213,22 @@ public:
     }
 
     /**
+     * @brief Merge only the child's local scope writes into this context.
+     *
+     * The child inherits visible values through its parent chain, so copying only locals
+     * preserves writes without re-materializing inherited state.
+     */
+    void mergeLocalValuesFrom(const WorkflowContext& child) {
+        if (!child.scope_) {
+            return;
+        }
+
+        for (const auto& [key, value] : child.scope_->getLocalSnapshot()) {
+            setValue(key, value);
+        }
+    }
+
+    /**
      * @brief Sets task status.
      *
      * Fully delegates to TaskRegistry.
@@ -342,12 +245,12 @@ public:
     }
 
     void setTaskOutput(const std::string& taskName, const std::string& key, const WorkflowValue& value) {
-        logd("setTaskOutput: task='{}', key='{}', value='{}'", taskName, key, value.to_string());
+        logd("setTaskOutput: task='{}', key='{}', type={}", taskName, key, static_cast<int>(value.type()));
         task_registry_->setOutput(taskName, key, value);
     }
 
     void mergeTaskOutputs(const std::string& taskName, const WorkflowValue& outputs) {
-        logd("mergeTaskOutputs: task='{}', outputs='{}'", taskName, outputs.to_string());
+        logd("mergeTaskOutputs: task='{}', outputs_type={}", taskName, static_cast<int>(outputs.type()));
         task_registry_->mergeOutputs(taskName, outputs);
     }
 
@@ -374,7 +277,8 @@ public:
     }
 
     void setCurrentTaskOutput(const std::string& key, const WorkflowValue& value) {
-        logd("setCurrentTaskOutput: key='{}', value='{}', stack_size={}", key, value.to_string(), task_scope_stack_.size());
+        logd("setCurrentTaskOutput: key='{}', type={}, stack_size={}",
+             key, static_cast<int>(value.type()), task_scope_stack_.size());
         if (task_scope_stack_.empty()) {
             logd("setCurrentTaskOutput: empty stack, using __root__ task");
             setTaskOutput("__root__", key, value);
@@ -436,69 +340,52 @@ public:
      * @param failure_context The failure context containing task failure details
      */
     void setFailureContext(const TaskFailureContext& failure_context) {
-        // Store the complete failure context
-        current_failure_context_ = failure_context;
-
-        // Set failure variables that can be accessed in on_failure tasks
-        auto failure_vars = failure_context.toFailureVariables();
-        for (const auto& [key, value] : failure_vars) {
-            setValue(key, value);
-        }
+        failure_state_.set(*scope_, failure_context);
     }
 
     /**
      * @brief Clears failure context variables after on_failure task execution
      */
     void clearFailureContext() {
-        if (current_failure_context_.has_value()) {
-            auto failure_vars = current_failure_context_->toFailureVariables();
-            for (const auto& [key, value] : failure_vars) {
-                scope_->remove(key);
-            }
-            current_failure_context_.reset();
-        }
+        failure_state_.clear(*scope_);
     }
 
     /**
      * @brief Gets the current failure context if available
      */
     std::optional<TaskFailureContext> getFailureContext() const {
-        return current_failure_context_;
+        return failure_state_.get();
     }
 
     /**
      * @brief Checks if we're currently executing within a failure context
      */
     bool isInFailureContext() const {
-        return current_failure_context_.has_value();
+        return failure_state_.isActive();
     }
 
     void setEmbeddedModules(const std::unordered_map<std::string, EmbeddedModule>& modules) {
-        embedded_modules_ = modules;
+        module_store_.setEmbeddedModules(modules);
     }
 
     bool hasEmbeddedModule(const std::string& name) const {
-        return embedded_modules_.find(name) != embedded_modules_.end();
+        return module_store_.hasEmbeddedModule(name);
     }
 
     const EmbeddedModule* getEmbeddedModule(const std::string& name) const {
-        auto it = embedded_modules_.find(name);
-        if (it == embedded_modules_.end()) {
-            return nullptr;
-        }
-        return &it->second;
+        return module_store_.getEmbeddedModule(name);
     }
 
     const std::unordered_map<std::string, EmbeddedModule>& getEmbeddedModules() const {
-        return embedded_modules_;
+        return module_store_.getEmbeddedModules();
     }
 
     void setNativeModules(const NativeModules& modules) {
-        native_modules_ = modules;
+        module_store_.setNativeModules(modules);
     }
 
     const NativeModules& getNativeModules() const {
-        return native_modules_;
+        return module_store_.getNativeModules();
     }
 
     void setSourcePath(const std::string& path) {
@@ -516,88 +403,7 @@ private:
 
     // Supporting members
     std::vector<std::pair<std::string, std::optional<std::string>>> task_scope_stack_;
-    std::unordered_map<std::string, EmbeddedModule> embedded_modules_;
-    NativeModules native_modules_;
+    WorkflowModuleStore module_store_;
     std::string source_path_;
-    std::optional<TaskFailureContext> current_failure_context_;
-
-    // Path resolution helpers - each does ONE thing
-    static std::string_view trimPath(const std::string& path) {
-        size_t first = path.find_first_not_of(" \t\r\n");
-        if (first == std::string::npos) return {};
-        size_t last = path.find_last_not_of(" \t\r\n");
-        return std::string_view(path).substr(first, last - first + 1);
-    }
-
-    WorkflowValue resolveTaskPath(std::string_view path) const {
-        // "tasks" -> entire registry
-        if (path == "tasks" || path == "tasks.") {
-            return task_registry_->toJson();
-        }
-
-        // "tasks.taskname..." -> parse task name and rest
-        auto dot1 = path.find('.', 6); // skip "tasks."
-        if (dot1 == std::string::npos) {
-            return task_registry_->toJson();
-        }
-
-        std::string task_name(path.substr(6, dot1 - 6));
-        std::string_view rest = path.substr(dot1 + 1);
-
-        if (rest == "status") {
-            return WorkflowValue(task_registry_->getStatus(task_name));
-        }
-        if (rest == "outputs") {
-            return task_registry_->getAllOutputs(task_name);
-        }
-        if (rest.substr(0, 8) == "outputs.") {
-            return resolveTaskOutput(task_name, rest.substr(8));
-        }
-        return WorkflowValue::null();
-    }
-
-    WorkflowValue resolveTaskOutput(const std::string& task_name, std::string_view output_path) const {
-        auto dot = output_path.find('.');
-        std::string base_key(output_path.substr(0, dot));
-
-        WorkflowValue current = task_registry_->getOutput(task_name, base_key);
-        if (dot == std::string_view::npos) {
-            return current;
-        }
-        return traverseJson(current, output_path.substr(dot + 1));
-    }
-
-    WorkflowValue traverseNestedPath(std::string_view path) const {
-        auto dot = path.find('.');
-        if (dot == std::string_view::npos) {
-            return WorkflowValue::null();
-        }
-
-        std::string base_key(path.substr(0, dot));
-        if (!scope_->has(base_key)) {
-            throw std::runtime_error("Context path not found: " + base_key);
-        }
-
-        WorkflowValue current = scope_->get(base_key);
-        return traverseJson(current, path.substr(dot + 1));
-    }
-
-    static WorkflowValue traverseJson(WorkflowValue current, std::string_view remaining_path) {
-        size_t start = 0;
-        while (start < remaining_path.size()) {
-            auto dot = remaining_path.find('.', start);
-            size_t end = (dot == std::string_view::npos) ? remaining_path.size() : dot;
-            std::string segment(remaining_path.substr(start, end - start));
-
-            if (!current.is_object() || !current.contains(segment)) {
-                return WorkflowValue::null();
-            }
-            WorkflowValue next = current.at(segment);
-            current = std::move(next);
-            start = (dot == std::string_view::npos) ? remaining_path.size() : dot + 1;
-        }
-        return current;
-    }
+    FailureContextState failure_state_;
 };
-
-#endif   // __WORKFLOW_CONTEXT_HPP__

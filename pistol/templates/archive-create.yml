@@ -37,11 +37,7 @@ tasks:
 
   - name: guard_source
     depends_on: [validate_request]
-    fallback:
-      - shell:
-          cmd: "powershell -NoProfile -Command \"if (-not (Test-Path '{{ SRC_PATH }}')) { Write-Error 'Source path missing'; exit 1 }\""
-      - shell:
-          cmd: "test -e \"{{ SRC_PATH }}\""
+    file_exists: "{{ SRC_PATH }}"
 
   - name: guard_destination
     depends_on: [guard_source]
@@ -61,21 +57,21 @@ tasks:
 
   - name: create_zip
     depends_on: [ensure_parent_dir]
-    when: "{{ FORMAT }} == 'zip'"
+    when: "$FORMAT == 'zip'"
     fallback:
       - shell:
-          cmd: "powershell -NoProfile -Command \"if (Test-Path '{{ DST_ARCHIVE }}') { Remove-Item -Force '{{ DST_ARCHIVE }}' }; Compress-Archive -Path '{{ SRC_PATH }}' -DestinationPath '{{ DST_ARCHIVE }}' -Force\""
+          cmd: "powershell -NoProfile -Command \"$src='{{ SRC_PATH }}'; $dst='{{ DST_ARCHIVE }}'; if (Test-Path $dst) { Remove-Item -Force $dst }; Compress-Archive -LiteralPath $src -DestinationPath $dst -Force\""
       - shell:
-          cmd: "rm -f \"{{ DST_ARCHIVE }}\" && zip -r \"{{ DST_ARCHIVE }}\" \"{{ SRC_PATH }}\""
+          cmd: "src='{{ SRC_PATH }}'; dst='{{ DST_ARCHIVE }}'; rm -f \"$dst\" && src_dir=$(dirname \"$src\") && src_name=$(basename \"$src\") && (cd \"$src_dir\" && zip -r \"$dst\" \"$src_name\")"
 
   - name: create_tar_gz
     depends_on: [ensure_parent_dir]
-    when: "{{ FORMAT }} == 'tar.gz'"
+    when: "$FORMAT == 'tar.gz'"
     fallback:
       - shell:
           cmd: "powershell -NoProfile -Command \"if (Test-Path '{{ DST_ARCHIVE }}') { Remove-Item -Force '{{ DST_ARCHIVE }}' }; tar -czf '{{ DST_ARCHIVE }}' '{{ SRC_PATH }}'\""
       - shell:
-          cmd: "rm -f \"{{ DST_ARCHIVE }}\" && tar -czf \"{{ DST_ARCHIVE }}\" \"{{ SRC_PATH }}\""
+          cmd: "src='{{ SRC_PATH }}'; dst='{{ DST_ARCHIVE }}'; rm -f \"$dst\" && src_dir=$(dirname \"$src\") && src_name=$(basename \"$src\") && tar -czf \"$dst\" -C \"$src_dir\" \"$src_name\""
 
   - name: emit_result
     depends_on: [create_zip, create_tar_gz]

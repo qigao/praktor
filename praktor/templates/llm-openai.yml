@@ -10,23 +10,26 @@ variables:
 tasks:
   - name: call_openai
     script: |
+      import("net");
       var messages = [];
       var sys = ctx.get("OPENAI_SYSTEM_PROMPT");
       if (sys != "" && sys != null) {
-        messages = [{"role": "system", "content": sys}];
+        messages = [map{role: "system", content: sys}];
       }
-      messages = messages + [{"role": "user", "content": ctx.get("PROMPT")}];
+      messages = messages + [map{role: "user", content: ctx.get("PROMPT")}];
+      var body = json.stringify(map{
+        model: ctx.get("OPENAI_MODEL"),
+        messages: messages,
+        max_tokens: json.parse(ctx.get("OPENAI_MAX_TOKENS")),
+        temperature: json.parse(ctx.get("OPENAI_TEMPERATURE"))
+      });
+      var headers = json.parse(
+        "{\"Authorization\":" + json.stringify("Bearer " + ctx.get("OPENAI_API_KEY")) +
+        ",\"Content-Type\":\"application/json\"}"
+      );
 
-      var resp = http.post("https://api.openai.com/v1/chat/completions", {
-        "model": ctx.get("OPENAI_MODEL"),
-        "messages": messages,
-        "max_tokens": json.parse(ctx.get("OPENAI_MAX_TOKENS")),
-        "temperature": json.parse(ctx.get("OPENAI_TEMPERATURE"))
-      }, {
-        "headers": {
-          "Authorization": "Bearer " + ctx.get("OPENAI_API_KEY"),
-          "Content-Type": "application/json"
-        }
+      var resp = http.post("https://api.openai.com/v1/chat/completions", body, map{
+        headers: headers
       });
 
       if (resp.status != 200) {

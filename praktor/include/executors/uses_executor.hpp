@@ -1,5 +1,4 @@
-#ifndef __USES_EXECUTOR_HPP__
-#define __USES_EXECUTOR_HPP__
+#pragma once
 
 #include "dag/task_executor.hpp"
 #include "yml/task.hpp"
@@ -62,4 +61,3 @@ std::unique_ptr<TaskExecutor> createUsesExecutor(
 
 }  // namespace Praktor::Execution
 
-#endif  // __USES_EXECUTOR_HPP__

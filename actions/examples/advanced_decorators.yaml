@@ -1,0 +1,88 @@
+# Advanced Decorators Example
+# Demonstrates KeepRunningUntilFailure, RunOnce, and ConsumeQueue
+
+name: Advanced Decorators Demo
+
+env:
+  MAX_RETRIES: 5
+
+tasks:
+  # Example 1: KeepRunningUntilFailure
+  # Keeps running child until it fails (inverse of Retry)
+  - name: monitor_until_error
+    description: Monitor a service until it reports an error
+    keep_running_until_failure:
+      max_iterations: 100
+      child:
+        sequence:
+          - shell:
+              cmd: curl -s http://localhost:8080/health
+              output_key: health_status
+          - parse_json:
+              input_key: health_status
+              path: $.status
+              output_key: status
+          - check_exit_code:
+              input_key: status
+              expected: "ok"
+          - sleep:
+              duration: 1000
+
+  # Example 2: RunOnce
+  # Executes child only once, caches result for subsequent calls
+  - name: initialize_once
+    description: Initialize configuration only on first run
+    run_once:
+      child:
+        sequence:
+          - shell:
+              cmd: echo "Initializing system..."
+              output_key: init_msg
+          - shell:
+              cmd: mkdir -p /tmp/app_cache
+          - set_variable:
+              key: initialized
+              value: "true"
+
+  # Example 3: ConsumeQueue
+  # Processes items from a queue one by one
+  - name: process_queue
+    depends_on: [setup_queue]
+    description: Process all items in the task queue
+    consume_queue:
+      queue_key: task_queue
+      item_key: current_task
+      child:
+        sequence:
+          - shell:
+              cmd: echo "Processing task: {current_task}"
+          - parse_json:
+              input_key: current_task
+              path: $.action
+              output_key: action
+          - shell:
+              cmd: echo "Action: {action}"
+
+  # Setup task to create a queue
+  - name: setup_queue
+    description: Create a JSON queue for processing
+    sequence:
+      - shell:
+          cmd: echo '[{"action":"build","target":"app"},{"action":"test","target":"unit"},{"action":"deploy","target":"prod"}]'
+          output_key: task_queue
+
+  # Example 4: Combined usage
+  - name: resilient_queue_processor
+    description: Process queue with retry logic
+    keep_running_until_failure:
+      max_iterations: 10
+      child:
+        consume_queue:
+          queue_key: work_queue
+          item_key: work_item
+          child:
+            retry:
+              num_attempts: 3
+              child:
+                shell:
+                  cmd: process_item.sh {work_item}

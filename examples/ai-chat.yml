@@ -19,21 +19,21 @@ variables:
 
 tasks:
   - name: ask_openai
-    when: "{{ PROVIDER }} == 'openai'"
+    when: "$PROVIDER == 'openai'"
     uses: ./praktor/templates/llm-openai.yml
     vars:
       OPENAI_API_KEY: "{{ OPENAI_API_KEY }}"
       PROMPT: "{{ PROMPT }}"
 
   - name: ask_claude
-    when: "{{ PROVIDER }} == 'claude'"
+    when: "$PROVIDER == 'claude'"
     uses: ./praktor/templates/llm-claude.yml
     vars:
       ANTHROPIC_API_KEY: "{{ ANTHROPIC_API_KEY }}"
       PROMPT: "{{ PROMPT }}"
 
   - name: ask_gemini
-    when: "{{ PROVIDER }} == 'gemini'"
+    when: "$PROVIDER == 'gemini'"
     uses: ./praktor/templates/llm-gemini.yml
     vars:
       GEMINI_API_KEY: "{{ GEMINI_API_KEY }}"

@@ -1,5 +1,4 @@
-#ifndef __DYNAMIC_TASKS_EXECUTOR_HPP__
-#define __DYNAMIC_TASKS_EXECUTOR_HPP__
+#pragma once
 
 #include "dag/task_executor.hpp"
 #include "yml/task_types.hpp"
@@ -13,7 +12,7 @@ namespace Praktor::Execution {
  * @brief Callback type for executing generated subtasks
  *
  * The DynamicTasksExecutor generates Task objects but needs the parent
- * WorkflowExecutor to actually execute them (to reuse retry logic, triggers, etc.)
+ * WorkflowExecutor to actually execute them using the normal fail-fast task path.
  */
 using SubTaskCallback = std::function<bool(const Task &, WorkflowContext &)>;
 using TaskNameExistsCallback = std::function<bool(std::string_view)>;
@@ -82,4 +81,3 @@ std::unique_ptr<TaskExecutor> createDynamicTasksExecutor();
 
 } // namespace Praktor::Execution
 
-#endif // __DYNAMIC_TASKS_EXECUTOR_HPP__

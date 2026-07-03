@@ -1,5 +1,4 @@
-#ifndef __TASK_EXECUTOR_POOL_HPP__
-#define __TASK_EXECUTOR_POOL_HPP__
+#pragma once
 
 #include "task_executor.hpp"
 #include <memory>
@@ -78,4 +77,3 @@ private:
 
 }  // namespace Praktor::Execution
 
-#endif  // __TASK_EXECUTOR_POOL_HPP__

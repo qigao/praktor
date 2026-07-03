@@ -1,5 +1,4 @@
-#ifndef __DEPENDENCY_GRAPH_HPP__
-#define __DEPENDENCY_GRAPH_HPP__
+#pragma once
 
 #include "graph.hpp"
 #include "workflow_context.hpp"
@@ -101,4 +100,3 @@ private:
     std::unordered_map<T, std::shared_ptr<DependencyGraph<T>>> subgraphs_;
 };
 
-#endif   // __DEPENDENCY_GRAPH_HPP__

@@ -38,13 +38,20 @@ tasks:
         fail("OVERWRITE must be 'true' or 'false'");
       }
 
-  - name: guard_destination
+  - name: inspect_destination
     depends_on: [validate_request]
-    fallback:
-      - shell:
-          cmd: "powershell -NoProfile -Command \"if ((Test-Path '{{ DST_PATH }}') -and '{{ OVERWRITE }}' -ne 'true') { Write-Error 'Destination exists'; exit 1 }\""
-      - shell:
-          cmd: "[ ! -e \"{{ DST_PATH }}\" ] || [ \"{{ OVERWRITE }}\" = \"true\" ]"
+    file_exists:
+      path: "{{ DST_PATH }}"
+      output_key: destination_exists
+      fail_if_missing: false
+
+  - name: guard_destination
+    depends_on: [inspect_destination]
+    script: |
+      if (ctx.get("tasks.inspect_destination.outputs.destination_exists") == "true" &&
+          ctx.get("OVERWRITE") != "true") {
+        fail("Destination exists");
+      }
 
   - name: ensure_parent_dir
     depends_on: [guard_destination]
@@ -94,11 +101,10 @@ tasks:
   - name: emit_result
     depends_on: [finalize_without_checksum, finalize_with_checksum]
     script: |
-      var result = {
-        "url": ctx.get("URL"),
-        "path": ctx.get("DST_PATH"),
-        "checksum_verified": ctx.get("CHECKSUM") != "",
-        "status": "completed"
-      };
-      ctx.output("result", json.stringify(result));
-      log.info("Download complete: " + json.stringify(result));
+      var checksumVerified = "false";
+      if (ctx.get("CHECKSUM") != "") {
+        checksumVerified = "true";
+      }
+      var jsonStr = "{\"url\":" + json.stringify(ctx.get("URL")) + ", \"path\":" + json.stringify(ctx.get("DST_PATH")) + ", \"checksum_verified\":" + checksumVerified + ", \"status\":" + json.stringify("completed") + "}";
+      ctx.output("result", jsonStr);
+      log.info("Download complete: " + jsonStr);

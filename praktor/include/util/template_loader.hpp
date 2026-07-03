@@ -1,13 +1,12 @@
-#ifndef __TEMPLATE_LOADER_HPP__
-#ifndef __TEMPLATE_LOADER_HPP__
-#define __TEMPLATE_LOADER_HPP__
+#pragma once
 
 #include "logging.hpp"
 #include <filesystem>
 #include <fstream>
+#include <stdexcept>
 #include <string>
-#include <vector>
 #include <sstream>
+#include <vector>
 
 namespace Praktor {
 namespace Utils {
@@ -27,14 +26,15 @@ public:
             }
         }
 
-        TLOG_WARN("Template '{}' not found in category '{}'", name, category);
-        return "";
+        throw std::runtime_error("Template '" + name + "' not found in category '" + category + "'");
     }
 
 private:
     static std::string readFile(const std::filesystem::path& path) {
         std::ifstream file(path);
-        if (!file.is_open()) return "";
+        if (!file.is_open()) {
+            throw std::runtime_error("Failed to open template file: " + path.string());
+        }
         std::stringstream buffer;
         buffer << file.rdbuf();
         return buffer.str();
@@ -43,6 +43,3 @@ private:
 
 } // namespace Utils
 } // namespace Praktor
-
-#endif // __TEMPLATE_LOADER_HPP__
-#endif

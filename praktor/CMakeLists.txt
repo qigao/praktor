@@ -13,6 +13,8 @@ find_package(TurboNet CONFIG REQUIRED PATHS ${EXTERNAL_ROOT}/turbonet)
 set(SOURCE_FILES
     src/workflow_runner.cpp
     src/yml/task_parser.cpp
+    src/yml/orch_parser.cpp
+    src/yml/task_field_parser.cpp
     src/yml/task_yaml.cpp
     src/yml/task_types.cpp
     src/dag/workflow_executor.cpp
@@ -21,6 +23,7 @@ set(SOURCE_FILES
     src/executors/dynamic_tasks_executor.cpp
     src/executors/uses_executor.cpp
     src/executors/declarative_tree_executor.cpp
+    src/executors/program_executor.cpp
     src/expressions/expression_evaluator.cpp
     src/expressions/expression_lexer.cpp
     src/util/system_info.cpp
@@ -44,37 +47,39 @@ find_package(ryml CONFIG REQUIRED)
 find_package(Threads)
 find_package(jsoncons CONFIG REQUIRED)
 find_package(cxxopts CONFIG REQUIRED)
-find_package(TurboNet CONFIG REQUIRED PATHS ${EXTERNAL_ROOT}/turbonet)
-
-file(GLOB PRAKTOR_SCRIPT_PLUGIN_DLLS "${EXTERNAL_ROOT}/turbonet/bin/*_plugin.dll")
+find_package(TurboNet CONFIG REQUIRED PATHS "${TURBONET_ROOT}")
+find_package(TurboScript CONFIG REQUIRED PATHS "${TURBOSCRIPT_ROOT}")
+set(PRAKTOR_SCRIPT_PLUGIN_GLOBS "${TURBOSCRIPT_ROOT}/bin/*_tbs.dll")
+file(GLOB PRAKTOR_SCRIPT_PLUGIN_DLLS ${PRAKTOR_SCRIPT_PLUGIN_GLOBS})
+list(REMOVE_DUPLICATES PRAKTOR_SCRIPT_PLUGIN_DLLS)
 
 function(praktor_copy_runtime_artifacts target_name)
     if(NOT WIN32)
         return()
     endif()
 
-    # Command for runtime DLL dependencies
-    # We include $<TARGET_FILE:${target_name}> as an "anchor" source to prevent
+    # Command for runtime DLL dependencies We include
+    # $<TARGET_FILE:${target_name}> as an "anchor" source to prevent
     # copy_if_different from failing if the DLL list is empty.
     add_custom_command(
-        TARGET ${target_name} POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                $<TARGET_FILE:${target_name}>
-                $<TARGET_RUNTIME_DLLS:${target_name}>
-                $<TARGET_FILE_DIR:${target_name}>
-        COMMAND_EXPAND_LISTS
-        VERBATIM
+        TARGET ${target_name}
+        POST_BUILD
+        COMMAND
+            ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:${target_name}>
+            $<TARGET_RUNTIME_DLLS:${target_name}>
+            $<TARGET_FILE_DIR:${target_name}>
+        COMMAND_EXPAND_LISTS VERBATIM
     )
 
     # Command for script plugins (only if they exist)
     if(PRAKTOR_SCRIPT_PLUGIN_DLLS)
         add_custom_command(
-            TARGET ${target_name} POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                    ${PRAKTOR_SCRIPT_PLUGIN_DLLS}
-                    $<TARGET_FILE_DIR:${target_name}>
-            COMMAND_EXPAND_LISTS
-            VERBATIM
+            TARGET ${target_name}
+            POST_BUILD
+            COMMAND
+                ${CMAKE_COMMAND} -E copy_if_different
+                ${PRAKTOR_SCRIPT_PLUGIN_DLLS} $<TARGET_FILE_DIR:${target_name}>
+            COMMAND_EXPAND_LISTS VERBATIM
         )
     endif()
 endfunction()
@@ -88,12 +93,14 @@ target_link_libraries(
            ryml::ryml
            TurboNet::Utils
            TurboNet::Mustache
-           TurboNet::HttpClient
            cxxopts::cxxopts
            TurboScript::ExprTk
            TurboScript::TurboScript
-           btdsl
+           actions
 )
+if(UNIX AND NOT APPLE)
+    target_link_libraries(${TARGET_NAME_LIB} PUBLIC ${CMAKE_DL_LIBS})
+endif()
 target_compile_definitions(
     ${TARGET_NAME_LIB} PUBLIC $<$<BOOL:WIN32>:NOMINMAX>
                               $<$<BOOL:WIN32>:WIN32_LEAN_AND_MEAN>
@@ -104,25 +111,30 @@ if(MSVC)
 endif()
 
 # Enable PIC so praktor_lib can be linked into the new praktor_api DLL
-set_target_properties(${TARGET_NAME_LIB} PROPERTIES POSITION_INDEPENDENT_CODE ON)
+set_target_properties(
+    ${TARGET_NAME_LIB} PROPERTIES POSITION_INDEPENDENT_CODE ON
+)
 
 add_executable(${TARGET_NAME_EXE})
 target_sources(${TARGET_NAME_EXE} PRIVATE main.cpp)
 target_link_libraries(${TARGET_NAME_EXE} PRIVATE ${TARGET_NAME_LIB})
 
-# Copy template files next to the runtime output so `praktor init` works from the built binary.
+# Copy template files next to the runtime output so `praktor init` works from
+# the built binary.
 file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/templates
      DESTINATION ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}
 )
 
-# Keep script plugins beside built executables so TurboScript import("feeds") works on Windows.
+# Keep script plugins beside built executables so TurboScript import("feeds")
+# works on Windows.
 if(WIN32 AND PRAKTOR_SCRIPT_PLUGIN_DLLS)
     file(COPY ${PRAKTOR_SCRIPT_PLUGIN_DLLS}
          DESTINATION ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}
     )
 endif()
 
-# Keep a copy under the subproject build directory for local development workflows.
+# Keep a copy under the subproject build directory for local development
+# workflows.
 file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/templates
      DESTINATION ${CMAKE_CURRENT_BINARY_DIR}
 )

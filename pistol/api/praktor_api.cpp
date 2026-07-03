@@ -5,9 +5,7 @@
 #include <string>
 #include <iostream>
 
-extern "C" {
-
-int praktor_execute_workflow(const char* workflow_path, const char* json_vars) {
+praktor_result praktor_execute_workflow(const char* workflow_path, const char* json_vars) {
     if (!workflow_path || workflow_path[0] == '\0') {
         return PRAKTOR_API_INVALID_ARGUMENT;
     }
@@ -35,10 +33,7 @@ int praktor_execute_workflow(const char* workflow_path, const char* json_vars) {
     } catch (const std::exception& e) {
         std::cerr << "[Praktor API Error] Exception during workflow execution: " << e.what() << std::endl;
         return PRAKTOR_API_INVALID_JSON;
-    } catch (...) {
-        std::cerr << "[Praktor API Error] Unknown exception during workflow execution" << std::endl;
-        return PRAKTOR_API_INVALID_ARGUMENT;
     }
 }
 
-}
+ 

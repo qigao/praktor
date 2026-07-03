@@ -1,4 +1,4 @@
-find_package(catch2 CONFIG REQUIRED)
+find_package(Catch2 CONFIG REQUIRED)
 
 set(TEST_SOURCES
     pistol_api_test.cpp

@@ -44,28 +44,25 @@ tasks:
   - name: emit_status
     depends_on: [ensure_service]
     script: |
+      var serviceName = ctx.get("SERVICE_NAME");
       var alive_pid = ctx.get("tasks.ensure_service.outputs.alive_pid");
       var restarted_pid = ctx.get("tasks.ensure_service.outputs.restarted_pid");
-      var status = {
-        "service": ctx.get("SERVICE_NAME"),
-        "alive": false,
-        "restarted": false,
-        "pid": "",
-        "status": "down"
-      };
-
-      if alive_pid {
-        status.alive = true;
-        status.pid = alive_pid;
-        status.status = "alive";
-      } else if restarted_pid {
-        status.alive = true;
-        status.restarted = true;
-        status.pid = restarted_pid;
-        status.status = "restarted";
+      var alive = "false";
+      var restarted = "false";
+      var pid = "";
+      var statusValue = "down";
+      if (alive_pid) {
+        alive = "true";
+        pid = alive_pid;
+        statusValue = "alive";
+      } else if (restarted_pid) {
+        alive = "true";
+        restarted = "true";
+        pid = restarted_pid;
+        statusValue = "restarted";
       }
-
-      ctx.output("service_status", status);
-      if not status.alive {
-        fail("Service '" + status.service + "' is not running");
+      var jsonStr = "{\"service\":" + json.stringify(serviceName) + ", \"alive\":" + alive + ", \"restarted\":" + restarted + ", \"pid\":" + json.stringify(pid) + ", \"status\":" + json.stringify(statusValue) + "}";
+      ctx.output("service_status", jsonStr);
+      if (alive != "true") {
+        fail("Service '" + serviceName + "' is not running");
       }

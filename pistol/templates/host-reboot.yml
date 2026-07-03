@@ -29,19 +29,12 @@ tasks:
     script: |
       var delay = ctx.get("DELAY_MINUTES");
       var unixArg = "now";
-      if delay != "0" {
+      if (delay != "0") {
         unixArg = "+" + delay;
       }
-
-      var result = {
-        "action": "reboot",
-        "delay_minutes": delay,
-        "message": ctx.get("MESSAGE"),
-        "status": "scheduled"
-      };
-
+      var jsonStr = "{\"action\":" + json.stringify("reboot") + ", \"delay_minutes\":" + json.stringify(delay) + ", \"message\":" + json.stringify(ctx.get("MESSAGE")) + ", \"status\":" + json.stringify("scheduled") + "}";
       ctx.output("unix_delay_arg", unixArg);
-      ctx.output("result", json.stringify(result));
+      ctx.output("result", jsonStr);
 
   - name: schedule_reboot
     depends_on: [plan_schedule]

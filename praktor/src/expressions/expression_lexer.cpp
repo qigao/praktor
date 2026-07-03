@@ -182,8 +182,7 @@ std::vector<Token> ExpressionLexer::tokenize() {
         } else if (std::isalpha(c) || c == '_') {
             tokens.push_back(readIdentifier());
         } else {
-            // Unknown character, skip it
-            advance();
+            throw std::runtime_error("unexpected character in expression: " + std::string(1, c));
         }
     }
 

@@ -1,5 +1,4 @@
-#ifndef __PUBCXX_THREAD_POOL_HPP__
-#define __PUBCXX_THREAD_POOL_HPP__
+#pragma once
 
 #include <vector>
 #include <queue>
@@ -85,4 +84,3 @@ private:
 
 } // namespace pubcxx
 
-#endif // __PUBCXX_THREAD_POOL_HPP__

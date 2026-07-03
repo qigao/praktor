@@ -10,25 +10,29 @@ variables:
 tasks:
   - name: call_gemini
     script: |
+      import("net");
       var model = ctx.get("GEMINI_MODEL");
       var key = ctx.get("GEMINI_API_KEY");
       var url = "https://generativelanguage.googleapis.com/v1beta/models/" + model + ":generateContent?key=" + key;
 
-      var body = {
-        "contents": [{"parts": [{"text": ctx.get("PROMPT")}]}],
-        "generationConfig": {
-          "maxOutputTokens": json.parse(ctx.get("GEMINI_MAX_TOKENS")),
-          "temperature": json.parse(ctx.get("GEMINI_TEMPERATURE"))
+      var body = json.stringify(map{
+        contents: [map{parts: [map{text: ctx.get("PROMPT")}]}],
+        generationConfig: map{
+          maxOutputTokens: json.parse(ctx.get("GEMINI_MAX_TOKENS")),
+          temperature: json.parse(ctx.get("GEMINI_TEMPERATURE"))
         }
-      };
+      });
 
       var sys = ctx.get("GEMINI_SYSTEM_PROMPT");
       if (sys != "" && sys != null) {
-        body.systemInstruction = {"parts": [{"text": sys}]};
+        var parsed_body = json.parse(body);
+        parsed_body.systemInstruction = map{parts: [map{text: sys}]};
+        body = json.stringify(parsed_body);
       }
+      var headers = json.parse("{\"Content-Type\":\"application/json\"}");
 
-      var resp = http.post(url, body, {
-        "headers": {"Content-Type": "application/json"}
+      var resp = http.post(url, body, map{
+        headers: headers
       });
 
       if (resp.status != 200) {

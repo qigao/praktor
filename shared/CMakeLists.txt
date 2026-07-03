@@ -1,6 +1,1 @@
-# add_subdirectory(pubcxx)
-# add_subdirectory(mmap)
-# add_subdirectory(unity)
-# add_subdirectory(mini-coro)
-add_subdirectory(cppcoro)
-add_subdirectory(BehaviorTree)
+add_subdirectory(shell) 

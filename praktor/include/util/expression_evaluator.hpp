@@ -1,5 +1,4 @@
-#ifndef __EXPRESSION_EVALUATOR_HPP__
-#define __EXPRESSION_EVALUATOR_HPP__
+#pragma once
 
 #include "dag/workflow_context.hpp"
 #include <string>
@@ -28,4 +27,3 @@ namespace Praktor::Util {
 
 } // namespace Praktor::Util
 
-#endif // __EXPRESSION_EVALUATOR_HPP__

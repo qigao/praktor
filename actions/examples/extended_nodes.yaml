@@ -1,0 +1,132 @@
+# Extended Nodes Example
+# Demonstrates Precondition, EntryUpdated, and PipelineSequence
+
+name: Extended Nodes Demo
+
+env:
+  ENABLE_DEPLOY: true
+  WATCH_FILE: /tmp/config.json
+
+tasks:
+  # Example 1: Precondition
+  # Only executes child if condition is met
+  - name: conditional_deploy
+    description: Deploy only if enabled
+    precondition:
+      condition: "{ENABLE_DEPLOY}"
+      child:
+        sequence:
+          - shell:
+              cmd: echo "Deploying application..."
+          - shell:
+              cmd: kubectl apply -f deployment.yaml
+
+  # Example 2: Precondition with runtime check
+  - name: deploy_if_tests_pass
+    depends_on: [run_tests]
+    description: Deploy only if all tests passed
+    precondition:
+      condition: "{tests_passed}"
+      child:
+        shell:
+          cmd: ./deploy.sh production
+
+  - name: run_tests
+    description: Run tests and set result flag
+    sequence:
+      - shell:
+          cmd: npm test
+          output_key: test_output
+      - parse_regex:
+          input_key: test_output
+          pattern: "All tests passed"
+          output_key: test_result
+      - set_variable:
+          key: tests_passed
+          value: "true"
+
+  # Example 3: EntryUpdated
+  # Executes child only when watched value changes
+  - name: react_to_config_changes
+    description: Reload service when config file changes
+    entry_updated:
+      watch_key: config_hash
+      child:
+        sequence:
+          - shell:
+              cmd: echo "Config changed, reloading..."
+          - shell:
+              cmd: systemctl reload myapp
+
+  - name: monitor_config
+    description: Continuously monitor config file
+    sequence:
+      - shell:
+          cmd: md5sum {WATCH_FILE}
+          output_key: config_hash
+      - sleep:
+          duration: 5000
+
+  # Example 4: PipelineSequence
+  # Passes output from each stage to the next
+  - name: data_pipeline
+    description: Transform data through multiple stages
+    pipeline_sequence:
+      input_key: raw_data
+      output_key: final_result
+      children:
+        - shell:
+            cmd: echo '{"users":[{"name":"Alice","age":30},{"name":"Bob","age":25}]}'
+            output_key: pipeline_output
+        - parse_json:
+            input_key: pipeline_output
+            path: $.users[0].name
+            output_key: pipeline_output
+        - shell:
+            cmd: echo "Hello, {pipeline_output}!"
+            output_key: pipeline_output
+
+  # Example 5: Combined usage - Smart deployment pipeline
+  - name: smart_deploy
+    description: Deploy with preconditions and change detection
+    sequence:
+      - shell:
+          cmd: git rev-parse HEAD
+          output_key: current_commit
+      - entry_updated:
+          watch_key: current_commit
+          child:
+            precondition:
+              condition: "{deploy_enabled}"
+              child:
+                pipeline_sequence:
+                  children:
+                    - shell:
+                        cmd: docker build -t myapp:latest .
+                        output_key: pipeline_output
+                    - parse_regex:
+                        input_key: pipeline_output
+                        pattern: "Successfully built ([a-f0-9]+)"
+                        capture_group: 1
+                        output_key: pipeline_output
+                    - shell:
+                        cmd: docker push myapp:latest
+                        output_key: pipeline_output
+                    - shell:
+                        cmd: kubectl rollout restart deployment/myapp
+
+  # Example 6: Precondition with boolean check
+  - name: cleanup_if_needed
+    description: Clean up only if disk usage is high
+    sequence:
+      - shell:
+          cmd: df -h / | tail -1 | awk '{print $5}' | sed 's/%//'
+          output_key: disk_usage
+      - set_variable:
+          key: needs_cleanup
+          from: disk_usage
+      - precondition:
+          condition: "{needs_cleanup}"
+          child:
+            shell:
+              cmd: docker system prune -af

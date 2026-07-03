@@ -1,5 +1,4 @@
-#ifndef __ENV_PARSER_HPP__
-#define __ENV_PARSER_HPP__
+#pragma once
 
 #include "string_utils.hpp"
 
@@ -68,5 +67,3 @@ parseDotEnvFile(const std::filesystem::path &file_path) {
 }
 
 } // namespace Praktor::util
-
-#endif // __ENV_PARSER_HPP__

@@ -12,20 +12,21 @@ variables:
 tasks:
   - name: alert_process_down
     script: |
+      import("net");
       var host = ctx.get("HOSTNAME");
       var svc = ctx.get("failed_inner_task_name");
-      if not svc {
+      if (not svc) {
         svc = ctx.get("failed_task_name");
       }
       var error = ctx.get("failed_inner_task_error");
-      if not error {
+      if (not error) {
         error = ctx.get("failed_task_error");
       }
       var webhook = ctx.get("ALERT_WEBHOOK");
       log.error("[CRITICAL] " + host + " | Process down: " + svc + " | " + error);
-      if webhook != "" {
-        var body = json.stringify({
-          "text": "[CRITICAL] " + host + " | " + svc + " is DOWN.\nError: " + error
+      if (webhook != "") {
+        var body = json.stringify(map{
+          text: "[CRITICAL] " + host + " | " + svc + " is DOWN.\nError: " + error
         });
         http.post(webhook, body);
       }
@@ -34,10 +35,10 @@ tasks:
     script: |
       var csv = ctx.get("SERVICES");
       var items = [];
-      for part in csv.split(",") {
+      for (part in csv.split(",")) {
         var name = part.trim();
-        if name != "" {
-          items = items + [{"name": name}];
+        if (name != "") {
+          items = items + [map{name: name}];
         }
       }
       ctx.output("services", items);
@@ -62,16 +63,16 @@ tasks:
       var results = ctx.get("tasks.check_all_services.outputs.generated_tasks");
       var failed = ctx.get("tasks.check_all_services.outputs.failed_count");
       var status = "ok";
-      if failed > 0 {
+      if (failed > 0) {
         status = "degraded";
       }
 
-      var summary = {
-        "host": host,
-        "service_count": json.query(services, "length(@)"),
-        "failed_count": failed,
-        "results": results,
-        "status": status
+      var summary = map{
+        host: host,
+        service_count: json.query(services, "length(@)"),
+        failed_count: failed,
+        results: results,
+        status: status
       };
       ctx.output("summary", summary);
       fs.write("./process-health.json", json.stringify(summary));

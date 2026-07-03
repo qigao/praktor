@@ -1,11 +1,11 @@
-#ifndef __DAG_EXPORTER_HPP__
-#define __DAG_EXPORTER_HPP__
+#pragma once
 
 #include "util/mustache_substitutor.hpp"
 #include "util/template_loader.hpp"
 #include "yml/task.hpp"
 #include <fstream>
 #include <iostream>
+#include <stdexcept>
 #include <string>
 #include <jsoncons/json.hpp>
 
@@ -17,10 +17,6 @@ class DagExporter {
 public:
   static bool exportToDot(const Workflow &workflow, const std::string &output_path) {
     std::string graphTmpl = TemplateLoader::loadTemplate("exporters/dot", "graph.dot");
-
-    if (graphTmpl.empty()) {
-      return false;
-    }
 
     // Convert workflow to JSON for Mustache
     jsoncons::json data = jsoncons::json::object();
@@ -57,8 +53,9 @@ public:
     std::string final_content = Praktor::Util::substituteMustache(graphTmpl, context);
 
     std::ofstream file(output_path);
-    if (!file.is_open())
-      return false;
+    if (!file.is_open()) {
+      throw std::runtime_error("Failed to open DAG export output: " + output_path);
+    }
     file << final_content;
     file.close();
 
@@ -69,5 +66,3 @@ public:
 
 } // namespace Utils
 } // namespace Praktor
-
-#endif // __DAG_EXPORTER_HPP__

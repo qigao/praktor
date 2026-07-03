@@ -29,15 +29,11 @@ tasks:
       - shell:
           cmd: "powershell -NoProfile -Command \"$pidValue = '{{ PID }}'; if ($pidValue -ne '') { if (Get-Process -Id $pidValue -ErrorAction SilentlyContinue) { Write-Error 'Process still running'; exit 1 } } else { if (Get-Process -Name '{{ PROCESS_NAME }}' -ErrorAction SilentlyContinue) { Write-Error 'Process still running'; exit 1 } }\""
       - shell:
-          cmd: "pid='{{ PID }}'; if [ -n \"$pid\" ]; then ! ps -p \"$pid\" >/dev/null 2>&1; else ! pgrep -x '{{ PROCESS_NAME }}' >/dev/null 2>&1; fi"
+          cmd: "pid='{{ PID }}'; name='{{ PROCESS_NAME }}'; attempts=50; while [ \"$attempts\" -gt 0 ]; do if [ -n \"$pid\" ]; then state=$(ps -p \"$pid\" -o stat= 2>/dev/null | tr -d '[:space:]'); [ -z \"$state\" ] && exit 0; case \"$state\" in Z*) exit 0 ;; esac; else if ! pgrep -x \"$name\" >/dev/null 2>&1; then exit 0; fi; fi; attempts=$((attempts-1)); sleep 0.1; done; exit 1"
 
   - name: emit_result
     depends_on: [verify_stopped]
     script: |
-      var result = {
-        "process_name": ctx.get("PROCESS_NAME"),
-        "pid": ctx.get("PID"),
-        "status": "stopped"
-      };
-      ctx.output("result", json.stringify(result));
-      log.info("Process stopped: " + json.stringify(result));
+      var jsonStr = "{\"process_name\":" + json.stringify(ctx.get("PROCESS_NAME")) + ", \"pid\":" + json.stringify(ctx.get("PID")) + ", \"status\":" + json.stringify("stopped") + "}";
+      ctx.output("result", jsonStr);
+      log.info("Process stopped: " + jsonStr);

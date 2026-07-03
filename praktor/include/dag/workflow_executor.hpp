@@ -1,5 +1,4 @@
-#ifndef __WORKFLOW_EXECUTOR_HPP__
-#define __WORKFLOW_EXECUTOR_HPP__
+#pragma once
 
 #include "dependency_graph.hpp"
 #include "task_executor.hpp"
@@ -110,11 +109,10 @@ private:
     std::vector<Task> onTaskCompleted(ExecutionState& state, const Task& task, bool success);
     void scheduleTask(const Task& task, WorkflowContext& context,
                       ExecutionState& state, std::optional<std::string> alias);
+    void mergeForkedContext(WorkflowContext& target, const WorkflowContext& child);
 
     std::vector<Task> all_tasks_;
     std::unordered_map<std::string, Task> all_task_lookup_;
     std::unordered_set<std::string> trigger_only_tasks_;
     bool schedule_trigger_tasks_ = false;
 };
-
-#endif // __WORKFLOW_EXECUTOR_HPP__

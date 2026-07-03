@@ -4,6 +4,7 @@
 #include "dag/workflow_executor.hpp"
 #include "util/env_parser.hpp"
 #include "util/logging.hpp"
+#include "util/path_utils.hpp"
 #include "util/variable_substitution.hpp"
 #include "yml/task_parser.hpp"
 
@@ -17,16 +18,6 @@ namespace Praktor::Execution {
 namespace {
 
 using EnvMap = std::unordered_map<std::string, std::string>;
-
-std::filesystem::path resolveRelativePath(const std::string &base, const std::string &child) {
-  std::filesystem::path base_path =
-      base.empty() ? std::filesystem::current_path() : std::filesystem::path(base).parent_path();
-  std::filesystem::path relative(child);
-  if (relative.is_absolute()) {
-    return relative.lexically_normal();
-  }
-  return (base_path / relative).lexically_normal();
-}
 
 std::string taskTypeName(const Task& task) {
   if (!task.declared_runner.empty()) {
@@ -42,8 +33,8 @@ std::string taskTypeName(const Task& task) {
       return "uses";
     case TaskAction::DynamicTasks:
       return "dynamic_tasks";
-    case TaskAction::Btdsl:
-      return "btdsl";
+    case TaskAction::Orch:
+      return "actions";
     case TaskAction::None:
       break;
   }
@@ -68,7 +59,7 @@ TaskResult UsesExecutor::execute(const Task &task, WorkflowContext &context) {
 
   try {
     const auto &params = std::get<UsesParams>(task.specifics);
-    std::filesystem::path resolved = resolveRelativePath(task.source_path, params.path);
+    std::filesystem::path resolved = Praktor::util::resolveRelativePath(task.source_path, params.path);
 
     // Parse nested workflow
     std::filesystem::path base_dir = resolved.parent_path();
@@ -237,7 +228,7 @@ std::unordered_map<std::string, std::string> UsesExecutor::buildNestedEnvironmen
 
   // Load nested workflow's dotEnv files
   for (const auto &env_file : nested.dot_env) {
-    std::filesystem::path env_path = resolveRelativePath(nested.source_path, env_file);
+    std::filesystem::path env_path = Praktor::util::resolveRelativePath(nested.source_path, env_file);
     try {
       auto parsed = Praktor::util::parseDotEnvFile(env_path);
       for (const auto &[key, value] : parsed) {

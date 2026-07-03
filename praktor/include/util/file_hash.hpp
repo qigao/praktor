@@ -1,5 +1,4 @@
-#ifndef __FILE_HASH_HPP__
-#define __FILE_HASH_HPP__
+#pragma once
 
 #include <filesystem>
 #include <string>
@@ -19,5 +18,3 @@ std::string computeFileHash(const std::filesystem::path &path);
 std::string computeStringHash(const std::string &str);
 
 } // namespace Praktor::Util
-
-#endif // __FILE_HASH_HPP__

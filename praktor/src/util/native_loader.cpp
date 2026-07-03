@@ -6,6 +6,7 @@
 #ifdef _WIN32
 #include <windows.h>
 #else
+#include <dlfcn.h>
 #include <unistd.h>
 #include <limits.h>
 #endif

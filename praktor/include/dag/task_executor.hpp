@@ -1,5 +1,4 @@
-#ifndef __TASK_EXECUTOR_HPP__
-#define __TASK_EXECUTOR_HPP__
+#pragma once
 
 #include "workflow_context.hpp"
 #include "yml/task.hpp"
@@ -60,5 +59,3 @@ protected:
   TaskExecutor(TaskExecutor &&) noexcept = default;
   TaskExecutor &operator=(TaskExecutor &&) noexcept = default;
 };
-
-#endif // __TASK_EXECUTOR_HPP__

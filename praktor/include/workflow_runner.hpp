@@ -1,5 +1,4 @@
-#ifndef __WORKFLOW_RUNNER_HPP__
-#define __WORKFLOW_RUNNER_HPP__
+#pragma once
 
 #include "dag/dependency_graph.hpp"
 #include "dag/workflow_executor.hpp"
@@ -28,4 +27,3 @@ private:
     std::filesystem::path base_directory_; // New: store the base directory for the workflow
 };
 
-#endif // __WORKFLOW_RUNNER_HPP__

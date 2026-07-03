@@ -1,5 +1,4 @@
-#ifndef __NATIVE_LOADER_HPP__
-#define __NATIVE_LOADER_HPP__
+#pragma once
 
 #include "yml/task_types.hpp"
 
@@ -60,5 +59,3 @@ private:
 };
 
 } // namespace Praktor::Native
-
-#endif // __NATIVE_LOADER_HPP__

@@ -14,19 +14,20 @@ variables:
 tasks:
   - name: alert_high_resource
     script: |
+      import("net");
       var host = ctx.get("HOSTNAME");
       var metric = ctx.get("failed_task_name");
       var detail = ctx.get("failed_task_error");
       var inner = ctx.get("failed_inner_task_name");
-      if inner {
+      if (inner) {
         metric = inner;
       }
       var webhook = ctx.get("ALERT_WEBHOOK");
-      var body = json.stringify({
-        "text": "[ALERT] " + host + " | " + metric + " exceeded threshold\nDetail: " + detail
+      var body = json.stringify(map{
+        text: "[ALERT] " + host + " | " + metric + " exceeded threshold\nDetail: " + detail
       });
       log.warn("[ALERT] " + host + " | " + metric + ": " + detail);
-      if webhook != "" {
+      if (webhook != "") {
         http.post(webhook, body);
       }
 
@@ -55,7 +56,7 @@ tasks:
       var threshold = ctx.get("CPU_THRESHOLD");
       ctx.output("cpu_percent", cpu);
       log.info("CPU usage: " + cpu + "% (threshold: " + threshold + "%)");
-      if math.eval(cpu + " > " + threshold) {
+      if (math.eval(cpu + " > " + threshold)) {
         fail("CPU at " + cpu + "% exceeds threshold " + threshold + "%");
       }
     continue_on_error: true
@@ -75,7 +76,7 @@ tasks:
       var threshold = ctx.get("MEM_THRESHOLD");
       ctx.output("mem_percent", mem);
       log.info("Memory usage: " + mem + "% (threshold: " + threshold + "%)");
-      if math.eval(mem + " > " + threshold) {
+      if (math.eval(mem + " > " + threshold)) {
         fail("Memory at " + mem + "% exceeds threshold " + threshold + "%");
       }
     continue_on_error: true
@@ -95,7 +96,7 @@ tasks:
       var threshold = ctx.get("DISK_THRESHOLD");
       ctx.output("disk_percent", disk);
       log.info("Disk usage: " + disk + "% (threshold: " + threshold + "%)");
-      if math.eval(disk + " > " + threshold) {
+      if (math.eval(disk + " > " + threshold)) {
         fail("Disk at " + disk + "% exceeds threshold " + threshold + "%");
       }
     continue_on_error: true
@@ -106,28 +107,28 @@ tasks:
     depends_on: [check_cpu, check_memory, check_disk]
     script: |
       var status = "ok";
-      if ctx.get("tasks.check_cpu.status") == "failed" {
+      if (ctx.get("tasks.check_cpu.status") == "failed") {
         status = "degraded";
       }
-      if ctx.get("tasks.check_memory.status") == "failed" {
+      if (ctx.get("tasks.check_memory.status") == "failed") {
         status = "degraded";
       }
-      if ctx.get("tasks.check_disk.status") == "failed" {
+      if (ctx.get("tasks.check_disk.status") == "failed") {
         status = "degraded";
       }
 
-      var summary = {
-        "host": ctx.get("HOSTNAME"),
-        "cpu_percent": ctx.get("tasks.check_cpu.outputs.cpu_percent"),
-        "mem_percent": ctx.get("tasks.check_memory.outputs.mem_percent"),
-        "disk_percent": ctx.get("tasks.check_disk.outputs.disk_percent"),
-        "status": status
+      var summary = map{
+        host: ctx.get("HOSTNAME"),
+        cpu_percent: ctx.get("tasks.check_cpu.outputs.cpu_percent"),
+        mem_percent: ctx.get("tasks.check_memory.outputs.mem_percent"),
+        disk_percent: ctx.get("tasks.check_disk.outputs.disk_percent"),
+        status: status
       };
 
       ctx.output("summary", summary);
       fs.write("./host-health.json", json.stringify(summary));
 
-      if status == "ok" {
+      if (status == "ok") {
         log.info("All host checks passed for " + ctx.get("HOSTNAME"));
       } else {
         log.warn("Host checks degraded for " + ctx.get("HOSTNAME"));

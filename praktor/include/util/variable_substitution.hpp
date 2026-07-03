@@ -1,5 +1,4 @@
-#ifndef __VARIABLE_SUBSTITUTION_HPP__
-#define __VARIABLE_SUBSTITUTION_HPP__
+#pragma once
 
 // Ensure we have the necessary standard library features
 #if __cplusplus < 201703L
@@ -30,4 +29,3 @@ inline std::string substituteVariables(std::string const& templateStr, WorkflowC
     return Praktor::Util::substituteMustache(templateStr, context);
 }
 
-#endif   // __VARIABLE_SUBSTITUTION_HPP__

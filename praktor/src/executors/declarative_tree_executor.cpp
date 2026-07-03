@@ -1,5 +1,6 @@
 #include "executors/declarative_tree_executor.hpp"
-#include "btdsl/shell_executor.hpp"
+#include "actions/shell_executor.hpp"
+#include "util/path_utils.hpp"
 #include "util/logging.hpp"
 #include "util/variable_substitution.hpp"
 #include "util/env_parser.hpp"
@@ -17,17 +18,6 @@ namespace Praktor::Execution
 namespace {
 
 using EnvMap = std::unordered_map<std::string, std::string>;
-
-std::filesystem::path resolveRelativePath(const std::string& source_path, const std::string& child) {
-  std::filesystem::path relative(child);
-  if (relative.is_absolute()) {
-    return relative.lexically_normal();
-  }
-
-  std::filesystem::path base =
-      source_path.empty() ? std::filesystem::current_path() : std::filesystem::path(source_path).parent_path();
-  return (base / relative).lexically_normal();
-}
 
 int parseDurationMs(const std::string& timeout) {
   if (timeout.empty()) {
@@ -72,6 +62,25 @@ WorkflowValue parseWorkflowValue(const std::string& value) {
   return WorkflowValue(value);
 }
 
+struct TaskScopeGuard {
+  WorkflowContext& context;
+  bool active = true;
+
+  TaskScopeGuard(WorkflowContext& ctx, const std::string& task_name)
+      : context(ctx) {
+    context.pushTaskScope(task_name);
+  }
+
+  ~TaskScopeGuard() {
+    if (active) {
+      context.popTaskScope();
+    }
+  }
+
+  TaskScopeGuard(const TaskScopeGuard&) = delete;
+  TaskScopeGuard& operator=(const TaskScopeGuard&) = delete;
+};
+
 void emitShellConsoleLine(const std::string& line) {
   if (Praktor::Logging::isVerboseEnabled()) {
     return;
@@ -82,23 +91,33 @@ void emitShellConsoleLine(const std::string& line) {
   Praktor::Logging::emitConsoleEvent(message);
 }
 
-void collectDeclaredOutputKeys(const btdsl::Node& node,
+std::string stringifyDeclaredParam(const actions::Value& value) {
+  if (std::holds_alternative<std::string>(value)) {
+    return std::get<std::string>(value);
+  }
+  if (std::holds_alternative<double>(value)) {
+    return std::to_string(std::get<double>(value));
+  }
+  return std::get<bool>(value) ? "true" : "false";
+}
+
+void collectDeclaredOutputKeys(const actions::Node& node,
                                std::set<std::string>& output_keys,
                                std::set<std::string>& stderr_keys,
                                std::set<std::string>& exit_code_keys) {
   auto output_it = node.params.find("output_key");
-  if (output_it != node.params.end() && std::holds_alternative<std::string>(output_it->second)) {
-    output_keys.insert(std::get<std::string>(output_it->second));
+  if (output_it != node.params.end()) {
+    output_keys.insert(stringifyDeclaredParam(output_it->second));
   }
 
   auto stderr_it = node.params.find("stderr_key");
-  if (stderr_it != node.params.end() && std::holds_alternative<std::string>(stderr_it->second)) {
-    stderr_keys.insert(std::get<std::string>(stderr_it->second));
+  if (stderr_it != node.params.end()) {
+    stderr_keys.insert(stringifyDeclaredParam(stderr_it->second));
   }
 
   auto exit_it = node.params.find("exit_code_key");
-  if (exit_it != node.params.end() && std::holds_alternative<std::string>(exit_it->second)) {
-    exit_code_keys.insert(std::get<std::string>(exit_it->second));
+  if (exit_it != node.params.end()) {
+    exit_code_keys.insert(stringifyDeclaredParam(exit_it->second));
   }
 
   for (const auto& child : node.children) {
@@ -106,14 +125,14 @@ void collectDeclaredOutputKeys(const btdsl::Node& node,
   }
 }
 
-void applyTaskExecutionDefaults(btdsl::Node& node, const Task& task) {
+void applyTaskExecutionDefaults(actions::Node& node, const Task& task) {
   if (node.id == "Shell") {
     if (node.params.find("stream_output") == node.params.end()) {
       node.params["stream_output"] = !task.silent;
     }
 
     if (task.working_dir && node.params.find("working_dir") == node.params.end()) {
-      node.params["working_dir"] = resolveRelativePath(task.source_path, *task.working_dir).string();
+      node.params["working_dir"] = Praktor::util::resolveRelativePath(task.source_path, *task.working_dir).string();
     }
 
     if (task.timeout && node.params.find("timeout") == node.params.end()) {
@@ -203,18 +222,19 @@ void DeclarativeTreeExecutor::logContextAccess(const std::string& path, const st
 }
 
 // Task 3.5: Command injection prevention - sanitize shell values
+// Windows cmd.exe compatible: wraps value in double quotes and escapes embedded quotes
 std::string DeclarativeTreeExecutor::sanitizeForShell(const std::string& value) const
 {
-  std::string sanitized;
-  sanitized.reserve(value.size() * 2);  // Reserve space for escapes
-  
+  // For cmd.exe: wrap in double quotes, escape embedded double quotes with ""
+  std::string sanitized = "\"";
   for (char c : value) {
-    if (strchr(SHELL_SPECIAL_CHARS, c)) {
-      sanitized += '\\';
+    if (c == '"') {
+      sanitized += "\"\"";  // cmd.exe escapes " as ""
+    } else {
+      sanitized += c;
     }
-    sanitized += c;
   }
-  
+  sanitized += "\"";
   return sanitized;
 }
 
@@ -224,129 +244,99 @@ std::string DeclarativeTreeExecutor::resolveContextRef(const std::string& param,
   if (!hasContextRef(param)) {
     return param;
   }
-  
-  std::string contextPath = extractContextPath(param);
-  
-  // Split path into components: ctx.category.path.to.value
-  std::vector<std::string> components;
-  std::stringstream ss(contextPath);
-  std::string component;
-  while (std::getline(ss, component, '.')) {
-    components.push_back(component);
-  }
-  
-  if (components.empty() || components[0] != "ctx") {
-    throw std::runtime_error("Invalid context reference: must start with 'ctx.'");
-  }
-  
-  if (components.size() < 2) {
-    throw std::runtime_error("Invalid context reference: missing category after 'ctx.'");
-  }
-  
-  // Task 3.3: Security - validate context root
-  std::string root = components[1];
-  if (!isAllowedContextRoot(root)) {
-    throw std::runtime_error("Unauthorized context access: '" + root + "' is not whitelisted. "
-                             "Allowed roots: variables, env, tasks");
-  }
-  
-  // Resolve based on category
-  std::string resolved;
-  
-  if (root == "variables") {
-    // ctx.variables.VAR_NAME
-    if (components.size() < 3) {
-      throw std::runtime_error("Invalid context reference: missing variable name");
-    }
-    std::string varName = components[2];
-    resolved = ctx.getValueOrDefault<std::string>(varName, "");
-    if (resolved.empty()) {
-      throw std::runtime_error("Variable not found: " + varName);
-    }
-  }
-  else if (root == "env") {
-    // ctx.env.ENV_VAR
-    if (components.size() < 3) {
-      throw std::runtime_error("Invalid context reference: missing environment variable name");
-    }
-    std::string envName = components[2];
-    WorkflowValue envValue = ctx.getValueByPath("env." + envName);
-    if (envValue.is_null()) {
-      throw std::runtime_error("Environment variable not found: " + envName);
-    }
-    resolved = envValue.is_string() ? envValue.as<std::string>() : envValue.to_string();
-  }
-  else if (root == "tasks") {
-    // ctx.tasks.TASK_NAME.outputs.KEY or ctx.tasks.TASK_NAME.outputs.KEY.nested.path
-    if (components.size() < 5) {
-      throw std::runtime_error("Invalid context reference: expected ctx.tasks.TASK_NAME.outputs.KEY");
-    }
-    
-    std::string taskName = components[2];
-    std::string outputsKey = components[3];
-    
-    if (outputsKey != "outputs") {
-      throw std::runtime_error("Invalid context reference: expected 'outputs' after task name");
-    }
-    
-    // Build the full path: tasks.TASK_NAME.outputs.KEY.nested.path
-    std::string fullPath = "tasks." + taskName + ".outputs";
-    for (size_t i = 4; i < components.size(); ++i) {
-      fullPath += "." + components[i];
-    }
-    
-    // Use WorkflowContext's getValueByPath for nested access
-    WorkflowValue value = ctx.getValueByPath(fullPath);
-    if (value.is_null()) {
-      throw std::runtime_error("Context path not found: " + contextPath + 
-                               "\nTask '" + taskName + "' may not have been executed or output key does not exist");
-    }
-    
-    // Convert to string
-    if (value.is_string()) {
-      resolved = value.as<std::string>();
-    } else {
-      resolved = value.to_string();
-    }
-  }
-  
-  // Task 3.3: Log context access for audit
-  logContextAccess(contextPath, resolved);
-  
-  // Replace the {ctx.*} reference with resolved value
+
   std::string result = param;
-  size_t start = result.find("{" + contextPath + "}");
-  if (start != std::string::npos) {
-    result.replace(start, contextPath.length() + 2, resolved);
+  size_t cursor = 0;
+
+  while (true) {
+    size_t open = result.find("{ctx.", cursor);
+    if (open == std::string::npos) {
+      break;
+    }
+
+    size_t close = result.find('}', open + 1);
+    if (close == std::string::npos) {
+      throw std::runtime_error("Unclosed context reference: " + param);
+    }
+
+    std::string contextPath = result.substr(open + 1, close - open - 1);
+
+    // Split path into components: ctx.category.path.to.value
+    std::vector<std::string> components;
+    std::stringstream ss(contextPath);
+    std::string component;
+    while (std::getline(ss, component, '.')) {
+      components.push_back(component);
+    }
+
+    if (components.empty() || components[0] != "ctx") {
+      throw std::runtime_error("Invalid context reference: must start with 'ctx.'");
+    }
+
+    if (components.size() < 2) {
+      throw std::runtime_error("Invalid context reference: missing category after 'ctx.'");
+    }
+
+    std::string root = components[1];
+    if (!isAllowedContextRoot(root)) {
+      throw std::runtime_error("Unauthorized context access: '" + root + "' is not whitelisted. "
+                               "Allowed roots: variables, env, tasks");
+    }
+
+    std::string resolved;
+
+    if (root == "variables") {
+      if (components.size() < 3) {
+        throw std::runtime_error("Invalid context reference: missing variable name");
+      }
+      std::string varName = components[2];
+      resolved = ctx.getValue<std::string>(varName);
+    } else if (root == "env") {
+      if (components.size() < 3) {
+        throw std::runtime_error("Invalid context reference: missing environment variable name");
+      }
+      std::string envName = components[2];
+      WorkflowValue envValue = ctx.getValueByPath("env." + envName);
+      if (envValue.is_null()) {
+        throw std::runtime_error("Environment variable not found: " + envName);
+      }
+      resolved = envValue.is_string() ? envValue.as<std::string>() : envValue.to_string();
+    } else if (root == "tasks") {
+      if (components.size() < 5) {
+        throw std::runtime_error("Invalid context reference: expected ctx.tasks.TASK_NAME.outputs.KEY");
+      }
+
+      std::string taskName = components[2];
+      std::string outputsKey = components[3];
+
+      if (outputsKey != "outputs") {
+        throw std::runtime_error("Invalid context reference: expected 'outputs' after task name");
+      }
+
+      std::string fullPath = "tasks." + taskName + ".outputs";
+      for (size_t i = 4; i < components.size(); ++i) {
+        fullPath += "." + components[i];
+      }
+
+      WorkflowValue value = ctx.getValueByPath(fullPath);
+      if (value.is_null()) {
+        throw std::runtime_error("Context path not found: " + contextPath +
+                                 "\nTask '" + taskName + "' may not have been executed or output key does not exist");
+      }
+
+      resolved = value.is_string() ? value.as<std::string>() : value.to_string();
+    }
+
+    logContextAccess(contextPath, resolved);
+    result.replace(open, close - open + 1, resolved);
+    cursor = open + resolved.size();
   }
-  
+
   return result;
 }
 
-// Preprocess node parameters: expand Mustache templates {{ variable }}
-void DeclarativeTreeExecutor::preprocessNodeParams(btdsl::Node& node, const WorkflowContext& context)
-{
-  // Process all parameters in this node
-  for (auto& [key, value] : node.params) {
-    if (std::holds_alternative<std::string>(value)) {
-      std::string& str = std::get<std::string>(value);
-
-      // Expand Mustache templates: {{ variable }}
-      if (str.find("{{") != std::string::npos) {
-        str = substituteVariables(str, context);
-        TLOG_DEBUG("Preprocessed parameter '{}': expanded Mustache template", key);
-      }
-    }
-  }
-
-  // Recursively process all children
-  for (auto& child : node.children) {
-    preprocessNodeParams(child, context);
-  }
-}
-
 // Task 3.4: Parse parameter value to appropriate type
-btdsl::Value DeclarativeTreeExecutor::parseValue(const std::string& str) const
+actions::Value DeclarativeTreeExecutor::parseValue(const std::string& str) const
 {
   // Try to parse as number
   try {
@@ -368,12 +358,12 @@ btdsl::Value DeclarativeTreeExecutor::parseValue(const std::string& str) const
   return str;
 }
 
-// Task 3.4: Convert Praktor BtdslNode to btdsl::Node with context bridge support
-btdsl::Node DeclarativeTreeExecutor::convertNode(const BtdslNode& praktor_node, 
+// Task 3.4: Convert Praktor OrchNode to actions::Node with context bridge support
+actions::Node DeclarativeTreeExecutor::convertNode(const OrchNode& praktor_node, 
                                                    const WorkflowContext& context,
                                                    const std::string& taskName)
 {
-  btdsl::Node node;
+  actions::Node node;
   node.id = praktor_node.type;
   
   // Task 3.4: Convert parameters with variable substitution and context bridge
@@ -391,9 +381,12 @@ btdsl::Node DeclarativeTreeExecutor::convertNode(const BtdslNode& praktor_node,
       
       substituted = resolveContextRef(substituted, context);
       
-      // Task 3.5: Sanitize if this is a shell command parameter
-      if (praktor_node.type == "Shell" && key == "cmd") {
-        TLOG_WARN("Using context value in shell command. Value has been sanitized to prevent injection.");
+      // Task 3.5: Sanitize if this is a shell parameter
+      // Apply to all Shell node parameters that may be interpreted by cmd.exe
+      if (praktor_node.type == "Shell" && 
+          (key == "cmd" || key == "working_dir" || key == "input" || 
+           key == "output_key" || key == "error_key" || key == "exit_code_key")) {
+        TLOG_WARN("Using context value in shell parameter '{}'. Value has been sanitized to prevent injection.", key);
         substituted = sanitizeForShell(substituted);
       }
     }
@@ -410,10 +403,10 @@ btdsl::Node DeclarativeTreeExecutor::convertNode(const BtdslNode& praktor_node,
   return node;
 }
 
-// Task 3.6: Bridge Praktor context to BTDSL blackboard
-void DeclarativeTreeExecutor::contextToBlackboard(const WorkflowContext& context, btdsl::Blackboard& bb)
+// Task 3.6: Bridge Praktor context to actions blackboard
+void DeclarativeTreeExecutor::contextToBlackboard(const WorkflowContext& context, actions::Blackboard& bb)
 {
-  TLOG_DEBUG("Bridging WorkflowContext to BTDSL Blackboard");
+  TLOG_DEBUG("Bridging WorkflowContext to actions Blackboard");
   
   // Copy all workflow variables to blackboard
   auto allVars = context.getAllVariables();
@@ -444,13 +437,13 @@ DeclarativeTreeExecutor::DeclarativeTreeExecutor(EnvMap base_environment)
   : base_environment_(std::move(base_environment)) {}
 
 // Task 3.7: Map blackboard outputs back to context
-void DeclarativeTreeExecutor::blackboardToContext(const btdsl::Blackboard& bb, 
+void DeclarativeTreeExecutor::blackboardToContext(const actions::Blackboard& bb, 
                                                     WorkflowContext& context, 
                                                     const std::string& taskName)
 {
-  TLOG_DEBUG("Mapping BTDSL Blackboard outputs to WorkflowContext for task: {}", taskName);
+  TLOG_DEBUG("Mapping actions Blackboard outputs to WorkflowContext for task: {}", taskName);
   
-  // Bridge BT Shell node outputs to workflow context.
+  // Bridge action Shell node outputs to workflow context.
   // The Shell node stores:
   //   shell_exit_code (or custom exit_code_key)
   //   shell_output (or custom output_key) — for stdout
@@ -502,12 +495,13 @@ void DeclarativeTreeExecutor::blackboardToContext(const btdsl::Blackboard& bb,
 
 TaskResult DeclarativeTreeExecutor::execute(const Task& task, WorkflowContext& context)
 {
-  TLOG_DEBUG("Executing behavior_tree task: {}", task.name);
+  TLOG_DEBUG("Executing action_orchestration task: {}", task.name);
 
   auto execution_context = context.fork();
   auto& local_context = *execution_context;
-  auto params = std::get<BtdslParams>(task.specifics);
-  btdsl::Executor executor;
+  TaskScopeGuard task_scope(local_context, task.name);
+  auto params = std::get<OrchParams>(task.specifics);
+  actions::Executor executor;
   std::set<std::string> output_keys;
   std::set<std::string> stderr_keys;
   std::set<std::string> exit_code_keys;
@@ -515,11 +509,12 @@ TaskResult DeclarativeTreeExecutor::execute(const Task& task, WorkflowContext& c
   EnvMap task_environment_overrides;
   for (const auto& env_file : task.dot_env) {
     try {
-      auto parsed = Praktor::util::parseDotEnvFile(resolveRelativePath(task.source_path, env_file));
+      auto parsed = Praktor::util::parseDotEnvFile(
+          Praktor::util::resolveRelativePath(task.source_path, env_file));
       for (const auto& [key, value] : parsed) {
         task_environment_overrides[key] = substituteVariables(value, local_context);
       }
-      TLOG_DEBUG("Loaded dotEnv file for BTDSL: {}", env_file);
+      TLOG_DEBUG("Loaded dotEnv file for orchestration: {}", env_file);
     } catch (const std::exception& e) {
       TLOG_WARN("Failed to load dotEnv file '{}': {}", env_file, e.what());
     }
@@ -539,33 +534,34 @@ TaskResult DeclarativeTreeExecutor::execute(const Task& task, WorkflowContext& c
   }
   executor.setEnvironment(shell_environment);
 
-  btdsl::Tree tree;
+  actions::Tree tree;
   tree.name = task.name;
   tree.root = convertNode(params.root, local_context, task.name);
-  TLOG_DEBUG("BTDSL tree built from YAML: {} (root: {})", tree.name, tree.root.id);
+  TLOG_DEBUG("Actions tree built from YAML: {} (root: {})", tree.name, tree.root.id);
   collectDeclaredOutputKeys(tree.root, output_keys, stderr_keys, exit_code_keys);
 
   applyTaskExecutionDefaults(tree.root, task);
 
-  btdsl::Blackboard blackboard;
-  btdsl::ShellExecutor::setStreamCallback(emitShellConsoleLine);
+  actions::Blackboard blackboard;
+  actions::ShellExecutor::setStreamCallback(emitShellConsoleLine);
 
   if (!shell_environment.empty()) {
-    TLOG_DEBUG("Set {} environment variables for BTDSL execution", shell_environment.size());
+    TLOG_DEBUG("Set {} environment variables for action execution", shell_environment.size());
   }
 
   contextToBlackboard(local_context, blackboard);
-  preprocessNodeParams(tree.root, local_context);
+  // preprocessNodeParams removed: convertNode already performs Mustache substitution.
+  // Calling it again would cause double expansion if variable values contain {{ }}.
 
   auto start_time = std::chrono::high_resolution_clock::now();
-  btdsl::NodeStatus status = executor.execute(tree, blackboard);
+  actions::NodeStatus status = executor.execute(tree, blackboard);
   auto end_time = std::chrono::high_resolution_clock::now();
   auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
 
   blackboard.set("execution_time_ms", std::to_string(duration.count()));
 
-  std::string status_str = (status == btdsl::NodeStatus::SUCCESS) ? "SUCCESS" :
-                           (status == btdsl::NodeStatus::FAILURE) ? "FAILURE" : "RUNNING";
+  std::string status_str = (status == actions::NodeStatus::SUCCESS) ? "SUCCESS" :
+                           (status == actions::NodeStatus::FAILURE) ? "FAILURE" : "RUNNING";
   blackboard.set("node_status", status_str);
 
   blackboardToContext(blackboard, local_context, task.name);
@@ -574,23 +570,28 @@ TaskResult DeclarativeTreeExecutor::execute(const Task& task, WorkflowContext& c
     if (!blackboard.has(key)) {
       continue;
     }
-    local_context.setCurrentTaskOutput(key, parseWorkflowValue(blackboard.get(key)));
+
+    const std::string raw_value = blackboard.get(key);
+    WorkflowValue parsed_value = parseWorkflowValue(raw_value);
+    local_context.setCurrentTaskOutput(key, parsed_value);
   }
 
   for (const auto& key : stderr_keys) {
     if (blackboard.has(key)) {
-      local_context.setCurrentTaskOutput(key, blackboard.get(key));
+      const std::string raw_value = blackboard.get(key);
+      local_context.setCurrentTaskOutput(key, raw_value);
     }
   }
 
   for (const auto& key : exit_code_keys) {
     if (blackboard.has(key)) {
-      local_context.setCurrentTaskOutput(key, blackboard.get(key));
+      const std::string raw_value = blackboard.get(key);
+      local_context.setCurrentTaskOutput(key, raw_value);
     }
   }
 
-  bool success = (status == btdsl::NodeStatus::SUCCESS);
-  std::string error_msg = success ? "" : "BTDSL execution failed";
+  bool success = (status == actions::NodeStatus::SUCCESS);
+  std::string error_msg = success ? "" : "Action execution failed";
 
   TaskResult result(success, error_msg);
 
@@ -608,13 +609,15 @@ TaskResult DeclarativeTreeExecutor::execute(const Task& task, WorkflowContext& c
   result.output_streamed_live = blackboard.has("shell_exit_code");
 
   if (!success && result.stderr_data.empty()) {
-    result.error_message = "BTDSL execution failed with status " + status_str;
+    result.error_message = "Action execution failed with status " + status_str;
   } else if (!success) {
     result.error_message = "Command failed with exit code " +
       std::to_string(result.exit_code) + ". Stderr: " + result.stderr_data;
   }
 
-  TLOG_DEBUG("Behavior tree task {} completed with status: {} ({}ms)",
+  context.mergeLocalValuesFrom(local_context);
+
+  TLOG_DEBUG("Action orchestration task {} completed with status: {} ({}ms)",
             task.name,
             status_str,
             duration.count());

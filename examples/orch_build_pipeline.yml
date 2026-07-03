@@ -1,8 +1,8 @@
-name: Build Pipeline with Behavior Trees
+name: Build Pipeline with Action Orchestration
 
 description: |
   Demonstrates basic sequence control flow for a typical build pipeline.
-  Uses behavior trees to orchestrate configure, build, and test steps.
+  Uses action orchestration to coordinate configure, build, and test steps.
 
 variables:
   BUILD_TYPE: "Release"

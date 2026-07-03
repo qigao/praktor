@@ -1,5 +1,4 @@
-#ifndef __TASK_TYPES_H__
-#define __TASK_TYPES_H__
+#pragma once
 
 #include <optional>
 #include <string>
@@ -11,7 +10,7 @@ using Vars = std::unordered_map<std::string, std::string>;
 using StrList = std::vector<std::string>;
 using DotEnv = std::vector<std::string>;
 
-enum class TaskAction { None, Uses, DynamicTasks, Btdsl };
+enum class TaskAction { None, Uses, DynamicTasks, orch, Program };
 
 enum class CommandOutputFormat { Text, Json };
 
@@ -50,13 +49,15 @@ struct RunCommandParams {
   std::optional<ParseKeyValueConfig> parse_keyvalue;
 };
 
-struct UsesParams {
-  std::string path;
+struct ProgramParams {
+  std::string program;
+  StrList args;
+  std::string input;
+  CommandOutputFormat output_format = CommandOutputFormat::Text;
 };
 
-struct RetryPolicy {
-  int count = 0;
-  std::string delay = "0s";
+struct UsesParams {
+  std::string path;
 };
 
 /**
@@ -68,7 +69,6 @@ struct DynamicTaskTemplate {
   std::string name;
   std::variant<std::string, StrList> command;
   std::optional<std::string> timeout;
-  std::optional<RetryPolicy> retries;
   std::optional<std::string> when;
   StrList depends_on;
   Vars env;
@@ -97,7 +97,7 @@ struct Each {
 };
 
 // Trigger actions reference tasks by name
-// Any task type (command, btdsl, uses, dynamic_tasks, script-only) can be used as a trigger
+// Any task type (command, orch, uses, dynamic_tasks, script-only) can be used as a trigger
 using TriggerAction = std::string;  // Task name to execute
 
 struct Triggers {
@@ -132,8 +132,8 @@ struct NativeModule {
 
 using NativeModules = std::vector<NativeModule>;
 
-// BTDSL Node Type Registry
-struct BtdslNodeSpec {
+// orch Node Type Registry
+struct OrchNodeSpec {
   std::string name;
   bool isControl;
   std::vector<std::string> requiredParams;
@@ -141,10 +141,10 @@ struct BtdslNodeSpec {
   bool allowsChildren;
 };
 
-struct BtdslNode {
-  std::string type;  // Node type: Sequence, Fallback, Shell, etc.
+struct OrchNode {
+  std::string type;  // Node type: Sequence, Shell, etc.
   std::unordered_map<std::string, std::string> params;  // Node parameters
-  std::vector<BtdslNode> children;  // Child nodes for control flow
+  std::vector<OrchNode> children;  // Child nodes for control flow
   
   // Helper methods for node classification
   bool isControlNode() const;
@@ -153,21 +153,19 @@ struct BtdslNode {
   bool hasParams() const { return !params.empty(); }
 };
 
-struct BtdslParams {
-  BtdslNode root;  // Root node of the behavior tree (parsed from YAML)
+struct OrchParams {
+  OrchNode root;  // Root node of the action orchestration (parsed from YAML)
 };
 
-// NODE_REGISTRY: Registry of all supported BTDSL node types
-extern const std::unordered_map<std::string, BtdslNodeSpec> NODE_REGISTRY;
+// NODE_REGISTRY: Registry of all supported orch node types
+extern const std::unordered_map<std::string, OrchNodeSpec> NODE_REGISTRY;
 
 // Lookup node spec by name (case-insensitive)
-const BtdslNodeSpec* findNodeSpec(const std::string& name);
+const OrchNodeSpec* findNodeSpec(const std::string& name);
 
 struct TaskDefaults {
-  std::optional<RetryPolicy> retries;
   std::optional<std::string> timeout;
 };
 
-using TaskSpecifics = std::variant<std::monostate, UsesParams, DynamicTasksParams, BtdslParams>;
+using TaskSpecifics = std::variant<std::monostate, UsesParams, DynamicTasksParams, OrchParams, ProgramParams>;
 
-#endif // __TASK_TYPES_H__

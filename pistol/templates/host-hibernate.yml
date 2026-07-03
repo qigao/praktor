@@ -23,10 +23,6 @@ tasks:
   - name: emit_result
     depends_on: [hibernate_host]
     script: |
-      var result = {
-        "action": "hibernate",
-        "message": ctx.get("MESSAGE"),
-        "status": "accepted"
-      };
-      ctx.output("result", json.stringify(result));
-      log.info("Hibernate requested: " + json.stringify(result));
+      var jsonStr = "{\"action\":" + json.stringify("hibernate") + ", \"message\":" + json.stringify(ctx.get("MESSAGE")) + ", \"status\":" + json.stringify("accepted") + "}";
+      ctx.output("result", jsonStr);
+      log.info("Hibernate requested: " + jsonStr);

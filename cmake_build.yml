@@ -1,0 +1,34 @@
+name: "CMake Build Workflow"
+description: "A professional workflow for configuring and building the project using CMake presets."
+
+variables:
+  # 默认预设名，可根据需要调整
+  CMAKE_PRESET: "win-dev-user"
+  BUILD_TARGET: "all"
+  VCPKG_INSTALL_ROOT: ".vcpkg_installed/debug"
+  VCPKG_TRIPLET: "x64-windows"
+  VCPKG_COMMAND: "vcpkg"
+  COMMAND_PREFIX: ""
+  TEST_COMMAND_PREFIX: ""
+
+tasks:
+  - name: vcpkg_install
+    description: "Install manifest dependencies before configure"
+    command: "{{ COMMAND_PREFIX }} {{ VCPKG_COMMAND }} install --x-manifest-root=. --x-install-root={{ VCPKG_INSTALL_ROOT }} --triplet {{ VCPKG_TRIPLET }}"
+  - name: configure
+    description: "Run CMake configure"
+    depends_on: [vcpkg_install]
+    command: "{{ COMMAND_PREFIX }} cmake --preset {{ CMAKE_PRESET }}"
+  - name: build
+    description: "Run CMake build in strict sequence."
+    depends_on: [configure]
+    command: "{{ COMMAND_PREFIX }} cmake --build --preset {{ CMAKE_PRESET }} -t {{ BUILD_TARGET }}"
+  - name: test
+    description: "Run cmake tests"
+    depends_on: [build]
+    command: "{{ TEST_COMMAND_PREFIX }} ctest --preset {{ CMAKE_PRESET }}"
+  - name: finish_report
+    description: "Optional task to notify after build"
+    depends_on: [test]
+    script: |
+      log.info("Build of target '" + ctx.get("BUILD_TARGET") + "' completed successfully.")

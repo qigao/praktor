@@ -1,5 +1,4 @@
-#ifndef __SCOPED_VARIABLES_HPP__
-#define __SCOPED_VARIABLES_HPP__
+#pragma once
 
 #include "workflow_context.hpp"
 #include "yml/task_types.hpp"
@@ -88,4 +87,3 @@ private:
     bool restored_ = false;
 };
 
-#endif // __SCOPED_VARIABLES_HPP__

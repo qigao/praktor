@@ -41,9 +41,9 @@ TEST_CASE("parse minimal run_command task")
     REQUIRE(workflow.tasks.size() == 1);
     const Task& build = workflow.tasks[0];
     CHECK(build.name == "build");
-    CHECK(build.action == TaskAction::Btdsl);
-    REQUIRE(std::holds_alternative<BtdslParams>(build.specifics));
-    const auto& params = std::get<BtdslParams>(build.specifics);
+    CHECK(build.action == TaskAction::Orch);
+    REQUIRE(std::holds_alternative<OrchParams>(build.specifics));
+    const auto& params = std::get<OrchParams>(build.specifics);
     REQUIRE(!params.root.children.empty());
     CHECK(params.root.children[0].params.at("cmd") == "echo building");
     CHECK(build.vars.at("MESSAGE") == "{{ APP_NAME }}");
@@ -71,14 +71,45 @@ TEST_CASE("parse uses tasks")
     REQUIRE(workflow.tasks.size() == 2);
 
     const Task& cmdTask = workflow.tasks[0];
-    CHECK(cmdTask.action == TaskAction::Btdsl);
-    REQUIRE(std::holds_alternative<BtdslParams>(cmdTask.specifics));
+    CHECK(cmdTask.action == TaskAction::Orch);
+    REQUIRE(std::holds_alternative<OrchParams>(cmdTask.specifics));
 
     const Task& usesTask = workflow.tasks[1];
     CHECK(usesTask.action == TaskAction::Uses);
     REQUIRE(std::holds_alternative<UsesParams>(usesTask.specifics));
     CHECK_FALSE(std::get<UsesParams>(usesTask.specifics).path.empty());
     CHECK(usesTask.vars.at("INPUT") == "data");
+}
+
+TEST_CASE("parse program task")
+{
+    const std::string content =
+        "tasks:\n"
+        "  - name: probe\n"
+        "    program: tool\n"
+        "    args:\n"
+        "      - alpha beta\n"
+        "      - --flag\n"
+        "    stdin: payload\n"
+        "    output_format: json\n";
+
+    auto wf = writeTempWorkflow("program.yml", content);
+
+    Workflow workflow = TaskParser::parseFile(wf.string());
+    REQUIRE(workflow.tasks.size() == 1);
+
+    const Task& task = workflow.tasks[0];
+    CHECK(task.action == TaskAction::Program);
+    CHECK(task.declared_runner == "program");
+    REQUIRE(std::holds_alternative<ProgramParams>(task.specifics));
+
+    const auto& params = std::get<ProgramParams>(task.specifics);
+    CHECK(params.program == "tool");
+    REQUIRE(params.args.size() == 2);
+    CHECK(params.args[0] == "alpha beta");
+    CHECK(params.args[1] == "--flag");
+    CHECK(params.input == "payload");
+    CHECK(params.output_format == CommandOutputFormat::Json);
 }
 
 
@@ -161,29 +192,6 @@ TEST_CASE("parse task triggers and environment")
     CHECK(triggers.on_failure[0] == "notify_http");
 }
 
-TEST_CASE("parse continue_on_error attribute")
-{
-    const std::string content =
-        "tasks:\n"
-        "  - name: test_unit\n"
-        "    command: npm run test:unit\n"
-        "    continue_on_error: true\n"
-        "  - name: test_integration\n"
-        "    command: npm run test:integration\n"
-        "    continue_on_error: false\n"
-        "  - name: build\n"
-        "    command: npm run build\n";
-
-    auto wf = writeTempWorkflow("continue_on_error.yml", content);
-
-    Workflow workflow = TaskParser::parseFile(wf.string());
-    REQUIRE(workflow.tasks.size() == 3);
-
-    CHECK(workflow.tasks[0].continue_on_error == true);
-    CHECK(workflow.tasks[1].continue_on_error == false);
-    CHECK(workflow.tasks[2].continue_on_error == false);  // default
-}
-
 TEST_CASE("parse working_dir attribute")
 {
     const std::string content =
@@ -239,9 +247,6 @@ TEST_CASE("top-level defaults apply to included tasks")
 
     std::string content =
         "defaults:\n"
-        "  retries:\n"
-        "    count: 2\n"
-        "    delay: 5s\n"
         "  timeout: 30s\n"
         "includes:\n"
         "  child: " + included.filename().generic_string() + "\n"
@@ -256,9 +261,6 @@ TEST_CASE("top-level defaults apply to included tasks")
         [](const Task& task) { return task.name == "included_step"; });
 
     REQUIRE(it != workflow.tasks.end());
-    REQUIRE(it->retries.has_value());
-    CHECK(it->retries->count == 2);
-    CHECK(it->retries->delay == "5s");
     REQUIRE(it->timeout.has_value());
     CHECK(it->timeout.value() == "30s");
 }
@@ -292,7 +294,7 @@ TEST_CASE("parse rejects http_request BT node in workflow grammar")
     auto wf = writeTempWorkflow("http_request_forbidden.yml", content);
 
     REQUIRE_THROWS_WITH(TaskParser::parseFile(wf.string()),
-        Catch::Matchers::ContainsSubstring("Unknown BTDSL node type: 'http_request'"));
+        Catch::Matchers::ContainsSubstring("Unknown orchestration node type: 'http_request'"));
 }
 
 TEST_CASE("parse accepts snake_case BT leaf nodes in explicit YAML trees")
@@ -312,9 +314,9 @@ TEST_CASE("parse accepts snake_case BT leaf nodes in explicit YAML trees")
 
     Workflow workflow = TaskParser::parseFile(wf.string());
     REQUIRE(workflow.tasks.size() == 1);
-    REQUIRE(std::holds_alternative<BtdslParams>(workflow.tasks[0].specifics));
+    REQUIRE(std::holds_alternative<OrchParams>(workflow.tasks[0].specifics));
 
-    const auto& params = std::get<BtdslParams>(workflow.tasks[0].specifics);
+    const auto& params = std::get<OrchParams>(workflow.tasks[0].specifics);
     REQUIRE(params.root.children.size() == 2);
     CHECK(params.root.children[0].type == "Shell");
     CHECK(params.root.children[1].type == "ParseJson");
@@ -337,11 +339,11 @@ TEST_CASE("parse accepts BT shorthand leaf roots")
     Workflow workflow = TaskParser::parseFile(wf.string());
     REQUIRE(workflow.tasks.size() == 2);
 
-    REQUIRE(std::holds_alternative<BtdslParams>(workflow.tasks[0].specifics));
-    REQUIRE(std::holds_alternative<BtdslParams>(workflow.tasks[1].specifics));
+    REQUIRE(std::holds_alternative<OrchParams>(workflow.tasks[0].specifics));
+    REQUIRE(std::holds_alternative<OrchParams>(workflow.tasks[1].specifics));
 
-    const auto& sleep_params = std::get<BtdslParams>(workflow.tasks[0].specifics);
-    const auto& file_params = std::get<BtdslParams>(workflow.tasks[1].specifics);
+    const auto& sleep_params = std::get<OrchParams>(workflow.tasks[0].specifics);
+    const auto& file_params = std::get<OrchParams>(workflow.tasks[1].specifics);
 
     CHECK(sleep_params.root.type == "Sleep");
     CHECK(sleep_params.root.params.at("duration") == "1s");
@@ -349,16 +351,334 @@ TEST_CASE("parse accepts BT shorthand leaf roots")
     CHECK(file_params.root.params.at("path") == "./config.yml");
 }
 
-TEST_CASE("parse rejects text btdsl blocks in workflow grammar")
+TEST_CASE("parse rejects multiple task runners including BT shorthand")
+{
+    const std::string command_and_shell =
+        "tasks:\n"
+        "  - name: confused\n"
+        "    command: echo one\n"
+        "    shell: echo two\n";
+
+    auto wf = writeTempWorkflow("multiple_runner_shorthand.yml", command_and_shell);
+
+    REQUIRE_THROWS_WITH(TaskParser::parseFile(wf.string()),
+        Catch::Matchers::ContainsSubstring("declares multiple runners"));
+
+    const std::string command_and_program =
+        "tasks:\n"
+        "  - name: raw_confused\n"
+        "    command: echo one\n"
+        "    program: tool\n";
+
+    auto program_wf = writeTempWorkflow("multiple_command_program.yml", command_and_program);
+
+    REQUIRE_THROWS_WITH(TaskParser::parseFile(program_wf.string()),
+        Catch::Matchers::ContainsSubstring("declares multiple runners"));
+
+    const std::string two_shorthands =
+        "tasks:\n"
+        "  - name: also_confused\n"
+        "    shell: echo one\n"
+        "    sleep: 1s\n";
+
+    auto shorthand_wf = writeTempWorkflow("multiple_bt_shorthand.yml", two_shorthands);
+
+    REQUIRE_THROWS_WITH(TaskParser::parseFile(shorthand_wf.string()),
+        Catch::Matchers::ContainsSubstring("declares multiple runners"));
+}
+
+TEST_CASE("parse rejects text orch blocks in workflow grammar")
 {
     const std::string content =
         "tasks:\n"
-        "  - name: legacy_bt\n"
-        "    btdsl: |\n"
+        "  - name: legacy_orch\n"
+        "    actions: |\n"
         "      tree Main { Shell(cmd=\\\"echo legacy\\\") }\n";
 
-    auto wf = writeTempWorkflow("legacy_text_btdsl.yml", content);
+    auto wf = writeTempWorkflow("legacy_text_orch.yml", content);
 
     REQUIRE_THROWS_WITH(TaskParser::parseFile(wf.string()),
-        Catch::Matchers::ContainsSubstring("btdsl must be a map"));
+        Catch::Matchers::ContainsSubstring("orch node must be a map"));
+}
+
+TEST_CASE("parse accepts flat if syntax with then and else branches")
+{
+    const std::string content =
+        "tasks:\n"
+        "  - name: verify_status\n"
+        "    sequence:\n"
+        "      - if: \"{ctx.tasks.fetch.outputs.ok}\"\n"
+        "        then:\n"
+        "          - shell: echo healthy\n"
+        "        else:\n"
+        "          - shell: echo unhealthy\n";
+
+    auto wf = writeTempWorkflow("if_bt.yml", content);
+
+    Workflow workflow = TaskParser::parseFile(wf.string());
+    REQUIRE(workflow.tasks.size() == 1);
+    REQUIRE(std::holds_alternative<OrchParams>(workflow.tasks[0].specifics));
+
+    const auto& params = std::get<OrchParams>(workflow.tasks[0].specifics);
+    REQUIRE(params.root.children.size() == 1);
+
+    const auto& if_node = params.root.children[0];
+    CHECK(if_node.type == "IfThenElse");
+    CHECK(if_node.params.at("condition") == "{ctx.tasks.fetch.outputs.ok}");
+    REQUIRE(if_node.children.size() == 2);
+    CHECK(if_node.children[0].type == "Sequence");
+    CHECK(if_node.children[1].type == "Sequence");
+    REQUIRE(if_node.children[0].children.size() == 1);
+    REQUIRE(if_node.children[1].children.size() == 1);
+    CHECK(if_node.children[0].children[0].type == "Shell");
+    CHECK(if_node.children[1].children[0].type == "Shell");
+}
+
+TEST_CASE("parse rejects legacy if_then_else and while_do grammar")
+{
+    const std::string if_content =
+        "tasks:\n"
+        "  - name: legacy_controls\n"
+        "    actions:\n"
+        "      if_then_else:\n"
+        "        condition: true\n"
+        "        then:\n"
+        "          - shell: echo healthy\n";
+
+    auto wf = writeTempWorkflow("legacy_if_orch.yml", if_content);
+
+    REQUIRE_THROWS_WITH(TaskParser::parseFile(wf.string()),
+        Catch::Matchers::ContainsSubstring("Legacy orchestration node type 'if_then_else'"));
+
+    const std::string while_content =
+        "tasks:\n"
+        "  - name: legacy_loop\n"
+        "    actions:\n"
+        "      while_do:\n"
+        "        condition: true\n"
+        "        do:\n"
+        "          - shell: echo loop\n";
+
+    auto while_wf = writeTempWorkflow("legacy_while_orch.yml", while_content);
+
+    REQUIRE_THROWS_WITH(TaskParser::parseFile(while_wf.string()),
+        Catch::Matchers::ContainsSubstring("Legacy orchestration node type 'while_do'"));
+}
+
+TEST_CASE("parse accepts flat timeout orch roots without treating them as task timeout")
+{
+    const std::string content =
+        "tasks:\n"
+        "  - name: guard\n"
+        "    timeout: 250\n"
+        "    child:\n"
+        "      shell: echo guarded\n";
+
+    auto wf = writeTempWorkflow("timeout_bt_root.yml", content);
+
+    Workflow workflow = TaskParser::parseFile(wf.string());
+    REQUIRE(workflow.tasks.size() == 1);
+    CHECK_FALSE(workflow.tasks[0].timeout.has_value());
+    REQUIRE(std::holds_alternative<OrchParams>(workflow.tasks[0].specifics));
+
+    const auto& params = std::get<OrchParams>(workflow.tasks[0].specifics);
+    CHECK(params.root.type == "Timeout");
+    CHECK(params.root.params.at("timeout_ms") == "250");
+    REQUIRE(params.root.children.size() == 1);
+    CHECK(params.root.children[0].type == "Shell");
+}
+
+TEST_CASE("parse rejects unknown BT node parameters")
+{
+    const std::string content =
+        "tasks:\n"
+        "  - name: broken\n"
+        "    sequence:\n"
+        "      - shell:\n"
+        "          cmd: echo hello\n"
+        "          not_a_real_param: nope\n";
+
+    auto wf = writeTempWorkflow("unknown_bt_param.yml", content);
+
+    REQUIRE_THROWS_WITH(TaskParser::parseFile(wf.string()),
+        Catch::Matchers::ContainsSubstring("Unknown orchestration parameter 'not_a_real_param'"));
+}
+
+TEST_CASE("parse rejects malformed BT integer parameters")
+{
+    const std::string content =
+        "tasks:\n"
+        "  - name: broken_timeout\n"
+        "    timeout: nope\n"
+        "    child:\n"
+        "      shell:\n"
+        "        cmd: echo hello\n";
+
+    auto wf = writeTempWorkflow("invalid_bt_integer_param.yml", content);
+
+    REQUIRE_THROWS_WITH(TaskParser::parseFile(wf.string()),
+        Catch::Matchers::ContainsSubstring("Orchestration parameter 'timeout_ms'"));
+}
+
+TEST_CASE("parse rejects malformed BT boolean parameters")
+{
+    const std::string content =
+        "tasks:\n"
+        "  - name: noisy\n"
+        "    shell:\n"
+        "      cmd: echo hi\n"
+        "      stream_output: maybe\n";
+
+    auto wf = writeTempWorkflow("invalid_bt_bool_param.yml", content);
+
+    REQUIRE_THROWS_WITH(TaskParser::parseFile(wf.string()),
+        Catch::Matchers::ContainsSubstring("Orchestration parameter 'stream_output'"));
+}
+
+TEST_CASE("parse accepts subtree shorthand with tree parameter")
+{
+    const std::string content =
+        "tasks:\n"
+        "  - name: run_subtree\n"
+        "    subtree: build_inner\n";
+
+    auto wf = writeTempWorkflow("subtree_bt.yml", content);
+
+    Workflow workflow = TaskParser::parseFile(wf.string());
+    REQUIRE(workflow.tasks.size() == 1);
+    REQUIRE(std::holds_alternative<OrchParams>(workflow.tasks[0].specifics));
+
+    const auto& params = std::get<OrchParams>(workflow.tasks[0].specifics);
+    CHECK(params.root.type == "SubTree");
+    CHECK(params.root.params.at("tree") == "build_inner");
+}
+
+TEST_CASE("parse accepts flat set_variable syntax and rejects legacy map syntax")
+{
+    const std::string content =
+        "tasks:\n"
+        "  - name: state_update\n"
+        "    sequence:\n"
+        "      - set_variable: deployment_status\n"
+        "        value: ready\n"
+        "      - set_variable: deployed_version\n"
+        "        from: build_version\n";
+
+    auto wf = writeTempWorkflow("set_variable_bt.yml", content);
+
+    Workflow workflow = TaskParser::parseFile(wf.string());
+    REQUIRE(workflow.tasks.size() == 1);
+    REQUIRE(std::holds_alternative<OrchParams>(workflow.tasks[0].specifics));
+
+    const auto& params = std::get<OrchParams>(workflow.tasks[0].specifics);
+    REQUIRE(params.root.children.size() == 2);
+    CHECK(params.root.children[0].type == "SetVariable");
+    CHECK(params.root.children[0].params.at("key") == "deployment_status");
+    CHECK(params.root.children[0].params.at("value") == "ready");
+    CHECK(params.root.children[1].type == "SetVariable");
+    CHECK(params.root.children[1].params.at("key") == "deployed_version");
+    CHECK(params.root.children[1].params.at("from") == "build_version");
+
+    const std::string legacy_content =
+        "tasks:\n"
+        "  - name: legacy_setter\n"
+        "    actions:\n"
+        "      set_variable:\n"
+        "        key: deployment_status\n"
+        "        value: ready\n";
+
+    auto legacy_wf = writeTempWorkflow("legacy_set_variable_orch.yml", legacy_content);
+
+    REQUIRE_THROWS_WITH(TaskParser::parseFile(legacy_wf.string()),
+        Catch::Matchers::ContainsSubstring("Legacy orchestration node type 'set_variable'"));
+}
+
+TEST_CASE("parse accepts flat while syntax and flat switch syntax")
+{
+    const std::string content =
+        "tasks:\n"
+        "  - name: advanced_nodes\n"
+        "    sequence:\n"
+        "      - while: \"{ctx.variables.keep_running}\"\n"
+        "        do:\n"
+        "          - shell: echo loop\n"
+        "      - switch: selected_case\n"
+        "        cases:\n"
+        "          - shell: echo zero\n"
+        "          - sequence:\n"
+        "              - shell: echo one\n";
+
+    auto wf = writeTempWorkflow("advanced_bt_nodes.yml", content);
+
+    Workflow workflow = TaskParser::parseFile(wf.string());
+    REQUIRE(workflow.tasks.size() == 1);
+    REQUIRE(std::holds_alternative<OrchParams>(workflow.tasks[0].specifics));
+
+    const auto& params = std::get<OrchParams>(workflow.tasks[0].specifics);
+    REQUIRE(params.root.children.size() == 2);
+
+    const auto& while_node = params.root.children[0];
+    CHECK(while_node.type == "WhileDo");
+    CHECK(while_node.params.at("condition") == "{ctx.variables.keep_running}");
+    REQUIRE(while_node.children.size() == 1);
+    CHECK(while_node.children[0].type == "Sequence");
+
+    const auto& switch_node = params.root.children[1];
+    CHECK(switch_node.type == "Switch");
+    CHECK(switch_node.params.at("variable") == "selected_case");
+    REQUIRE(switch_node.children.size() == 2);
+    CHECK(switch_node.children[0].type == "Shell");
+    CHECK(switch_node.children[1].type == "Sequence");
+}
+
+TEST_CASE("parse rejects legacy switch and timeout grammar")
+{
+    const std::string switch_content =
+        "tasks:\n"
+        "  - name: legacy_switch\n"
+        "    actions:\n"
+        "      switch:\n"
+        "        variable: selected_case\n"
+        "        cases:\n"
+        "          - shell: echo zero\n";
+
+    auto switch_wf = writeTempWorkflow("legacy_switch_orch.yml", switch_content);
+
+    REQUIRE_THROWS_WITH(TaskParser::parseFile(switch_wf.string()),
+        Catch::Matchers::ContainsSubstring("Legacy orchestration node type 'switch'"));
+
+    const std::string timeout_content =
+        "tasks:\n"
+        "  - name: legacy_timeout\n"
+        "    actions:\n"
+        "      timeout:\n"
+        "        timeout_ms: 100\n"
+        "        child:\n"
+        "          shell: echo guarded\n";
+
+    auto timeout_wf = writeTempWorkflow("legacy_timeout_orch.yml", timeout_content);
+
+    REQUIRE_THROWS_WITH(TaskParser::parseFile(timeout_wf.string()),
+        Catch::Matchers::ContainsSubstring("Legacy orchestration node type 'timeout'"));
+}
+
+TEST_CASE("parse accepts flat run_once root syntax")
+{
+    const std::string content =
+        "tasks:\n"
+        "  - name: only_once\n"
+        "    run_once: true\n"
+        "    child:\n"
+        "      shell: echo hi\n";
+
+    auto wf = writeTempWorkflow("run_once_bt_root.yml", content);
+
+    Workflow workflow = TaskParser::parseFile(wf.string());
+    REQUIRE(workflow.tasks.size() == 1);
+    REQUIRE(std::holds_alternative<OrchParams>(workflow.tasks[0].specifics));
+
+    const auto& params = std::get<OrchParams>(workflow.tasks[0].specifics);
+    CHECK(params.root.type == "RunOnce");
+    REQUIRE(params.root.children.size() == 1);
+    CHECK(params.root.children[0].type == "Shell");
 }

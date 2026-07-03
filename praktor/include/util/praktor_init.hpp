@@ -1,5 +1,4 @@
-#ifndef __PRAKTOR_INIT_HPP__
-#define __PRAKTOR_INIT_HPP__
+#pragma once
 
 #include <string>
 
@@ -18,5 +17,3 @@ public:
 
 } // namespace Utils
 } // namespace Praktor
-
-#endif // __PRAKTOR_INIT_HPP__

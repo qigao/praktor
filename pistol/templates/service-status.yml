@@ -33,11 +33,10 @@ tasks:
       if (running) {
         statusValue = "running";
       }
-      var result = {
-        "service": ctx.get("SERVICE_NAME"),
-        "running": running,
-        "raw": ctx.get("tasks.query_status.outputs.status_raw"),
-        "status": statusValue
-      };
-      ctx.output("result", json.stringify(result));
-      log.info("Service status: " + json.stringify(result));
+      var runningStr = "false";
+      if (running) {
+        runningStr = "true";
+      }
+      var jsonStr = "{\"service\":" + json.stringify(ctx.get("SERVICE_NAME")) + ", \"running\":" + runningStr + ", \"raw\":" + json.stringify(ctx.get("tasks.query_status.outputs.status_raw")) + ", \"status\":" + json.stringify(statusValue) + "}";
+      ctx.output("result", jsonStr);
+      log.info("Service status: " + jsonStr);

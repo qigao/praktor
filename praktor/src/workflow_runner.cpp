@@ -3,6 +3,7 @@
 #include "util/logging.hpp"
 #include "util/file_utils.hpp"
 #include "util/native_loader.hpp"
+#include "util/path_utils.hpp"
 #include "util/system_info.hpp"
 #include "yml/task_parser.hpp"
 #include "dag/workflow_executor.hpp"
@@ -18,22 +19,11 @@
 
 namespace {
 
-std::filesystem::path resolveRelativePath(const std::string& source_path, const std::string& child) {
-    std::filesystem::path relative(child);
-    if (relative.is_absolute()) {
-        return relative.lexically_normal();
-    }
-
-    std::filesystem::path base =
-        source_path.empty() ? std::filesystem::current_path() : std::filesystem::path(source_path).parent_path();
-    return (base / relative).lexically_normal();
-}
-
 std::unordered_map<std::string, std::string> collectWorkflowEnvironment(const Workflow& workflow) {
     std::unordered_map<std::string, std::string> env_values;
 
     for (const auto& env_path_str : workflow.dot_env) {
-        std::filesystem::path env_path = resolveRelativePath(workflow.source_path, env_path_str);
+        std::filesystem::path env_path = Praktor::util::resolveRelativePath(workflow.source_path, env_path_str);
         if (!std::filesystem::exists(env_path)) {
             TLOG_WARN("dotEnv file not found: {}", env_path.string());
             continue;
@@ -95,6 +85,59 @@ void populateWorkflowEnvironmentContext(
     }
 }
 
+void preloadNativeModules(const Workflow& workflow) {
+    if (workflow.native_modules.empty()) {
+        return;
+    }
+
+    TLOG_DEBUG("Pre-loading {} native module libraries", workflow.native_modules.size());
+    Praktor::Native::NativeLoader::instance().loadModuleLibraries(
+        workflow.native_modules, workflow.source_path);
+}
+
+void populateWorkflowVariables(WorkflowContext& context,
+                               const Workflow& workflow,
+                               const std::unordered_map<std::string, std::string>& input_values) {
+    for (const auto& [key, value] : input_values) {
+        setWorkflowVariable(context, key, value);
+        TLOG_DEBUG("Set input variable: {} = {}", key, value);
+    }
+
+    for (const auto& [key, value] : workflow.variables) {
+        if (input_values.find(key) == input_values.end()) {
+            setWorkflowVariable(context, key, value);
+            TLOG_DEBUG("Set variable: {} = {}", key, value);
+        } else {
+            TLOG_DEBUG("Preserved input override for variable: {}", key);
+        }
+    }
+}
+
+struct PreparedWorkflow {
+    Workflow workflow;
+    DependencyGraph<Task> graph{"prepared_workflow"};
+    std::unordered_map<std::string, std::string> runtime_environment;
+    std::unique_ptr<WorkflowContext> context;
+};
+
+PreparedWorkflow prepareExecution(const std::string& yaml_path,
+                                  const std::filesystem::path& base_directory,
+                                  const std::unordered_map<std::string, std::string>& input_values,
+                                  const std::unordered_map<std::string, std::string>& base_environment) {
+    PreparedWorkflow prepared;
+    prepared.workflow = TaskParser::parseFileWithImports(yaml_path, base_directory.string());
+    prepared.runtime_environment = buildRuntimeEnvironment(prepared.workflow, base_environment);
+    prepared.graph = TaskParser::buildGraph(prepared.workflow);
+    prepared.context = std::make_unique<WorkflowContext>(input_values);
+    prepared.context->setEmbeddedModules(prepared.workflow.embedded);
+    prepared.context->setNativeModules(prepared.workflow.native_modules);
+    prepared.context->setSourcePath(prepared.workflow.source_path);
+    populateWorkflowEnvironmentContext(*prepared.context, prepared.runtime_environment);
+    preloadNativeModules(prepared.workflow);
+    populateWorkflowVariables(*prepared.context, prepared.workflow, input_values);
+    return prepared;
+}
+
 } // namespace
 
 WorkflowRunner::WorkflowRunner(std::string const& yamlPath,
@@ -110,59 +153,23 @@ WorkflowRunner::~WorkflowRunner() = default;
 bool WorkflowRunner::run(bool useConcurrent, int maxConcurrency) {
     try {
         TLOG_DEBUG("Loading workflow from: {}", yamlPath_);
-        Workflow workflow = TaskParser::parseFileWithImports(yamlPath_, base_directory_.string());
+        auto prepared = prepareExecution(yamlPath_, base_directory_, inputValues_, baseEnvironment_);
 
-        auto runtime_environment = buildRuntimeEnvironment(workflow, baseEnvironment_);
-
-        auto workflow_dir = std::filesystem::path(workflow.source_path).parent_path();
-        if (workflow_dir.empty()) {
-            workflow_dir = base_directory_;
-        }
-
-        WorkflowContext context(inputValues_);
-        context.setEmbeddedModules(workflow.embedded);
-        context.setNativeModules(workflow.native_modules);
-        context.setSourcePath(workflow.source_path);
-        populateWorkflowEnvironmentContext(context, runtime_environment);
-
-        // Pre-load native module DLLs (dlopen + resolve hooks)
-        if (!workflow.native_modules.empty()) {
-            TLOG_DEBUG("Pre-loading {} native module libraries", workflow.native_modules.size());
-            Praktor::Native::NativeLoader::instance().loadModuleLibraries(
-                workflow.native_modules, workflow.source_path);
-        }
-
-        TLOG_DEBUG("Initializing workflow context...");
-        for (const auto& [key, value] : inputValues_) {
-            setWorkflowVariable(context, key, value);
-            TLOG_DEBUG("Set input variable: {} = {}", key, value);
-        }
-        for (const auto& [key, value] : workflow.variables) {
-            if (inputValues_.find(key) == inputValues_.end()) {
-                setWorkflowVariable(context, key, value);
-                TLOG_DEBUG("Set variable: {} = {}", key, value);
-            } else {
-                TLOG_DEBUG("Preserved input override for variable: {}", key);
-            }
-        }
-
-        for (const auto& [key, value] : runtime_environment) {
+        for (const auto& [key, value] : prepared.runtime_environment) {
             TLOG_DEBUG("Set workflow environment: {} = {}", key, value);
         }
 
-        TLOG_DEBUG("Building task graph...");
-        DependencyGraph<Task> graph = TaskParser::buildGraph(workflow);
-
         TLOG_DEBUG("Starting workflow execution...");
         WorkflowExecutor executor(
-            graph,
-            workflow.tasks,
-            runtime_environment,
+            prepared.graph,
+            prepared.workflow.tasks,
+            prepared.runtime_environment,
             useConcurrent ? maxConcurrency : 1,
             false);
-        executor.execute(context);
+        executor.execute(*prepared.context);
 
-        std::string status = context.getValueOrDefault<std::string>("workflow_status", "unknown");
+        std::string status =
+            prepared.context->getValueOrDefault<std::string>("workflow_status", "unknown");
         if (status == "failed") {
             if (!Praktor::Logging::isVerboseEnabled()) {
                 Praktor::Logging::printWorkflowStatus("FAILED");
@@ -186,55 +193,29 @@ bool WorkflowRunner::run(bool useConcurrent, int maxConcurrency) {
 bool WorkflowRunner::runTask(std::string const& taskName, bool useConcurrent, int maxConcurrency) {
     try {
         TLOG_DEBUG("Loading workflow to run single task: {}", taskName);
-        Workflow workflow = TaskParser::parseFileWithImports(yamlPath_, base_directory_.string());
+        auto prepared = prepareExecution(yamlPath_, base_directory_, inputValues_, baseEnvironment_);
 
-        auto runtime_environment = buildRuntimeEnvironment(workflow, baseEnvironment_);
-
-        auto workflow_dir = std::filesystem::path(workflow.source_path).parent_path();
-        if (workflow_dir.empty()) {
-            workflow_dir = base_directory_;
-        }
-
-        auto targetTaskIt = std::find_if(workflow.tasks.begin(), workflow.tasks.end(),
+        auto targetTaskIt = std::find_if(prepared.workflow.tasks.begin(), prepared.workflow.tasks.end(),
             [&](const Task& task) { return task.name == taskName; });
 
-        if (targetTaskIt == workflow.tasks.end()) {
+        if (targetTaskIt == prepared.workflow.tasks.end()) {
             throw std::runtime_error("Target task '" + taskName + "' not found in workflow.");
         }
 
-        DependencyGraph<Task> fullGraph = TaskParser::buildGraph(workflow);
         TLOG_DEBUG("Creating subgraph for task: {}", taskName);
-        DependencyGraph<Task> subgraph = fullGraph.createSubgraphFor(*targetTaskIt);
-
-        WorkflowContext context(inputValues_);
-        context.setEmbeddedModules(workflow.embedded);
-        context.setNativeModules(workflow.native_modules);
-        context.setSourcePath(workflow.source_path);
-        populateWorkflowEnvironmentContext(context, runtime_environment);
-
-        // Pre-load native module DLLs (dlopen + resolve hooks)
-        if (!workflow.native_modules.empty()) {
-            TLOG_DEBUG("Pre-loading {} native module libraries", workflow.native_modules.size());
-            Praktor::Native::NativeLoader::instance().loadModuleLibraries(
-                workflow.native_modules, workflow.source_path);
-        }
-
-        for (const auto& [key, value] : workflow.variables) {
-            if (inputValues_.find(key) == inputValues_.end()) {
-                setWorkflowVariable(context, key, value);
-            }
-        }
+        DependencyGraph<Task> subgraph = prepared.graph.createSubgraphFor(*targetTaskIt);
 
         TLOG_DEBUG("Executing subgraph for task: {}", taskName);
         WorkflowExecutor executor(
             subgraph,
-            workflow.tasks,
-            runtime_environment,
+            prepared.workflow.tasks,
+            prepared.runtime_environment,
             useConcurrent ? maxConcurrency : 1,
             true);
-        executor.execute(context);
+        executor.execute(*prepared.context);
 
-        std::string status = context.getValueOrDefault<std::string>("workflow_status", "unknown");
+        std::string status =
+            prepared.context->getValueOrDefault<std::string>("workflow_status", "unknown");
         if (!Praktor::Logging::isVerboseEnabled()) {
             Praktor::Logging::printWorkflowStatus(status == "failed" ? "FAILED" : "SUCCESS");
         }

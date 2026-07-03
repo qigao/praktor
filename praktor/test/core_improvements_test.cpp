@@ -8,6 +8,19 @@
 
 namespace fs = std::filesystem;
 
+namespace {
+
+std::string writeTextCommand(const fs::path& path, const std::string& text)
+{
+#ifdef _WIN32
+    return "echo " + text + " > " + path.string();
+#else
+    return "printf '" + text + "' > " + path.string();
+#endif
+}
+
+}
+
 TEST_CASE("Parser Improvements - Line Numbers & Validation", "[parser][schema]") {
     fs::path temp_file = "temp_invalid.yml";
 
@@ -107,6 +120,32 @@ TEST_CASE("Execution Engine - Task Caching", "[execution][caching]") {
         WorkflowContext context3;
         executor.execute(context3);
         REQUIRE(context3.getTaskStatus("cache_task") == "success");
+    }
+
+    SECTION("Action changed: re-execute") {
+        executor.execute(context); // cache the first command
+
+        {
+            std::ofstream(wf_path)
+                << "tasks:\n"
+                << "  - name: cache_task\n"
+                << "    command: " << writeTextCommand(gen, "changed") << "\n"
+                << "    sources: [" << src.string() << "]\n"
+                << "    generates: [" << gen.string() << "]\n";
+        }
+
+        Workflow updated_wf = TaskParser::parseFile(wf_path.string());
+        DependencyGraph<Task> updated_graph = TaskParser::buildGraph(updated_wf);
+        WorkflowContext context4;
+        WorkflowExecutor updated_executor(updated_graph);
+
+        updated_executor.execute(context4);
+
+        REQUIRE(context4.getTaskStatus("cache_task") == "success");
+        std::ifstream in(gen);
+        std::string output;
+        std::getline(in, output);
+        CHECK(output.find("changed") != std::string::npos);
     }
 
     if (fs::exists(src)) fs::remove(src);

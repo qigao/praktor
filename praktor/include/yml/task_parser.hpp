@@ -1,5 +1,4 @@
-#ifndef __TASK_PARSER_HPP__
-#define __TASK_PARSER_HPP__
+#pragma once
 
 #include "dag/dependency_graph.hpp"
 #include "task.hpp"
@@ -36,4 +35,3 @@ namespace TaskParser {
 
 } // namespace TaskParser
 
-#endif // __TASK_PARSER_HPP__

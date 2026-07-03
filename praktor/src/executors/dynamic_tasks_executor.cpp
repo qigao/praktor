@@ -30,8 +30,8 @@ std::string taskTypeName(const Task& task)
             return "uses";
         case TaskAction::DynamicTasks:
             return "dynamic_tasks";
-        case TaskAction::Btdsl:
-            return "btdsl";
+        case TaskAction::Orch:
+            return "actions";
         case TaskAction::None:
             break;
     }
@@ -170,7 +170,7 @@ TaskResult DynamicTasksExecutor::execute(const Task& task, WorkflowContext& cont
             context.setCurrentTaskOutput("success_count", success_count);
             context.setCurrentTaskOutput("failed_count", failed_count);
             context.setCurrentTaskOutput("skipped_count", skipped_count);
-            if (!callback_success && !task.continue_on_error) {
+            if (!callback_success) {
                 TaskResult result(false, "Generated task '" + generated.name + "' failed");
                 if (first_failure_context.has_value()) {
                     result.nested_failure_context = *first_failure_context;
@@ -255,8 +255,8 @@ Task DynamicTasksExecutor::generateTask(const Task& parent_task,
     // Substitute item placeholders in name
     task.name = substituteItemPlaceholders(tmpl.name, item, index);
 
-    // Set action and specifics using BTDSL substitution
-    task.action = TaskAction::Btdsl;
+    // Set action and specifics using action substitution
+    task.action = TaskAction::Orch;
     task.declared_runner = "command";
     task.source_path = parent_task.source_path;
 
@@ -276,10 +276,6 @@ Task DynamicTasksExecutor::generateTask(const Task& parent_task,
     // Copy optional fields
     if (tmpl.timeout) {
         task.timeout = substituteItemPlaceholders(*tmpl.timeout, item, index);
-    }
-
-    if (tmpl.retries) {
-        task.retries = *tmpl.retries;
     }
 
     if (tmpl.when) {

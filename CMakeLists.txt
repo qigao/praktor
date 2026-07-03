@@ -1,6 +1,10 @@
 cmake_minimum_required(VERSION 3.20)
-cmake_policy(SET CMP0144 OLD)
-cmake_policy(SET CMP0167 OLD) # for boost
+if(POLICY CMP0144)
+    cmake_policy(SET CMP0144 OLD)
+endif()
+if(POLICY CMP0167)
+    cmake_policy(SET CMP0167 OLD) # for boost
+endif()
 
 set(CMAKE_C_STANDARD 17)
 set(CMAKE_CXX_STANDARD 20)
@@ -49,6 +53,5 @@ find_package(TurboNet CONFIG REQUIRED PATHS "${TURBONET_ROOT}")
 find_package(TurboScript CONFIG REQUIRED PATHS "${TURBOSCRIPT_ROOT}")
 add_subdirectory(shared)
 add_subdirectory(praktor)
-add_subdirectory(btdsl)
+add_subdirectory(actions)
 add_subdirectory(pistol)
-

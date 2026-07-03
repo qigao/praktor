@@ -1,5 +1,4 @@
-#ifndef __TASK_REGISTRY_HPP__
-#define __TASK_REGISTRY_HPP__
+#pragma once
 
 #include <jsoncons/json.hpp>
 #include <stdexcept>
@@ -62,7 +61,7 @@ public:
      * When a task starts, it is removed from completed/failed sets.
      */
     void startTask(const std::string& task_name) {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::lock_guard<std::recursive_mutex> lock(mutex_);
         task_state_[task_name] = TaskState::Running;
         completed_tasks_.erase(task_name);
         failed_tasks_.erase(task_name);
@@ -73,7 +72,7 @@ public:
      * @brief Record that a task completed successfully (locks outputs)
      */
     void markCompleted(const std::string& task_name) {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::lock_guard<std::recursive_mutex> lock(mutex_);
         task_state_[task_name] = TaskState::Completed;
         completed_tasks_.insert(task_name);
     }
@@ -82,7 +81,7 @@ public:
      * @brief Record that a task failed (locks outputs)
      */
     void markFailed(const std::string& task_name, const std::string& error_message) {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::lock_guard<std::recursive_mutex> lock(mutex_);
         task_state_[task_name] = TaskState::Failed;
         failed_tasks_[task_name] = error_message;
     }
@@ -91,7 +90,7 @@ public:
      * @brief Get task state
      */
     TaskState getState(const std::string& task_name) const {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::lock_guard<std::recursive_mutex> lock(mutex_);
         return getStateInternal(task_name);
     }
 
@@ -113,7 +112,7 @@ public:
         } else if (status == "failed") {
             markFailed(task_name, "Task explicitly set to failed status");
         } else if (status == "skipped") {
-            std::lock_guard<std::mutex> lock(mutex_);
+            std::lock_guard<std::recursive_mutex> lock(mutex_);
             task_state_[task_name] = TaskState::Skipped;
             completed_tasks_.insert(task_name);
         }
@@ -127,7 +126,7 @@ public:
      */
     void setOutput(const std::string& task_name, const std::string& key,
                    const jsoncons::json& value) {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::lock_guard<std::recursive_mutex> lock(mutex_);
         TaskState state = getStateInternal(task_name);
         if (state != TaskState::Running && state != TaskState::Pending) {
             throw std::runtime_error(
@@ -143,24 +142,23 @@ public:
 
     /**
      * @brief Merge multiple outputs for a task
+     * 
+     * Now properly delegates to setOutput to ensure all validation logic is centralized.
+     * Uses recursive_mutex to allow nested locking.
      * @throws std::runtime_error if task is not in Running state
      */
     void mergeOutputs(const std::string& task_name, const jsoncons::json& outputs) {
         if (!outputs.is_object()) {
             return;
         }
-        std::lock_guard<std::mutex> lock(mutex_);
+        // Delegate to setOutput (recursive_mutex allows re-entry)
         for (const auto& item : outputs.object_range()) {
-            // Internal setOutput logic duplicate or use helper?
-            // Since we already locked, we can't call setOutput (it locks too).
-            // Let's refactor setOutput logic to private if needed, but for now just inline or use recursive_mutex?
-            // Better: use internal helper.
-            setOutputInternal(task_name, item.key(), item.value());
+            setOutput(task_name, item.key(), item.value());
         }
     }
 
     void clearOutputs(const std::string& task_name) {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::lock_guard<std::recursive_mutex> lock(mutex_);
         task_outputs_.erase(task_name);
     }
 
@@ -171,7 +169,7 @@ public:
      * ensuring the data is final and won't change.
      */
     jsoncons::json getOutput(const std::string& task_name, const std::string& key) const {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::lock_guard<std::recursive_mutex> lock(mutex_);
         auto task_it = task_outputs_.find(task_name);
         if (task_it == task_outputs_.end()) {
             throw std::runtime_error("Task not found: " + task_name);
@@ -189,7 +187,7 @@ public:
      * @brief Get all outputs for a task
      */
     jsoncons::json getAllOutputs(const std::string& task_name) const {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::lock_guard<std::recursive_mutex> lock(mutex_);
         auto it = task_outputs_.find(task_name);
         if (it == task_outputs_.end()) {
             return jsoncons::json::object();
@@ -206,7 +204,7 @@ public:
      * @brief Check if task completed successfully
      */
     bool isCompleted(const std::string& task_name) const {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::lock_guard<std::recursive_mutex> lock(mutex_);
         return completed_tasks_.count(task_name) > 0;
     }
 
@@ -214,7 +212,7 @@ public:
      * @brief Check if task failed
      */
     bool isFailed(const std::string& task_name) const {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::lock_guard<std::recursive_mutex> lock(mutex_);
         return failed_tasks_.count(task_name) > 0;
     }
 
@@ -222,7 +220,7 @@ public:
      * @brief Check if task outputs are finalized (completed or failed)
      */
     bool isFinalized(const std::string& task_name) const {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::lock_guard<std::recursive_mutex> lock(mutex_);
         TaskState state = getStateInternal(task_name);
         return state == TaskState::Completed || state == TaskState::Failed;
     }
@@ -231,7 +229,7 @@ public:
      * @brief Get all completed task names
      */
     std::unordered_set<std::string> getCompletedTasks() const {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::lock_guard<std::recursive_mutex> lock(mutex_);
         return completed_tasks_;
     }
 
@@ -239,7 +237,7 @@ public:
      * @brief Get all failed tasks with their error messages
      */
     std::unordered_map<std::string, std::string> getFailedTasks() const {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::lock_guard<std::recursive_mutex> lock(mutex_);
         return failed_tasks_;
     }
 
@@ -247,7 +245,7 @@ public:
      * @brief Get error message for a failed task
      */
     std::string getFailureReason(const std::string& task_name) const {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::lock_guard<std::recursive_mutex> lock(mutex_);
         auto it = failed_tasks_.find(task_name);
         return (it != failed_tasks_.end()) ? it->second : "";
     }
@@ -256,7 +254,7 @@ public:
      * @brief Build a JSON representation of all tasks for context access
      */
     jsoncons::json toJson() const {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::lock_guard<std::recursive_mutex> lock(mutex_);
         jsoncons::json result = jsoncons::json::object();
 
         for (const auto& [task_name, state] : task_state_) {
@@ -284,23 +282,10 @@ private:
         return (it != task_state_.end()) ? it->second : TaskState::Pending;
     }
 
-    void setOutputInternal(const std::string& task_name, const std::string& key, const jsoncons::json& value) {
-        TaskState state = getStateInternal(task_name);
-        if (state != TaskState::Running && state != TaskState::Pending) {
-             throw std::runtime_error(
-                "Cannot set output for task '" + task_name + "': task is " +
-                taskStateToString(state) + " (outputs are immutable after completion)");
-        }
-        if (state == TaskState::Pending) {
-            task_state_[task_name] = TaskState::Running;
-        }
-        task_outputs_[task_name][key] = value;
-    }
-    mutable std::mutex mutex_;
+    mutable std::recursive_mutex mutex_;  // Changed to recursive_mutex to allow setOutput calling from mergeOutputs
     std::unordered_map<std::string, TaskState> task_state_;
     std::unordered_set<std::string> completed_tasks_;
     std::unordered_map<std::string, std::string> failed_tasks_;
     std::unordered_map<std::string, std::unordered_map<std::string, jsoncons::json>> task_outputs_;
 };
 
-#endif // __TASK_REGISTRY_HPP__

@@ -19,6 +19,9 @@
             "version>=": "3.12.5"
         },
         {
+            "name": "stc"
+        },
+        {
             "name": "effolkronium-random",
             "version>=": "1.5.0"
         },

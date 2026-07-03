@@ -1,5 +1,4 @@
-#ifndef __SHARED_THREAD_POOL_HPP__
-#define __SHARED_THREAD_POOL_HPP__
+#pragma once
 
 #include "util/thread_pool.hpp"
 #include <algorithm>
@@ -39,5 +38,3 @@ private:
 };
 
 } // namespace Praktor
-
-#endif // __SHARED_THREAD_POOL_HPP__

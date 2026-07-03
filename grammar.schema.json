@@ -28,9 +28,6 @@
       "type": "object",
       "description": "Default attributes applied to all tasks.",
       "properties": {
-        "retries": {
-          "$ref": "#/$defs/retriesPolicy"
-        },
         "timeout": {
           "$ref": "#/$defs/durationString"
         }
@@ -82,41 +79,6 @@
       "type": "string",
       "description": "A duration string, e.g., '30s', '5m', '1h'.",
       "pattern": "^[0-9]+(s|m|h)$"
-    },
-    "retriesPolicy": {
-      "type": "object",
-      "properties": {
-        "count": {
-          "type": "integer",
-          "minimum": 0,
-          "description": "Maximum number of retry attempts."
-        },
-        "delay": {
-          "$ref": "#/$defs/durationString",
-          "description": "The delay between attempts."
-        },
-        "on_exit_codes": {
-          "type": "array",
-          "items": {
-            "type": "integer"
-          },
-          "description": "Only retry if exit code matches one of these values. If omitted, retries on any non-zero exit code."
-        },
-        "on_stderr_pattern": {
-          "type": "string",
-          "description": "Only retry if stderr matches this regex pattern. Useful for retrying on specific error messages."
-        },
-        "backoff": {
-          "type": "string",
-          "enum": ["linear", "exponential"],
-          "default": "linear",
-          "description": "Backoff strategy: 'linear' (constant delay) or 'exponential' (delay doubles each retry)."
-        }
-      },
-      "required": [
-        "count"
-      ],
-      "additionalProperties": false
     },
     "nativeModule": {
       "type": "object",
@@ -224,10 +186,10 @@
           "$ref": "#/$defs/stringOrStringArray"
         },
         "timeout": {
-          "$ref": "#/$defs/durationString"
-        },
-        "retries": {
-          "$ref": "#/$defs/retriesPolicy"
+          "oneOf": [
+            { "type": "string" },
+            { "type": "number" }
+          ]
         },
         "when": {
           "type": "string"
@@ -237,11 +199,6 @@
         },
         "triggers": {
           "$ref": "#/$defs/triggersBlock"
-        },
-        "continue_on_error": {
-          "type": "boolean",
-          "description": "If true, workflow continues even if this task fails.",
-          "default": false
         },
         "working_dir": {
           "type": "string",
@@ -265,6 +222,21 @@
               "minItems": 1
             }
           ]
+        },
+        "program": {
+          "type": "string",
+          "description": "Executable path or program name for raw process execution. Does not invoke a shell."
+        },
+        "args": {
+          "type": "array",
+          "description": "Argument vector passed to program without shell parsing.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "stdin": {
+          "type": "string",
+          "description": "Standard input passed to program."
         },
         "output_format": {
           "enum": [
@@ -294,7 +266,6 @@
                 "name": { "type": "string" },
                 "command": { "$ref": "#/$defs/stringOrStringArray" },
                 "timeout": { "$ref": "#/$defs/durationString" },
-                "retries": { "$ref": "#/$defs/retriesPolicy" },
                 "when": { "type": "string" },
                 "depends_on": { "$ref": "#/$defs/stringOrStringArray" },
                 "env": { "$ref": "#/$defs/stringMap" }
@@ -308,32 +279,125 @@
         "sequence": {
           "$ref": "#/$defs/orchestrationNodeChildren"
         },
-        "fallback": {
-          "$ref": "#/$defs/orchestrationNodeChildren"
-        },
         "parallel": {
           "$ref": "#/$defs/orchestrationNodeChildren"
         },
         "reactive_sequence": {
           "$ref": "#/$defs/orchestrationNodeChildren"
         },
-        "reactive_fallback": {
+        "pipeline_sequence": {
+          "$ref": "#/$defs/orchestrationPipelineSequenceNodeValue"
+        },
+        "fallback": {
+          "$ref": "#/$defs/orchestrationNodeChildren"
+        },
+        "selector": {
+          "$ref": "#/$defs/orchestrationNodeChildren"
+        },
+        "inverter": {
+          "$ref": "#/$defs/orchestrationNodeChildren"
+        },
+        "force_success": {
+          "$ref": "#/$defs/orchestrationNodeChildren"
+        },
+        "force_failure": {
+          "$ref": "#/$defs/orchestrationNodeChildren"
+        },
+        "repeat": {
+          "oneOf": [
+            { "type": "string" },
+            { "type": "number" }
+          ]
+        },
+        "delay": {
+          "oneOf": [
+            { "type": "string" },
+            { "type": "number" }
+          ]
+        },
+        "run_once": {
+          "oneOf": [
+            { "type": "string" },
+            { "type": "number" },
+            { "type": "boolean" }
+          ]
+        },
+        "keep_running_until_failure": {
+          "oneOf": [
+            { "type": "string" },
+            { "type": "number" }
+          ]
+        },
+        "consume_queue": {
+          "type": "string"
+        },
+        "precondition": {
+          "$ref": "#/$defs/orchestrationConditionScalar"
+        },
+        "entry_updated": {
+          "type": "string"
+        },
+        "if": {
+          "$ref": "#/$defs/orchestrationConditionValue"
+        },
+        "then": {
+          "$ref": "#/$defs/orchestrationNodeChildren"
+        },
+        "else": {
+          "$ref": "#/$defs/orchestrationNodeChildren"
+        },
+        "while": {
+          "$ref": "#/$defs/orchestrationConditionValue"
+        },
+        "do": {
+          "$ref": "#/$defs/orchestrationNodeChildren"
+        },
+        "max_iterations": {
+          "oneOf": [
+            { "type": "string" },
+            { "type": "number" }
+          ]
+        },
+        "switch": {
+          "oneOf": [
+            { "type": "string" },
+            { "type": "number" }
+          ]
+        },
+        "cases": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/orchestrationNodeChildren" },
+          "minItems": 1
+        },
+        "child": {
           "$ref": "#/$defs/orchestrationNodeChildren"
         },
         "shell": {
           "$ref": "#/$defs/orchestrationShellNode"
         },
         "parse_json": {
-          "$ref": "#/$defs/orchestrationParseJsonNode"
+          "oneOf": [
+            { "$ref": "#/$defs/commandParseJsonNode" },
+            { "$ref": "#/$defs/orchestrationParseJsonNode" }
+          ]
         },
         "parse_regex": {
-          "$ref": "#/$defs/orchestrationParseRegexNode"
+          "oneOf": [
+            { "$ref": "#/$defs/commandParseRegexNode" },
+            { "$ref": "#/$defs/orchestrationParseRegexNode" }
+          ]
         },
         "parse_lines": {
-          "$ref": "#/$defs/orchestrationParseLinesNode"
+          "oneOf": [
+            { "$ref": "#/$defs/commandParseLinesNode" },
+            { "$ref": "#/$defs/orchestrationParseLinesNode" }
+          ]
         },
         "parse_keyvalue": {
-          "$ref": "#/$defs/orchestrationParseKeyValueNode"
+          "oneOf": [
+            { "$ref": "#/$defs/commandParseKeyValueNode" },
+            { "$ref": "#/$defs/orchestrationParseKeyValueNode" }
+          ]
         },
         "check_exit_code": {
           "$ref": "#/$defs/orchestrationCheckExitCodeNode"
@@ -348,114 +412,659 @@
           "$ref": "#/$defs/orchestrationSleepNode"
         },
         "set_variable": {
-          "$ref": "#/$defs/orchestrationSetVariableNode"
+          "type": "string"
+        },
+        "value": {
+          "description": "Sibling value for flat set_variable syntax"
+        },
+        "from": {
+          "type": "string",
+          "description": "Sibling source key for flat set_variable syntax"
         },
         "subtree": {
-          "$ref": "#/$defs/orchestrationSubTreeNode"
+          "type": "string"
         }
       },
       "required": [
         "name"
       ],
-      "oneOf": [
+      "allOf": [
         {
-          "required": [
-            "command"
+          "anyOf": [
+            {
+              "required": [
+                "script"
+              ]
+            },
+            {
+              "required": [
+                "command"
+              ]
+            },
+            {
+              "required": [
+                "program"
+              ]
+            },
+            {
+              "required": [
+                "uses"
+              ]
+            },
+            {
+              "required": [
+                "dynamic_tasks"
+              ]
+            },
+            {
+              "required": [
+                "sequence"
+              ]
+            },
+            {
+              "required": [
+                "parallel"
+              ]
+            },
+            {
+              "required": [
+                "reactive_sequence"
+              ]
+            },
+            {
+              "required": [
+                "pipeline_sequence"
+              ]
+            },
+            {
+              "required": [
+                "fallback"
+              ]
+            },
+            {
+              "required": [
+                "selector"
+              ]
+            },
+            {
+              "required": [
+                "if",
+                "then"
+              ]
+            },
+            {
+              "required": [
+                "while",
+                "do"
+              ]
+            },
+            {
+              "required": [
+                "switch",
+                "cases"
+              ]
+            },
+            {
+              "required": [
+                "timeout",
+                "child"
+              ]
+            },
+            {
+              "required": [
+                "repeat",
+                "child"
+              ]
+            },
+            {
+              "required": [
+                "delay",
+                "child"
+              ]
+            },
+            {
+              "required": [
+                "run_once",
+                "child"
+              ]
+            },
+            {
+              "required": [
+                "keep_running_until_failure",
+                "child"
+              ]
+            },
+            {
+              "required": [
+                "consume_queue",
+                "child"
+              ]
+            },
+            {
+              "required": [
+                "precondition",
+                "child"
+              ]
+            },
+            {
+              "required": [
+                "entry_updated",
+                "child"
+              ]
+            },
+            {
+              "required": [
+                "inverter"
+              ]
+            },
+            {
+              "required": [
+                "force_success"
+              ]
+            },
+            {
+              "required": [
+                "force_failure"
+              ]
+            },
+            {
+              "required": [
+                "shell"
+              ]
+            },
+            {
+              "required": [
+                "parse_json"
+              ],
+              "not": {
+                "required": [
+                  "command"
+                ]
+              }
+            },
+            {
+              "required": [
+                "parse_regex"
+              ],
+              "not": {
+                "required": [
+                  "command"
+                ]
+              }
+            },
+            {
+              "required": [
+                "parse_lines"
+              ],
+              "not": {
+                "required": [
+                  "command"
+                ]
+              }
+            },
+            {
+              "required": [
+                "parse_keyvalue"
+              ],
+              "not": {
+                "required": [
+                  "command"
+                ]
+              }
+            },
+            {
+              "required": [
+                "check_exit_code"
+              ]
+            },
+            {
+              "required": [
+                "wait_event"
+              ]
+            },
+            {
+              "required": [
+                "file_exists"
+              ]
+            },
+            {
+              "required": [
+                "sleep"
+              ]
+            },
+            {
+              "required": [
+                "set_variable",
+                "value"
+              ]
+            },
+            {
+              "required": [
+                "set_variable",
+                "from"
+              ]
+            },
+            {
+              "required": [
+                "subtree"
+              ]
+            }
           ]
         },
         {
-          "required": [
-            "uses"
-          ]
-        },
-        {
-          "required": [
-            "dynamic_tasks"
-          ]
-        },
-        {
-          "required": [
-            "sequence"
-          ]
-        },
-        {
-          "required": [
-            "fallback"
-          ]
-        },
-        {
-          "required": [
-            "parallel"
-          ]
-        },
-        {
-          "required": [
-            "reactive_sequence"
-          ]
-        },
-        {
-          "required": [
-            "reactive_fallback"
-          ]
-        },
-        {
-          "required": [
-            "shell"
-          ]
-        },
-        {
-          "required": [
-            "parse_json"
-          ]
-        },
-        {
-          "required": [
-            "parse_regex"
-          ]
-        },
-        {
-          "required": [
-            "parse_lines"
-          ]
-        },
-        {
-          "required": [
-            "parse_keyvalue"
-          ]
-        },
-        {
-          "required": [
-            "check_exit_code"
-          ]
-        },
-        {
-          "required": [
-            "wait_event"
-          ]
-        },
-        {
-          "required": [
-            "file_exists"
-          ]
-        },
-        {
-          "required": [
-            "sleep"
-          ]
-        },
-        {
-          "required": [
-            "set_variable"
-          ]
-        },
-        {
-          "required": [
-            "script"
-          ]
-        },
-        {
-          "required": [
-            "subtree"
+          "oneOf": [
+            {
+              "required": [
+                "command"
+              ]
+            },
+            {
+              "required": [
+                "program"
+              ]
+            },
+            {
+              "required": [
+                "uses"
+              ]
+            },
+            {
+              "required": [
+                "dynamic_tasks"
+              ]
+            },
+            {
+              "required": [
+                "sequence"
+              ]
+            },
+            {
+              "required": [
+                "parallel"
+              ]
+            },
+            {
+              "required": [
+                "reactive_sequence"
+              ]
+            },
+            {
+              "required": [
+                "pipeline_sequence"
+              ]
+            },
+            {
+              "required": [
+                "fallback"
+              ]
+            },
+            {
+              "required": [
+                "selector"
+              ]
+            },
+            {
+              "required": [
+                "if",
+                "then"
+              ]
+            },
+            {
+              "required": [
+                "while",
+                "do"
+              ]
+            },
+            {
+              "required": [
+                "switch",
+                "cases"
+              ]
+            },
+            {
+              "required": [
+                "timeout",
+                "child"
+              ]
+            },
+            {
+              "required": [
+                "repeat",
+                "child"
+              ]
+            },
+            {
+              "required": [
+                "delay",
+                "child"
+              ]
+            },
+            {
+              "required": [
+                "run_once",
+                "child"
+              ]
+            },
+            {
+              "required": [
+                "keep_running_until_failure",
+                "child"
+              ]
+            },
+            {
+              "required": [
+                "consume_queue",
+                "child"
+              ]
+            },
+            {
+              "required": [
+                "precondition",
+                "child"
+              ]
+            },
+            {
+              "required": [
+                "entry_updated",
+                "child"
+              ]
+            },
+            {
+              "required": [
+                "inverter"
+              ]
+            },
+            {
+              "required": [
+                "force_success"
+              ]
+            },
+            {
+              "required": [
+                "force_failure"
+              ]
+            },
+            {
+              "required": [
+                "shell"
+              ]
+            },
+            {
+              "required": [
+                "parse_json"
+              ],
+              "not": {
+                "required": [
+                  "command"
+                ]
+              }
+            },
+            {
+              "required": [
+                "parse_regex"
+              ],
+              "not": {
+                "required": [
+                  "command"
+                ]
+              }
+            },
+            {
+              "required": [
+                "parse_lines"
+              ],
+              "not": {
+                "required": [
+                  "command"
+                ]
+              }
+            },
+            {
+              "required": [
+                "parse_keyvalue"
+              ],
+              "not": {
+                "required": [
+                  "command"
+                ]
+              }
+            },
+            {
+              "required": [
+                "check_exit_code"
+              ]
+            },
+            {
+              "required": [
+                "wait_event"
+              ]
+            },
+            {
+              "required": [
+                "file_exists"
+              ]
+            },
+            {
+              "required": [
+                "sleep"
+              ]
+            },
+            {
+              "required": [
+                "set_variable",
+                "value"
+              ]
+            },
+            {
+              "required": [
+                "set_variable",
+                "from"
+              ]
+            },
+            {
+              "required": [
+                "subtree"
+              ]
+            },
+            {
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "command"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "program"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "uses"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "dynamic_tasks"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "sequence"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "parallel"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "reactive_sequence"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "pipeline_sequence"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "fallback"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "selector"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "if",
+                      "then"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "while",
+                      "do"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "switch",
+                      "cases"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "timeout",
+                      "child"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "repeat",
+                      "child"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "delay",
+                      "child"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "run_once",
+                      "child"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "keep_running_until_failure",
+                      "child"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "consume_queue",
+                      "child"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "precondition",
+                      "child"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "entry_updated",
+                      "child"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "inverter"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "force_success"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "force_failure"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "shell"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "parse_json"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "parse_regex"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "parse_lines"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "parse_keyvalue"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "check_exit_code"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "wait_event"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "file_exists"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "sleep"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "set_variable",
+                      "value"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "set_variable",
+                      "from"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "subtree"
+                    ]
+                  }
+                ]
+              }
+            }
           ]
         }
       ],
@@ -470,10 +1079,25 @@
     "orchestrationControlNode": {
       "oneOf": [
         { "type": "object", "properties": { "sequence": { "$ref": "#/$defs/orchestrationNodeChildren" } }, "required": ["sequence"], "additionalProperties": false },
-        { "type": "object", "properties": { "fallback": { "$ref": "#/$defs/orchestrationNodeChildren" } }, "required": ["fallback"], "additionalProperties": false },
         { "type": "object", "properties": { "parallel": { "$ref": "#/$defs/orchestrationNodeChildren" } }, "required": ["parallel"], "additionalProperties": false },
         { "type": "object", "properties": { "reactive_sequence": { "$ref": "#/$defs/orchestrationNodeChildren" } }, "required": ["reactive_sequence"], "additionalProperties": false },
-        { "type": "object", "properties": { "reactive_fallback": { "$ref": "#/$defs/orchestrationNodeChildren" } }, "required": ["reactive_fallback"], "additionalProperties": false }
+        { "type": "object", "properties": { "pipeline_sequence": { "$ref": "#/$defs/orchestrationPipelineSequenceNodeValue" } }, "required": ["pipeline_sequence"], "additionalProperties": false },
+        { "type": "object", "properties": { "fallback": { "$ref": "#/$defs/orchestrationNodeChildren" } }, "required": ["fallback"], "additionalProperties": false },
+        { "type": "object", "properties": { "selector": { "$ref": "#/$defs/orchestrationNodeChildren" } }, "required": ["selector"], "additionalProperties": false },
+        { "$ref": "#/$defs/orchestrationIfNode" },
+        { "$ref": "#/$defs/orchestrationWhileNode" },
+        { "$ref": "#/$defs/orchestrationSwitchNode" },
+        { "$ref": "#/$defs/orchestrationTimeoutNode" },
+        { "$ref": "#/$defs/orchestrationRepeatNode" },
+        { "$ref": "#/$defs/orchestrationDelayNode" },
+        { "$ref": "#/$defs/orchestrationRunOnceNode" },
+        { "$ref": "#/$defs/orchestrationKeepRunningUntilFailureNode" },
+        { "$ref": "#/$defs/orchestrationConsumeQueueNode" },
+        { "$ref": "#/$defs/orchestrationPreconditionNode" },
+        { "$ref": "#/$defs/orchestrationEntryUpdatedNode" },
+        { "$ref": "#/$defs/orchestrationInverterNode" },
+        { "$ref": "#/$defs/orchestrationForceSuccessNode" },
+        { "$ref": "#/$defs/orchestrationForceFailureNode" }
       ]
     },
     "orchestrationLeafNode": {
@@ -487,9 +1111,277 @@
         { "type": "object", "properties": { "wait_event": { "$ref": "#/$defs/orchestrationWaitEventNode" } }, "required": ["wait_event"], "additionalProperties": false },
         { "type": "object", "properties": { "file_exists": { "$ref": "#/$defs/orchestrationFileExistsNode" } }, "required": ["file_exists"], "additionalProperties": false },
         { "type": "object", "properties": { "sleep": { "$ref": "#/$defs/orchestrationSleepNode" } }, "required": ["sleep"], "additionalProperties": false },
-        { "type": "object", "properties": { "set_variable": { "$ref": "#/$defs/orchestrationSetVariableNode" } }, "required": ["set_variable"], "additionalProperties": false },
-        { "type": "object", "properties": { "subtree": { "$ref": "#/$defs/orchestrationSubTreeNode" } }, "required": ["subtree"], "additionalProperties": false }
+        { "$ref": "#/$defs/orchestrationSetVariableNode" },
+        { "$ref": "#/$defs/orchestrationSubTreeNode" }
       ]
+    },
+    "orchestrationConditionScalar": {
+      "oneOf": [
+        { "type": "string" },
+        { "type": "number" },
+        { "type": "boolean" }
+      ]
+    },
+    "orchestrationConditionValue": {
+      "oneOf": [
+        { "$ref": "#/$defs/orchestrationConditionScalar" },
+        { "$ref": "#/$defs/orchestrationNodeChildren" }
+      ]
+    },
+    "orchestrationIfNode": {
+      "type": "object",
+      "properties": {
+        "if": {
+          "$ref": "#/$defs/orchestrationConditionValue"
+        },
+        "then": {
+          "$ref": "#/$defs/orchestrationNodeChildren"
+        },
+        "else": {
+          "$ref": "#/$defs/orchestrationNodeChildren"
+        }
+      },
+      "required": ["if", "then"],
+      "additionalProperties": false
+    },
+    "orchestrationWhileNode": {
+      "type": "object",
+      "properties": {
+        "while": {
+          "$ref": "#/$defs/orchestrationConditionValue"
+        },
+        "do": {
+          "$ref": "#/$defs/orchestrationNodeChildren"
+        },
+        "max_iterations": {
+          "oneOf": [
+            { "type": "string" },
+            { "type": "number" }
+          ]
+        }
+      },
+      "required": ["while", "do"],
+      "additionalProperties": false
+    },
+    "orchestrationSwitchNode": {
+      "type": "object",
+      "properties": {
+        "switch": {
+          "oneOf": [
+            { "type": "string" },
+            { "type": "number" }
+          ]
+        },
+        "cases": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/orchestrationNodeChildren" },
+          "minItems": 1
+        }
+      },
+      "required": ["switch", "cases"],
+      "additionalProperties": false
+    },
+    "orchestrationTimeoutNode": {
+      "type": "object",
+      "properties": {
+        "timeout": {
+          "oneOf": [
+            { "type": "string" },
+            { "type": "number" }
+          ]
+        },
+        "child": {
+          "$ref": "#/$defs/orchestrationNodeChildren"
+        }
+      },
+      "required": ["timeout", "child"],
+      "additionalProperties": false
+    },
+    "orchestrationRepeatNode": {
+      "type": "object",
+      "properties": {
+        "repeat": {
+          "oneOf": [
+            { "type": "string" },
+            { "type": "number" }
+          ]
+        },
+        "child": {
+          "$ref": "#/$defs/orchestrationNodeChildren"
+        }
+      },
+      "required": ["repeat", "child"],
+      "additionalProperties": false
+    },
+    "orchestrationDelayNode": {
+      "type": "object",
+      "properties": {
+        "delay": {
+          "oneOf": [
+            { "type": "string" },
+            { "type": "number" }
+          ]
+        },
+        "child": {
+          "$ref": "#/$defs/orchestrationNodeChildren"
+        }
+      },
+      "required": ["delay", "child"],
+      "additionalProperties": false
+    },
+    "orchestrationInverterNode": {
+      "type": "object",
+      "properties": {
+        "inverter": {
+          "$ref": "#/$defs/orchestrationNodeChildren"
+        }
+      },
+      "required": ["inverter"],
+      "additionalProperties": false
+    },
+    "orchestrationForceSuccessNode": {
+      "type": "object",
+      "properties": {
+        "force_success": {
+          "$ref": "#/$defs/orchestrationNodeChildren"
+        }
+      },
+      "required": ["force_success"],
+      "additionalProperties": false
+    },
+    "orchestrationForceFailureNode": {
+      "type": "object",
+      "properties": {
+        "force_failure": {
+          "$ref": "#/$defs/orchestrationNodeChildren"
+        }
+      },
+      "required": ["force_failure"],
+      "additionalProperties": false
+    },
+    "orchestrationPipelineSequenceNodeValue": {
+      "oneOf": [
+        {
+          "type": "array",
+          "items": { "$ref": "#/$defs/orchestrationNode" },
+          "minItems": 1
+        },
+        {
+          "type": "object",
+          "properties": {
+            "input_key": { "type": "string" },
+            "output_key": { "type": "string" },
+            "child": { "$ref": "#/$defs/orchestrationNodeChildren" },
+            "children": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/orchestrationNode" },
+              "minItems": 1
+            }
+          },
+          "oneOf": [
+            { "required": ["child"] },
+            { "required": ["children"] }
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "orchestrationRunOnceNode": {
+      "type": "object",
+      "properties": {
+        "run_once": {
+          "type": "object",
+          "properties": {
+            "child": {
+              "$ref": "#/$defs/orchestrationNodeChildren"
+            }
+          },
+          "required": ["child"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["run_once"],
+      "additionalProperties": false
+    },
+    "orchestrationKeepRunningUntilFailureNode": {
+      "type": "object",
+      "properties": {
+        "keep_running_until_failure": {
+          "type": "object",
+          "properties": {
+            "max_iterations": {
+              "oneOf": [
+                { "type": "string" },
+                { "type": "number" }
+              ]
+            },
+            "child": {
+              "$ref": "#/$defs/orchestrationNodeChildren"
+            }
+          },
+          "required": ["child"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["keep_running_until_failure"],
+      "additionalProperties": false
+    },
+    "orchestrationConsumeQueueNode": {
+      "type": "object",
+      "properties": {
+        "consume_queue": {
+          "type": "object",
+          "properties": {
+            "queue_key": { "type": "string" },
+            "item_key": { "type": "string" },
+            "child": {
+              "$ref": "#/$defs/orchestrationNodeChildren"
+            }
+          },
+          "required": ["queue_key", "child"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["consume_queue"],
+      "additionalProperties": false
+    },
+    "orchestrationPreconditionNode": {
+      "type": "object",
+      "properties": {
+        "precondition": {
+          "type": "object",
+          "properties": {
+            "condition": {
+              "$ref": "#/$defs/orchestrationConditionScalar"
+            },
+            "child": {
+              "$ref": "#/$defs/orchestrationNodeChildren"
+            }
+          },
+          "required": ["condition", "child"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["precondition"],
+      "additionalProperties": false
+    },
+    "orchestrationEntryUpdatedNode": {
+      "type": "object",
+      "properties": {
+        "entry_updated": {
+          "type": "object",
+          "properties": {
+            "watch_key": { "type": "string" },
+            "child": {
+              "$ref": "#/$defs/orchestrationNodeChildren"
+            }
+          },
+          "required": ["watch_key", "child"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["entry_updated"],
+      "additionalProperties": false
     },
     "orchestrationNodeChildren": {
       "oneOf": [
@@ -531,6 +1423,77 @@
           "additionalProperties": false
         }
       ]
+    },
+    "commandParseJsonNode": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "JSONPath or JMESPath expression"
+        },
+        "output_key": {
+          "type": "string",
+          "description": "Task output key for extracted data"
+        }
+      },
+      "required": ["path", "output_key"],
+      "additionalProperties": false
+    },
+    "commandParseRegexNode": {
+      "type": "object",
+      "properties": {
+        "pattern": {
+          "type": "string",
+          "description": "Regular expression pattern"
+        },
+        "capture_group": {
+          "oneOf": [
+            { "type": "string" },
+            { "type": "number" }
+          ],
+          "description": "Capture group to extract (default: 1)"
+        },
+        "output_key": {
+          "type": "string",
+          "description": "Task output key for extracted data"
+        }
+      },
+      "required": ["pattern", "output_key"],
+      "additionalProperties": false
+    },
+    "commandParseLinesNode": {
+      "type": "object",
+      "properties": {
+        "filter": {
+          "type": "string",
+          "description": "Optional regex filter for matching lines"
+        },
+        "output_key": {
+          "type": "string",
+          "description": "Task output key for extracted lines"
+        }
+      },
+      "required": ["output_key"],
+      "additionalProperties": false
+    },
+    "commandParseKeyValueNode": {
+      "type": "object",
+      "properties": {
+        "delimiter": {
+          "type": "string",
+          "description": "Key/value delimiter"
+        },
+        "line_separator": {
+          "type": "string",
+          "description": "Line separator"
+        },
+        "output_key": {
+          "type": "string",
+          "description": "Task output key for parsed key/value data"
+        }
+      },
+      "required": ["output_key"],
+      "additionalProperties": false
     },
     "orchestrationParseJsonNode": {
       "type": "object",
@@ -620,22 +1583,34 @@
       "additionalProperties": false
     },
     "orchestrationCheckExitCodeNode": {
-      "type": "object",
-      "properties": {
-        "input_key": {
+      "oneOf": [
+        {
           "type": "string",
-          "description": "Blackboard key containing exit code"
+          "description": "Simple syntax: expected exit code"
         },
-        "expected": {
-          "oneOf": [
-            { "type": "string" },
-            { "type": "number" }
-          ],
-          "description": "Expected exit code value"
+        {
+          "type": "number",
+          "description": "Simple syntax: expected exit code"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "input_key": {
+              "type": "string",
+              "description": "Blackboard key containing exit code"
+            },
+            "expected": {
+              "oneOf": [
+                { "type": "string" },
+                { "type": "number" }
+              ],
+              "description": "Expected exit code value"
+            }
+          },
+          "required": ["expected"],
+          "additionalProperties": false
         }
-      },
-      "required": ["expected"],
-      "additionalProperties": false
+      ]
     },
     "orchestrationWaitEventNode": {
       "type": "object",
@@ -718,33 +1693,34 @@
     "orchestrationSetVariableNode": {
       "type": "object",
       "properties": {
-        "key": {
+        "set_variable": {
           "type": "string",
           "description": "Blackboard key to set"
         },
         "value": {
           "description": "Value to set (supports {ctx.*} syntax)"
         },
-        "from_context": {
+        "from": {
           "type": "string",
-          "description": "Alternative: copy value from context path"
+          "description": "Alternative: copy value from another blackboard key"
         }
       },
+      "required": ["set_variable"],
       "oneOf": [
-        { "required": ["key", "value"] },
-        { "required": ["key", "from_context"] }
+        { "required": ["set_variable", "value"] },
+        { "required": ["set_variable", "from"] }
       ],
       "additionalProperties": false
     },
     "orchestrationSubTreeNode": {
       "type": "object",
       "properties": {
-        "ID": {
+        "subtree": {
           "type": "string",
           "description": "Registered subtree identifier"
         }
       },
-      "required": ["ID"],
+      "required": ["subtree"],
       "additionalProperties": false
     }
   }

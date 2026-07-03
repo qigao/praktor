@@ -1,5 +1,4 @@
-#ifndef __FILE_OPERATION_EXECUTORS_HPP__
-#define __FILE_OPERATION_EXECUTORS_HPP__
+#pragma once
 
 #include "dag/task_executor.hpp"
 #include "yml/task_types.hpp"
@@ -40,4 +39,3 @@ std::unique_ptr<TaskExecutor> createCreateDirectoryExecutor();
 
 } // namespace Praktor::Execution
 
-#endif // __FILE_OPERATION_EXECUTORS_HPP__

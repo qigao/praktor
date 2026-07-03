@@ -1,5 +1,4 @@
-#ifndef __GRAPH_HPP__
-#define __GRAPH_HPP__
+#pragma once
 
 #include <functional>
 #include <sstream>
@@ -263,4 +262,3 @@ private:
     }
 };
 
-#endif   // __GRAPH_HPP__

@@ -1,5 +1,4 @@
-#ifndef __MUSTACHE_SUBSTITUTOR_HPP__
-#define __MUSTACHE_SUBSTITUTOR_HPP__
+#pragma once
 
 #include <string>
 #include "dag/workflow_context.hpp"
@@ -20,4 +19,3 @@ std::string substituteMustache(const std::string& templateStr, const WorkflowCon
 
 } // namespace Praktor::Util
 
-#endif // __MUSTACHE_SUBSTITUTOR_HPP__

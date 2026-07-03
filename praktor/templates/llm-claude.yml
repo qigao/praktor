@@ -10,24 +10,27 @@ variables:
 tasks:
   - name: call_claude
     script: |
-      var body = {
-        "model": ctx.get("CLAUDE_MODEL"),
-        "max_tokens": json.parse(ctx.get("CLAUDE_MAX_TOKENS")),
-        "temperature": json.parse(ctx.get("CLAUDE_TEMPERATURE")),
-        "messages": [{"role": "user", "content": ctx.get("PROMPT")}]
-      };
+      import("net");
+      var body = json.stringify(map{
+        model: ctx.get("CLAUDE_MODEL"),
+        max_tokens: json.parse(ctx.get("CLAUDE_MAX_TOKENS")),
+        temperature: json.parse(ctx.get("CLAUDE_TEMPERATURE")),
+        messages: [map{role: "user", content: ctx.get("PROMPT")}]
+      });
 
       var sys = ctx.get("CLAUDE_SYSTEM_PROMPT");
       if (sys != "" && sys != null) {
-        body.system = sys;
+        var parsed_body = json.parse(body);
+        parsed_body.system = sys;
+        body = json.stringify(parsed_body);
       }
+      var headers = json.parse(
+        "{\"x-api-key\":" + json.stringify(ctx.get("ANTHROPIC_API_KEY")) +
+        ",\"anthropic-version\":\"2023-06-01\",\"Content-Type\":\"application/json\"}"
+      );
 
-      var resp = http.post("https://api.anthropic.com/v1/messages", body, {
-        "headers": {
-          "x-api-key": ctx.get("ANTHROPIC_API_KEY"),
-          "anthropic-version": "2023-06-01",
-          "Content-Type": "application/json"
-        }
+      var resp = http.post("https://api.anthropic.com/v1/messages", body, map{
+        headers: headers
       });
 
       if (resp.status != 200) {

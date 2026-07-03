@@ -1,8 +1,9 @@
-#ifndef __VARIABLE_SCOPE_HPP__
-#define __VARIABLE_SCOPE_HPP__
+#pragma once
 
 #include <jsoncons/json.hpp>
 #include <memory>
+#include <mutex>
+#include <shared_mutex>
 #include <string>
 #include <unordered_map>
 
@@ -40,6 +41,7 @@ public:
      * @brief Set a variable in the current scope
      */
     void set(const std::string& key, const jsoncons::json& value) {
+        std::unique_lock lock(mutex_);
         local_[key] = value;
     }
 
@@ -48,15 +50,20 @@ public:
      * @throws std::runtime_error if key not found
      */
     jsoncons::json get(const std::string& key) const {
-        auto it = local_.find(key);
-        if (it != local_.end()) {
-            return it->second;
+        VariableScope* parent = nullptr;
+        {
+            std::shared_lock lock(mutex_);
+            auto it = local_.find(key);
+            if (it != local_.end()) {
+                return it->second;
+            }
+            parent = parent_;
         }
-        
-        if (parent_) {
-            return parent_->get(key);
+
+        if (parent) {
+            return parent->get(key);
         }
-        
+
         throw std::runtime_error("Variable not found: " + key);
     }
 
@@ -73,17 +80,22 @@ public:
      * @brief Check if variable exists in scope chain
      */
     bool has(const std::string& key) const {
-        bool in_local = local_.count(key) > 0;
-        if (in_local) {
-            return true;
+        VariableScope* parent = nullptr;
+        {
+            std::shared_lock lock(mutex_);
+            if (local_.count(key) > 0) {
+                return true;
+            }
+            parent = parent_;
         }
-        return parent_ ? parent_->has(key) : false;
+        return parent ? parent->has(key) : false;
     }
 
     /**
      * @brief Remove a variable from current scope only
      */
     void remove(const std::string& key) {
+        std::unique_lock lock(mutex_);
         local_.erase(key);
     }
 
@@ -92,24 +104,32 @@ public:
      */
     std::unordered_map<std::string, jsoncons::json> getAllVisible() const {
         std::unordered_map<std::string, jsoncons::json> result;
-        
-        // Start with parent's variables
-        if (parent_) {
-            result = parent_->getAllVisible();
+
+        VariableScope* parent = nullptr;
+        {
+            std::shared_lock lock(mutex_);
+            parent = parent_;
         }
-        
-        // Override with local variables
-        for (const auto& [key, value] : local_) {
-            result[key] = value;
+
+        if (parent) {
+            result = parent->getAllVisible();
         }
-        
+
+        {
+            std::shared_lock lock(mutex_);
+            for (const auto& [key, value] : local_) {
+                result[key] = value;
+            }
+        }
+
         return result;
     }
 
     /**
      * @brief Get only local variables (not including parent)
      */
-    const std::unordered_map<std::string, jsoncons::json>& getLocal() const {
+    std::unordered_map<std::string, jsoncons::json> getLocalSnapshot() const {
+        std::shared_lock lock(mutex_);
         return local_;
     }
 
@@ -121,8 +141,8 @@ public:
     }
 
 private:
+    mutable std::shared_mutex mutex_;
     std::unordered_map<std::string, jsoncons::json> local_;
     VariableScope* parent_;
 };
 
-#endif // __VARIABLE_SCOPE_HPP__

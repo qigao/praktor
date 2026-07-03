@@ -59,9 +59,9 @@ namespace {
 #endif
     }
 
-    bool enableVirtualTerminalProcessing(DWORD stream_id) {
+    bool enableVirtualTerminalProcessing(int stream_id) {
 #ifdef _WIN32
-        HANDLE handle = GetStdHandle(stream_id);
+        HANDLE handle = GetStdHandle(static_cast<DWORD>(stream_id));
         if (handle == INVALID_HANDLE_VALUE || handle == nullptr) {
             return false;
         }
@@ -201,10 +201,12 @@ namespace {
     tlog_t* setupLogging(bool verbose, bool use_color) {
         Praktor::Logging::configure(verbose, use_color);
 
+#ifdef _WIN32
         if (use_color) {
             enableVirtualTerminalProcessing(STD_OUTPUT_HANDLE);
             enableVirtualTerminalProcessing(STD_ERROR_HANDLE);
         }
+#endif
 
         // Create default logger with console sink
         tlog_config_t config = {

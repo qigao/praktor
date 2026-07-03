@@ -1,5 +1,5 @@
-name: "Behavior Tree Environment Variables Example"
-description: "Demonstrates environment variable propagation to YAML behavior tree nodes"
+name: "Action Orchestration Environment Variables Example"
+description: "Demonstrates environment variable propagation to YAML action nodes"
 
 variables:
   PROJECT_NAME: "MyApp"
@@ -13,8 +13,8 @@ env:
   WORKFLOW_VAR: "from_workflow"
 
 tasks:
-  # Example 1: Task-level env propagates to behavior tree nodes
-  - name: btdsl_with_task_env
+  # Example 1: Task-level env propagates to action nodes
+  - name: orch_with_task_env
     dotEnv:
       - .env.task
     env:
@@ -34,7 +34,7 @@ tasks:
           output_key: "build_output"
 
   # Example 2: Mustache templates
-  - name: btdsl_with_mustache
+  - name: orch_with_mustache
     env:
       DEPLOY_ENV: "production"
     sequence:
@@ -47,7 +47,7 @@ tasks:
           output_key: "type_output"
 
   # Example 3: Mixed - env vars + Mustache
-  - name: btdsl_mixed
+  - name: orch_mixed
     env:
       COMPILER: "gcc"
       CFLAGS: "-O2 -Wall"
@@ -57,7 +57,7 @@ tasks:
           output_key: "compile_output"
 
   # Example 4: Environment variables in nested sequence
-  - name: btdsl_nested
+  - name: orch_nested
     env:
       DB_HOST: "localhost"
       DB_PORT: "5432"
@@ -73,7 +73,7 @@ tasks:
 
   # Example 5: Verify task env doesn't leak to other tasks
   - name: verify_isolation
-    depends_on: [btdsl_with_task_env]
+    depends_on: [orch_with_task_env]
     sequence:
       - shell:
           cmd: "echo TASK_VAR=$TASK_VAR"  # Should be empty (not inherited)

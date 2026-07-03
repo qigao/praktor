@@ -1,5 +1,4 @@
-#ifndef __STRING_UTILS_HPP__
-#define __STRING_UTILS_HPP__
+#pragma once
 
 #include <algorithm>
 #include <cctype>
@@ -70,4 +69,3 @@ inline std::string replaceAll(std::string str, const std::string& from, const st
 
 } // namespace Praktor::util
 
-#endif // __STRING_UTILS_HPP__

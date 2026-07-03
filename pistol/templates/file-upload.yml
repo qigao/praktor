@@ -39,11 +39,7 @@ tasks:
 
   - name: guard_source
     depends_on: [validate_request]
-    fallback:
-      - shell:
-          cmd: "powershell -NoProfile -Command \"if (-not (Test-Path '{{ SRC_PATH }}')) { Write-Error 'Source file missing'; exit 1 }\""
-      - shell:
-          cmd: "test -f \"{{ SRC_PATH }}\""
+    file_exists: "{{ SRC_PATH }}"
 
   - name: upload_file
     depends_on: [guard_source]
@@ -56,11 +52,6 @@ tasks:
   - name: emit_result
     depends_on: [upload_file]
     script: |
-      var result = {
-        "source": ctx.get("SRC_PATH"),
-        "url": ctx.get("URL"),
-        "method": ctx.get("METHOD"),
-        "status": "completed"
-      };
-      ctx.output("result", json.stringify(result));
-      log.info("Upload complete: " + json.stringify(result));
+      var jsonStr = "{\"source\":" + json.stringify(ctx.get("SRC_PATH")) + ", \"url\":" + json.stringify(ctx.get("URL")) + ", \"method\":" + json.stringify(ctx.get("METHOD")) + ", \"status\":" + json.stringify("completed") + "}";
+      ctx.output("result", jsonStr);
+      log.info("Upload complete: " + jsonStr);

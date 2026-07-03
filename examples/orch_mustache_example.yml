@@ -1,5 +1,5 @@
-name: "Behavior Tree Mustache Template Example"
-description: "Demonstrates Mustache template support in YAML behavior tree tasks for consistency with command tasks"
+name: "Action Orchestration Mustache Template Example"
+description: "Demonstrates Mustache template support in YAML action orchestration tasks for consistency with command tasks"
 
 variables:
   PROJECT_NAME: "MyApp"
@@ -16,16 +16,13 @@ tasks:
       CC: "{{ COMPILER }}"
       CFLAGS: "{{ CFLAGS }}"
 
-  # Example 2: behavior tree with Mustache templates
-  - name: build_with_btdsl
+  # Example 2: action orchestration with Mustache templates
+  - name: build_with_actions
     depends_on: [configure_cmake]
     sequence:
       - shell:
           cmd: "cmake --build {{ BUILD_DIR }}"
           output_key: "build_output"
-          env:
-            CC: "{{ COMPILER }}"
-            CFLAGS: "{{ CFLAGS }}"
 
       - parse_regex:
           input_key: "build_output"
@@ -39,9 +36,8 @@ tasks:
   - name: test_mixed_syntax
     depends_on: [build_with_btdsl]
     sequence:
-      - set_variable:
-          key: "test_dir"
-          value: "{{ BUILD_DIR }}/tests"
+      - set_variable: test_dir
+        value: "{{ BUILD_DIR }}/tests"
 
       - shell:
           cmd: "ctest --test-dir {test_dir}"
@@ -81,7 +77,7 @@ tasks:
 #   3. {{ variable }}  -> WorkflowContext (Mustache, preprocessed)
 #
 # Benefits:
-#   - Same syntax across command tasks and behavior-tree shell nodes
-#   - Mustache templates expanded before behavior-tree execution
+#   - Same syntax across command tasks and action orchestration shell nodes
+#   - Mustache templates expanded before action execution
 #   - Blackboard variables still work for internal state
 #   - Context bridge still works for cross-task references

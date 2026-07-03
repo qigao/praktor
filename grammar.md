@@ -1,8 +1,8 @@
 # Praktor Workflow DSL Specification
 
-**Version:** 9.0
+**Version:** 9.1
 **Status:** Authoritative
-**Last Updated:** February 2026
+**Last Updated:** April 2026
 
 ## Table of Contents
 
@@ -26,11 +26,12 @@
     - [6.1. Executing a Reusable Workflow](#61-executing-a-reusable-workflow)
     - [6.2. Passing Data with `vars` and `env`](#62-passing-data-with-vars-and-env)
   - [7. Task Runner Reference](#7-task-runner-reference)
-    - [7.1. Runner: `command` (Side Effects)](#71-runner-command-side-effects)
-    - [7.2. Post-Processing: `script` (Context Manipulation)](#72-post-processing-script-context-manipulation)
-    - [7.3. Runner: `dynamic_tasks` (Runtime Task Generation)](#73-runner-dynamic_tasks-runtime-task-generation)
-    - [7.4. HTTP Requests via Script](#74-http-requests-via-script)
-    - [7.5. Runner: Behavior Trees (Declarative Control Flow)](#75-runner-behavior-trees-declarative-control-flow)
+    - [7.1. Runner: `command` (Shell Command)](#71-runner-command-shell-command)
+    - [7.2. Runner: `program` (Raw Process)](#72-runner-program-raw-process)
+    - [7.3. Post-Processing: `script` (Context Manipulation)](#73-post-processing-script-context-manipulation)
+    - [7.4. Runner: `dynamic_tasks` (Runtime Task Generation)](#74-runner-dynamic_tasks-runtime-task-generation)
+    - [7.5. HTTP Requests via Script](#75-http-requests-via-script)
+    - [7.6. Runner: Actions (Declarative Control Flow)](#76-runner-actions-declarative-control-flow)
   - [8. Event-Driven Triggers](#8-event-driven-triggers)
     - [8.1. Simple Trigger References](#81-simple-trigger-references)
     - [8.2. Failure Context Variables](#82-failure-context-variables)
@@ -74,7 +75,7 @@ The Praktor Workflow Domain Specific Language (DSL) provides a declarative, YAML
 
 * **Workflow:** The complete automated process defined in a YAML file.
 - **Task:** The fundamental unit of execution.
-- **Runner:** The execution engine for a task (`command`, `uses`, `dynamic_tasks`, or orchestration nodes).
+- **Runner:** The execution engine for a task (`command`, `program`, `uses`, `dynamic_tasks`, or orchestration nodes).
 - **Script:** An optional post-processing block attached to any task for in-memory data transformation.
 - **Context:** The runtime data object holding variables, environment settings, and task outputs.
 - **Trigger:** A lightweight, event-driven action (e.g., an HTTP call) that fires upon task completion.
@@ -85,15 +86,15 @@ Praktor defines orchestration at two separate levels:
 
 1. **Workflow-level orchestration (DAG):**
    decides when a task runs, how many times it runs, what it depends on, and what happens after it finishes.
-   This includes flow-level task properties such as `depends_on`, `when`, `each`, `retries`, `triggers`, and `script`.
+   This includes flow-level task properties such as `depends_on`, `when`, `each`, `triggers`, and `script`.
 2. **Runner-level execution:**
    defines which executor performs the task's work.
-   This is where `command`, orchestration nodes (`sequence`, `fallback`, etc.), `uses`, and `dynamic_tasks` live.
+   This is where `command`, `program`, orchestration nodes (`sequence`, `parallel`, etc.), `uses`, and `dynamic_tasks` live.
 
 Therefore:
 
 - Flow-level task properties apply to the whole task, regardless of runner.
-- `command` is a runner that invokes an external process.
+- `command` is a shell-command runner. `program` is a raw-process runner that passes an argument vector without shell parsing.
 - Orchestration nodes (like `sequence`) are runners that execute complex logic inside one task.
 - `command` is not a BT node and is not part of BT grammar.
 - YAML is the canonical and only workflow authoring grammar; runtimes should not require a separate text BT language.
@@ -106,15 +107,15 @@ Workflow / DAG layer
   - depends_on
   - when
   - each
-  - retries
   - triggers
   - script
             │
             ▼
   - command
+  - program
   - uses
   - dynamic_tasks
-  - sequence / fallback / ... (orchestration)
+  - sequence / parallel / ... (orchestration)
             │
             ▼
 Internal execution (if orchestration node)
@@ -140,7 +141,17 @@ tasks:
     command: "./build.sh"
 ```
 
-Behavior-tree runner:
+Raw-process runner:
+
+```yaml
+tasks:
+  - name: run_tool
+    program: ./tool
+    args: ["--input", "{{ tasks.prepare.outputs.path }}"]
+    stdin: "{{ tasks.prepare.outputs.payload }}"
+```
+
+Action runner:
 
 ```yaml
 tasks:
@@ -156,7 +167,7 @@ tasks:
           output_key: "status"
 ```
 
-In the second example, `each` repeats the whole `deploy` task. It does not repeat one BT node in isolation. The BT structure is internal to each generated task execution.
+In the second example, `each` repeats the whole `deploy` task. It does not repeat one action node in isolation. The action structure is internal to each generated task execution.
 
 ## 3. Execution Model: Context and Data Flow
 
@@ -175,7 +186,7 @@ For any given task, variables are resolved in the following order (higher number
 ### 3.3. Data Flow Between Tasks
 
 State is passed between tasks by writing to and reading from the context.
-- A `command` task produces output by writing to `stdout`, which is captured into the context.
+- A `command` or `program` task produces output by writing to `stdout`, which is captured into the context.
 - Any task with a `script` block can both read from and write to any part of the context tree using the `ctx` module.
 
 The outputs for a completed task `my-task` are stored at `tasks.my-task.outputs`.
@@ -193,7 +204,7 @@ A Praktor workflow is a YAML map with the following top-level keys:
 | `variables` | Map<String, String> | No | Global constants available to all tasks. |
 | `env` | Map<String, String> | No | Global environment variables exported to all tasks. |
 | `dotEnv` | String or Array<String> | No | Paths to `.env` files to load into the global environment. |
-| `defaults` | Map | No | Default `retries` and `timeout` applied to all tasks. |
+| `defaults` | Map | No | Default `timeout` applied to all tasks. |
 | `native_modules` | Array<NativeModule> | No | Native DLL/SO modules to load, callable via `dll.call()` in scripts. |
 | `tasks` | Array<Task> | **Yes** | The list of task definitions. |
 
@@ -253,9 +264,6 @@ dotEnv:
   - ".env.production"
 
 defaults:
-  retries:
-    count: 2
-    delay: "5s"
   timeout: "10m"
 
 tasks:
@@ -265,9 +273,9 @@ tasks:
 
 ## 5. Task Definition
 
-Every task must have a `name` and exactly one runner (`command`, `uses`, `dynamic_tasks`, or an orchestration node root key). Any task can optionally include flow-level properties such as `when`, `each`, `retries`, `triggers`, and `script`.
+Every task must have a `name` and exactly one runner (`command`, `program`, `uses`, `dynamic_tasks`, or an orchestration node root key). Any task can optionally include flow-level properties such as `when`, `each`, `triggers`, and `script`.
 
-Task attributes such as `when`, `each`, `retries`, `triggers`, and `script` are evaluated at the workflow layer before or around runner execution. If the runner is an orchestration node, those controls still apply to the whole task, not to individual internal nodes.
+Task attributes such as `when`, `each`, `triggers`, and `script` are evaluated at the workflow layer before or around runner execution. If the runner is an orchestration node, those controls still apply to the whole task, not to individual internal nodes.
 
 ### 5.1. Core Attributes
 
@@ -282,13 +290,14 @@ Task attributes such as `when`, `each`, `retries`, `triggers`, and `script` are 
 
 **Runner (exactly one required):**
 
-- `command` (String or Array): Execute an external command. See Section 7.1.
+- `command` (String or Array): Execute a shell command. See Section 7.1.
+- `program` (String): Execute a raw process with optional `args` and `stdin`. See Section 7.2.
 - `uses` (String): Execute a reusable workflow file. See Section 6.
-- `dynamic_tasks` (Object): Execute tasks generated at runtime. See Section 7.3.
+- `dynamic_tasks` (Object): Execute tasks generated at runtime. See Section 7.4.
 
 **Post-Processing (optional):**
 
-- `script` (String): Inline script for data transformation after the runner completes. See Section 7.2.
+- `script` (String): Inline script for data transformation after the runner completes. See Section 7.3.
 
 ### 5.2. Control Flow & Resilience
 
@@ -296,16 +305,41 @@ Task attributes such as `when`, `each`, `retries`, `triggers`, and `script` are 
 | :--- | :--- | :--- |
 | `when` | String | An expression that must evaluate to `true` for the task to run. |
 | `each` | Object | Execute the task multiple times over a list or matrix. |
-| `retries` | Object | Retry policy with `count` (integer) and `delay` (duration string). |
-| `timeout` | String | Maximum execution time (e.g., `"30s"`, `"5m"`, `"1h"`). |
+| `timeout` | String or Number | Maximum execution time. String format: `"30s"`, `"5m"`, `"1h"`. Number format: milliseconds. See below for dual semantics. |
 | `triggers` | Object | Event-driven actions to execute on task completion. See Section 8. |
-| `continue_on_error` | Boolean | If `true`, workflow continues even if this task fails. Default: `false`. |
+
+**IMPORTANT: `timeout` Dual Semantics**
+
+The `timeout` key has **two different interpretations** depending on context:
+
+1. **Task-level timeout** (applies to the entire task):
+   - Format: String with unit (`"30s"`, `"5m"`, `"1h"`) or plain number (interpreted as milliseconds)
+   - Applies when: `timeout` is a top-level task attribute **without** a `child:` key
+   - Example:
+     ```yaml
+     - name: build
+       command: "npm run build"
+       timeout: "5m"  # Task-level: entire build must complete in 5 minutes
+     ```
+
+2. **Action Timeout decorator** (wraps a single child node):
+   - Format: Object with `timeout_ms` (number) and `child` keys, OR flat syntax with `timeout` (number) and `child` keys
+   - Applies when: Used as an orchestration node with a `child:` key
+   - Example:
+     ```yaml
+     - name: guarded_shell
+       timeout: 5000  # Action decorator: child node must complete in 5000ms
+       child:
+         shell: "long_task.sh"
+     ```
+
+The parser distinguishes between these two cases by checking for the presence of `child:` in the same map as `timeout`. This dual usage can cause confusion if not carefully documented.
 
 ### 5.3. Execution Context
 
 | Key | Type | Description |
 | :--- | :--- | :--- |
-| `working_dir` | String | Working directory for command execution. Relative paths resolve from workflow file location. |
+| `working_dir` | String | Working directory for command or program execution. Relative paths resolve from workflow file location. |
 | `silent` | Boolean | Suppress command output from logs. Default: `false`. |
 
 **Example:**
@@ -316,19 +350,13 @@ tasks:
     depends_on: [build, test]
     command: "./deploy.sh"
     when: "{{ env.ENVIRONMENT }} == 'production'"
-    retries:
-      count: 3
-      delay: "10s"
     timeout: "15m"
 
-  # Run all tests, collect all failures
   - name: test_unit
     command: "npm run test:unit"
-    continue_on_error: true
 
   - name: test_integration
     command: "npm run test:integration"
-    continue_on_error: true
 
   # Monorepo: build each package in its directory
   - name: build_frontend
@@ -360,11 +388,11 @@ The reusable workflow can set its own outputs using `ctx.output()` in a `script`
 
 ## 7. Task Runner Reference
 
-### 7.1. Runner: `command` (Side Effects)
+### 7.1. Runner: `command` (Shell Command)
 
-Executes external programs and captures their output.
+Executes a shell command and captures its output.
 
-Implementation note: runtimes may normalize or lower runner implementations internally, but the language model is stable: `command` remains the external-process runner in the grammar and must not be treated as a node in user-facing documentation. Likewise, internal orchestration must be authored as YAML tree data, not as a separate embedded text language.
+Implementation note: `command` is user-facing shell syntax. Runtimes may lower it internally, but it remains distinct from BT `shell` nodes and from the raw `program` runner.
 
 **Attributes:**
 
@@ -392,9 +420,38 @@ tasks:
     # Output available at: tasks.fetch_config.outputs.data.version
 ```
 
-### 7.2. Post-Processing: `script` (Context Manipulation)
+### 7.2. Runner: `program` (Raw Process)
 
-The `script` field is an optional inline string that runs after a task's runner completes. It uses a custom built-in scripting language for in-memory data transformation and context manipulation. Any task type (`command`, `uses`, `dynamic_tasks`) can attach a `script` block.
+Executes one program directly. It does not invoke `cmd.exe`, `/bin/sh`, or shell expansion unless you explicitly choose a shell as the `program`.
+
+**Attributes:**
+
+- `program` (String, **Required**): Executable name, absolute path, or relative path. Relative paths resolve from the workflow file location.
+- `args` (Array<String>, Optional): Argument vector passed as-is after Mustache substitution.
+- `stdin` (String, Optional): Data written to the process standard input.
+- `output_format` (String, Optional): How to interpret stdout. Values: `text` (default) or `json`.
+
+**Output Capture:**
+
+- Text output: `{{ tasks.<task_name>.outputs.stdout }}`
+- JSON output: `{{ tasks.<task_name>.outputs.data }}`
+- Exit code: `{{ tasks.<task_name>.outputs.exit_code }}`
+- Stderr: `{{ tasks.<task_name>.outputs.stderr }}`
+
+**Example:**
+
+```yaml
+tasks:
+  - name: inspect_config
+    program: python
+    args: ["./tools/read_config.py", "--format", "json"]
+    stdin: "{{ tasks.fetch_config.outputs.stdout }}"
+    output_format: json
+```
+
+### 7.3. Post-Processing: `script` (Context Manipulation)
+
+The `script` field is an optional inline string that runs after a task's runner completes. It uses a custom built-in scripting language for in-memory data transformation and context manipulation. Any task type (`command`, `program`, `uses`, `dynamic_tasks`) can attach a `script` block.
 
 **Syntax:**
 
@@ -402,7 +459,7 @@ The `script` field is an optional inline string that runs after a task's runner 
 
 **Built-in Modules:**
 
-The script language provides 7 built-in modules available in every script:
+The script language provides 8 built-in modules available in every script:
 
 | Module | Description |
 | :--- | :--- |
@@ -410,6 +467,7 @@ The script language provides 7 built-in modules available in every script:
 | `json` | JSON parsing, serialization, and querying |
 | `http` | Async HTTP client (TurboNet) |
 | `fs` | File system operations via turbo_fs |
+| `shell` | Execute shell commands (limited) |
 | `base64` | Base64 encoding/decoding |
 | `log` | Logging at various levels |
 | `math` | Math functions + exprtk expression evaluator |
@@ -444,7 +502,10 @@ Options object (all optional):
 - `basic_auth`: `{"user": "admin", "pass": "secret"}` — basic auth
 - `bearer_token`: `"xxx"` — bearer token auth
 
-Returns: `{status: 200, body: "...", headers: {}, data: {...}}` (data is auto-parsed JSON if valid)
+Compatibility:
+- `http.get(url)` and `http.post(url, body)` keep the legacy behavior and return only the response body string.
+- `http.get(url, options)` and `http.post(url, body, options)` return `{status, body, headers, data, error}`.
+- `body` must be a string; use `json.stringify(...)` when sending JSON.
 
 **`fs` — File System (turbo_fs):**
 
@@ -455,6 +516,15 @@ Returns: `{status: 200, body: "...", headers: {}, data: {...}}` (data is auto-pa
 - `fs.stat(path)`: Returns `{size: N, is_dir: bool}`.
 - `fs.mkdir(path)`: Create a directory (and parents).
 - `fs.remove(path)`: Delete a file.
+
+**`shell` — Shell Command Execution:**
+
+- `shell.exec(command [, input [, working_dir [, timeout_ms]]])`: Execute a shell command and return `{exit_code, stdout, stderr}`.
+
+**IMPORTANT LIMITATIONS:**
+- Shell commands executed via `shell.exec()` **do NOT** respect the task-level `timeout:` setting. The `timeout_ms` parameter must be explicitly provided in the script call.
+- Commands executed via `shell.exec()` **do NOT** respect the task-level `silent:` setting. Output is not streamed to the console by default.
+- For consistent behavior with task configuration, prefer using `command:` or `shell:` nodes over `shell.exec()` in scripts.
 
 **`base64` — Base64 Encoding:**
 
@@ -479,7 +549,7 @@ The script language supports the following constructs:
 - **Variables:** `var name = value`
 - **Control flow:** `if`/`else`, `for..in`, `while`, `break`, `continue`, `return`
 - **Failure:** `fail("message")` — immediately fails the task with the given message.
-- **Literals:** string, number, boolean (`true`/`false`), `null`, array (`[1, 2, 3]`), object (`{key: "value"}`)
+- **Literals:** string, number, boolean (`true`/`false`), `null`, array (`[1, 2, 3]`), map (`map{key: "value"}`)
 - **Operators:** arithmetic (`+`, `-`, `*`, `/`, `%`), comparison (`==`, `!=`, `<`, `>`, `<=`, `>=`), logical (`and`, `or`, `not`)
 - **Member access:** dot notation (`obj.field`)
 - **Function calls:** `module.function(args)`
@@ -525,14 +595,15 @@ tasks:
   - name: notify
     depends_on: [write_report]
     script: |
+      import("net");
       var count = ctx.get("tasks.transform_data.outputs.count")
-      var body = json.stringify({status: "deployed", active_users: count})
+      var body = json.stringify(map{status: "deployed", active_users: count})
       http.post("https://hooks.example.com/webhook", body)
 ```
 
 Note: `write_report` and `notify` are **script-only tasks** — they have no `command:` action. The `script:` block IS the action.
 
-### 7.2.1. LLM Templates (Prompt + Template Pattern)
+### 7.3.1. LLM Templates (Prompt + Template Pattern)
 
 Praktor provides built-in templates for calling AI API gateways. Each template wraps the provider-specific request format, auth, and response parsing — you just pass a prompt.
 
@@ -618,7 +689,7 @@ tasks:
 
 See `examples/ai-chat.yml`, `examples/ai-code-review.yml`, `examples/ai-translation.yml` for complete workflows.
 
-### 7.3. Runner: `dynamic_tasks` (Runtime Task Generation)
+### 7.4. Runner: `dynamic_tasks` (Runtime Task Generation)
 
 Generates and executes tasks dynamically at runtime based on data from the context. This enables data-driven workflows where the number and configuration of tasks is determined by runtime values.
 
@@ -650,12 +721,9 @@ tasks:
         name: "deploy_{{ item.name }}"
         command: "./deploy.sh --service {{ item.name }} --port {{ item.port }}"
         timeout: "5m"
-        retries:
-          count: 2
-          delay: "10s"
 ```
 
-The parent `dynamic_tasks` task records an aggregate summary at `tasks.<name>.outputs.generated_tasks`, where each entry contains `index`, `item`, `name`, `status`, and `outputs` for the generated task. `tasks.<name>.outputs.generated_count` records how many generated tasks actually ran, and `success_count`, `failed_count`, `skipped_count` summarize the outcome distribution. Generated task names must be unique within the fan-out and must not collide with any existing workflow task. By default, fan-out stops at the first failed generated task; if the parent task sets `continue_on_error: true`, all generated tasks run and the parent still ends in `failed` if any generated task failed.
+The parent `dynamic_tasks` task records an aggregate summary at `tasks.<name>.outputs.generated_tasks`, where each entry contains `index`, `item`, `name`, `status`, and `outputs` for the generated task. `tasks.<name>.outputs.generated_count` records how many generated tasks actually ran, and `success_count`, `failed_count`, `skipped_count` summarize the outcome distribution. Generated task names must be unique within the fan-out and must not collide with any existing workflow task. By default, fan-out stops at the first failed generated task.
 
 **Use Cases:**
 
@@ -664,7 +732,7 @@ The parent `dynamic_tasks` task records an aggregate summary at `tasks.<name>.ou
 - Run tests for dynamically discovered modules
 - Fan-out operations based on API responses
 
-### 7.4. HTTP Requests via Script
+### 7.5. HTTP Requests via Script
 
 Execute HTTP requests using TurboScript's built-in `http` module.
 
@@ -695,9 +763,10 @@ tasks:
   # Basic GET request
   - name: fetch_users
     script: |
-      var resp = http.get("https://api.example.com/users", {
-        "headers": {
-          "Authorization": "Bearer " + ctx.get("secrets.api_token")
+      import("net");
+      var resp = http.get("https://api.example.com/users", map{
+        headers: map{
+          Authorization: "Bearer " + ctx.get("secrets.api_token")
         }
       });
       if (resp.status != 200) {
@@ -708,16 +777,19 @@ tasks:
   # POST with authentication
   - name: create_user
     script: |
+      import("net");
+      var headers = json.parse(
+        "{\"Authorization\":" + json.stringify("Bearer " + ctx.get("secrets.api_token")) +
+        ",\"Content-Type\":\"application/json\"}"
+      )
+      var body = json.stringify(map{
+        name: ctx.get("user_name"),
+        email: ctx.get("user_email")
+      })
       var resp = http.post("https://api.example.com/users",
-        {
-          "name": ctx.get("user_name"),
-          "email": ctx.get("user_email")
-        },
-        {
-          "headers": {
-            "Authorization": "Bearer " + ctx.get("secrets.api_token"),
-            "Content-Type": "application/json"
-          }
+        body,
+        map{
+          headers: headers
         }
       );
       if (resp.status != 201) {
@@ -728,10 +800,12 @@ tasks:
   # Chained requests with context
   - name: login
     script: |
-      var resp = http.post("https://api.example.com/auth/login", {
-        "username": ctx.get("env.API_USER"),
-        "password": ctx.get("env.API_PASS")
+      import("net");
+      var body = json.stringify(map{
+        username: ctx.get("env.API_USER"),
+        password: ctx.get("env.API_PASS")
       });
+      var resp = http.post("https://api.example.com/auth/login", body, map{});
       if (resp.status != 200 || !resp.data.token) {
         fail("Login failed");
       }
@@ -740,24 +814,25 @@ tasks:
   - name: get_protected_data
     depends_on: [login]
     script: |
+      import("net");
       var token = ctx.get("tasks.login.outputs.token");
-      var resp = http.get("https://api.example.com/protected/data", {
-        "headers": {
-          "Authorization": "Bearer " + token
+      var resp = http.get("https://api.example.com/protected/data", map{
+        headers: map{
+          Authorization: "Bearer " + token
         }
       });
       ctx.output("data", resp.data);
 ```
 
-### 7.5. Runner: Orchestration Nodes (Declarative Control Flow)
+### 7.6. Runner: Orchestration Nodes (Declarative Control Flow)
 
 Orchestration nodes provide declarative control flow for complex task execution. Instead of defining only linear task dependencies, you can express sophisticated control policies using composable tree structures directly within a task.
 
-Praktor intentionally does not expose an HTTP BT leaf node. Network I/O belongs in `script` via the built-in `http` module, or in `command`/`shell` via external tools such as `curl`.
+Praktor intentionally does not expose an HTTP action leaf node. Network I/O belongs in `script` via the built-in `http` module, or in `command`/`shell` via external tools such as `curl`.
 
 **Key Concepts:**
 
-- **Control Nodes**: Define execution flow (sequence, fallback, parallel)
+- **Control Nodes**: Define execution flow (sequence, parallel, conditionals, loops)
 - **Leaf Nodes**: Perform actions (shell commands, parsing, validation)
 - **Context Bridge**: Access workflow data using `{ctx.*}` syntax
 - **Simplified Syntax**: Clean YAML without unnecessary braces
@@ -767,17 +842,19 @@ Praktor intentionally does not expose an HTTP BT leaf node. Network I/O belongs 
 | Node Type | Category | Description |
 | :--- | :--- | :--- |
 | `sequence` | Control | Execute children in order until one fails |
-| `fallback` | Control | Execute children in order until one succeeds |
 | `parallel` | Control | Execute all children concurrently |
 | `reactive_sequence` | Control | Sequence with continuous re-evaluation |
-| `reactive_fallback` | Control | Fallback with continuous re-evaluation |
+| `repeat` / `timeout` / `delay` | Decorator | Wrap exactly one child plus optional parameters |
+| `if` | Control | Conditional branch with `if`, `then`, and optional `else` |
+| `while` | Control | Loop while a condition is true |
+| `switch` | Control | Select one case by numeric index |
 | `shell` | Leaf | Execute shell command |
 | `parse_json` | Leaf | Extract data from JSON using JSONPath |
 | `parse_regex` | Leaf | Extract data using regular expressions |
 | `check_exit_code` | Leaf | Validate command exit code |
 | `wait_event` | Leaf | Wait for external event |
 
-#### 7.5.1. Control Nodes
+#### 7.6.1. Control Nodes
 
 **Sequence:**
 
@@ -790,19 +867,6 @@ tasks:
       - shell: cmake -B build
       - shell: cmake --build build
       - shell: ctest --test-dir build
-```
-
-**Fallback:**
-
-Executes children in order. Succeeds on first success. Fails if all children fail.
-
-```yaml
-tasks:
-  - name: deploy
-    fallback:
-      - shell: deploy.sh production
-      - shell: deploy.sh backup
-      - shell: echo "All deployment attempts failed" && exit 1
 ```
 
 **Parallel:**
@@ -818,7 +882,99 @@ tasks:
       - shell: npm run lint
 ```
 
-#### 7.5.2. Leaf Nodes
+**Reactive Sequence:**
+
+Executes children in order with re-evaluation semantics.
+
+```yaml
+tasks:
+  - name: reactive_check
+    reactive_sequence:
+      - file_exists: ./config.yml
+      - shell: ./build-with-config.sh
+```
+
+#### 7.6.1.a. Decorators and Advanced Control Nodes
+
+Action YAML uses one uniform rule: a node may contain scalar parameters and child branches in the same map.
+
+Supported branch keys:
+
+- `child`: one child node
+- `children`: sequence of child nodes
+- `then` / `else`: branch lists for `if`
+- `do`: loop body for `while`
+- `cases`: ordered branch list for `switch`
+
+Some scalar leaf nodes also use flat sibling keys instead of nested parameter maps:
+
+- `set_variable: target_key` with exactly one of sibling `value:` or `from:`
+- `subtree: build_inner`
+
+**Timeout:**
+
+`timeout` fails the node if the child takes longer than `timeout_ms`. When the immediate child is `shell`, Praktor also pushes that limit into the shell runner so the process can be interrupted. For larger subtrees, timeout is detected when control returns from the child subtree.
+
+```yaml
+tasks:
+  - name: guarded_build
+    timeout: 5000
+    child:
+      shell: cmake --build build
+```
+
+**Repeat:**
+
+Praktor's task runner is synchronous. Therefore `repeat` must declare a finite `num_cycles`; omitting it is rejected at runtime instead of hanging forever.
+
+```yaml
+tasks:
+  - name: warm_cache
+    repeat: 3
+    child:
+      shell: ./warm-cache.sh
+```
+
+**If:**
+
+The `if` condition may be a scalar truthy/falsey value or a child node/sequence. Truthy strings are anything other than empty, `0`, `false`, `no`, `off`, or `null`.
+
+```yaml
+tasks:
+  - name: verify_status
+    if: "{ctx.tasks.fetch.outputs.api_status}"
+    then:
+      - shell: echo "Service is healthy"
+    else:
+      - shell: echo "Service is down"
+```
+
+**While:**
+
+```yaml
+tasks:
+  - name: poll_until_ready
+    while: "{ctx.variables.keep_polling}"
+    do:
+      - shell: ./poll.sh
+      - sleep: "1s"
+```
+
+**Switch:**
+
+`switch` must resolve to a zero-based numeric index into `cases`.
+You may provide a numeric literal, a `{blackboard_key}` reference, or a bare blackboard key name.
+
+```yaml
+tasks:
+  - name: route_case
+    switch: selected_case
+    cases:
+      - shell: echo "primary"
+      - shell: echo "secondary"
+```
+
+#### 7.6.2. Leaf Nodes
 
 **Shell (Single Parameter - Simplified Syntax):**
 
@@ -839,10 +995,36 @@ tasks:
       timeout: 300
 ```
 
+**SetVariable (Flat Syntax):**
+
+```yaml
+tasks:
+  - name: state_update
+    sequence:
+      - set_variable: deployment_status
+        value: ready
+      - set_variable: deployed_version
+        from: build_version
+```
+
+`set_variable` writes to the BT blackboard. Use `value` for a literal or substituted scalar, or `from` to copy another blackboard key.
+
+**SubTree (Flat Syntax):**
+
+```yaml
+tasks:
+  - name: run_nested_tree
+    subtree: build_inner
+```
+
 **Parameters:**
 - `cmd` (String, **Required**): Command to execute
 - `output_key` (String, Optional): Blackboard key for stdout
-- `timeout` (Number, Optional): Timeout in seconds
+- `stderr_key` (String, Optional): Blackboard key for stderr
+- `exit_code_key` (String, Optional): Blackboard key for exit code
+- `working_dir` (String, Optional): Working directory for the command
+- `timeout` (Number, Optional): Timeout in milliseconds
+- `stream_output` (Boolean, Optional): Stream stdout/stderr to the console while running
 
 **Parse JSON:**
 
@@ -885,10 +1067,22 @@ tasks:
 ```
 
 **Parameters:**
-- `input_key` (String, **Required**): Blackboard key containing text
+- `input_key` (String, **Required**): Blackboard key containing text to parse
 - `pattern` (String, **Required**): Regular expression pattern
 - `capture_group` (Number, Optional): Which capture group to extract (default: 0)
 - `output_key` (String, Optional): Blackboard key for extracted data
+
+**IMPORTANT:** When `parse_regex` is used as a **top-level post-processor** for `command:` tasks (simplified syntax), `input_key` defaults to `stdout` and may be omitted. However, when used **inside orchestration nodes**, `input_key` is always required.
+
+Example of simplified syntax (top-level post-processor):
+```yaml
+- name: extract_version
+  command: "git describe --tags"
+  parse_regex:
+    pattern: "v([0-9]+\\.[0-9]+\\.[0-9]+)"
+    output_key: "version"
+    # input_key omitted: defaults to stdout
+```
 
 **Check Exit Code:**
 
@@ -905,9 +1099,9 @@ tasks:
 **Parameters:**
 - `expected` (Number, **Required**): Expected exit code
 
-#### 7.5.3. Context Bridge
+#### 7.6.3. Context Bridge
 
-The context bridge allows behavior tree nodes to access workflow data using `{ctx.*}` syntax.
+The context bridge allows action orchestration nodes to access workflow data using `{ctx.*}` syntax.
 
 **Syntax:**
 
@@ -954,30 +1148,23 @@ tasks:
       - shell: echo "Processing item {ctx.tasks.process_api_data.outputs.item_id}"
 ```
 
-#### 7.5.4. Nested Structures
+#### 7.6.4. Nested Structures
 
-Behavior trees can be nested to create complex control flow:
+Action orchestration can be nested to create complex control flow:
 
 ```yaml
 tasks:
-  - name: deploy_with_fallback
+  - name: deploy_with_checks
     sequence:
       - shell: echo "Starting deployment"
-      - fallback:
-          - sequence:
-              - shell: kubectl apply -f deployment.yml --context=prod
-              - check_exit_code: 0
-          - sequence:
-              - shell: echo "Primary cluster failed, trying backup..."
-              - shell: kubectl apply -f deployment.yml --context=backup
-              - check_exit_code: 0
-          - shell: echo "All deployment attempts failed!" && exit 1
+      - shell: kubectl apply -f deployment.yml --context=prod
+      - check_exit_code: 0
       - shell: echo "Deployment complete"
 ```
 
-#### 7.5.5. Output Mapping
+#### 7.6.5. Output Mapping
 
-Behavior tree outputs are automatically mapped to task outputs in the workflow context.
+Action orchestration outputs are automatically mapped to task outputs in the workflow context.
 
 **Reserved Output Keys:**
 
@@ -1011,7 +1198,7 @@ tasks:
     command: echo "Version is {{ tasks.extract_data.outputs.version }}"
 ```
 
-#### 7.5.6. Complete Example
+#### 7.6.6. Complete Example
 
 ```yaml
 name: Build and Deploy Pipeline
@@ -1036,17 +1223,11 @@ tasks:
 
   - name: deploy
     depends_on: [build_and_test]
-    fallback:
-      - sequence:
-          - shell: echo "Deploying to production"
-          - shell: kubectl set image deployment/app app={ctx.variables.REGISTRY}:{ctx.variables.VERSION}
-          - check_exit_code: 0
-          - shell: echo "Deployment successful"
-      - sequence:
-          - shell: echo "Production deployment failed, trying staging"
-          - shell: kubectl set image deployment/app app={ctx.variables.REGISTRY}:{ctx.variables.VERSION} --context=staging
-          - check_exit_code: 0
-          - shell: echo "Deployed to staging instead"
+    sequence:
+      - shell: echo "Deploying to production"
+      - shell: kubectl set image deployment/app app={ctx.variables.REGISTRY}:{ctx.variables.VERSION}
+      - check_exit_code: 0
+      - shell: echo "Deployment successful"
 ```
 
 **See Also:**
@@ -1062,7 +1243,7 @@ Tasks referenced only by triggers are treated as trigger handlers, not as regula
 **Events:**
 
 - `on_success`: Fires when the task completes successfully.
-- `on_failure`: Fires when the task fails (after all retries).
+- `on_failure`: Fires when the task fails.
 - `on_complete`: Fires regardless of success or failure.
 
 **Trigger Actions:**
@@ -1079,8 +1260,9 @@ tasks:
   - name: notify_slack
     command: "curl -s -X POST {{ env.SLACK_WEBHOOK }}"
     script: |
+      import("net");
       var version = ctx.get("tasks.deploy.outputs.stdout")
-      var body = json.stringify({text: "Deployed " + version})
+      var body = json.stringify(map{text: "Deployed " + version})
       http.post(ctx.get("env.SLACK_WEBHOOK"), body)
 
   - name: rollback
@@ -1089,9 +1271,6 @@ tasks:
   # Main task with triggers
   - name: deploy
     command: "./deploy.sh --env production"
-    retries:
-      count: 3
-      delay: "10s"
     triggers:
       on_success:
         - notify_slack
@@ -1117,8 +1296,8 @@ When a task fails, the following variables are available in triggered tasks to p
 | Variable | Description |
 | :--- | :--- |
 | `failed_task_name` | Name of the failed task. |
-| `failed_task_type` | Type of runner used (`command`, `uses`, `dynamic_tasks`). |
-| `failed_task_exit_code` | Process exit code (available for `command` runner). |
+| `failed_task_type` | Type of runner used (`command`, `program`, `uses`, `dynamic_tasks`). |
+| `failed_task_exit_code` | Process exit code (available for `command` and `program` runners). |
 | `failed_task_stdout` | The captured standard output of the failed task. |
 | `failed_task_stderr` | The captured standard error of the failed task. |
 | `failed_task_error` | The primary error message describing the failure. |
@@ -1139,11 +1318,12 @@ tasks:
   - name: alert_on_failure
     command: "echo 'Task failed'"
     script: |
+      import("net");
       var taskName = ctx.get("failed_task_name")
       var error = ctx.get("failed_task_error")
       var stderr = ctx.get("failed_task_stderr")
       var message = "Task '" + taskName + "' failed: " + error + "\n\nStderr:\n" + stderr
-      http.post(ctx.get("env.ALERT_WEBHOOK"), json.stringify({text: message}))
+      http.post(ctx.get("env.ALERT_WEBHOOK"), json.stringify(map{text: message}))
 
   - name: deploy
     command: "./deploy.sh"
@@ -1161,6 +1341,11 @@ Praktor uses a two-tier system for dynamic values:
 ### 9.1. Mustache Templating
 
 Standard string substitution uses the [Mustache](https://mustache.github.io/) templating engine. This provides powerful formatting capabilities beyond simple variable replacement.
+
+**Scope:** Mustache templating with double braces `{{ }}` is used in:
+- Praktor task-level fields (`command:`, `program:`, `args:`, `vars:`, etc.)
+- Task-level `env:` and `vars:` values
+- Script blocks
 
 **Basic Variables:**
 
@@ -1190,6 +1375,41 @@ command: "echo '{{^tasks.test.outputs.data.results}}No tests were executed.{{/ta
 
 **Object Access:**
 You can access nested fields using dot notation: `{{ tasks.fetch.outputs.data.user.id }}`.
+
+**Action Layer Context Bridge:**
+
+When using orchestration nodes (actions), a **separate** syntax is available for accessing workflow context from within action node parameters:
+
+- **Single braces** `{ctx.*}` are used in action node parameters (e.g., `shell:`, `parse_regex:`, etc.)
+- `{ctx.variables.VAR}` - Access global variable
+- `{ctx.env.ENV_VAR}` - Access environment variable
+- `{ctx.tasks.TASK_NAME.outputs.KEY}` - Access task output
+
+**IMPORTANT DISTINCTION:**
+- **Praktor task level** (e.g., `command:`, `vars:`) uses **double braces** `{{ }}` with full Mustache features (sections, loops, inverted sections).
+- **Action node parameters** (e.g., inside `shell:`, `parse_regex:`) use **single braces** `{ctx.*}` for simple variable lookup only (no sections/loops).
+
+**Example showing both syntaxes:**
+```yaml
+tasks:
+  - name: extract_version
+    command: "cat version.txt"  # Praktor command task
+    
+  - name: deploy
+    vars:
+      app_name: "MyApp"  # Task-level variable
+      version: "{{ tasks.extract_version.outputs.stdout }}"  # Double braces: Mustache
+    actions:
+      sequence:
+        - shell: "echo Deploying {ctx.variables.app_name} v{ctx.tasks.extract_version.outputs.version}"
+          # Single braces: BT context bridge
+        - shell: "kubectl apply -f deployment.yaml"
+          working_dir: "{ctx.env.DEPLOY_DIR}"  # Single braces: access env
+```
+
+Mixing syntaxes in the wrong layer will cause errors:
+- Using `{{ }}` in BT node parameters will be treated as literal text (Mustache runs at task parse time, BT nodes are evaluated at execution time).
+- Using `{ctx.*}` in Praktor task-level fields will be treated as literal text.
 
 ### 9.2. Expression Language (for `when`)
 
@@ -1256,9 +1476,6 @@ tasks:
   - name: test
     depends_on: [build]
     command: "npm test"
-    retries:
-      count: 2
-      delay: "5s"
 ```
 
 ### 11.2. Reusable Workflow with Context Inheritance
@@ -1310,8 +1527,9 @@ tasks:
   - name: notify_slack
     command: "echo 'Notifying...'"
     script: |
+      import("net");
       var image = ctx.get("tasks.build_image.outputs.full_image_tag")
-      var body = json.stringify({text: "Deployment failed for " + image})
+      var body = json.stringify(map{text: "Deployment failed for " + image})
       http.post(ctx.get("env.SLACK_WEBHOOK_URL"), body)
 
   - name: deploy
@@ -1375,21 +1593,19 @@ tasks:
   - name: notify_team
     command: "echo 'Notifying...'"
     script: |
+      import("net");
       var webhook = ctx.get("env.SLACK_WEBHOOK")
       var error = ctx.get("failed_task_error")
-      if not error {
+      if (not error) {
         error = "Success"
       }
-      http.post(webhook, json.stringify({text: "Deploy status: " + error}))
+      http.post(webhook, json.stringify(map{text: "Deploy status: " + error}))
 
   - name: rollback
     command: "./rollback.sh --reason 'Deploy failed'"
 
   - name: deploy_app
     command: "./deploy.sh --env production"
-    retries:
-      count: 3
-      delay: "10s"
     triggers:
       on_failure: [rollback, notify_team]
       on_success: [save_deploy_log, notify_team]
@@ -1456,9 +1672,6 @@ dotEnv:
   - ".env"
 
 defaults:
-  retries:
-    count: 2
-    delay: "5s"
   timeout: "10m"
 
 # Optional: Native DLL/SO modules
@@ -1480,13 +1693,14 @@ tasks:
     each:
       items: ["a", "b"]
       as: "item"
-    retries:
-      count: 3
-      delay: "10s"
     timeout: "15m"
 
     # Exactly one runner:
     command: "echo hello"
+    # OR
+    program: "python"
+    args: ["./tool.py", "--json"]
+    stdin: "{{ payload }}"
     # OR
     uses: "./path/to/workflow.yml"
     # OR
@@ -1512,7 +1726,8 @@ tasks:
 
 | Runner | Purpose | Output Location |
 | :--- | :--- | :--- |
-| `command` | Execute external programs | `tasks.<name>.outputs.stdout` |
+| `command` | Execute shell commands | `tasks.<name>.outputs.stdout` |
+| `program` | Execute raw process with explicit args | `tasks.<name>.outputs.stdout` |
 | `uses` | Execute reusable workflow | `tasks.<name>.outputs.*` (from nested tasks) |
 | `dynamic_tasks` | Runtime task generation | `tasks.<name>.outputs.generated_tasks[*]` plus each generated task's own outputs |
 

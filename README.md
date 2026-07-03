@@ -8,7 +8,7 @@ Praktor is a high-performance, concurrent workflow engine written in modern C++2
 - **📝 Declarative YAML Syntax**: Define your workflows in a simple, human-readable YAML format
 - **⚡ Concurrent Execution**: DAG-based executor runs independent tasks in parallel to maximize performance
 - **📦 Reusable Workflows**: Compose complex pipelines using the `uses` keyword to execute external workflow files
-- **🔧 Built-in Script Engine**: Post-processing scripts with `ctx`, `json`, `http`, `fs`, `base64`, `math`, `log`, and `dll` modules (re2c + lemon parser)
+- **🔧 Built-in Script Engine**: MIR/JIT-backed post-processing scripts with `ctx`, `json`, `http`, `fs`, `base64`, `math`, `log`, and `dll` modules (re2c + lemon parser)
 - **🎯 Advanced Control Flow**:
     - `depends_on`: Define a Directed Acyclic Graph (DAG) of task dependencies
     - `when`: Use powerful conditional expressions (e.g., `"{{env}} == 'prod' and {{tag}} != 'latest'"`) to control task execution
@@ -16,7 +16,7 @@ Praktor is a high-performance, concurrent workflow engine written in modern C++2
     - `retries`: Automatic retry with configurable delays and backoff
 - **🔌 Integrated Runners**:
     - `command`: Native execution of external programs and shell scripts
-    - `btdsl`: Explicit behavior-tree orchestration for shell/script driven workflows
+    - `actions`: Explicit action orchestration for shell/script driven workflows
     - `dynamic_tasks`: Generate and execute tasks at runtime based on data from the context
 - **📊 Output Capture**: Intelligent capture of stdout, stderr, and JSON data into the shared context
 - **🛡️ Resilience & Triggers**: Event-driven actions (`on_success`, `on_failure`) for notifications and automated recovery
@@ -33,15 +33,15 @@ Praktor has two distinct orchestration levels:
 Common runners include:
 
 - **`command`**: call an external process.
-- **`btdsl`**: define internal behavior-tree control flow for one task.
+- **`actions`**: define internal action control flow for one task.
 - **`uses` / `dynamic_tasks`**: compose or generate more tasks at runtime.
 
 Important semantic rule:
 
-- `when`, `each`, `retries`, `triggers`, and `script` are flow-level task properties. They apply to all task kinds, including BT tasks.
-- `command` is just a runner for external process execution. It is not part of BT grammar.
-- YAML is the only authoring grammar for workflows and BT tasks.
-- BT node syntax is task-internal. BT nodes do not have their own DAG-level `when` or `each`.
+- `when`, `each`, `retries`, `triggers`, and `script` are flow-level task properties. They apply to all task kinds, including action tasks.
+- `command` is just a runner for external process execution. It is not part of action grammar.
+- YAML is the only authoring grammar for workflows and action tasks.
+- Action node syntax is task-internal. Action nodes do not have their own DAG-level `when` or `each`.
 
 Visual summary:
 
@@ -50,12 +50,12 @@ Workflow (DAG)
   ├─ task properties: depends_on / when / each / retries / triggers / script
   └─ Task
       ├─ runner: command
-      ├─ runner: btdsl
+      ├─ runner: actions
       ├─ runner: uses
       └─ runner: dynamic_tasks
 
-Inside btdsl only:
-  sequence / fallback / retry / shell / parse_*
+Inside actions only:
+  sequence / fallback / parallel / retry / if / while / switch / shell / parse_*
 ```
 
 Minimal examples:
@@ -70,7 +70,7 @@ tasks:
     each:
       items: ["api", "worker"]
       as: service
-    btdsl:
+    actions:
       sequence:
         - shell:
             cmd: "./deploy.sh {{ service }}"
@@ -83,8 +83,12 @@ In the example above:
 
 - `when` belongs to the workflow layer and decides whether `build_once` runs.
 - `each` belongs to the workflow layer and repeats the whole `deploy_many` task.
-- `command` is an external-process runner, not a BT node.
-- `sequence`, `shell`, and `parse_json` belong to the BT layer inside one task execution.
+- `command` is an external-process runner, not an action node.
+- `sequence`, `shell`, and `parse_json` belong to the action layer inside one task execution.
+- Advanced action nodes that need both parameters and branches use YAML maps such as `{ if: ..., then: [...], else: [...] }`, `{ while: ..., do: [...] }`, `{ switch: ..., cases: [...] }`, `{ timeout: 5000, child: ... }`, or `{ set_variable: status, value: ready }`.
+- `repeat` in Praktor must use a finite `num_cycles`; the synchronous runner intentionally rejects unbounded loops.
+- `timeout` now fails overruns reliably; if it wraps an immediate `shell`, the time budget is also pushed into the shell runner for real process timeout.
+- `switch` resolves to a zero-based case index and may be a numeric literal, a `{blackboard_key}` reference, or a bare blackboard key name.
 
 ## Technology Stack
 
@@ -228,7 +232,7 @@ tasks:
       var data = ctx.get("tasks.fetch_data.outputs.data");
       var active = json.query(data, "[?status=='active']");
       ctx.output("active_count", json.query(active, "length(@)"));
-      for item in active {
+      for (item in active) {
         log.info("Active: " + item.name);
       }
 ```
@@ -244,7 +248,7 @@ tasks:
     script: |
       var users = ctx.get("tasks.fetch_users.outputs.data");
       var orders = ctx.get("tasks.fetch_orders.outputs.data");
-      var summary = {
+      var summary = map{
         user_count: json.query(users, "length(@)"),
         order_total: json.query(orders, "sum([].amount)")
       };
@@ -305,7 +309,7 @@ Praktor is designed with performance and modularity in mind:
          ▼
 ┌─────────────────┐
 │  Script Engine  │
-│ (re2c + lemon)  │
+│ MIR/JIT backend │
 └─────────────────┘
 ```
 
@@ -313,7 +317,7 @@ Praktor is designed with performance and modularity in mind:
 - **Task Parser**: High-speed YAML engine using `ryml` for zero-allocation parsing
 - **Enhanced Graph**: Advanced DAG orchestration with cycle detection and parallel scheduling
 - **Workflow Executor**: Concurrent runtime that manages thread pools and execution context
-- **Script Engine**: Built-in scripting language (re2c lexer + lemon parser + tree-walking interpreter)
+- **Script Engine**: Built-in scripting language (re2c lexer + lemon parser + MIR/JIT backend)
 - **Expression Engine**: Powerful interpolation engine supporting variables, environment, and task outputs
 
 ## Advanced Features
@@ -354,8 +358,9 @@ tasks:
 tasks:
   - name: notify_failure
     script: |
+      import("net");
       var error = ctx.get("failed_task_error");
-      http.post("{{ env.SLACK_WEBHOOK }}", {"text": "Deployment failed: " + error});
+      http.post("{{ env.SLACK_WEBHOOK }}", json.stringify(map{text: "Deployment failed: " + error}));
 
   - name: rollback
     command: "./rollback.sh"

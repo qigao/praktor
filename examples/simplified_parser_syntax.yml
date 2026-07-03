@@ -55,18 +55,17 @@ tasks:
     depends_on: [extract_target]
     command: 'echo "Deploying {{ tasks.extract_target.outputs.target }}"'
 
-  # Example 9: behavior tree task accessing parsed output
+  # Example 9: action orchestration task accessing parsed output
   - name: verify_status
     depends_on: [fetch_status]
     sequence:
       - shell:
           cmd: "echo Status: {ctx.tasks.fetch_status.outputs.api_status}"
-      - if_then_else:
-          condition: "{ctx.tasks.fetch_status.outputs.api_status}"
-          then:
-            - shell: "echo Service is healthy"
-          else:
-            - shell: "echo Service is down"
+      - if: "{ctx.tasks.fetch_status.outputs.api_status}"
+        then:
+          - shell: "echo Service is healthy"
+        else:
+          - shell: "echo Service is down"
 
   # Example 10: Multiple parsers in pipeline
   - name: build_and_extract
@@ -106,5 +105,5 @@ tasks:
 # - 33% less nesting
 # - Named parameters (self-documenting)
 # - No parser plugin indirection
-# - Consistent with behavior-tree task style
+# - Consistent with action orchestration task style
 # - More readable

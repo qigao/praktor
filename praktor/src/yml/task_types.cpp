@@ -13,25 +13,36 @@ std::string normalizeNodeLookup(std::string value) {
 
 } // namespace
 
-// NODE_REGISTRY: Registry of all supported BTDSL node types
-const std::unordered_map<std::string, BtdslNodeSpec> NODE_REGISTRY = {
+// NODE_REGISTRY: Registry of all supported orchestration node types
+const std::unordered_map<std::string, OrchNodeSpec> NODE_REGISTRY = {
   // Control Flow Nodes
   {"Sequence", {"Sequence", true, {}, {}, true}},
   {"Fallback", {"Fallback", true, {}, {}, true}},
+  {"Selector", {"Selector", true, {}, {}, true}},
   {"Parallel", {"Parallel", true, {}, {}, true}},
   {"ReactiveSequence", {"ReactiveSequence", true, {}, {}, true}},
-  {"ReactiveFallback", {"ReactiveFallback", true, {}, {}, true}},
   {"Switch", {"Switch", true, {"variable"}, {}, true}},
   {"WhileDo", {"WhileDo", true, {}, {"max_iterations"}, true}},
   {"IfThenElse", {"IfThenElse", true, {}, {}, true}},
-  {"Retry", {"Retry", true, {}, {"num_attempts"}, true}},
   {"Inverter", {"Inverter", true, {}, {}, true}},
   {"ForceSuccess", {"ForceSuccess", true, {}, {}, true}},
   {"ForceFailure", {"ForceFailure", true, {}, {}, true}},
   {"Repeat", {"Repeat", true, {}, {"num_cycles"}, true}},
   {"Timeout", {"Timeout", true, {}, {"timeout_ms"}, true}},
   {"Delay", {"Delay", true, {}, {"delay_ms"}, true}},
-  {"SubTree", {"SubTree", false, {"ID"}, {}, false}},
+  {"SubTree", {"SubTree", false, {"tree"}, {}, false}},
+  
+  // Advanced Decorators
+  {"KeepRunningUntilFailure", {"KeepRunningUntilFailure", true, {}, {"max_iterations"}, true}},
+  {"RunOnce", {"RunOnce", true, {}, {}, true}},
+  {"ConsumeQueue", {"ConsumeQueue", true, {"queue_key"}, {"item_key"}, true}},
+  
+  // Extended Decorators
+  {"Precondition", {"Precondition", true, {"condition"}, {}, true}},
+  {"EntryUpdated", {"EntryUpdated", true, {"watch_key"}, {}, true}},
+  
+  // Extended Control Flow
+  {"PipelineSequence", {"PipelineSequence", true, {}, {"input_key", "output_key"}, true}},
   
   // Leaf Nodes
   {"Shell", {"Shell", false, {"cmd"}, {"output_key", "stderr_key", "exit_code_key", "working_dir", "timeout", "stream_output"}, false}},
@@ -43,10 +54,10 @@ const std::unordered_map<std::string, BtdslNodeSpec> NODE_REGISTRY = {
   {"WaitEvent", {"WaitEvent", false, {"event"}, {"timeout"}, false}},
   {"Sleep", {"Sleep", false, {"duration"}, {}, false}},
   {"FileExists", {"FileExists", false, {"path"}, {"output_key", "fail_if_missing"}, false}},
-  {"SetVariable", {"SetVariable", false, {"key"}, {"value", "from_context"}, false}}
+  {"SetVariable", {"SetVariable", false, {"key"}, {"value", "from"}, false}}
 };
 
-const BtdslNodeSpec* findNodeSpec(const std::string& name) {
+const OrchNodeSpec* findNodeSpec(const std::string& name) {
   // Try exact match first
   auto it = NODE_REGISTRY.find(name);
   if (it != NODE_REGISTRY.end()) {
@@ -64,13 +75,13 @@ const BtdslNodeSpec* findNodeSpec(const std::string& name) {
   return nullptr;
 }
 
-// BtdslNode helper method implementations
-bool BtdslNode::isControlNode() const {
+// OrchNode helper method implementations
+bool OrchNode::isControlNode() const {
   auto* spec = findNodeSpec(type);
   return spec && spec->isControl;
 }
 
-bool BtdslNode::isLeafNode() const {
+bool OrchNode::isLeafNode() const {
   auto* spec = findNodeSpec(type);
   return spec && !spec->isControl;
 }

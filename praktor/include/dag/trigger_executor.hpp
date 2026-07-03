@@ -1,11 +1,11 @@
-#ifndef __TRIGGER_EXECUTOR_HPP__
-#define __TRIGGER_EXECUTOR_HPP__
+#pragma once
 
 #include "workflow_context.hpp"
 #include "yml/task.hpp"
 
 #include <functional>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 namespace Praktor {
@@ -32,10 +32,9 @@ public:
 
 private:
   void executeTriggerAction(const TriggerAction &action, WorkflowContext &context,
-                            const std::vector<Task> &all_tasks, ExecutionCallback callback);
+                            const std::vector<Task> &all_tasks, ExecutionCallback callback,
+                            std::unordered_set<std::string> &visited_triggers);
 };
 
 } // namespace Execution
 } // namespace Praktor
-
-#endif // __TRIGGER_EXECUTOR_HPP__

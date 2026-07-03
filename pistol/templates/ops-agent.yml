@@ -24,36 +24,38 @@ variables:
 tasks:
   - name: alert_ops_failure
     script: |
+      import("net");
       var host = ctx.get("HOSTNAME");
       var task = ctx.get("failed_inner_task_name");
-      if not task {
+      if (not task) {
         task = ctx.get("failed_task_name");
       }
       var error = ctx.get("failed_inner_task_error");
-      if not error {
+      if (not error) {
         error = ctx.get("failed_task_error");
       }
       var webhook = ctx.get("ALERT_WEBHOOK");
       log.error("[ALERT] " + host + " | " + task + ": " + error);
-      if webhook != "" {
-        http.post(webhook, json.stringify({
-          "text": "[ALERT] " + host + " | " + task + ": " + error
+      if (webhook != "") {
+        http.post(webhook, json.stringify(map{
+          text: "[ALERT] " + host + " | " + task + ": " + error
         }));
       }
 
   - name: fetch_remote_commands
     when: "'{{ CMD_ENDPOINT }}' != ''"
     script: |
+      import("net");
       var endpoint = ctx.get("CMD_ENDPOINT");
       var token = ctx.get("AUTH_TOKEN");
       var agent = ctx.get("HOSTNAME");
 
-      var resp = http.get(endpoint + "?agent=" + agent, {
-        "headers": {"Authorization": "Bearer " + token},
-        "timeout": 10000
+      var resp = http.get(endpoint + "?agent=" + agent, map{
+        headers: map{Authorization: "Bearer " + token},
+        timeout: 10000
       });
 
-      if resp.status != 200 {
+      if (resp.status != 200) {
         log.warn("Failed to fetch commands: HTTP " + resp.status);
         ctx.output("commands", []);
         ctx.output("executable_commands", []);
@@ -64,32 +66,32 @@ tasks:
       }
 
       var cmds = resp.data;
-      if not cmds {
+      if (not cmds) {
         cmds = [];
       }
 
       var executable = [];
       var unsupported = [];
-      for cmd in cmds {
-        var normalized = {
-          "id": cmd.id,
-          "action": cmd.action,
-          "command": ""
+      for (cmd in cmds) {
+        var normalized = map{
+          id: cmd.id,
+          action: cmd.action,
+          command: ""
         };
 
-        if cmd.action == "run_command" and cmd.params.command {
+        if (cmd.action == "run_command" and cmd.params.command) {
           normalized.command = cmd.params.command;
           executable = executable + [normalized];
-        } else if cmd.action == "restart_service" and cmd.params.service {
+        } else if (cmd.action == "restart_service" and cmd.params.service) {
           var svc = cmd.params.service;
           normalized.command = "systemctl restart " + svc + " || (net stop " + svc + " && net start " + svc + ")";
           executable = executable + [normalized];
         } else {
-          unsupported = unsupported + [{
-            "id": cmd.id,
-            "action": cmd.action,
-            "status": "unsupported",
-            "agent": agent
+          unsupported = unsupported + [map{
+            id: cmd.id,
+            action: cmd.action,
+            status: "unsupported",
+            agent: agent
           }];
         }
       }
@@ -103,7 +105,7 @@ tasks:
 
   - name: execute_remote_commands
     depends_on: [fetch_remote_commands]
-    when: "{{ tasks.fetch_remote_commands.outputs.executable_count }} > 0"
+    when: "$tasks.fetch_remote_commands.outputs.executable_count > 0"
     dynamic_tasks:
       items_variable: "{{ tasks.fetch_remote_commands.outputs.executable_commands }}"
       template:
@@ -127,7 +129,7 @@ tasks:
       var threshold = ctx.get("CPU_THRESHOLD");
       ctx.output("cpu_percent", cpu);
       log.info("CPU: " + cpu + "% (threshold: " + threshold + "%)");
-      if math.eval(cpu + " > " + threshold) {
+      if (math.eval(cpu + " > " + threshold)) {
         fail("CPU at " + cpu + "% exceeds " + threshold + "%");
       }
     continue_on_error: true
@@ -148,7 +150,7 @@ tasks:
       var threshold = ctx.get("MEM_THRESHOLD");
       ctx.output("mem_percent", mem);
       log.info("Memory: " + mem + "% (threshold: " + threshold + "%)");
-      if math.eval(mem + " > " + threshold) {
+      if (math.eval(mem + " > " + threshold)) {
         fail("Memory at " + mem + "% exceeds " + threshold + "%");
       }
     continue_on_error: true
@@ -169,7 +171,7 @@ tasks:
       var threshold = ctx.get("DISK_THRESHOLD");
       ctx.output("disk_percent", disk);
       log.info("Disk: " + disk + "% (threshold: " + threshold + "%)");
-      if math.eval(disk + " > " + threshold) {
+      if (math.eval(disk + " > " + threshold)) {
         fail("Disk at " + disk + "% exceeds " + threshold + "%");
       }
     continue_on_error: true
@@ -181,10 +183,10 @@ tasks:
     script: |
       var csv = ctx.get("SERVICES");
       var items = [];
-      for part in csv.split(",") {
+      for (part in csv.split(",")) {
         var name = part.trim();
-        if name != "" {
-          items = items + [{"name": name}];
+        if (name != "") {
+          items = items + [map{name: name}];
         }
       }
       ctx.output("services", items);
@@ -205,48 +207,48 @@ tasks:
     depends_on: [check_cpu, check_memory, check_disk, check_services]
     script: |
       var status = "ok";
-      if ctx.get("tasks.check_cpu.status") == "failed" {
+      if (ctx.get("tasks.check_cpu.status") == "failed") {
         status = "degraded";
       }
-      if ctx.get("tasks.check_memory.status") == "failed" {
+      if (ctx.get("tasks.check_memory.status") == "failed") {
         status = "degraded";
       }
-      if ctx.get("tasks.check_disk.status") == "failed" {
+      if (ctx.get("tasks.check_disk.status") == "failed") {
         status = "degraded";
       }
-      if ctx.get("tasks.check_services.outputs.failed_count") > 0 {
+      if (ctx.get("tasks.check_services.outputs.failed_count") > 0) {
         status = "degraded";
       }
-      if ctx.get("tasks.execute_remote_commands.outputs.failed_count") > 0 {
+      if (ctx.get("tasks.execute_remote_commands.outputs.failed_count") > 0) {
         status = "degraded";
       }
 
       var remote_results = ctx.get("tasks.fetch_remote_commands.outputs.unsupported_results");
-      if not remote_results {
+      if (not remote_results) {
         remote_results = [];
       }
       var executed = ctx.get("tasks.execute_remote_commands.outputs.generated_tasks");
-      if executed {
-        for item in executed {
-          remote_results = remote_results + [{
-            "id": item.item.id,
-            "action": item.item.action,
-            "status": item.status,
-            "agent": ctx.get("HOSTNAME")
+      if (executed) {
+        for (item in executed) {
+          remote_results = remote_results + [map{
+            id: item.item.id,
+            action: item.item.action,
+            status: item.status,
+            agent: ctx.get("HOSTNAME")
           }];
         }
       }
 
-      var report = {
-        "host": ctx.get("HOSTNAME"),
-        "health": {
-          "cpu_percent": ctx.get("tasks.check_cpu.outputs.cpu_percent"),
-          "mem_percent": ctx.get("tasks.check_memory.outputs.mem_percent"),
-          "disk_percent": ctx.get("tasks.check_disk.outputs.disk_percent")
+      var report = map{
+        host: ctx.get("HOSTNAME"),
+        health: map{
+          cpu_percent: ctx.get("tasks.check_cpu.outputs.cpu_percent"),
+          mem_percent: ctx.get("tasks.check_memory.outputs.mem_percent"),
+          disk_percent: ctx.get("tasks.check_disk.outputs.disk_percent")
         },
-        "services": ctx.get("tasks.check_services.outputs.generated_tasks"),
-        "remote_commands": remote_results,
-        "status": status
+        services: ctx.get("tasks.check_services.outputs.generated_tasks"),
+        remote_commands: remote_results,
+        status: status
       };
 
       ctx.output("report", report);
@@ -257,14 +259,16 @@ tasks:
     depends_on: [generate_report]
     when: "'{{ CMD_ENDPOINT }}' != ''"
     script: |
+      import("net");
       var endpoint = ctx.get("CMD_ENDPOINT");
       var token = ctx.get("AUTH_TOKEN");
       var report = ctx.get("tasks.generate_report.outputs.report");
+      var headers = json.parse(
+        "{\"Authorization\":" + json.stringify("Bearer " + token) +
+        ",\"Content-Type\":\"application/json\"}"
+      );
 
-      http.post(endpoint + "/report", json.stringify(report), {
-        "headers": {
-          "Authorization": "Bearer " + token,
-          "Content-Type": "application/json"
-        }
+      http.post(endpoint + "/report", json.stringify(report), map{
+        headers: headers
       });
       log.info("Report sent upstream");
