@@ -6,8 +6,6 @@ configure_file(
     ${CMAKE_CURRENT_SOURCE_DIR}/include/util/version.hpp.in
     ${CMAKE_CURRENT_BINARY_DIR}/generated/include/util/version.hpp @ONLY
 )
-find_package(TurboNet CONFIG REQUIRED PATHS ${EXTERNAL_ROOT}/turbonet)
-
 # ── SOURCE FILES ──
 
 set(SOURCE_FILES
@@ -43,12 +41,6 @@ target_include_directories(
 )
 
 set(folder_name "${TARGET_NAME_EXE}")
-find_package(ryml CONFIG REQUIRED)
-find_package(Threads)
-find_package(jsoncons CONFIG REQUIRED)
-find_package(cxxopts CONFIG REQUIRED)
-find_package(TurboNet CONFIG REQUIRED PATHS "${TURBONET_ROOT}")
-find_package(TurboScript CONFIG REQUIRED PATHS "${TURBOSCRIPT_ROOT}")
 set(PRAKTOR_SCRIPT_PLUGIN_GLOBS "${TURBOSCRIPT_ROOT}/bin/*_tbs.dll")
 file(GLOB PRAKTOR_SCRIPT_PLUGIN_DLLS ${PRAKTOR_SCRIPT_PLUGIN_GLOBS})
 list(REMOVE_DUPLICATES PRAKTOR_SCRIPT_PLUGIN_DLLS)
@@ -91,8 +83,8 @@ target_link_libraries(
            OpenSSL::SSL
            OpenSSL::Crypto
            ryml::ryml
-           TurboNet::Utils
-           TurboNet::Mustache
+           TurboUtils::Core
+           TurboUtils::Mustache
            cxxopts::cxxopts
            TurboScript::ExprTk
            TurboScript::TurboScript
@@ -113,6 +105,9 @@ endif()
 # Enable PIC so praktor_lib can be linked into the new praktor_api DLL
 set_target_properties(
     ${TARGET_NAME_LIB} PROPERTIES POSITION_INDEPENDENT_CODE ON
+)
+cmake_config_target(
+    ${TARGET_NAME_LIB} NO_INSTALL NO_VERSION FOLDER ${folder_name}
 )
 
 add_executable(${TARGET_NAME_EXE})
@@ -141,8 +136,7 @@ file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/templates
 
 praktor_copy_runtime_artifacts(${TARGET_NAME_EXE})
 
-set_target_properties(${TARGET_NAME_EXE} PROPERTIES FOLDER ${folder_name})
-set_target_properties(${TARGET_NAME_LIB} PROPERTIES FOLDER ${folder_name})
+cmake_config_target(${TARGET_NAME_EXE} NO_INSTALL FOLDER ${folder_name})
 if(ENABLE_TESTS)
     add_subdirectory(test)
 endif()

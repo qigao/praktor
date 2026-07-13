@@ -8,8 +8,7 @@
             "name": "win-paths",
             "hidden": true,
             "cacheVariables": {
-                "TURBONET_ROOT": "c:/projects/cpp/external/pkgs/turbonet",
-                "TURBOHTTP_ROOT": "c:/projects/cpp/external/pkgs/turbohttp",
+                "TURBO_UTILS_ROOT": "C:/projects/cpp/external/pkgs/turboutils",
                 "TURBOSCRIPT_ROOT": "c:/projects/cpp/external/pkgs/turbo_script",
                 "CMAKE_MAKE_PROGRAM": "C:/Users/lockg/scoop/shims/ninja.exe",
                 "VCPKG_TARGET_TRIPLET": "x64-windows",
@@ -31,7 +30,7 @@
             "name": "linux-paths",
             "hidden": true,
             "cacheVariables": {
-                "TURBONET_ROOT": "/opt/turbonet",       
+                "TURBONET_ROOT": "/opt/turbonet",
                 "TURBOSCRIPT_ROOT": "/opt/turboscript",
                 "TURBOHTTP_ROOT": "/opt/turbohttp",
                 "VCPKG_TARGET_TRIPLET": "x64-linux",

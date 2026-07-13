@@ -12,6 +12,19 @@ namespace actions {
 enum class NodeStatus;
 class ShellExecutor; // Forward declaration
 
+class CancellationContext {
+public:
+  void setHandler(std::function<void()> handler);
+  void clearHandler();
+  bool requestCancel();
+  bool isCancellationRequested() const;
+
+private:
+  mutable std::mutex mutex_;
+  bool cancellation_requested_ = false;
+  std::function<void()> handler_;
+};
+
 // Base class for async tasks
 class AsyncTask {
 public:
@@ -30,13 +43,11 @@ public:
 template <typename T> class AsyncTaskImpl : public AsyncTask {
 public:
   // Constructor accepting a pre-created future (from thread pool)
-  explicit AsyncTaskImpl(std::future<NodeStatus> future)
+  explicit AsyncTaskImpl(std::future<NodeStatus> future,
+                         std::shared_ptr<CancellationContext> cancellation)
       : future_(std::move(future)),
-        start_time_(std::chrono::steady_clock::now()) {}
-
-  explicit AsyncTaskImpl(std::future<NodeStatus> future, int pid)
-      : future_(std::move(future)),
-        start_time_(std::chrono::steady_clock::now()), pid_(pid) {}
+        start_time_(std::chrono::steady_clock::now()),
+        cancellation_(std::move(cancellation)) {}
 
   bool isDone() const override {
     if (result_cached_) {
@@ -62,12 +73,10 @@ public:
     return elapsed > max_seconds;
   }
 
-  int getPid() const override { return pid_; }
-
 private:
   mutable std::future<NodeStatus> future_;
   std::chrono::steady_clock::time_point start_time_;
-  int pid_ = -1;
+  std::shared_ptr<CancellationContext> cancellation_;
   NodeStatus result_{};
   bool result_cached_ = false;
 };

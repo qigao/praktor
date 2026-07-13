@@ -680,6 +680,35 @@ tasks:
     std::filesystem::remove_all(dir);
 }
 
+TEST_CASE("failed trigger handlers fail the workflow without rewriting the source task status")
+{
+    auto dir = createTempDir();
+    auto workflow_path = dir / "workflow.yml";
+
+    writeFile(workflow_path, R"(
+tasks:
+  - name: notify
+    command: "definitely_missing_trigger_command_86420"
+
+  - name: build
+    command: "echo done"
+    triggers:
+      on_success: [notify]
+)"
+    );
+
+    auto workflow = TaskParser::parseFile(workflow_path.string());
+    auto graph = TaskParser::buildGraph(workflow);
+    WorkflowContext context;
+    WorkflowExecutor executor(graph, workflow.tasks, {}, 1, false);
+    executor.execute(context);
+
+    CHECK(context.getValueOrDefault<std::string>("workflow_status", "") == "failed");
+    CHECK(context.getTaskStatus("build") == "success");
+    CHECK(context.getTaskStatus("notify") == "failed");
+    std::filesystem::remove_all(dir);
+}
+
 TEST_CASE("each tasks fire triggers once after aggregate completion")
 {
     auto dir = createTempDir();

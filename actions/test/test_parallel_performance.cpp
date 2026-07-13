@@ -1,3 +1,4 @@
+#include "actions/shell_executor.hpp"
 #include "core/ast.hpp"
 #include "core/executor.hpp"
 #include "tinytest.h"
@@ -240,6 +241,38 @@ suite("Parallel Node - Thread Safety") {
                 for (int i = 0; i < 10; ++i) {
                     check_true(bb.has("task_" + std::to_string(i)));
                 }
+            }
+        }
+    }
+
+    given("a stream callback configured by the submitting thread") {
+        when("parallel children emit output from worker threads") {
+            then("each line should reach the submitting thread's callback") {
+                Executor executor;
+                Blackboard bb;
+                std::atomic<int> streamed_lines{0};
+
+                ShellExecutor::setStreamCallback([&streamed_lines](const std::string&) {
+                    streamed_lines.fetch_add(1, std::memory_order_relaxed);
+                });
+                executor.registerTask("StreamLine", [](const auto&, Blackboard&) {
+                    ShellExecutor::emitStreamLine("parallel output");
+                    return NodeStatus::SUCCESS;
+                });
+
+                Node parallel;
+                parallel.id = "Parallel";
+                for (int i = 0; i < 10; ++i) {
+                    Node child;
+                    child.id = "StreamLine";
+                    parallel.children.push_back(child);
+                }
+
+                NodeStatus status = executor.execute(parallel, bb);
+                ShellExecutor::setStreamCallback({});
+
+                check_int_eq(static_cast<int>(status), static_cast<int>(NodeStatus::SUCCESS));
+                check_int_eq(streamed_lines.load(std::memory_order_relaxed), 10);
             }
         }
     }

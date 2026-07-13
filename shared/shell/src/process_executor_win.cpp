@@ -1,23 +1,43 @@
-#include "praktor/shell/process_executor.hpp"
+#include "managed_process_internal.hpp"
 
 #include "shell_executor_internal.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstring>
-#include <iostream>
+#include <map>
+#include <string>
+#include <thread>
 #include <vector>
 #include <windows.h>
 
-namespace Praktor::Shell {
+namespace Praktor::Shell::detail {
 
 namespace {
+
+constexpr DWORD kPollIntervalMs = 25;
+constexpr DWORD kManagedProcessExitCode = 1;
 
 struct CaseInsensitiveLess {
   bool operator()(const std::string& lhs, const std::string& rhs) const {
     return _stricmp(lhs.c_str(), rhs.c_str()) < 0;
   }
 };
+
+void closeHandle(HANDLE& handle) noexcept {
+  if (handle != NULL && handle != INVALID_HANDLE_VALUE) {
+    CloseHandle(handle);
+    handle = NULL;
+  }
+}
+
+void appendError(std::string& stderr_output, const std::string& message) {
+  if (!stderr_output.empty() && stderr_output.back() != '\n') {
+    stderr_output.push_back('\n');
+  }
+  stderr_output += message;
+}
 
 std::vector<char> buildEnvironmentBlock(const std::map<std::string, std::string>& env) {
   if (env.empty()) {
@@ -30,10 +50,9 @@ std::vector<char> buildEnvironmentBlock(const std::map<std::string, std::string>
     for (LPCCH cursor = current_block; *cursor != '\0'; cursor += std::strlen(cursor) + 1) {
       const std::string entry(cursor);
       const size_t equals = entry[0] == '=' ? entry.find('=', 1) : entry.find('=');
-      if (equals == std::string::npos) {
-        continue;
+      if (equals != std::string::npos) {
+        merged_env[entry.substr(0, equals)] = entry.substr(equals + 1);
       }
-      merged_env[entry.substr(0, equals)] = entry.substr(equals + 1);
     }
     FreeEnvironmentStringsA(current_block);
   }
@@ -44,7 +63,7 @@ std::vector<char> buildEnvironmentBlock(const std::map<std::string, std::string>
 
   std::vector<char> env_block;
   for (const auto& [key, value] : merged_env) {
-    std::string entry = key + "=" + value;
+    const std::string entry = key + "=" + value;
     env_block.insert(env_block.end(), entry.begin(), entry.end());
     env_block.push_back('\0');
   }
@@ -92,192 +111,271 @@ std::string buildCommandLine(const ProcessSpec& spec) {
   return command_line;
 }
 
-void appendAndMirror(std::string& sink, const char* buffer, DWORD bytes_read,
-                     bool stream_output, std::string& pending_line) {
+bool appendCaptured(std::string& sink, const char* buffer, DWORD bytes_read,
+                    std::size_t& captured_bytes, const ProcessSpec& spec,
+                    std::string& pending_line) {
   if (bytes_read == 0) {
-    return;
+    return true;
   }
-  sink.append(buffer, buffer + bytes_read);
-  detail::mirrorWithPrefix(buffer, bytes_read, stream_output, pending_line);
+  const std::size_t remaining = spec.max_output_bytes - captured_bytes;
+  const std::size_t accepted = std::min<std::size_t>(bytes_read, remaining);
+  sink.append(buffer, accepted);
+  mirrorWithPrefix(buffer, accepted, spec.stream_output, pending_line);
+  captured_bytes += accepted;
+  return accepted == bytes_read;
 }
 
-void drainPipe(HANDLE pipe, std::string& sink, bool stream_output, std::string& pending_line) {
+bool drainPipe(HANDLE pipe, std::string& sink, std::size_t& captured_bytes,
+               const ProcessSpec& spec, std::string& pending_line) {
   for (;;) {
     DWORD available = 0;
     if (!PeekNamedPipe(pipe, NULL, 0, NULL, &available, NULL) || available == 0) {
-      break;
+      return true;
     }
 
     char buffer[4096];
-    DWORD bytes_to_read = std::min<DWORD>(available, static_cast<DWORD>(sizeof(buffer)));
+    const DWORD bytes_to_read = std::min<DWORD>(available, sizeof(buffer));
     DWORD bytes_read = 0;
     if (!ReadFile(pipe, buffer, bytes_to_read, &bytes_read, NULL) || bytes_read == 0) {
-      break;
+      return true;
     }
-
-    appendAndMirror(sink, buffer, bytes_read, stream_output, pending_line);
+    if (!appendCaptured(sink, buffer, bytes_read, captured_bytes, spec, pending_line)) {
+      return false;
+    }
   }
 }
 
-void writeInputAndClose(HANDLE pipe, const std::string& input) {
-  if (pipe == NULL) {
-    return;
-  }
-
-  if (!input.empty()) {
-    size_t total_written = 0;
-    while (total_written < input.size()) {
-      DWORD bytes_written = 0;
-      const DWORD remaining =
-          static_cast<DWORD>(std::min<size_t>(input.size() - total_written, 1u << 15));
-      if (!WriteFile(pipe, input.data() + total_written, remaining, &bytes_written, NULL) ||
-          bytes_written == 0) {
-        break;
-      }
-      total_written += bytes_written;
+void writeInputAndClose(HANDLE pipe, const std::string& input, const std::atomic_bool& stop) {
+  size_t total_written = 0;
+  while (!stop.load(std::memory_order_relaxed) && total_written < input.size()) {
+    DWORD bytes_written = 0;
+    const DWORD remaining =
+        static_cast<DWORD>(std::min<size_t>(input.size() - total_written, 1u << 15));
+    if (!WriteFile(pipe, input.data() + total_written, remaining, &bytes_written, NULL) ||
+        bytes_written == 0) {
+      break;
     }
+    total_written += bytes_written;
   }
-
   CloseHandle(pipe);
 }
 
-HANDLE createProcessJob(HANDLE process_handle) {
+void stopAndJoinWriter(std::thread& writer, std::atomic_bool& stop) noexcept {
+  stop.store(true, std::memory_order_relaxed);
+  CancelSynchronousIo(writer.native_handle());
+  if (writer.joinable()) {
+    writer.join();
+  }
+}
+
+HANDLE createKillOnCloseJob(HANDLE process) {
   HANDLE job = CreateJobObjectA(NULL, NULL);
   if (job == NULL) {
     return NULL;
   }
 
-  if (!AssignProcessToJobObject(job, process_handle)) {
+  JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits = {};
+  limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+  if (!SetInformationJobObject(job, JobObjectExtendedLimitInformation, &limits, sizeof(limits)) ||
+      !AssignProcessToJobObject(job, process)) {
     CloseHandle(job);
     return NULL;
   }
-
   return job;
 }
 
 } // namespace
 
-ShellResult ProcessExecutor::executeWindows(const ProcessSpec& spec) {
-  ShellResult result;
-  result.output_streamed_live = spec.stream_output;
+PlatformProcessResult executeManagedWindows(const ProcessSpec& spec, ProcessControl& control,
+                                            const std::string& command_line_override) {
+  PlatformProcessResult completed;
+  completed.result.output_streamed_live = spec.stream_output;
 
-  HANDLE hStdinRead, hStdinWrite;
-  HANDLE hStdoutRead, hStdoutWrite;
-  HANDLE hStderrRead, hStderrWrite;
-  SECURITY_ATTRIBUTES sa = {sizeof(SECURITY_ATTRIBUTES), NULL, TRUE};
+  HANDLE stdin_read = NULL;
+  HANDLE stdin_write = NULL;
+  HANDLE stdout_read = NULL;
+  HANDLE stdout_write = NULL;
+  HANDLE stderr_read = NULL;
+  HANDLE stderr_write = NULL;
+  SECURITY_ATTRIBUTES security = {sizeof(SECURITY_ATTRIBUTES), NULL, TRUE};
 
-  if (!CreatePipe(&hStdinRead, &hStdinWrite, &sa, 0) ||
-      !CreatePipe(&hStdoutRead, &hStdoutWrite, &sa, 0) ||
-      !CreatePipe(&hStderrRead, &hStderrWrite, &sa, 0)) {
-    result.stderr_output = "Failed to create pipes";
-    result.exit_code = -1;
-    return result;
+  if (!CreatePipe(&stdin_read, &stdin_write, &security, 0) ||
+      !CreatePipe(&stdout_read, &stdout_write, &security, 0) ||
+      !CreatePipe(&stderr_read, &stderr_write, &security, 0)) {
+    completed.result.exit_code = -1;
+    completed.result.stderr_output = "Failed to create process pipes";
+    completed.state = ProcessState::SpawnFailed;
+    closeHandle(stdin_read);
+    closeHandle(stdin_write);
+    closeHandle(stdout_read);
+    closeHandle(stdout_write);
+    closeHandle(stderr_read);
+    closeHandle(stderr_write);
+    return completed;
   }
 
-  SetHandleInformation(hStdinWrite, HANDLE_FLAG_INHERIT, 0);
-  SetHandleInformation(hStdoutRead, HANDLE_FLAG_INHERIT, 0);
-  SetHandleInformation(hStderrRead, HANDLE_FLAG_INHERIT, 0);
-
-  STARTUPINFOA si = {sizeof(STARTUPINFOA)};
-  si.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
-  si.hStdOutput = hStdoutWrite;
-  si.hStdError = hStderrWrite;
-  si.hStdInput = hStdinRead;
-  si.wShowWindow = SW_HIDE;
-
-  PROCESS_INFORMATION pi = {0};
-  std::string command_line = buildCommandLine(spec);
-  std::vector<char> env_block = buildEnvironmentBlock(spec.env);
-  void* env_ptr = env_block.empty() ? NULL : env_block.data();
-
-  BOOL success = CreateProcessA(NULL, command_line.data(), NULL, NULL, TRUE, CREATE_NO_WINDOW,
-                                env_ptr, spec.working_dir.empty() ? NULL : spec.working_dir.c_str(),
-                                &si, &pi);
-
-  CloseHandle(hStdinRead);
-  CloseHandle(hStdoutWrite);
-  CloseHandle(hStderrWrite);
-
-  if (!success) {
-    result.stderr_output = "Failed to create process";
-    result.exit_code = -1;
-    CloseHandle(hStdinWrite);
-    CloseHandle(hStdoutRead);
-    CloseHandle(hStderrRead);
-    return result;
+  if (!SetHandleInformation(stdin_write, HANDLE_FLAG_INHERIT, 0) ||
+      !SetHandleInformation(stdout_read, HANDLE_FLAG_INHERIT, 0) ||
+      !SetHandleInformation(stderr_read, HANDLE_FLAG_INHERIT, 0)) {
+    completed.result.exit_code = -1;
+    completed.result.stderr_output = "Failed to isolate parent pipe handles";
+    completed.state = ProcessState::SpawnFailed;
+    closeHandle(stdin_read);
+    closeHandle(stdin_write);
+    closeHandle(stdout_read);
+    closeHandle(stdout_write);
+    closeHandle(stderr_read);
+    closeHandle(stderr_write);
+    return completed;
   }
 
-  writeInputAndClose(hStdinWrite, spec.input);
-  HANDLE job = createProcessJob(pi.hProcess);
+  STARTUPINFOA startup = {sizeof(STARTUPINFOA)};
+  startup.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
+  startup.hStdInput = stdin_read;
+  startup.hStdOutput = stdout_write;
+  startup.hStdError = stderr_write;
+  startup.wShowWindow = SW_HIDE;
 
-  result.pid = static_cast<int>(pi.dwProcessId);
+  PROCESS_INFORMATION process_info = {};
+  std::string command_line = command_line_override.empty()
+                                 ? buildCommandLine(spec)
+                                 : command_line_override;
+  std::vector<char> environment = buildEnvironmentBlock(spec.env);
+  const DWORD creation_flags = CREATE_NO_WINDOW | CREATE_SUSPENDED;
+  const BOOL created = CreateProcessA(
+      NULL, command_line.data(), NULL, NULL, TRUE, creation_flags,
+      environment.empty() ? NULL : environment.data(),
+      spec.working_dir.empty() ? NULL : spec.working_dir.c_str(), &startup, &process_info);
+
+  closeHandle(stdin_read);
+  closeHandle(stdout_write);
+  closeHandle(stderr_write);
+
+  if (!created) {
+    completed.result.exit_code = -1;
+    completed.result.stderr_output = "Failed to create process (Win32 error " +
+                                      std::to_string(GetLastError()) + ")";
+    completed.state = ProcessState::SpawnFailed;
+    closeHandle(stdin_write);
+    closeHandle(stdout_read);
+    closeHandle(stderr_read);
+    return completed;
+  }
+
+  HANDLE job = createKillOnCloseJob(process_info.hProcess);
+  if (job == NULL) {
+    TerminateProcess(process_info.hProcess, kManagedProcessExitCode);
+    WaitForSingleObject(process_info.hProcess, INFINITE);
+    completed.result.exit_code = -1;
+    completed.result.stderr_output = "Failed to place process in a managed Job Object";
+    completed.state = ProcessState::SpawnFailed;
+    closeHandle(process_info.hProcess);
+    closeHandle(process_info.hThread);
+    closeHandle(stdin_write);
+    closeHandle(stdout_read);
+    closeHandle(stderr_read);
+    return completed;
+  }
+
+  const int pid = static_cast<int>(process_info.dwProcessId);
+  const bool should_start = control.publishRunning(pid, [job]() {
+    TerminateJobObject(job, kManagedProcessExitCode);
+  });
+  if (should_start && ResumeThread(process_info.hThread) == static_cast<DWORD>(-1)) {
+    TerminateJobObject(job, kManagedProcessExitCode);
+    control.releaseNative();
+    WaitForSingleObject(process_info.hProcess, INFINITE);
+    completed.result.exit_code = -1;
+    completed.result.stderr_output = "Failed to resume managed process";
+    completed.state = ProcessState::SpawnFailed;
+    closeHandle(job);
+    closeHandle(process_info.hProcess);
+    closeHandle(process_info.hThread);
+    closeHandle(stdin_write);
+    closeHandle(stdout_read);
+    closeHandle(stderr_read);
+    return completed;
+  }
+
+  std::atomic_bool stop_input{!should_start};
+  std::thread input_writer([stdin_write, &spec, &stop_input]() {
+    writeInputAndClose(stdin_write, spec.input, stop_input);
+  });
+  stdin_write = NULL;
+
+  const auto started_at = std::chrono::steady_clock::now();
   std::string stdout_pending_line;
   std::string stderr_pending_line;
+  std::size_t captured_bytes = 0;
+  ProcessState terminal_state = ProcessState::Exited;
 
-  const DWORD poll_interval_ms = 50;
-  auto start = std::chrono::steady_clock::now();
   for (;;) {
-    drainPipe(hStdoutRead, result.stdout_output, spec.stream_output, stdout_pending_line);
-    drainPipe(hStderrRead, result.stderr_output, spec.stream_output, stderr_pending_line);
-
-    DWORD wait_result = WaitForSingleObject(pi.hProcess, poll_interval_ms);
-    if (wait_result == WAIT_OBJECT_0) {
+    const bool stdout_ok = drainPipe(stdout_read, completed.result.stdout_output, captured_bytes,
+                                     spec, stdout_pending_line);
+    const bool stderr_ok = drainPipe(stderr_read, completed.result.stderr_output, captured_bytes,
+                                     spec, stderr_pending_line);
+    if (!stdout_ok || !stderr_ok) {
+      terminal_state = ProcessState::OutputLimitExceeded;
+      TerminateJobObject(job, kManagedProcessExitCode);
       break;
     }
-    if (wait_result == WAIT_TIMEOUT) {
-      auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-                         std::chrono::steady_clock::now() - start)
-                         .count();
-      if (elapsed > spec.timeout_ms) {
-        if (job != NULL) {
-          TerminateJobObject(job, 1);
-        } else {
-          TerminateProcess(pi.hProcess, 1);
-        }
-        result.stderr_output = "Command timed out";
-        result.exit_code = -1;
-        if (job != NULL) {
-          CloseHandle(job);
-        }
-        CloseHandle(pi.hProcess);
-        CloseHandle(pi.hThread);
-        CloseHandle(hStdoutRead);
-        CloseHandle(hStderrRead);
-        return result;
-      }
-      continue;
+
+    const DWORD wait_result = WaitForSingleObject(process_info.hProcess, kPollIntervalMs);
+    if (wait_result == WAIT_OBJECT_0) {
+      terminal_state = control.cancelRequested() ? ProcessState::Cancelled : ProcessState::Exited;
+      break;
+    }
+    if (wait_result != WAIT_TIMEOUT) {
+      terminal_state = ProcessState::WaitFailed;
+      TerminateJobObject(job, kManagedProcessExitCode);
+      break;
     }
 
-    result.stderr_output = "Failed while waiting for process";
-    result.exit_code = -1;
-    if (job != NULL) {
-      CloseHandle(job);
+    if (std::chrono::steady_clock::now() - started_at >=
+        std::chrono::milliseconds(spec.timeout_ms)) {
+      terminal_state = ProcessState::TimedOut;
+      TerminateJobObject(job, kManagedProcessExitCode);
+      break;
     }
-    CloseHandle(pi.hProcess);
-    CloseHandle(pi.hThread);
-    CloseHandle(hStdoutRead);
-    CloseHandle(hStderrRead);
-    return result;
   }
 
-  DWORD exit_code;
-  GetExitCodeProcess(pi.hProcess, &exit_code);
-  result.exit_code = static_cast<int>(exit_code);
-
-  drainPipe(hStdoutRead, result.stdout_output, spec.stream_output, stdout_pending_line);
-  drainPipe(hStderrRead, result.stderr_output, spec.stream_output, stderr_pending_line);
-  detail::flushPendingLine(spec.stream_output, stdout_pending_line);
-  detail::flushPendingLine(spec.stream_output, stderr_pending_line);
-
-  if (job != NULL) {
-    CloseHandle(job);
+  WaitForSingleObject(process_info.hProcess, INFINITE);
+  control.releaseNative();
+  stopAndJoinWriter(input_writer, stop_input);
+  const bool final_stdout_ok = drainPipe(stdout_read, completed.result.stdout_output,
+                                         captured_bytes, spec, stdout_pending_line);
+  const bool final_stderr_ok = drainPipe(stderr_read, completed.result.stderr_output,
+                                         captured_bytes, spec, stderr_pending_line);
+  if ((!final_stdout_ok || !final_stderr_ok) && terminal_state == ProcessState::Exited) {
+    terminal_state = ProcessState::OutputLimitExceeded;
   }
-  CloseHandle(pi.hProcess);
-  CloseHandle(pi.hThread);
-  CloseHandle(hStdoutRead);
-  CloseHandle(hStderrRead);
+  flushPendingLine(spec.stream_output, stdout_pending_line);
+  flushPendingLine(spec.stream_output, stderr_pending_line);
 
-  return result;
+  DWORD exit_code = kManagedProcessExitCode;
+  if (!GetExitCodeProcess(process_info.hProcess, &exit_code)) {
+    terminal_state = ProcessState::WaitFailed;
+  }
+  completed.result.exit_code = terminal_state == ProcessState::Exited
+                                   ? static_cast<int>(exit_code)
+                                   : -1;
+  if (terminal_state == ProcessState::TimedOut) {
+    appendError(completed.result.stderr_output, "Command timed out");
+  } else if (terminal_state == ProcessState::Cancelled) {
+    appendError(completed.result.stderr_output, "Command cancelled");
+  } else if (terminal_state == ProcessState::OutputLimitExceeded) {
+    appendError(completed.result.stderr_output, "Captured process output exceeded the configured limit");
+  } else if (terminal_state == ProcessState::WaitFailed) {
+    appendError(completed.result.stderr_output, "Failed while waiting for process");
+  }
+  completed.state = terminal_state;
+
+  closeHandle(job);
+  closeHandle(process_info.hProcess);
+  closeHandle(process_info.hThread);
+  closeHandle(stdout_read);
+  closeHandle(stderr_read);
+  return completed;
 }
 
-} // namespace Praktor::Shell
+} // namespace Praktor::Shell::detail

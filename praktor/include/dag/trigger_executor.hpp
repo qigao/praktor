@@ -27,11 +27,11 @@ public:
    * @param all_tasks All tasks in the workflow (for trigger task lookup)
    * @param callback Function to execute a task
    */
-  void executeTriggers(const Task &task, bool success, WorkflowContext &context,
+  bool executeTriggers(const Task &task, bool success, WorkflowContext &context,
                        const std::vector<Task> &all_tasks, ExecutionCallback callback);
 
 private:
-  void executeTriggerAction(const TriggerAction &action, WorkflowContext &context,
+  bool executeTriggerAction(const TriggerAction &action, WorkflowContext &context,
                             const std::vector<Task> &all_tasks, ExecutionCallback callback,
                             std::unordered_set<std::string> &visited_triggers);
 };

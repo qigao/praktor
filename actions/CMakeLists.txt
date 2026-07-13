@@ -9,18 +9,13 @@ project(
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# ── COLLECT ALL SOURCE FILES ──
-
-file(GLOB_RECURSE ALL_SOURCE_FILES ${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp
-     ${CMAKE_CURRENT_SOURCE_DIR}/core/*.cpp
+cmake_add_source(ALL_SOURCE_FILES RECURSE
+    DIRS src core
+    PATTERNS "*.cpp"
 )
-
-file(
-    GLOB_RECURSE
-    ALL_HEADER_FILES
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/actions/*.hpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/actions/*.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/core/*.hpp
+cmake_add_source(ALL_HEADER_FILES RECURSE
+    DIRS include/actions core
+    PATTERNS "*.hpp" "*.h"
 )
 list(FILTER ALL_SOURCE_FILES EXCLUDE REGEX "praktor_integration\\.cpp$")
 list(FILTER ALL_HEADER_FILES EXCLUDE REGEX "praktor_integration\\.hpp$")
@@ -37,14 +32,11 @@ target_include_directories(
 )
 
 target_compile_features(actions PUBLIC cxx_std_17)
-set_target_properties(
-    actions PROPERTIES FOLDER "actions/" VERSION ${PROJECT_VERSION}
-                       POSITION_INDEPENDENT_CODE ON
-)
+set_target_properties(actions PROPERTIES POSITION_INDEPENDENT_CODE ON)
+cmake_config_target(actions NO_INSTALL FOLDER "actions/" VERSION ${PROJECT_VERSION})
 
 # ── DEPENDENCIES ──
 
-find_package(jsoncons CONFIG REQUIRED)
 target_link_libraries(actions PUBLIC praktor_shell PRIVATE jsoncons::jsoncons)
 
 if(WIN32)
@@ -78,5 +70,6 @@ install(
 
 # ── TESTS ──
 
-enable_testing()
-add_subdirectory(test)
+if(ENABLE_TESTS)
+    add_subdirectory(test)
+endif()

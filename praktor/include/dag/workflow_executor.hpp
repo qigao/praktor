@@ -49,7 +49,7 @@ private:
                                    const WorkflowValue& outputs) const;
     WorkflowValue getTaskOutputsSnapshot(const Task& task, const WorkflowContext& context) const;
     bool evaluateWhen(const Task& task, WorkflowContext& context) const;
-    void executeTriggers(const Task& task, bool success, WorkflowContext& context);
+    bool executeTriggers(const Task& task, bool success, WorkflowContext& context);
     bool executeTriggeredTask(const Task& task, WorkflowContext& context);
     bool executeTriggeredTask(const Task& task, WorkflowContext& context,
                              std::unordered_set<std::string>& active_stack,

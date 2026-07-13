@@ -13,4 +13,4 @@ tasks:
   - name: show_info
     description: "Displays system info"
     depends_on: [say_hello]
-    command: "echo Running on {{ env.OS || 'Unknown OS' }}"
+    command: "echo Running on {{ PRAKTOR_OS_NAME }}"

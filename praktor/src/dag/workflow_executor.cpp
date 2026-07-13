@@ -696,12 +696,12 @@ bool WorkflowExecutor::executeTask(const Task &task, WorkflowContext &context,
     has_failure_context = true;
   }
 
-  executeTriggers(task, overall_success, context);
+  const bool triggers_success = executeTriggers(task, overall_success, context);
   if (has_failure_context) {
     context.clearFailureContext();
   }
 
-  return overall_success;
+  return overall_success && triggers_success;
 }
 
 void WorkflowExecutor::setTaskExecutionStatus(const Task& task, WorkflowContext& context,
@@ -892,21 +892,17 @@ std::unordered_map<std::string, std::string> WorkflowExecutor::buildTaskEnvironm
   return env;
 }
 
-void WorkflowExecutor::executeTriggers(const Task &task, bool success, WorkflowContext &context) {
+bool WorkflowExecutor::executeTriggers(const Task &task, bool success, WorkflowContext &context) {
   if (!task.triggers || task.triggers->empty()) {
-    return;
+    return true;
   }
 
   logd("Executing triggers for task '{}' (success={})", task.name, success);
 
-  try {
-    trigger_executor_.executeTriggers(
-        task, success, context, all_tasks_, [this, &context](const Task &t) {
-          return this->executeTriggeredTask(t, context);
-        });
-  } catch (const std::exception &e) {
-    logw("Trigger execution encountered an error: {}", e.what());
-  }
+  return trigger_executor_.executeTriggers(
+      task, success, context, all_tasks_, [this, &context](const Task &t) {
+        return this->executeTriggeredTask(t, context);
+      });
 }
 
 bool WorkflowExecutor::executeTriggeredTask(const Task& task, WorkflowContext& context) {

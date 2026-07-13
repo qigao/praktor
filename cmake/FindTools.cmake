@@ -22,9 +22,9 @@ else()
 endif()
 
 # Set path to lemon parser template
-set(LEMPAR "${CMAKE_SOURCE_DIR}/vendor/lemon/lempar.c" CACHE PATH "Path to lemon parser template")
+set(LEMPAR "${CMAKE_SOURCE_DIR}/tools/lemon/lempar.c" CACHE PATH "Path to lemon parser template")
 
-# Note: These variables are set in the root scope and will be inherited 
+# Note: These variables are set in the root scope and will be inherited
 # by all subdirectories added via add_subdirectory().
 
 message(STATUS "Tools detection:")

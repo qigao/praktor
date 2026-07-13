@@ -20,7 +20,7 @@ PUBLIC TurboScript::ExprTk)
 # Export definition for PRAKTOR_API
 target_compile_definitions(${TARGET_NAME_PISTOL} PRIVATE PRAKTOR_EXPORTS)
 
-set_target_properties(${TARGET_NAME_PISTOL} PROPERTIES FOLDER "pistol")
+cmake_config_target(${TARGET_NAME_PISTOL} NO_INSTALL NO_VERSION FOLDER "pistol")
 
 install(
     TARGETS ${TARGET_NAME_PISTOL}

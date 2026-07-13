@@ -1,4 +1,6 @@
 #include <cxxopts.hpp>
+#include <tlog.h>
+
 #include "util/logging.hpp"
 #include "util/version.hpp"
 #include "workflow_runner.hpp"
@@ -11,6 +13,7 @@
 #include <filesystem>
 #include <iostream>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <unordered_map>
@@ -215,18 +218,30 @@ namespace {
             .pool_size = 0
         };
         tlog_t* logger = tlog_create(&config);
+        if (!logger) {
+            throw std::runtime_error("Failed to create logger");
+        }
 
+        turbo_log_sink_t* sink = nullptr;
         if (verbose) {
             turbo_console_sink_opts_t console_opts = {
                 .output = stdout,
                 .use_colors = use_color ? 1 : 0,
                 .pattern = TURBO_LOG_DEFAULT_PATTERN
             };
-            tlog_add_sink(logger, turbo_sink_console_create(&console_opts));
+            sink = turbo_sink_console_create(&console_opts);
         } else {
-            auto* sink = turbo_sink_callback_create(writeCompactLog, nullptr);
-            sink->min_level = TURBO_LOG_LEVEL_INFO;
-            tlog_add_sink(logger, sink);
+            sink = turbo_sink_callback_create(writeCompactLog, nullptr);
+            if (sink && turbo_sink_set_min_level(sink, TURBO_LOG_LEVEL_INFO) != 0) {
+                turbo_sink_destroy(sink);
+                sink = nullptr;
+            }
+        }
+
+        if (!sink || tlog_add_sink(logger, sink) != 0) {
+            turbo_sink_destroy(sink);
+            tlog_destroy(logger);
+            throw std::runtime_error("Failed to configure logger sink");
         }
         tlog_set_default(logger);
         return logger;

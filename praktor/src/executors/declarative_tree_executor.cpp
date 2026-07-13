@@ -214,10 +214,11 @@ bool DeclarativeTreeExecutor::isSensitivePath(const std::string& path) const
 // Task 3.3: Security - log context access with redaction
 void DeclarativeTreeExecutor::logContextAccess(const std::string& path, const std::string& value) const
 {
+  (void)value;
   if (isSensitivePath(path)) {
-    TLOG_DEBUG("Context access: {} = [REDACTED]", path);
+    TLOG_DEBUG("Context access: {} [REDACTED]", path);
   } else {
-    TLOG_DEBUG("Context access: {} = {}", path, value);
+    TLOG_DEBUG("Context access: {}", path);
   }
 }
 
@@ -417,8 +418,8 @@ void DeclarativeTreeExecutor::contextToBlackboard(const WorkflowContext& context
   auto allVars = context.getAllVariables();
   for (const auto& [key, value] : allVars) {
     bb.set(key, value);
-    TLOG_DEBUG("  Variable: {} = {}", key, value);
   }
+  TLOG_DEBUG("Copied {} string variables to actions Blackboard", allVars.size());
   
   // Copy all task outputs to blackboard
   auto allValues = context.getAllVisibleValues();

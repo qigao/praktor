@@ -7,11 +7,11 @@
 namespace Praktor {
 namespace Execution {
 
-void TriggerExecutor::executeTriggers(const Task &task, bool success, WorkflowContext &context,
+bool TriggerExecutor::executeTriggers(const Task &task, bool success, WorkflowContext &context,
                                       const std::vector<Task> &all_tasks,
                                       ExecutionCallback callback) {
   if (!task.triggers || task.triggers->empty()) {
-    return;
+    return true;
   }
 
   const auto &triggers = *task.triggers;
@@ -38,7 +38,9 @@ void TriggerExecutor::executeTriggers(const Task &task, bool success, WorkflowCo
   bool any_trigger_failed = false;
   for (const auto &action : actions_to_execute) {
     try {
-      executeTriggerAction(action, context, all_tasks, callback, visited_triggers);
+      if (!executeTriggerAction(action, context, all_tasks, callback, visited_triggers)) {
+        any_trigger_failed = true;
+      }
     } catch (const std::exception &e) {
       logw("Trigger execution failed: {}", e.what());
       any_trigger_failed = true;
@@ -46,13 +48,10 @@ void TriggerExecutor::executeTriggers(const Task &task, bool success, WorkflowCo
     }
   }
   
-  // Propagate failure if any trigger failed
-  if (any_trigger_failed) {
-    throw std::runtime_error("One or more trigger actions failed for task '" + task.name + "'");
-  }
+  return !any_trigger_failed;
 }
 
-void TriggerExecutor::executeTriggerAction(const TriggerAction &action, WorkflowContext &context,
+bool TriggerExecutor::executeTriggerAction(const TriggerAction &action, WorkflowContext &context,
                                            const std::vector<Task> &all_tasks,
                                            ExecutionCallback callback,
                                            std::unordered_set<std::string> &visited_triggers) {
@@ -92,6 +91,7 @@ void TriggerExecutor::executeTriggerAction(const TriggerAction &action, Workflow
   
   // Clean up visited set after execution
   visited_triggers.erase(task_name);
+  return success;
 }
 
 } // namespace Execution

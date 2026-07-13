@@ -100,13 +100,13 @@ void populateWorkflowVariables(WorkflowContext& context,
                                const std::unordered_map<std::string, std::string>& input_values) {
     for (const auto& [key, value] : input_values) {
         setWorkflowVariable(context, key, value);
-        TLOG_DEBUG("Set input variable: {} = {}", key, value);
+        TLOG_DEBUG("Set input variable: {}", key);
     }
 
     for (const auto& [key, value] : workflow.variables) {
         if (input_values.find(key) == input_values.end()) {
             setWorkflowVariable(context, key, value);
-            TLOG_DEBUG("Set variable: {} = {}", key, value);
+            TLOG_DEBUG("Set workflow variable: {}", key);
         } else {
             TLOG_DEBUG("Preserved input override for variable: {}", key);
         }
@@ -155,9 +155,8 @@ bool WorkflowRunner::run(bool useConcurrent, int maxConcurrency) {
         TLOG_DEBUG("Loading workflow from: {}", yamlPath_);
         auto prepared = prepareExecution(yamlPath_, base_directory_, inputValues_, baseEnvironment_);
 
-        for (const auto& [key, value] : prepared.runtime_environment) {
-            TLOG_DEBUG("Set workflow environment: {} = {}", key, value);
-        }
+        TLOG_DEBUG("Loaded {} workflow environment variables",
+                   prepared.runtime_environment.size());
 
         TLOG_DEBUG("Starting workflow execution...");
         WorkflowExecutor executor(

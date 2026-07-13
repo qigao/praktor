@@ -1,10 +1,13 @@
 #pragma once
 
+#include "actions/async_executor.hpp"
 #include "praktor/shell/shell_executor.hpp"
 
 namespace actions {
 
 using ShellResult = Praktor::Shell::ShellResult;
+
+class AsyncExecutor;
 
 class ShellExecutor {
 public:
@@ -17,8 +20,28 @@ public:
       int timeout_ms = 30000,
       const std::map<std::string, std::string>& env = {},
       bool stream_output = true) {
-    return Praktor::Shell::ShellExecutor::execute(command, input, working_dir, timeout_ms, env,
-                                                  stream_output);
+    auto process = std::make_shared<Praktor::Shell::ManagedProcess>(
+        Praktor::Shell::ShellExecutor::start(command, input, working_dir, timeout_ms, env,
+                                             stream_output));
+    auto cancellation = getCancellationContext();
+    if (cancellation) {
+      cancellation->setHandler([process]() { process->cancel(); });
+      if (cancellation->isCancellationRequested()) {
+        process->cancel();
+      }
+    }
+    try {
+      auto result = process->wait();
+      if (cancellation) {
+        cancellation->clearHandler();
+      }
+      return result;
+    } catch (...) {
+      if (cancellation) {
+        cancellation->clearHandler();
+      }
+      throw;
+    }
   }
 
   static void executeAsync(
@@ -39,6 +62,16 @@ public:
   static void emitStreamLine(const std::string& line) {
     Praktor::Shell::ShellExecutor::emitStreamLine(line);
   }
+
+private:
+  friend class AsyncExecutor;
+
+  static StreamCallback getStreamCallback() {
+    return Praktor::Shell::ShellExecutor::getStreamCallback();
+  }
+
+  static void setCancellationContext(std::shared_ptr<CancellationContext> cancellation);
+  static std::shared_ptr<CancellationContext> getCancellationContext();
 };
 
 inline bool ShellExecutor::killProcess(int pid) {

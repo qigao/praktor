@@ -1,10 +1,25 @@
 #include "actions/thread_pool.hpp"
+#include "actions/async_executor.hpp"
+#include "actions/shell_executor.hpp"
+#include "core/executor.hpp"
 #include "tinytest.h"
 #include <atomic>
 #include <chrono>
 #include <thread>
 
 using namespace actions;
+
+namespace {
+
+std::string longRunningShellCommand() {
+#ifdef _WIN32
+    return "ping 127.0.0.1 -n 10 > nul";
+#else
+    return "sleep 10";
+#endif
+}
+
+} // namespace
 
 suite("ThreadPool - Basic Functionality") {
 
@@ -228,6 +243,32 @@ suite("ThreadPool - Stress Test") {
                 }
                 
                 check_int_eq(counter.load(), num_tasks);
+            }
+        }
+    }
+}
+
+suite("AsyncExecutor - Process Cancellation") {
+
+    given("an async task running a shell process") {
+        when("all tasks are cancelled") {
+            then("the managed process should terminate promptly") {
+                AsyncExecutor executor;
+                auto task = executor.submit([]() {
+                    auto result = ShellExecutor::execute(
+                        longRunningShellCommand(), "", "", 30000, {}, false);
+                    return result.success() ? NodeStatus::SUCCESS : NodeStatus::FAILURE;
+                });
+
+                const auto start = std::chrono::steady_clock::now();
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                executor.cancelAll();
+                const NodeStatus status = task->getResult();
+                const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now() - start);
+
+                check_int_eq(static_cast<int>(status), static_cast<int>(NodeStatus::FAILURE));
+                check_true(elapsed.count() < 3000);
             }
         }
     }

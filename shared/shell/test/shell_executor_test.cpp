@@ -5,6 +5,7 @@
 
 #include <chrono>
 #include <algorithm>
+#include <atomic>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -25,6 +26,7 @@
 namespace {
 
 constexpr int kLongLineLength = 6000;
+constexpr std::size_t kDuplexPayloadSize = 256 * 1024;
 constexpr const char* kTailFragment = "tail_fragment";
 
 std::filesystem::path createTempDir()
@@ -261,6 +263,29 @@ Praktor::Shell::ProcessSpec processProbeSpec(const std::filesystem::path& script
     spec.stream_output = false;
     return spec;
 }
+
+std::filesystem::path createDuplexPipeScript(const std::filesystem::path& dir)
+{
+    const auto script = dir / "duplex_pipe.ps1";
+    writeTextFile(script,
+                  "$output = 'O' * " + std::to_string(kDuplexPayloadSize) + "\n"
+                  "[Console]::Out.Write($output)\n"
+                  "$inputText = [Console]::In.ReadToEnd()\n"
+                  "[Console]::Out.Write('|INPUT=' + $inputText.Length)\n");
+    return script;
+}
+
+Praktor::Shell::ProcessSpec duplexProcessSpec(const std::filesystem::path& script,
+                                              const std::string& input)
+{
+    Praktor::Shell::ProcessSpec spec;
+    spec.program = "powershell.exe";
+    spec.args = {"-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script.string()};
+    spec.input = input;
+    spec.timeout_ms = 10000;
+    spec.stream_output = false;
+    return spec;
+}
 #else
 std::string stdoutStderrCommand()
 {
@@ -349,6 +374,31 @@ std::filesystem::path createProcessProbeScript(const std::filesystem::path& dir)
                   "printf '%s|%s|%s|%s' \"$PRAKTOR_PROCESS_ENV\" \"$1\" \"$input\" \"$(basename \"$PWD\")\"\n");
     ::chmod(script.string().c_str(), 0700);
     return script;
+}
+
+std::filesystem::path createDuplexPipeScript(const std::filesystem::path& dir)
+{
+    const auto script = dir / "duplex_pipe.sh";
+    writeTextFile(script,
+                  "#!/bin/sh\n"
+                  "awk 'BEGIN { for (i = 0; i < " + std::to_string(kDuplexPayloadSize) +
+                      "; ++i) printf \"O\"; }'\n"
+                  "input_size=$(wc -c | tr -d ' ')\n"
+                  "printf '|INPUT=%s' \"$input_size\"\n");
+    ::chmod(script.string().c_str(), 0700);
+    return script;
+}
+
+Praktor::Shell::ProcessSpec duplexProcessSpec(const std::filesystem::path& script,
+                                              const std::string& input)
+{
+    Praktor::Shell::ProcessSpec spec;
+    spec.program = "/bin/sh";
+    spec.args = {script.string()};
+    spec.input = input;
+    spec.timeout_ms = 10000;
+    spec.stream_output = false;
+    return spec;
 }
 
 Praktor::Shell::ProcessSpec processProbeSpec(const std::filesystem::path& script,
@@ -511,6 +561,50 @@ TEST_CASE("shell executor flushes fragmented and trailing callback lines", "[she
     std::filesystem::remove_all(dir);
 }
 
+TEST_CASE("shell executor pumps large stdin and stdout without deadlock", "[shell][pipes]") {
+    const auto dir = createTempDir();
+    const auto script = createDuplexPipeScript(dir);
+    const std::string input(kDuplexPayloadSize, 'I');
+
+    const auto result = Praktor::Shell::ShellExecutor::execute(
+        commandForScript(script), input, "", 10000, {}, false);
+
+    REQUIRE(result.success());
+    CHECK(result.stdout_output.size() >= kDuplexPayloadSize);
+    CHECK(result.stdout_output.find("|INPUT=" + std::to_string(kDuplexPayloadSize)) !=
+          std::string::npos);
+    std::filesystem::remove_all(dir);
+}
+
+TEST_CASE("stream callback updates are synchronized with concurrent emission", "[shell][concurrency]") {
+    StreamCallbackGuard guard;
+    constexpr int kEmitterThreads = 4;
+    constexpr int kMessagesPerThread = 1000;
+    std::atomic<int> first_count{0};
+    std::atomic<int> second_count{0};
+
+    const Praktor::Shell::ShellExecutor::StreamCallback first =
+        [&](const std::string&) { first_count.fetch_add(1); };
+    const Praktor::Shell::ShellExecutor::StreamCallback second =
+        [&](const std::string&) { second_count.fetch_add(1); };
+    std::vector<std::thread> emitters;
+    for (int i = 0; i < kEmitterThreads; ++i) {
+        emitters.emplace_back([&, i]() {
+            Praktor::Shell::ShellExecutor::setStreamCallback((i % 2 == 0) ? first : second);
+            for (int message = 0; message < kMessagesPerThread; ++message) {
+                Praktor::Shell::ShellExecutor::emitStreamLine("line");
+            }
+        });
+    }
+
+    for (auto& emitter : emitters) {
+        emitter.join();
+    }
+
+    CHECK(first_count.load() == (kEmitterThreads / 2) * kMessagesPerThread);
+    CHECK(second_count.load() == (kEmitterThreads / 2) * kMessagesPerThread);
+}
+
 TEST_CASE("shell executor kills a running process by pid", "[shell]") {
     const auto dir = createTempDir();
     const auto pid_file = dir / "shell.pid";
@@ -571,5 +665,96 @@ TEST_CASE("process executor runs program args env stdin and working directory wi
     CHECK(result.stderr_output.empty());
     CHECK_FALSE(result.output_streamed_live);
 
+    std::filesystem::remove_all(dir);
+}
+
+TEST_CASE("process executor pumps large stdin and stdout without deadlock", "[process][pipes]") {
+    const auto dir = createTempDir();
+    const auto script = createDuplexPipeScript(dir);
+    const std::string input(kDuplexPayloadSize, 'I');
+
+    const auto result = Praktor::Shell::ProcessExecutor::execute(duplexProcessSpec(script, input));
+
+    REQUIRE(result.success());
+    CHECK(result.stdout_output.size() >= kDuplexPayloadSize);
+    CHECK(result.stdout_output.find("|INPUT=" + std::to_string(kDuplexPayloadSize)) !=
+          std::string::npos);
+    std::filesystem::remove_all(dir);
+}
+
+TEST_CASE("managed process exposes lifecycle and supports bounded waits", "[process][managed]") {
+    const auto dir = createTempDir();
+    const auto pid_file = dir / "managed.pid";
+    const auto finished_file = dir / "finished.txt";
+    const auto script = createKillScript(dir, pid_file, finished_file);
+
+    auto process = Praktor::Shell::ShellExecutor::start(
+        commandForScript(script), "", "", 10000, {}, false);
+
+    REQUIRE(process.valid());
+    REQUIRE(waitUntil([&]() { return process.pid() > 0; }, 5000));
+    CHECK(process.isRunning());
+    CHECK_FALSE(process.waitFor(std::chrono::milliseconds(25)));
+    CHECK_FALSE(process.result().has_value());
+
+    REQUIRE(process.cancel());
+    const auto result = process.wait();
+    CHECK(result.state == Praktor::Shell::ProcessState::Cancelled);
+    CHECK_FALSE(result.success());
+    CHECK_FALSE(process.cancel());
+    CHECK(process.result().has_value());
+    CHECK_FALSE(std::filesystem::exists(finished_file));
+
+    std::filesystem::remove_all(dir);
+}
+
+TEST_CASE("managed process destructor terminates its process tree", "[process][managed]") {
+    const auto dir = createTempDir();
+    const auto pid_file = dir / "managed_destructor.pid";
+    const auto finished_file = dir / "finished.txt";
+    const auto script = createKillScript(dir, pid_file, finished_file);
+    int managed_pid = -1;
+
+    {
+        auto process = Praktor::Shell::ShellExecutor::start(
+            commandForScript(script), "", "", 10000, {}, false);
+        REQUIRE(waitUntil([&]() { return process.pid() > 0; }, 5000));
+        managed_pid = process.pid();
+        REQUIRE(isProcessAlive(managed_pid));
+    }
+
+    CHECK(waitUntil([&]() { return !isProcessAlive(managed_pid); }, 5000));
+    CHECK_FALSE(std::filesystem::exists(finished_file));
+    std::filesystem::remove_all(dir);
+}
+
+TEST_CASE("managed process reports spawn failures distinctly", "[process][managed]") {
+    Praktor::Shell::ProcessSpec spec;
+    spec.program = "definitely_missing_managed_process_97531";
+    spec.stream_output = false;
+
+    auto process = Praktor::Shell::ProcessExecutor::start(spec);
+    const auto result = process.wait();
+
+    CHECK(result.state == Praktor::Shell::ProcessState::SpawnFailed);
+    CHECK(result.exit_code == -1);
+    CHECK_FALSE(result.success());
+    CHECK_FALSE(result.stderr_output.empty());
+}
+
+TEST_CASE("managed process enforces captured output limits", "[process][managed][limits]") {
+    const auto dir = createTempDir();
+    const auto script = createDuplexPipeScript(dir);
+    auto spec = duplexProcessSpec(script, "");
+    constexpr std::size_t kOutputLimit = 4096;
+    spec.max_output_bytes = kOutputLimit;
+
+    const auto result = Praktor::Shell::ProcessExecutor::execute(spec);
+
+    CHECK(result.state == Praktor::Shell::ProcessState::OutputLimitExceeded);
+    CHECK(result.exit_code == -1);
+    CHECK(result.stdout_output.size() + result.stderr_output.size() <=
+          kOutputLimit + std::string("\nCaptured process output exceeded the configured limit").size());
+    CHECK_FALSE(result.success());
     std::filesystem::remove_all(dir);
 }

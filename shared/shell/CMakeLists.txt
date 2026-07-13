@@ -35,10 +35,8 @@ target_include_directories(
 
 target_compile_features(${TARGET_NAME_SHARED_SHELL} PUBLIC cxx_std_17)
 
-set_target_properties(${TARGET_NAME_SHARED_SHELL} PROPERTIES
-    FOLDER "shared/"
-    POSITION_INDEPENDENT_CODE ON
-)
+set_target_properties(${TARGET_NAME_SHARED_SHELL} PROPERTIES POSITION_INDEPENDENT_CODE ON)
+cmake_config_target(${TARGET_NAME_SHARED_SHELL} NO_INSTALL NO_VERSION FOLDER "shared/")
 
 if(ENABLE_TESTS)
     add_subdirectory(test)

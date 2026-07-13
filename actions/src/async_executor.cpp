@@ -5,13 +5,58 @@
 
 namespace actions {
 
+namespace {
+
+thread_local std::shared_ptr<CancellationContext> g_cancellation_context;
+
+} // namespace
+
+void CancellationContext::setHandler(std::function<void()> handler) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  handler_ = std::move(handler);
+}
+
+void CancellationContext::clearHandler() {
+  std::lock_guard<std::mutex> lock(mutex_);
+  handler_ = {};
+}
+
+bool CancellationContext::requestCancel() {
+  std::function<void()> handler;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (cancellation_requested_) {
+      return false;
+    }
+    cancellation_requested_ = true;
+    handler = handler_;
+  }
+  if (handler) {
+    handler();
+  }
+  return true;
+}
+
+bool CancellationContext::isCancellationRequested() const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  return cancellation_requested_;
+}
+
+void ShellExecutor::setCancellationContext(
+    std::shared_ptr<CancellationContext> cancellation) {
+  g_cancellation_context = std::move(cancellation);
+}
+
+std::shared_ptr<CancellationContext> ShellExecutor::getCancellationContext() {
+  return g_cancellation_context;
+}
+
 // Template specialization for cancel() implementation
 template<>
 void AsyncTaskImpl<NodeStatus>::cancel() {
-  if (pid_ > 0) {
-    ShellExecutor::killProcess(pid_);
+  if (cancellation_) {
+    cancellation_->requestCancel();
   }
-  // Note: std::future doesn't support cancellation
 }
 
 std::shared_ptr<AsyncTask> AsyncExecutor::submit(std::function<NodeStatus()> func) {
@@ -19,8 +64,26 @@ std::shared_ptr<AsyncTask> AsyncExecutor::submit(std::function<NodeStatus()> fun
 
   // Use actions's shared thread pool instead of std::async
   // This prevents thread explosion and provides better resource control
-  auto future = ThreadPool::instance().submit(std::move(func));
-  auto task = std::make_shared<AsyncTaskImpl<NodeStatus>>(std::move(future));
+  auto stream_callback = ShellExecutor::getStreamCallback();
+  auto cancellation = std::make_shared<CancellationContext>();
+  auto future = ThreadPool::instance().submit(
+      [func = std::move(func), stream_callback = std::move(stream_callback),
+       cancellation]() mutable {
+        auto previous_callback = ShellExecutor::getStreamCallback();
+        ShellExecutor::setStreamCallback(std::move(stream_callback));
+        ShellExecutor::setCancellationContext(cancellation);
+        try {
+          auto result = func();
+          ShellExecutor::setCancellationContext({});
+          ShellExecutor::setStreamCallback(std::move(previous_callback));
+          return result;
+        } catch (...) {
+          ShellExecutor::setCancellationContext({});
+          ShellExecutor::setStreamCallback(std::move(previous_callback));
+          throw;
+        }
+      });
+  auto task = std::make_shared<AsyncTaskImpl<NodeStatus>>(std::move(future), cancellation);
   tasks_.push_back(task);
 
   return task;

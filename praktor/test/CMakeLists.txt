@@ -1,5 +1,3 @@
-find_package(Catch2 CONFIG REQUIRED)
-find_package(Python3 COMPONENTS Interpreter REQUIRED)
 string(REPLACE "\\" "\\\\" PYTHON3_EXECUTABLE_ESCAPED "${Python3_EXECUTABLE}")
 
 set(TEST_SOURCES
@@ -21,38 +19,25 @@ set(TEST_SOURCES
     declarative_tree_executor_test.cpp
 )
 
-# TinyTest-based tests (separate list)
-set(TINYTEST_SOURCES
-)
-
 # Copy test fixtures to build directory
 file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/fixtures
      DESTINATION ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}
 )
 
-# Catch2 tests
-foreach(test_source ${TEST_SOURCES})
-    get_filename_component(test_name ${test_source} NAME_WE)
-    set(executable_name "${test_name}.${TARGET_NAME_LIB}")
-    add_executable(${executable_name} ${test_source})
-    target_link_libraries(${executable_name} PRIVATE Catch2::Catch2WithMain ${TARGET_NAME_LIB})
-    if(test_name STREQUAL "script_engine_test")
-        target_compile_definitions(${executable_name} PRIVATE PRAKTOR_TEST_PYTHON="${PYTHON3_EXECUTABLE_ESCAPED}")
-    endif()
-    praktor_copy_runtime_artifacts(${executable_name})
-    add_test(NAME ${executable_name} COMMAND ${executable_name})
-    set_target_properties(${executable_name} PROPERTIES FOLDER ${folder_name}/test)
-endforeach()
+cmake_add_test(
+    SOURCES ${TEST_SOURCES}
+    LIBS Catch2::Catch2WithMain ${TARGET_NAME_LIB}
+    TARGET_SUFFIX ".${TARGET_NAME_LIB}"
+    FOLDER "${folder_name}/test"
+    OUT_TARGETS PRAKTOR_TEST_TARGETS
+)
 
-# TinyTest tests
-foreach(test_source ${TINYTEST_SOURCES})
-    get_filename_component(test_name ${test_source} NAME_WE)
-    set(executable_name "${test_name}.${TARGET_NAME_LIB}")
-    add_executable(${executable_name} ${test_source})
-    target_link_libraries(${executable_name} PRIVATE TurboNet::TinyTest ${TARGET_NAME_LIB})
-    praktor_copy_runtime_artifacts(${executable_name})
-    add_test(NAME ${executable_name} COMMAND ${executable_name})
-    set_target_properties(${executable_name} PROPERTIES FOLDER ${folder_name}/test)
+target_compile_definitions(script_engine_test.${TARGET_NAME_LIB} PRIVATE
+    PRAKTOR_TEST_PYTHON="${PYTHON3_EXECUTABLE_ESCAPED}"
+)
+
+foreach(test_target ${PRAKTOR_TEST_TARGETS})
+    praktor_copy_runtime_artifacts(${test_target})
 endforeach()
 
 add_test(
