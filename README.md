@@ -138,11 +138,26 @@ tasks:
 Praktor uses CMake with vcpkg for dependency management:
 
 ```bash
-# Configure the project (vcpkg will install dependencies)
-cmake --preset=default
+# Configure and build a developer package (Windows)
+cmake --fresh --preset win-dev-user
+cmake --build --preset win-dev-user
 
-# Build the executable
-cmake --build build/Ninja/Msvc
+# Install only the CLI and Pistol developer interface
+cmake --install build/Msvc --prefix C:/opt/praktor-dev
+
+# Run the configured tests separately when needed
+ctest --preset win-dev-user
+```
+
+The install contains only the Praktor CLI and Praktor developer interface:
+`praktor.exe`, `Praktor.dll` (plus its Windows import library), and
+`praktor.h`.
+
+Consumers can use the installed CMake package:
+
+```cmake
+find_package(Praktor CONFIG REQUIRED)
+target_link_libraries(my_app PRIVATE Praktor::Praktor)
 ```
 
 ### 3. Run the workflow
@@ -399,15 +414,11 @@ Complete documentation is available in the [docs/](./docs/README.md) directory:
 
 ### Building from Source
 ```bash
-# Install vcpkg dependencies
-vcpkg install
-
-# Configure with presets
-cmake --preset=default
-
-# Build and test
-cmake --build build/Ninja/Msvc
-ctest --preset=default
+# Configure, build, test, and install the developer package
+cmake --fresh --preset win-dev-user
+cmake --build --preset win-dev-user
+ctest --preset win-dev-user
+cmake --install build/Msvc --prefix C:/opt/praktor-dev
 ```
 
 ### Project Structure

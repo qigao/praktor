@@ -33,6 +33,8 @@ project(
 )
 # Cmake modules
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+include(GNUInstallDirs)
+include(CMakePackageConfigHelpers)
 include(ProjectOptions.cmake)
 include(CmakeUtils)
 add_subdirectory(tools)
@@ -61,3 +63,31 @@ add_subdirectory(shared)
 add_subdirectory(praktor)
 add_subdirectory(actions)
 add_subdirectory(pistol)
+
+set(PRAKTOR_INSTALL_CMAKEDIR "${CMAKE_INSTALL_LIBDIR}/cmake/Praktor")
+
+install(
+    EXPORT PraktorTargets
+    FILE PraktorTargets.cmake
+    NAMESPACE Praktor::
+    DESTINATION "${PRAKTOR_INSTALL_CMAKEDIR}"
+)
+
+configure_package_config_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/PraktorConfig.cmake.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/PraktorConfig.cmake"
+    INSTALL_DESTINATION "${PRAKTOR_INSTALL_CMAKEDIR}"
+)
+
+write_basic_package_version_file(
+    "${CMAKE_CURRENT_BINARY_DIR}/PraktorConfigVersion.cmake"
+    VERSION "${PROJECT_VERSION}"
+    COMPATIBILITY SameMajorVersion
+)
+
+install(
+    FILES
+        "${CMAKE_CURRENT_BINARY_DIR}/PraktorConfig.cmake"
+        "${CMAKE_CURRENT_BINARY_DIR}/PraktorConfigVersion.cmake"
+    DESTINATION "${PRAKTOR_INSTALL_CMAKEDIR}"
+)

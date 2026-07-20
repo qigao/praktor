@@ -137,6 +137,11 @@ file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/templates
 praktor_copy_runtime_artifacts(${TARGET_NAME_EXE})
 
 cmake_config_target(${TARGET_NAME_EXE} NO_INSTALL FOLDER ${folder_name})
+
+install(
+    TARGETS ${TARGET_NAME_EXE}
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+)
 if(ENABLE_TESTS)
     add_subdirectory(test)
 endif()

@@ -10,6 +10,7 @@
             "cacheVariables": {
                 "TURBO_UTILS_ROOT": "C:/projects/cpp/external/pkgs/turboutils",
                 "TURBOSCRIPT_ROOT": "c:/projects/cpp/external/pkgs/turbo_script",
+                 "CMAKE_INSTALL_PREFIX": "C:/projects/cpp/external/pkgs/praktor",
                 "CMAKE_MAKE_PROGRAM": "C:/Users/lockg/scoop/shims/ninja.exe",
                 "VCPKG_TARGET_TRIPLET": "x64-windows",
                 "VCPKG_MANIFEST_MODE": "ON"

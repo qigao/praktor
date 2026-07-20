@@ -1,4 +1,4 @@
-#include "praktor_api.h"
+#include "praktor.h"
  
 
 #include <catch2/catch_all.hpp>
@@ -37,6 +37,18 @@ constexpr long long kSequentialMinMs = 900;
 #endif
 
 } // namespace
+
+TEST_CASE("pistol API v1 publishes a compatible versioned function table", "[pistol][abi]") {
+    const praktor_api_v1* api = praktor_get_api_v1();
+
+    REQUIRE(api != nullptr);
+    REQUIRE(api->struct_size >= sizeof(praktor_api_v1));
+    CHECK(api->abi_major == PRAKTOR_ABI_MAJOR);
+    CHECK(api->abi_minor >= PRAKTOR_ABI_MINOR);
+    CHECK((api->capabilities & PRAKTOR_CAPABILITY_EXECUTE_WORKFLOW) != 0);
+    REQUIRE(api->execute_workflow != nullptr);
+    CHECK(api->execute_workflow(nullptr, "{}") == PRAKTOR_API_INVALID_ARGUMENT);
+}
 
 TEST_CASE("pistol API executes workflow with JSON object inputs", "[pistol]") {
     auto dir = createTempDir();

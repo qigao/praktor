@@ -47,27 +47,6 @@ endif()
 
 add_subdirectory(examples)
 
-# ── INSTALL ──
-
-install(
-    TARGETS actions
-    EXPORT actionsTargets
-    LIBRARY DESTINATION lib
-    ARCHIVE DESTINATION lib
-    RUNTIME DESTINATION bin
-    INCLUDES
-    DESTINATION include
-)
-
-install(DIRECTORY include/actions DESTINATION include)
-
-install(
-    DIRECTORY core/
-    DESTINATION include/actions/core
-    FILES_MATCHING
-    PATTERN "*.hpp"
-)
-
 # ── TESTS ──
 
 if(ENABLE_TESTS)

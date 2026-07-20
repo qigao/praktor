@@ -1,4 +1,4 @@
-set(TARGET_NAME_PISTOL pistol)
+set(TARGET_NAME_PISTOL Praktor)
 
 # Need to compile pistol as SHARED library
 add_library(${TARGET_NAME_PISTOL} SHARED
@@ -6,7 +6,7 @@ add_library(${TARGET_NAME_PISTOL} SHARED
 )
 
 # Include directories
-# We set api/ to PUBLIC so that external users linking to pistol can just #include "praktor_api.h"
+# The public API is the installed praktor.h header.
 target_include_directories(
     ${TARGET_NAME_PISTOL}
     PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/api>
@@ -14,8 +14,7 @@ target_include_directories(
 )
 
 # Link to praktor_lib to get WorkflowRunner, etc.
-target_link_libraries(${TARGET_NAME_PISTOL} PRIVATE praktor_lib
-PUBLIC TurboScript::ExprTk)
+target_link_libraries(${TARGET_NAME_PISTOL} PRIVATE praktor_lib TurboScript::ExprTk)
 
 # Export definition for PRAKTOR_API
 target_compile_definitions(${TARGET_NAME_PISTOL} PRIVATE PRAKTOR_EXPORTS)
@@ -24,18 +23,18 @@ cmake_config_target(${TARGET_NAME_PISTOL} NO_INSTALL NO_VERSION FOLDER "pistol")
 
 install(
     TARGETS ${TARGET_NAME_PISTOL}
-    LIBRARY DESTINATION lib
-    ARCHIVE DESTINATION lib
-    RUNTIME DESTINATION bin
+    EXPORT PraktorTargets
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
     INCLUDES
-    DESTINATION include
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
 )
 
-install(FILES api/praktor_api.h DESTINATION include)
-
-install(DIRECTORY templates examples DESTINATION share/pistol)
-
-install(FILES README.md hello-world.yml DESTINATION share/pistol)
+install(
+    FILES api/praktor.h
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+)
 
 if(ENABLE_TESTS)
     add_subdirectory(test)
