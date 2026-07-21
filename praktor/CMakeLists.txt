@@ -41,47 +41,11 @@ target_include_directories(
 )
 
 set(folder_name "${TARGET_NAME_EXE}")
-set(PRAKTOR_SCRIPT_PLUGIN_GLOBS "${TURBOSCRIPT_ROOT}/bin/*_tbs.dll")
-file(GLOB PRAKTOR_SCRIPT_PLUGIN_DLLS ${PRAKTOR_SCRIPT_PLUGIN_GLOBS})
-list(REMOVE_DUPLICATES PRAKTOR_SCRIPT_PLUGIN_DLLS)
-
-function(praktor_copy_runtime_artifacts target_name)
-    if(NOT WIN32)
-        return()
-    endif()
-
-    # Command for runtime DLL dependencies We include
-    # $<TARGET_FILE:${target_name}> as an "anchor" source to prevent
-    # copy_if_different from failing if the DLL list is empty.
-    add_custom_command(
-        TARGET ${target_name}
-        POST_BUILD
-        COMMAND
-            ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:${target_name}>
-            $<TARGET_RUNTIME_DLLS:${target_name}>
-            $<TARGET_FILE_DIR:${target_name}>
-        COMMAND_EXPAND_LISTS VERBATIM
-    )
-
-    # Command for script plugins (only if they exist)
-    if(PRAKTOR_SCRIPT_PLUGIN_DLLS)
-        add_custom_command(
-            TARGET ${target_name}
-            POST_BUILD
-            COMMAND
-                ${CMAKE_COMMAND} -E copy_if_different
-                ${PRAKTOR_SCRIPT_PLUGIN_DLLS} $<TARGET_FILE_DIR:${target_name}>
-            COMMAND_EXPAND_LISTS VERBATIM
-        )
-    endif()
-endfunction()
 
 target_link_libraries(
     ${TARGET_NAME_LIB}
     PUBLIC Threads::Threads
            jsoncons::jsoncons
-           OpenSSL::SSL
-           OpenSSL::Crypto
            ryml::ryml
            TurboUtils::Core
            TurboUtils::Mustache
@@ -120,21 +84,11 @@ file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/templates
      DESTINATION ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}
 )
 
-# Keep script plugins beside built executables so TurboScript import("feeds")
-# works on Windows.
-if(WIN32 AND PRAKTOR_SCRIPT_PLUGIN_DLLS)
-    file(COPY ${PRAKTOR_SCRIPT_PLUGIN_DLLS}
-         DESTINATION ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}
-    )
-endif()
-
 # Keep a copy under the subproject build directory for local development
 # workflows.
 file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/templates
      DESTINATION ${CMAKE_CURRENT_BINARY_DIR}
 )
-
-praktor_copy_runtime_artifacts(${TARGET_NAME_EXE})
 
 cmake_config_target(${TARGET_NAME_EXE} NO_INSTALL FOLDER ${folder_name})
 

@@ -22,10 +22,10 @@ tasks:
       var archiveFormat = ctx.get("FORMAT");
       var overwriteFlag = ctx.get("OVERWRITE");
 
-      if (sourcePath == "") {
+      if (len(sourcePath) == 0) {
         fail("SRC_PATH is required");
       }
-      if (destinationArchive == "") {
+      if (len(destinationArchive) == 0) {
         fail("DST_ARCHIVE is required");
       }
       if (archiveFormat != "zip" && archiveFormat != "tar.gz") {

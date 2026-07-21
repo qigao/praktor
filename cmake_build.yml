@@ -2,33 +2,104 @@ name: "CMake Build Workflow"
 description: "A professional workflow for configuring and building the project using CMake presets."
 
 variables:
-  # 默认预设名，可根据需要调整
   CMAKE_PRESET: "win-dev-user"
   BUILD_TARGET: "all"
-  VCPKG_INSTALL_ROOT: ".vcpkg_installed/debug"
-  VCPKG_TRIPLET: "x64-windows"
-  VCPKG_COMMAND: "vcpkg"
-  COMMAND_PREFIX: ""
-  TEST_COMMAND_PREFIX: ""
+  TURBOSCRIPT_ROOT: "../external/pkgs/turbo_script"
+  TURBO_UTILS_ROOT: "../external/pkgs/turboutils"
+  TURBO_NET_ROOT: "../external/pkgs/turbonet"
+  TURBO_HTTP_ROOT: "../external/pkgs/turbohttp"
+  CMAKE_RUNTIME_OUTPUT_DIRECTORY: "build/Msvc/bin"
 
 tasks:
-  - name: vcpkg_install
-    description: "Install manifest dependencies before configure"
-    command: "{{ COMMAND_PREFIX }} {{ VCPKG_COMMAND }} install --x-manifest-root=. --x-install-root={{ VCPKG_INSTALL_ROOT }} --triplet {{ VCPKG_TRIPLET }}"
   - name: configure
-    description: "Run CMake configure"
-    depends_on: [vcpkg_install]
-    command: "{{ COMMAND_PREFIX }} cmake --preset {{ CMAKE_PRESET }}"
+    description: "Configure from the selected preset and install manifest dependencies"
+    program: cmake
+    args: ["--fresh", "--preset", "{{ CMAKE_PRESET }}"]
+    timeout: 10m
+
   - name: build
-    description: "Run CMake build in strict sequence."
+    description: "Build the selected target"
     depends_on: [configure]
-    command: "{{ COMMAND_PREFIX }} cmake --build --preset {{ CMAKE_PRESET }} -t {{ BUILD_TARGET }}"
-  - name: test
-    description: "Run cmake tests"
+    program: cmake
+    args: ["--build", "--preset", "{{ CMAKE_PRESET }}", "--target", "{{ BUILD_TARGET }}"]
+    timeout: 30m
+
+  - name: setup_turboutils_runtime
+    description: "Copy TurboUtils runtime libraries before testing"
     depends_on: [build]
-    command: "{{ TEST_COMMAND_PREFIX }} ctest --preset {{ CMAKE_PRESET }}"
+    program: powershell
+    args:
+      - -NoProfile
+      - -Command
+      - |
+        $ErrorActionPreference = 'Stop'
+        $source = '{{ TURBO_UTILS_ROOT }}/bin'
+        $destination = '{{ CMAKE_RUNTIME_OUTPUT_DIRECTORY }}'
+        $dlls = Get-ChildItem -LiteralPath $source -Filter '*.dll' -File
+        if ($dlls.Count -eq 0) { throw "No TurboUtils DLLs found in $source" }
+        New-Item -ItemType Directory -Force -Path $destination | Out-Null
+        $dlls | Copy-Item -Destination $destination -Force
+    timeout: 10m
+  - name: setup_turboscript_runtime
+    description: "Copy TurboScript runtime libraries before testing"
+    depends_on: [setup_turboutils_runtime]
+    program: powershell
+    args:
+      - -NoProfile
+      - -Command
+      - |
+        $ErrorActionPreference = 'Stop'
+        $source = '{{ TURBOSCRIPT_ROOT }}/bin'
+        $destination = '{{ CMAKE_RUNTIME_OUTPUT_DIRECTORY }}'
+        $dlls = Get-ChildItem -LiteralPath $source -Filter '*.dll' -File
+        if ($dlls.Count -eq 0) { throw "No TurboScript DLLs found in $source" }
+        New-Item -ItemType Directory -Force -Path $destination | Out-Null
+        $dlls | Copy-Item -Destination $destination -Force
+    timeout: 10m
+
+  - name: setup_turbonet_runtime
+    description: "Copy TurboNet runtime libraries before testing"
+    depends_on: [setup_turboscript_runtime]
+    program: powershell
+    args:
+      - -NoProfile
+      - -Command
+      - |
+        $ErrorActionPreference = 'Stop'
+        $source = '{{ TURBO_NET_ROOT }}/bin'
+        $destination = '{{ CMAKE_RUNTIME_OUTPUT_DIRECTORY }}'
+        $dlls = Get-ChildItem -LiteralPath $source -Filter '*.dll' -File
+        if ($dlls.Count -eq 0) { throw "No TurboNet DLLs found in $source" }
+        New-Item -ItemType Directory -Force -Path $destination | Out-Null
+        $dlls | Copy-Item -Destination $destination -Force
+    timeout: 10m
+
+  - name: setup_http_runtime
+    description: "Copy TurboHTTP runtime libraries before testing"
+    depends_on: [setup_turbonet_runtime]
+    program: powershell
+    args:
+      - -NoProfile
+      - -Command
+      - |
+        $ErrorActionPreference = 'Stop'
+        $source = '{{ TURBO_HTTP_ROOT }}/bin'
+        $destination = '{{ CMAKE_RUNTIME_OUTPUT_DIRECTORY }}'
+        $dlls = Get-ChildItem -LiteralPath $source -Filter '*.dll' -File
+        if ($dlls.Count -eq 0) { throw "No TurboHTTP DLLs found in $source" }
+        New-Item -ItemType Directory -Force -Path $destination | Out-Null
+        $dlls | Copy-Item -Destination $destination -Force
+    timeout: 10m
+
+  - name: test
+    description: "Run the preset's CTest suite"
+    depends_on: [setup_http_runtime]
+    program: ctest
+    args: ["--preset", "{{ CMAKE_PRESET }}"]
+    timeout: 30m
+
   - name: finish_report
-    description: "Optional task to notify after build"
+    description: "Report the completed build"
     depends_on: [test]
     script: |
       log.info("Build of target '" + ctx.get("BUILD_TARGET") + "' completed successfully.")

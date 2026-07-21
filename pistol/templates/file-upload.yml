@@ -27,10 +27,10 @@ tasks:
       var uploadUrl = ctx.get("URL");
       var uploadMethod = ctx.get("METHOD");
 
-      if (sourcePath == "") {
+      if (len(sourcePath) == 0) {
         fail("SRC_PATH is required");
       }
-      if (uploadUrl == "") {
+      if (len(uploadUrl) == 0) {
         fail("URL is required");
       }
       if (uploadMethod != "PUT" && uploadMethod != "POST") {

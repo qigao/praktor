@@ -9,7 +9,7 @@ tasks:
   - name: validate_request
     script: |
       var serviceName = ctx.get("SERVICE_NAME");
-      if (serviceName == "") {
+      if (len(serviceName) == 0) {
         fail("SERVICE_NAME is required");
       }
 

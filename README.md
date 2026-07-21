@@ -137,19 +137,72 @@ tasks:
 
 Praktor uses CMake with vcpkg for dependency management:
 
-```bash
-# Configure and build a developer package (Windows)
+Windows builds must run in an x64 Visual Studio developer environment. Python 3
+is required when tests are enabled: it runs the schema validation test and the
+temporary HTTP server used by the script engine tests. The default workflow
+also expects these installed SDK directories relative to the repository:
+
+- `../external/pkgs/turboutils/bin`
+- `../external/pkgs/turbo_script/bin`
+- `../external/pkgs/turbonet/bin`
+- `../external/pkgs/turbohttp/bin`
+
+With `praktor` installed or available on `PATH`, configure, build, prepare the
+runtime DLLs, and run all tests with:
+
+```powershell
+praktor --file cmake_build.yml
+```
+
+The workflow runs this dependency chain:
+
+```text
+configure -> build -> setup_turboutils_runtime
+                   -> setup_turboscript_runtime
+                   -> setup_turbonet_runtime
+                   -> setup_http_runtime -> test -> finish_report
+```
+
+Each setup task copies only `*.dll` from its SDK `bin` directory into
+`build/Msvc/bin`. The order is intentional: TurboHTTP is copied last so its
+current HTTP runtime replaces the older transitive copy shipped by TurboScript.
+A missing SDK directory or an SDK without DLLs fails the workflow immediately.
+
+For a Release build, override both the preset and its matching runtime output
+directory:
+
+```powershell
+praktor --file cmake_build.yml `
+  --input CMAKE_PRESET=win-release-user `
+  --input CMAKE_RUNTIME_OUTPUT_DIRECTORY=build/Msvc-Release/bin
+```
+
+The four SDK roots and `BUILD_TARGET` are workflow variables and can also be
+overridden with `--input`. vcpkg runtime dependencies, including BoringSSL's
+`ssl.dll` and `crypto.dll`, are supplied through the selected preset's `PATH`;
+the workflow does not copy vcpkg DLLs.
+
+To run the CMake stages directly after the external DLLs have already been
+staged, use the matching presets:
+
+```powershell
 cmake --fresh --preset win-dev-user
 cmake --build --preset win-dev-user
-
-# Install only the CLI and Pistol developer interface
-cmake --install build/Msvc --prefix C:/opt/praktor-dev
-
-# Run the configured tests separately when needed
 ctest --preset win-dev-user
 ```
 
-The install contains only the Praktor CLI and Praktor developer interface:
+Direct `ctest` invocation bypasses the workflow setup tasks. If the build tree
+does not already contain the external runtime DLLs, use `cmake_build.yml`
+instead.
+
+To install the developer package after a successful build:
+
+```powershell
+# Install only the CLI and Praktor developer interface
+cmake --install build/Msvc --prefix C:/opt/praktor-dev
+```
+
+The install contains only the Praktor CLI and developer interface:
 `praktor.exe`, `Praktor.dll` (plus its Windows import library), and
 `praktor.h`.
 
@@ -162,9 +215,8 @@ target_link_libraries(my_app PRIVATE Praktor::Praktor)
 
 ### 3. Run the workflow
 
-```bash
-# Run the workflow (from build directory)
-bin/praktor -f my_workflow.yml
+```powershell
+build/Msvc/bin/praktor.exe --file my_workflow.yml
 ```
 
 ## CLI Usage
@@ -413,13 +465,11 @@ Complete documentation is available in the [docs/](./docs/README.md) directory:
 ## Contributing & Development
 
 ### Building from Source
-```bash
-# Configure, build, test, and install the developer package
-cmake --fresh --preset win-dev-user
-cmake --build --preset win-dev-user
-ctest --preset win-dev-user
-cmake --install build/Msvc --prefix C:/opt/praktor-dev
-```
+
+Use the [Quick Start build workflow](#2-build-the-project) for the complete
+Windows configure, build, runtime setup, and test sequence. Keep the selected
+CMake preset and `CMAKE_RUNTIME_OUTPUT_DIRECTORY` paired so Debug and Release
+artifacts are never mixed.
 
 ### Project Structure
 ```

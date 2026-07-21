@@ -11,7 +11,7 @@ tasks:
     script: |
       var processName = ctx.get("PROCESS_NAME");
       var processId = ctx.get("PID");
-      if (processName == "" && processId == "") {
+      if (len(processName) == 0 && len(processId) == 0) {
         fail("PROCESS_NAME or PID is required");
       }
 

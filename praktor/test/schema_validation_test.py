@@ -184,22 +184,22 @@ tasks:
     child:
       shell: echo keep-running
   - name: nested_decorators
-    run_once:
+    run_once: true
+    child:
+      keep_running_until_failure:
+        max_iterations: 2
         child:
-          keep_running_until_failure:
-            max_iterations: 2
+          consume_queue:
+            queue_key: jobs
+            item_key: job
             child:
-              consume_queue:
-                queue_key: jobs
-                item_key: job
+              precondition:
+                condition: true
                 child:
-                  precondition:
-                    condition: true
+                  entry_updated:
+                    watch_key: payload
                     child:
-                      entry_updated:
-                        watch_key: payload
-                        child:
-                          shell: echo nested
+                      shell: echo nested
 """,
         True,
     )

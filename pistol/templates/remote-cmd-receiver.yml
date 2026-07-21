@@ -20,7 +20,7 @@ tasks:
       var token = ctx.get("AUTH_TOKEN");
       var agent = ctx.get("AGENT_ID");
 
-      if (endpoint == "") {
+      if (len(endpoint) == 0) {
         log.warn("CMD_ENDPOINT not set, skipping remote command fetch");
         ctx.output("commands", []);
         ctx.output("executable_commands", []);
@@ -99,7 +99,7 @@ tasks:
       var token = ctx.get("AUTH_TOKEN");
       var agent = ctx.get("AGENT_ID");
 
-      if (endpoint == "") {
+      if (len(endpoint) == 0) {
         return;
       }
 

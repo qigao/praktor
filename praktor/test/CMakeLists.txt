@@ -19,11 +19,6 @@ set(TEST_SOURCES
     declarative_tree_executor_test.cpp
 )
 
-# Copy test fixtures to build directory
-file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/fixtures
-     DESTINATION ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}
-)
-
 cmake_add_test(
     SOURCES ${TEST_SOURCES}
     LIBS Catch2::Catch2WithMain ${TARGET_NAME_LIB}
@@ -35,10 +30,6 @@ cmake_add_test(
 target_compile_definitions(script_engine_test.${TARGET_NAME_LIB} PRIVATE
     PRAKTOR_TEST_PYTHON="${PYTHON3_EXECUTABLE_ESCAPED}"
 )
-
-foreach(test_target ${PRAKTOR_TEST_TARGETS})
-    praktor_copy_runtime_artifacts(${test_target})
-endforeach()
 
 add_test(
     NAME schema_validation_test

@@ -19,6 +19,17 @@ target_link_libraries(${TARGET_NAME_PISTOL} PRIVATE praktor_lib TurboScript::Exp
 # Export definition for PRAKTOR_API
 target_compile_definitions(${TARGET_NAME_PISTOL} PRIVATE PRAKTOR_EXPORTS)
 
+if(MSVC)
+    # praktor.exe and Praktor.dll otherwise contend for the same case-insensitive
+    # bin/praktor.{ilk,pdb} paths when Ninja links Debug targets in parallel.
+    set_target_properties(${TARGET_NAME_PISTOL} PROPERTIES
+        PDB_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
+    )
+    target_link_options(${TARGET_NAME_PISTOL} PRIVATE
+        "/ILK:${CMAKE_CURRENT_BINARY_DIR}/${TARGET_NAME_PISTOL}.ilk"
+    )
+endif()
+
 cmake_config_target(${TARGET_NAME_PISTOL} NO_INSTALL NO_VERSION FOLDER "pistol")
 
 install(

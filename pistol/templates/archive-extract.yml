@@ -19,10 +19,10 @@ tasks:
       var destinationDir = ctx.get("DST_DIR");
       var archiveFormat = ctx.get("FORMAT");
 
-      if (sourceArchive == "") {
+      if (len(sourceArchive) == 0) {
         fail("SRC_ARCHIVE is required");
       }
-      if (destinationDir == "") {
+      if (len(destinationDir) == 0) {
         fail("DST_DIR is required");
       }
       if (archiveFormat != "zip" && archiveFormat != "tar.gz") {

@@ -106,14 +106,27 @@ ExecutionResult executeWorkflow(const std::filesystem::path& workflow_path,
                                 std::unordered_map<std::string, std::string> input_values = {})
 {
     auto workflow = TaskParser::parseFileWithImports(workflow_path.string(), workflow_path.parent_path().string());
-    auto context = std::make_unique<WorkflowContext>(input_values);
+    auto context = std::make_unique<WorkflowContext>();
     context->setEmbeddedModules(workflow.embedded);
     context->setNativeModules(workflow.native_modules);
     context->setSourcePath(workflow.source_path);
 
+    const auto set_workflow_variable = [&context](const std::string& key, const std::string& value) {
+        context->setValue(key, value);
+        context->setValue("variables." + key, value);
+    };
+
+    for (const auto& [key, value] : input_values) {
+        set_workflow_variable(key, value);
+        if (context->getValue<std::string>(key) != value ||
+            context->getValue<std::string>("variables." + key) != value) {
+            throw std::runtime_error("Failed to initialize workflow input: " + key);
+        }
+    }
+
     for (const auto& [key, value] : workflow.variables) {
         if (input_values.find(key) == input_values.end()) {
-            context->setValue(key, value);
+            set_workflow_variable(key, value);
         }
     }
 

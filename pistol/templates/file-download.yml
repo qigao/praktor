@@ -28,10 +28,10 @@ tasks:
       var destinationPath = ctx.get("DST_PATH");
       var overwriteFlag = ctx.get("OVERWRITE");
 
-      if (downloadUrl == "") {
+      if (len(downloadUrl) == 0) {
         fail("URL is required");
       }
-      if (destinationPath == "") {
+      if (len(destinationPath) == 0) {
         fail("DST_PATH is required");
       }
       if (overwriteFlag != "true" && overwriteFlag != "false") {

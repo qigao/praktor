@@ -22,8 +22,13 @@
             "name": "cxxopts"
         },
         {
-            "name": "openssl",
-            "version>=": "3.2.0"
+            "name": "aklomp-base64"
+        },
+        {
+            "name": "boringssl"
+        },
+        {
+            "name": "zstd"
         }
     ],
     "builtin-baseline": "b1b19307e2d2ec1eefbdb7ea069de7d4bcd31f01"
