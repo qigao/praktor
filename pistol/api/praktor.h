@@ -36,15 +36,8 @@ typedef enum praktor_result {
     PRAKTOR_RESULT_INTERNAL_ERROR = -8
 } praktor_result;
 
-#define PRAKTOR_API_SUCCESS PRAKTOR_RESULT_SUCCESS
-#define PRAKTOR_API_EXECUTION_FAILED PRAKTOR_RESULT_EXECUTION_FAILED
-#define PRAKTOR_API_INVALID_ARGUMENT PRAKTOR_RESULT_INVALID_ARGUMENT
-#define PRAKTOR_API_INVALID_JSON PRAKTOR_RESULT_INVALID_JSON
-
 #define PRAKTOR_ABI_MAJOR 1u
 #define PRAKTOR_ABI_MINOR 0u
-#define PRAKTOR_ABI_V2_MAJOR 2u
-#define PRAKTOR_ABI_V2_MINOR 0u
 
 #define PRAKTOR_CAPABILITY_EXECUTE_WORKFLOW (UINT64_C(1) << 0)
 #define PRAKTOR_CAPABILITY_DATA_BIND (UINT64_C(1) << 1)
@@ -103,40 +96,24 @@ typedef struct praktor_error {
 #define PRAKTOR_OWNED_DATA_INIT {sizeof(praktor_owned_data), NULL, 0, PRAKTOR_DATA_FORMAT_JSON}
 #define PRAKTOR_ERROR_INIT {sizeof(praktor_error), 0, -1, -1, {0}, {0}}
 
-typedef int32_t (PRAKTOR_CALL *praktor_execute_workflow_fn)(const char* workflow_path,
-                                                            const char* json_vars);
-
-typedef struct praktor_api_v1 {
-    uint32_t struct_size;
-    uint32_t abi_major;
-    uint32_t abi_minor;
-    uint64_t capabilities;
-    praktor_execute_workflow_fn execute_workflow;
-} praktor_api_v1;
-
-typedef const praktor_api_v1* (PRAKTOR_CALL *praktor_get_api_v1_fn)(void);
-
-typedef int32_t (PRAKTOR_CALL *praktor_execute_workflow_data_fn)(
+typedef int32_t (PRAKTOR_CALL *praktor_execute_workflow_fn)(
     const praktor_execute_request* request,
     praktor_owned_data* output,
     praktor_error* error);
 typedef void (PRAKTOR_CALL *praktor_release_data_fn)(praktor_owned_data* data);
 
-typedef struct praktor_api_v2 {
+typedef struct praktor_api {
     uint32_t struct_size;
     uint32_t abi_major;
     uint32_t abi_minor;
     uint64_t capabilities;
-    praktor_execute_workflow_data_fn execute_workflow_data;
+    praktor_execute_workflow_fn execute_workflow;
     praktor_release_data_fn release_data;
-} praktor_api_v2;
+} praktor_api;
 
-typedef const praktor_api_v2* (PRAKTOR_CALL *praktor_get_api_v2_fn)(void);
+typedef const praktor_api* (PRAKTOR_CALL *praktor_get_api_fn)(void);
 
-PRAKTOR_API const praktor_api_v1* PRAKTOR_CALL praktor_get_api_v1(void);
-PRAKTOR_API praktor_result PRAKTOR_CALL praktor_execute_workflow(const char* workflow_path,
-                                                                 const char* json_vars);
-PRAKTOR_API const praktor_api_v2* PRAKTOR_CALL praktor_get_api_v2(void);
+PRAKTOR_API const praktor_api* PRAKTOR_CALL praktor_get_api(void);
 /**
  * Execute a workflow with schema-bound input and serialize its minimal result.
  *
@@ -144,7 +121,7 @@ PRAKTOR_API const praktor_api_v2* PRAKTOR_CALL praktor_get_api_v2(void);
  * All negative results leave output empty. The result contains workflow_status, task states and
  * explicit task outputs; it never includes the complete input or environment snapshot.
  */
-PRAKTOR_API praktor_result PRAKTOR_CALL praktor_execute_workflow_data(
+PRAKTOR_API praktor_result PRAKTOR_CALL praktor_execute_workflow(
     const praktor_execute_request* request,
     praktor_owned_data* output,
     praktor_error* error);
@@ -152,13 +129,5 @@ PRAKTOR_API praktor_result PRAKTOR_CALL praktor_execute_workflow_data(
 PRAKTOR_API void PRAKTOR_CALL praktor_release_data(praktor_owned_data* data);
 
 #ifdef __cplusplus
-}
-
-#include <string>
-
-namespace praktor {
-    inline praktor_result execute_workflow(const std::string& workflow_path, const std::string& json_vars = "{}") {
-        return ::praktor_execute_workflow(workflow_path.c_str(), json_vars.c_str());
-    }
 }
 #endif

@@ -42,59 +42,25 @@ constexpr long long kSequentialMinMs = 900;
 
 } // namespace
 
-TEST_CASE("pistol API v1 publishes a compatible versioned function table", "[pistol][abi]") {
-    const praktor_api_v1* api = praktor_get_api_v1();
+TEST_CASE("pistol API publishes DataBind execution and ownership", "[pistol][abi]") {
+    const praktor_api* api = praktor_get_api();
 
     REQUIRE(api != nullptr);
-    REQUIRE(api->struct_size >= sizeof(praktor_api_v1));
+    REQUIRE(api->struct_size >= sizeof(praktor_api));
     CHECK(api->abi_major == PRAKTOR_ABI_MAJOR);
     CHECK(api->abi_minor >= PRAKTOR_ABI_MINOR);
-    CHECK((api->capabilities & PRAKTOR_CAPABILITY_EXECUTE_WORKFLOW) != 0);
+    CHECK((api->capabilities & PRAKTOR_CAPABILITY_DATA_BIND) != 0);
     REQUIRE(api->execute_workflow != nullptr);
-    CHECK(api->execute_workflow(nullptr, "{}") == PRAKTOR_API_INVALID_ARGUMENT);
-}
+    REQUIRE(api->release_data != nullptr);
 
-TEST_CASE("pistol API executes workflow with JSON object inputs", "[pistol]") {
-    auto dir = createTempDir();
-    auto workflow_path = dir / "workflow.yml";
-    auto output_path = dir / "out.txt";
-
-    writeFile(workflow_path, R"(
-tasks:
-  - name: write
-    working_dir: .
-    command: "echo {{ NAME }} > out.txt"
-)");
-
-    REQUIRE(praktor_execute_workflow(workflow_path.string().c_str(), R"({"NAME":"pistol"})") == PRAKTOR_API_SUCCESS);
-    REQUIRE(std::filesystem::exists(output_path));
-
-    std::ifstream input(output_path);
-    std::string content;
-    std::getline(input, content);
-    input.close();
-    CHECK(content.find("pistol") != std::string::npos);
-
-    std::filesystem::remove_all(dir);
-}
-
-TEST_CASE("pistol API rejects non-object JSON payloads", "[pistol]") {
-    auto dir = createTempDir();
-    auto workflow_path = dir / "workflow.yml";
-
-    writeFile(workflow_path, "tasks: []\n");
-
-    CHECK(praktor_execute_workflow(workflow_path.string().c_str(), "[]") == PRAKTOR_API_INVALID_JSON);
-    CHECK(praktor_execute_workflow(nullptr, "{}") == PRAKTOR_API_INVALID_ARGUMENT);
-    CHECK(praktor_execute_workflow("", "{}") == PRAKTOR_API_INVALID_ARGUMENT);
-
-    std::filesystem::remove_all(dir);
+    praktor_owned_data output = PRAKTOR_OWNED_DATA_INIT;
+    praktor_error error = PRAKTOR_ERROR_INIT;
+    CHECK(api->execute_workflow(nullptr, &output, &error) == PRAKTOR_RESULT_INVALID_ARGUMENT);
 }
 
 TEST_CASE("pistol API preserves sequential runner defaults", "[pistol]") {
     auto dir = createTempDir();
     auto workflow_path = dir / "workflow.yml";
-
     const std::string workflow =
         "tasks:\n"
         "  - name: first\n"
@@ -108,58 +74,36 @@ TEST_CASE("pistol API preserves sequential runner defaults", "[pistol]") {
         "    command: \"echo done\"\n";
     writeFile(workflow_path, workflow);
 
-    auto start = std::chrono::steady_clock::now();
-    REQUIRE(praktor_execute_workflow(workflow_path.string().c_str(), "{}") == PRAKTOR_API_SUCCESS);
-    auto end = std::chrono::steady_clock::now();
+    const std::string schema =
+        "message WorkflowInput { }\n"
+        "message WorkflowResult { string workflow_status; optional string error; }\n";
+    const std::string input = "{}";
+    const std::string workflow_path_storage = workflow_path.string();
 
-    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
-    CHECK(duration >= kSequentialMinMs);
-
-    std::filesystem::remove_all(dir);
-}
-
-TEST_CASE("pistol C++ API wraps the DLL C entrypoint", "[pistol]") {
-    auto dir = createTempDir();
-    auto workflow_path = dir / "workflow.yml";
-    auto output_path = dir / "cpp-out.txt";
-
-    writeFile(workflow_path, R"(
-tasks:
-  - name: write
-    working_dir: .
-    command: "echo {{ NAME }} > cpp-out.txt"
-)");
-
-    REQUIRE(praktor::execute_workflow(workflow_path.string(), R"({"NAME":"cpp"})")
-            == PRAKTOR_RESULT_SUCCESS);
-    REQUIRE(std::filesystem::exists(output_path));
-
-    std::ifstream input(output_path);
-    std::string content;
-    std::getline(input, content);
-    input.close();
-    CHECK(content.find("cpp") != std::string::npos);
-
-    std::filesystem::remove_all(dir);
-}
-
-TEST_CASE("pistol API v2 publishes DataBind execution and ownership", "[pistol][abi]") {
-    const praktor_api_v2* api = praktor_get_api_v2();
-
-    REQUIRE(api != nullptr);
-    REQUIRE(api->struct_size >= sizeof(praktor_api_v2));
-    CHECK(api->abi_major == PRAKTOR_ABI_V2_MAJOR);
-    CHECK(api->abi_minor >= PRAKTOR_ABI_V2_MINOR);
-    CHECK((api->capabilities & PRAKTOR_CAPABILITY_DATA_BIND) != 0);
-    REQUIRE(api->execute_workflow_data != nullptr);
-    REQUIRE(api->release_data != nullptr);
+    praktor_execute_request request = PRAKTOR_EXECUTE_REQUEST_INIT;
+    request.workflow_path = workflow_path_storage.c_str();
+    request.input_data = input.data();
+    request.input_size = input.size();
+    request.schema_text = schema.data();
+    request.schema_text_size = schema.size();
+    request.input_type = "WorkflowInput";
+    request.output_type = "WorkflowResult";
 
     praktor_owned_data output = PRAKTOR_OWNED_DATA_INIT;
     praktor_error error = PRAKTOR_ERROR_INIT;
-    CHECK(api->execute_workflow_data(nullptr, &output, &error) == PRAKTOR_RESULT_INVALID_ARGUMENT);
+    const auto start = std::chrono::steady_clock::now();
+    const auto status = praktor_execute_workflow(&request, &output, &error);
+    const auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - start).count();
+
+    INFO(error.message);
+    REQUIRE(status == PRAKTOR_RESULT_SUCCESS);
+    CHECK(duration >= kSequentialMinMs);
+    praktor_release_data(&output);
+    std::filesystem::remove_all(dir);
 }
 
-TEST_CASE("pistol API v2 preserves structured DataBind input and task output", "[pistol][databind]") {
+TEST_CASE("pistol API preserves structured DataBind input and task output", "[pistol][databind]") {
     auto dir = createTempDir();
     auto workflow_path = dir / "workflow.yml";
     writeFile(workflow_path, R"(
@@ -191,7 +135,7 @@ tasks:
 
     praktor_owned_data output = PRAKTOR_OWNED_DATA_INIT;
     praktor_error error = PRAKTOR_ERROR_INIT;
-    const auto execution_status = praktor_execute_workflow_data(&request, &output, &error);
+    const auto execution_status = praktor_execute_workflow(&request, &output, &error);
     INFO(error.message);
     REQUIRE(execution_status == PRAKTOR_RESULT_SUCCESS);
     REQUIRE(output.data != nullptr);
@@ -208,7 +152,7 @@ tasks:
     std::filesystem::remove_all(dir);
 }
 
-TEST_CASE("pistol API v2 binds and serializes every DataBind format", "[pistol][databind]") {
+TEST_CASE("pistol API binds and serializes every DataBind format", "[pistol][databind]") {
     auto dir = createTempDir();
     auto workflow_path = dir / "workflow.yml";
     auto output_path = dir / "out.txt";
@@ -267,7 +211,7 @@ tasks:
 
             praktor_owned_data output = PRAKTOR_OWNED_DATA_INIT;
             praktor_error error = PRAKTOR_ERROR_INIT;
-            REQUIRE(praktor_execute_workflow_data(&request, &output, &error)
+            REQUIRE(praktor_execute_workflow(&request, &output, &error)
                     == PRAKTOR_RESULT_SUCCESS);
             REQUIRE(output.data != nullptr);
             CHECK(output.size > 0);
@@ -283,7 +227,7 @@ tasks:
     std::filesystem::remove_all(dir);
 }
 
-TEST_CASE("pistol API v2 reports schema and data failures", "[pistol][databind]") {
+TEST_CASE("pistol API reports schema and data failures", "[pistol][databind]") {
     auto dir = createTempDir();
     auto workflow_path = dir / "workflow.yml";
     writeFile(workflow_path, "tasks: []\n");
@@ -306,32 +250,32 @@ TEST_CASE("pistol API v2 reports schema and data failures", "[pistol][databind]"
 
     praktor_owned_data output = PRAKTOR_OWNED_DATA_INIT;
     praktor_error error = PRAKTOR_ERROR_INIT;
-    CHECK(praktor_execute_workflow_data(&request, &output, &error)
+    CHECK(praktor_execute_workflow(&request, &output, &error)
           == PRAKTOR_RESULT_INVALID_DATA);
     CHECK(error.data_bind_status != 0);
     CHECK(output.data == nullptr);
 
     request.input_type = "MissingType";
-    CHECK(praktor_execute_workflow_data(&request, &output, &error)
+    CHECK(praktor_execute_workflow(&request, &output, &error)
           == PRAKTOR_RESULT_TYPE_NOT_FOUND);
 
     request.input_type = "WorkflowInput";
     request.schema_path = "also-present.schema";
     request.schema_text = schema.data();
     request.schema_text_size = schema.size();
-    CHECK(praktor_execute_workflow_data(&request, &output, &error)
+    CHECK(praktor_execute_workflow(&request, &output, &error)
           == PRAKTOR_RESULT_INVALID_ARGUMENT);
 
     request.schema_path = nullptr;
     request.schema_text = nullptr;
     request.schema_text_size = 0;
-    CHECK(praktor_execute_workflow_data(&request, &output, &error)
+    CHECK(praktor_execute_workflow(&request, &output, &error)
           == PRAKTOR_RESULT_INVALID_ARGUMENT);
 
     std::filesystem::remove_all(dir);
 }
 
-TEST_CASE("pistol API v2 returns an owned result for workflow failure", "[pistol][databind]") {
+TEST_CASE("pistol API returns an owned result for workflow failure", "[pistol][databind]") {
     auto dir = createTempDir();
     auto workflow_path = dir / "workflow.yml";
     writeFile(workflow_path, R"(
@@ -360,7 +304,7 @@ tasks:
 
     praktor_owned_data output = PRAKTOR_OWNED_DATA_INIT;
     praktor_error error = PRAKTOR_ERROR_INIT;
-    REQUIRE(praktor_execute_workflow_data(&request, &output, &error)
+    REQUIRE(praktor_execute_workflow(&request, &output, &error)
             == PRAKTOR_RESULT_EXECUTION_FAILED);
     REQUIRE(output.data != nullptr);
     const auto result = WorkflowValue::parse(

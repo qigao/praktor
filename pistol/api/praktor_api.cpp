@@ -6,9 +6,7 @@
 #include <data_bind.h>
 
 #include <cstdio>
-#include <cstring>
-#include <iostream>
-#include <string>
+#include <utility>
 
 namespace {
 
@@ -112,51 +110,15 @@ bool validateRequest(const praktor_execute_request* request,
     return true;
 }
 
-WorkflowInputs parseLegacyJson(const char* json_vars) {
-    WorkflowInputs inputs;
-    if (!json_vars || json_vars[0] == '\0') {
-        return inputs;
-    }
-
-    const auto root = WorkflowValue::parse(json_vars);
-    if (!root.is_object()) {
-        throw std::invalid_argument("Workflow variables must be a JSON object");
-    }
-    for (const auto& member : root.object_range()) {
-        inputs.emplace(member.key(), member.value());
-    }
-    return inputs;
-}
-
-int32_t PRAKTOR_CALL execute_workflow_v1(const char* workflow_path, const char* json_vars) {
-    return static_cast<int32_t>(praktor_execute_workflow(workflow_path, json_vars));
-}
-
-int32_t PRAKTOR_CALL execute_workflow_v2(const praktor_execute_request* request,
-                                         praktor_owned_data* output,
-                                         praktor_error* error) {
-    return static_cast<int32_t>(praktor_execute_workflow_data(request, output, error));
+int32_t PRAKTOR_CALL executeWorkflow(const praktor_execute_request* request,
+                                     praktor_owned_data* output,
+                                     praktor_error* error) {
+    return static_cast<int32_t>(praktor_execute_workflow(request, output, error));
 }
 
 } // namespace
 
-praktor_result PRAKTOR_CALL praktor_execute_workflow(const char* workflow_path,
-                                                     const char* json_vars) {
-    if (!isPresent(workflow_path)) {
-        return PRAKTOR_API_INVALID_ARGUMENT;
-    }
-
-    try {
-        WorkflowRunner runner(workflow_path, parseLegacyJson(json_vars));
-        return runner.run() ? PRAKTOR_API_SUCCESS : PRAKTOR_API_EXECUTION_FAILED;
-    } catch (const std::exception& exception) {
-        std::cerr << "[Praktor API Error] Exception during workflow execution: "
-                  << exception.what() << std::endl;
-        return PRAKTOR_API_INVALID_JSON;
-    }
-}
-
-praktor_result PRAKTOR_CALL praktor_execute_workflow_data(
+praktor_result PRAKTOR_CALL praktor_execute_workflow(
     const praktor_execute_request* request,
     praktor_owned_data* output,
     praktor_error* error) {
@@ -213,24 +175,13 @@ void PRAKTOR_CALL praktor_release_data(praktor_owned_data* data) {
     praktor::api::DataBindAdapter::release(*data);
 }
 
-const praktor_api_v1* PRAKTOR_CALL praktor_get_api_v1(void) {
-    static const praktor_api_v1 api = {
-        sizeof(praktor_api_v1),
+const praktor_api* PRAKTOR_CALL praktor_get_api(void) {
+    static const praktor_api api = {
+        sizeof(praktor_api),
         PRAKTOR_ABI_MAJOR,
         PRAKTOR_ABI_MINOR,
-        PRAKTOR_CAPABILITY_EXECUTE_WORKFLOW,
-        &execute_workflow_v1,
-    };
-    return &api;
-}
-
-const praktor_api_v2* PRAKTOR_CALL praktor_get_api_v2(void) {
-    static const praktor_api_v2 api = {
-        sizeof(praktor_api_v2),
-        PRAKTOR_ABI_V2_MAJOR,
-        PRAKTOR_ABI_V2_MINOR,
         PRAKTOR_CAPABILITY_EXECUTE_WORKFLOW | PRAKTOR_CAPABILITY_DATA_BIND,
-        &execute_workflow_v2,
+        &executeWorkflow,
         &praktor_release_data,
     };
     return &api;
