@@ -428,12 +428,16 @@ TEST_CASE("Script engine: context integration", "[script]") {
         context.pushTaskScope("emit");
         auto r = Praktor::Script::execute(R"(
             ctx.output("payload", "{\"status\":\"ok\",\"value\":3}");
+            ctx.output("enabled", true);
+            ctx.output("count", 7);
         )", context);
         context.popTaskScope();
         REQUIRE(r.success);
         auto payload = context.getValueByPath("tasks.emit.outputs.payload");
         CHECK(payload["status"].as<std::string>() == "ok");
         CHECK(payload["value"].as<int>() == 3);
+        CHECK(context.getValueByPath("tasks.emit.outputs.enabled").as<bool>());
+        CHECK(context.getValueByPath("tasks.emit.outputs.count").as<int64_t>() == 7);
     }
 
     SECTION("ctx.get returns structured arrays for iteration") {
@@ -468,7 +472,7 @@ TEST_CASE("Script engine: context integration", "[script]") {
 
         REQUIRE(r.success);
         CHECK(context.getValue<std::string>("payload_name") == "demo");
-        CHECK(context.getValue<double>("payload_ok") == Catch::Approx(1.0));
+        CHECK(context.getValue<bool>("payload_ok"));
     }
 
     SECTION("ctx.get parses JSON-like strings into structured values") {

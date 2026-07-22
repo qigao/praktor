@@ -28,79 +28,59 @@ typedef enum praktor_result {
     PRAKTOR_RESULT_EXECUTION_FAILED = 1,
     PRAKTOR_RESULT_INVALID_ARGUMENT = -1,
     PRAKTOR_RESULT_INVALID_JSON = -2,
-    PRAKTOR_RESULT_INVALID_DATA = -3,
-    PRAKTOR_RESULT_INVALID_SCHEMA = -4,
-    PRAKTOR_RESULT_TYPE_NOT_FOUND = -5,
-    PRAKTOR_RESULT_SERIALIZATION_FAILED = -6,
-    PRAKTOR_RESULT_OUT_OF_MEMORY = -7,
-    PRAKTOR_RESULT_INTERNAL_ERROR = -8
+    PRAKTOR_RESULT_OUT_OF_MEMORY = -3,
+    PRAKTOR_RESULT_INTERNAL_ERROR = -4
 } praktor_result;
 
-#define PRAKTOR_ABI_MAJOR 1u
+#define PRAKTOR_ABI_MAJOR 2u
 #define PRAKTOR_ABI_MINOR 0u
 
-#define PRAKTOR_CAPABILITY_EXECUTE_WORKFLOW (UINT64_C(1) << 0)
-#define PRAKTOR_CAPABILITY_DATA_BIND (UINT64_C(1) << 1)
+#define PRAKTOR_CAPABILITY_JSON_WORKFLOW (UINT64_C(1) << 0)
 
-typedef enum praktor_data_format {
-    PRAKTOR_DATA_FORMAT_JSON = 0,
-    PRAKTOR_DATA_FORMAT_YAML = 1,
-    PRAKTOR_DATA_FORMAT_XML = 2,
-    PRAKTOR_DATA_FORMAT_CSV = 3,
-    PRAKTOR_DATA_FORMAT_BINARY = 4
-} praktor_data_format;
+typedef enum praktor_error_phase {
+    PRAKTOR_ERROR_PHASE_NONE = 0,
+    PRAKTOR_ERROR_PHASE_REQUEST = 1,
+    PRAKTOR_ERROR_PHASE_INPUT_JSON = 2,
+    PRAKTOR_ERROR_PHASE_EXECUTION = 3,
+    PRAKTOR_ERROR_PHASE_RESULT_JSON = 4
+} praktor_error_phase;
 
 /**
- * Schema-bound workflow execution request.
+ * JSON workflow execution request.
  *
- * Provide exactly one trusted schema source: schema_path or schema_text/schema_text_size.
- * The schema must contain input_type and output_type. input_data is borrowed for the call.
- * csv_row is used only for CSV input.
+ * input_json is borrowed for the duration of the call and must contain one JSON object.
+ * The object members become the workflow inputs without schema coercion.
  */
 typedef struct praktor_execute_request {
     uint32_t struct_size;
     const char* workflow_path;
-    const void* input_data;
-    size_t input_size;
-    praktor_data_format input_format;
-    size_t csv_row;
-    const char* schema_path;
-    const char* schema_text;
-    size_t schema_text_size;
-    const char* input_type;
-    const char* output_type;
-    praktor_data_format output_format;
+    const char* input_json;
+    size_t input_json_size;
 } praktor_execute_request;
 
-/** Output owned by Praktor. Release it exactly once with praktor_release_data(). */
-typedef struct praktor_owned_data {
+/** Canonical JSON owned by Praktor. Release it exactly once with praktor_release_json(). */
+typedef struct praktor_owned_json {
     uint32_t struct_size;
-    void* data;
+    char* data;
     size_t size;
-    praktor_data_format format;
-} praktor_owned_data;
+} praktor_owned_json;
 
-/** Detailed DataBind diagnostics populated when a schema or format operation fails. */
+/** Error diagnostics for request validation, JSON processing, or workflow execution. */
 typedef struct praktor_error {
     uint32_t struct_size;
-    int32_t data_bind_status;
-    int32_t line;
-    int32_t column;
-    char path[260];
+    praktor_error_phase phase;
     char message[512];
 } praktor_error;
 
-#define PRAKTOR_EXECUTE_REQUEST_INIT                                                        \
-    {sizeof(praktor_execute_request), NULL, NULL, 0, PRAKTOR_DATA_FORMAT_JSON, 0, NULL,    \
-     NULL, 0, NULL, NULL, PRAKTOR_DATA_FORMAT_JSON}
-#define PRAKTOR_OWNED_DATA_INIT {sizeof(praktor_owned_data), NULL, 0, PRAKTOR_DATA_FORMAT_JSON}
-#define PRAKTOR_ERROR_INIT {sizeof(praktor_error), 0, -1, -1, {0}, {0}}
+#define PRAKTOR_EXECUTE_REQUEST_INIT {sizeof(praktor_execute_request), NULL, NULL, 0}
+#define PRAKTOR_OWNED_JSON_INIT {sizeof(praktor_owned_json), NULL, 0}
+#define PRAKTOR_ERROR_INIT {sizeof(praktor_error), PRAKTOR_ERROR_PHASE_NONE, {0}}
 
 typedef int32_t (PRAKTOR_CALL *praktor_execute_workflow_fn)(
     const praktor_execute_request* request,
-    praktor_owned_data* output,
+    praktor_owned_json* output,
     praktor_error* error);
-typedef void (PRAKTOR_CALL *praktor_release_data_fn)(praktor_owned_data* data);
+typedef void (PRAKTOR_CALL *praktor_release_json_fn)(praktor_owned_json* data);
 
 typedef struct praktor_api {
     uint32_t struct_size;
@@ -108,25 +88,25 @@ typedef struct praktor_api {
     uint32_t abi_minor;
     uint64_t capabilities;
     praktor_execute_workflow_fn execute_workflow;
-    praktor_release_data_fn release_data;
+    praktor_release_json_fn release_json;
 } praktor_api;
 
 typedef const praktor_api* (PRAKTOR_CALL *praktor_get_api_fn)(void);
 
 PRAKTOR_API const praktor_api* PRAKTOR_CALL praktor_get_api(void);
 /**
- * Execute a workflow with schema-bound input and serialize its minimal result.
+ * Execute a workflow and return its canonical JSON result.
  *
- * PRAKTOR_RESULT_SUCCESS and PRAKTOR_RESULT_EXECUTION_FAILED may both return owned output.
- * All negative results leave output empty. The result contains workflow_status, task states and
- * explicit task outputs; it never includes the complete input or environment snapshot.
+ * PRAKTOR_RESULT_SUCCESS and PRAKTOR_RESULT_EXECUTION_FAILED both return owned JSON. Negative
+ * results leave output empty. The result contains workflow_status, task states, and explicit task
+ * outputs; it never contains the complete input or environment snapshot.
  */
 PRAKTOR_API praktor_result PRAKTOR_CALL praktor_execute_workflow(
     const praktor_execute_request* request,
-    praktor_owned_data* output,
+    praktor_owned_json* output,
     praktor_error* error);
-/** Release output storage and reset data/size. Passing NULL is valid. */
-PRAKTOR_API void PRAKTOR_CALL praktor_release_data(praktor_owned_data* data);
+/** Release canonical JSON and reset data/size. Passing NULL is valid. */
+PRAKTOR_API void PRAKTOR_CALL praktor_release_json(praktor_owned_json* data);
 
 #ifdef __cplusplus
 }

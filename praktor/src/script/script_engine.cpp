@@ -18,6 +18,7 @@ extern "C" {
 #include <cctype>
 #include <deque>
 #include <filesystem>
+#include <limits>
 #include <stdexcept>
 #include <string_view>
 #include <vector>
@@ -159,13 +160,26 @@ static exprtk_value_t json_to_exprtk_value(const WorkflowValue &value, ScriptEva
     return make_null();
   }
   if (value.is_bool()) {
-    return make_num(value.as<bool>() ? 1.0 : 0.0);
+    exprtk_value_t result{};
+    result.type = EXPRTK_VAL_BOOL;
+    result.data.boolean = value.as<bool>() ? 1 : 0;
+    return result;
   }
   if (value.is_int64()) {
-    return make_num(static_cast<double>(value.as<int64_t>()));
+    exprtk_value_t result{};
+    result.type = EXPRTK_VAL_INTEGER;
+    result.data.integer = value.as<int64_t>();
+    return result;
   }
   if (value.is_uint64()) {
-    return make_num(static_cast<double>(value.as<uint64_t>()));
+    const auto integer = value.as<uint64_t>();
+    if (integer <= static_cast<uint64_t>(std::numeric_limits<int64_t>::max())) {
+      exprtk_value_t result{};
+      result.type = EXPRTK_VAL_INTEGER;
+      result.data.integer = static_cast<int64_t>(integer);
+      return result;
+    }
+    return eval_ctx.keep(value.to_string());
   }
   if (value.is_double()) {
     return make_num(value.as<double>());
@@ -228,6 +242,10 @@ static WorkflowValue exprtk_scalar_to_json(const exprtk_value_t &value) {
   switch (value.type) {
   case EXPRTK_VAL_NUMBER:
     return value.data.number;
+  case EXPRTK_VAL_INTEGER:
+    return value.data.integer;
+  case EXPRTK_VAL_BOOL:
+    return value.data.boolean != 0;
   case EXPRTK_VAL_STRING:
     return parse_string_or_keep(std::string_view(value.data.string.data, value.data.string.len));
   case EXPRTK_VAL_VECTOR: {
@@ -239,7 +257,8 @@ static WorkflowValue exprtk_scalar_to_json(const exprtk_value_t &value) {
   }
   case EXPRTK_VAL_NULL:
     return WorkflowValue::null();
-  case EXPRTK_VAL_MAP: {
+  case EXPRTK_VAL_MAP:
+  case EXPRTK_VAL_OBJECT: {
     WorkflowValue obj = WorkflowValue::object();
     turbo_script_value_map_iterator_t it = turbo_script_value_map_iter_begin(&value);
     const char *key = nullptr;
@@ -249,7 +268,8 @@ static WorkflowValue exprtk_scalar_to_json(const exprtk_value_t &value) {
     }
     return obj;
   }
-  case EXPRTK_VAL_LIST: {
+  case EXPRTK_VAL_LIST:
+  case EXPRTK_VAL_SET: {
     WorkflowValue arr = WorkflowValue::array();
     for (size_t i = 0; i < value.data.list.count; ++i) {
       arr.push_back(exprtk_scalar_to_json(value.data.list.items[i]));
