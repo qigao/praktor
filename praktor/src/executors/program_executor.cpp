@@ -10,7 +10,6 @@
 #include <chrono>
 #include <cctype>
 #include <filesystem>
-#include <jsoncons/json.hpp>
 #include <stdexcept>
 
 namespace Praktor::Execution {
@@ -113,7 +112,7 @@ void emitProcessConsoleLine(const std::string& line) {
 
 WorkflowValue parseJsonOutput(const std::string& output) {
   try {
-    return jsoncons::json::parse(output);
+    return WorkflowValue::parse(output);
   } catch (const std::exception& e) {
     throw std::runtime_error(std::string("Failed to parse program stdout as JSON: ") + e.what());
   }

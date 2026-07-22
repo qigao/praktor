@@ -24,8 +24,6 @@ tasks:
       - shell:
           cmd: "pid='{{ PID }}'; if [ -n \"$pid\" ]; then ps -p \"$pid\" -o pid=; else pgrep -x '{{ PROCESS_NAME }}' | head -n 1; fi"
           output_key: matched_pid
-    continue_on_error: true
-
   - name: emit_result
     depends_on: [query_process]
     script: |

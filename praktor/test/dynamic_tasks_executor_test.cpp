@@ -22,7 +22,7 @@ TEST_CASE("DynamicTasksExecutor placeholder substitution", "[dynamic_tasks]") {
 
     SECTION("Simple string items with {{ item }}") {
         // Set up items in context
-        jsoncons::json items = jsoncons::json::array();
+        WorkflowValue items = WorkflowValue::array();
         items.push_back("service_a");
         items.push_back("service_b");
         items.push_back("service_c");
@@ -52,13 +52,13 @@ TEST_CASE("DynamicTasksExecutor placeholder substitution", "[dynamic_tasks]") {
     SECTION("Object items with {{ item.field }}") {
         generated_tasks.clear();
 
-        jsoncons::json items = jsoncons::json::array();
-        jsoncons::json item1 = jsoncons::json::object();
+        WorkflowValue items = WorkflowValue::array();
+        WorkflowValue item1 = WorkflowValue::object();
         item1["name"] = "web";
         item1["port"] = 8080;
         items.push_back(item1);
 
-        jsoncons::json item2 = jsoncons::json::object();
+        WorkflowValue item2 = WorkflowValue::object();
         item2["name"] = "api";
         item2["port"] = 3000;
         items.push_back(item2);
@@ -94,7 +94,7 @@ TEST_CASE("DynamicTasksExecutor placeholder substitution", "[dynamic_tasks]") {
     SECTION("{{ index }} placeholder") {
         generated_tasks.clear();
 
-        jsoncons::json items = jsoncons::json::array();
+        WorkflowValue items = WorkflowValue::array();
         items.push_back("a");
         items.push_back("b");
 
@@ -192,7 +192,7 @@ TEST_CASE("DynamicTasksExecutor error handling", "[dynamic_tasks]") {
             return call_count < 2;  // Fail on second task
         });
 
-        jsoncons::json items = jsoncons::json::array();
+        WorkflowValue items = WorkflowValue::array();
         items.push_back("a");
         items.push_back("b");
         items.push_back("c");
@@ -229,7 +229,7 @@ TEST_CASE("DynamicTasksExecutor template fields", "[dynamic_tasks]") {
 
     WorkflowContext context;
 
-    jsoncons::json items = jsoncons::json::array();
+    WorkflowValue items = WorkflowValue::array();
     items.push_back("x");
 
     context.setValue("items", items);
@@ -335,8 +335,7 @@ TEST_CASE("DynamicTasksExecutor items_variable with {{ }} wrapper", "[dynamic_ta
 
     // Set up nested path: config.services.list
     // Note: We avoid "tasks.*" paths as those are special-cased to use TaskRegistry
-    // Work around jsoncons nested object issue by using a flatter structure
-    jsoncons::json config_services_list = jsoncons::json::array({"item1", "item2"});
+    WorkflowValue config_services_list = WorkflowValue::array({"item1", "item2"});
     context.setValue("config.services.list", config_services_list);
 
     SECTION("Unwraps {{ config.services.list }}") {
@@ -370,7 +369,7 @@ TEST_CASE("DynamicTasksExecutor empty items array", "[dynamic_tasks]") {
     });
 
     WorkflowContext context;
-    context.setValue("items", jsoncons::json::array());
+    context.setValue("items", WorkflowValue::array());
 
     Task task;
     task.name = "empty_test";
@@ -405,7 +404,7 @@ TEST_CASE("DynamicTasksExecutor aggregates generated task results", "[dynamic_ta
     context.setTaskStatus("deploy_all", "running");
     context.pushTaskScope("deploy_all");
 
-    jsoncons::json items = jsoncons::json::array({"a", "b", "c"});
+    WorkflowValue items = WorkflowValue::array({"a", "b", "c"});
     context.setValue("items", items);
 
     Task task;
@@ -449,7 +448,7 @@ TEST_CASE("DynamicTasksExecutor rejects duplicate generated task names", "[dynam
     WorkflowContext context;
     context.setTaskStatus("deploy_all", "running");
     context.pushTaskScope("deploy_all");
-    context.setValue("items", jsoncons::json::array({"dup", "dup"}));
+    context.setValue("items", WorkflowValue::array({"dup", "dup"}));
 
     Task task;
     task.name = "deploy_all";
@@ -488,7 +487,7 @@ TEST_CASE("DynamicTasksExecutor stops at first generated task failure", "[dynami
     WorkflowContext context;
     context.setTaskStatus("fanout_jobs", "running");
     context.pushTaskScope("fanout_jobs");
-    context.setValue("items", jsoncons::json::array({"a", "b", "c"}));
+    context.setValue("items", WorkflowValue::array({"a", "b", "c"}));
 
     Task task;
     task.name = "fanout_jobs";

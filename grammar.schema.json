@@ -34,12 +34,9 @@
       },
       "additionalProperties": false
     },
-    "native_modules": {
-      "type": "array",
-      "description": "Native DLL/SO modules to load for script execution.",
-      "items": {
-        "$ref": "#/$defs/nativeModule"
-      }
+    "includes": {
+      "$ref": "#/$defs/workflowIncludes",
+      "description": "Named workflow files whose tasks and default values are included."
     },
     "tasks": {
       "type": "array",
@@ -68,6 +65,22 @@
         }
       ]
     },
+    "nonEmptyStringOrStringArray": {
+      "oneOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      ]
+    },
     "stringMap": {
       "type": "object",
       "description": "A mapping of keys to values. Values support Mustache templating and variable interpolation.",
@@ -80,34 +93,19 @@
       "description": "A duration string, e.g., '30s', '5m', '1h'.",
       "pattern": "^[0-9]+(s|m|h)$"
     },
-    "nativeModule": {
+    "workflowIncludes": {
       "type": "object",
-      "description": "A native DLL/SO module loaded at startup.",
-      "properties": {
-        "name": {
-          "type": "string",
-          "description": "Module name for identification."
-        },
-        "path": {
-          "type": "string",
-          "description": "Path to the DLL (Windows) or SO (Linux/macOS) file."
-        },
-        "hooks": {
-          "type": "object",
-          "description": "Hook function mappings.",
-          "additionalProperties": {
-            "type": "string"
-          }
-        }
-      },
-      "required": ["name", "path"],
-      "additionalProperties": false
+      "additionalProperties": {
+        "type": "string",
+        "minLength": 1
+      }
     },
     "triggerActionList": {
       "type": "array",
       "description": "A list of task names to execute when a trigger event fires.",
       "items": {
         "type": "string",
+        "minLength": 1,
         "description": "Name of a task to execute as a trigger action."
       },
       "minItems": 1
@@ -129,6 +127,7 @@
           "description": "Tasks to execute regardless of success or failure."
         }
       },
+      "minProperties": 1,
       "additionalProperties": false
     },
     "eachBlock": {
@@ -168,7 +167,8 @@
       "type": "object",
       "properties": {
         "name": {
-          "type": "string"
+          "type": "string",
+          "minLength": 1
         },
         "description": {
           "type": "string"
@@ -209,22 +209,25 @@
           "description": "Suppress command output.",
           "default": false
         },
+        "sources": {
+          "$ref": "#/$defs/stringOrStringArray",
+          "description": "Input files or globs used for incremental freshness checks."
+        },
+        "generates": {
+          "$ref": "#/$defs/stringOrStringArray",
+          "description": "Output files produced by the task."
+        },
+        "finally": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Task invoked through the on_complete trigger lifecycle."
+        },
         "command": {
-          "oneOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "array",
-              "items": {
-                "type": "string"
-              },
-              "minItems": 1
-            }
-          ]
+          "$ref": "#/$defs/nonEmptyStringOrStringArray"
         },
         "program": {
           "type": "string",
+          "minLength": 1,
           "description": "Executable path or program name for raw process execution. Does not invoke a shell."
         },
         "args": {
@@ -246,10 +249,12 @@
         },
         "script": {
           "type": "string",
+          "minLength": 1,
           "description": "Post-processing script executed after the task action completes. Uses the built-in scripting language with access to ctx, json, dll, http, and log modules."
         },
         "uses": {
-          "type": "string"
+          "type": "string",
+          "minLength": 1
         },
         "dynamic_tasks": {
           "type": "object",
@@ -257,24 +262,30 @@
           "properties": {
             "items_variable": {
               "type": "string",
+              "minLength": 1,
               "description": "Context path to a JSON array that drives task generation."
             },
             "template": {
               "type": "object",
               "description": "Task template with {{ item }} placeholders.",
               "properties": {
-                "name": { "type": "string" },
-                "command": { "$ref": "#/$defs/stringOrStringArray" },
+                "name": { "type": "string", "minLength": 1 },
+                "command": { "$ref": "#/$defs/nonEmptyStringOrStringArray" },
                 "timeout": { "$ref": "#/$defs/durationString" },
                 "when": { "type": "string" },
                 "depends_on": { "$ref": "#/$defs/stringOrStringArray" },
                 "env": { "$ref": "#/$defs/stringMap" }
               },
-              "required": ["name", "command"]
+              "required": ["name", "command"],
+              "additionalProperties": false
             }
           },
           "required": ["items_variable", "template"],
           "additionalProperties": false
+        },
+        "actions": {
+          "$ref": "#/$defs/orchestrationNode",
+          "description": "Explicit orchestration tree used as the task runner."
         },
         "sequence": {
           "$ref": "#/$defs/orchestrationNodeChildren"
@@ -454,6 +465,11 @@
             {
               "required": [
                 "dynamic_tasks"
+              ]
+            },
+            {
+              "required": [
+                "actions"
               ]
             },
             {
@@ -671,6 +687,11 @@
             {
               "required": [
                 "dynamic_tasks"
+              ]
+            },
+            {
+              "required": [
+                "actions"
               ]
             },
             {
@@ -891,6 +912,11 @@
                   },
                   {
                     "required": [
+                      "actions"
+                    ]
+                  },
+                  {
+                    "required": [
                       "sequence"
                     ]
                   },
@@ -1066,6 +1092,18 @@
               }
             }
           ]
+        },
+        {
+          "not": {
+            "anyOf": [
+              { "required": ["parse_json", "parse_regex"] },
+              { "required": ["parse_json", "parse_lines"] },
+              { "required": ["parse_json", "parse_keyvalue"] },
+              { "required": ["parse_regex", "parse_lines"] },
+              { "required": ["parse_regex", "parse_keyvalue"] },
+              { "required": ["parse_lines", "parse_keyvalue"] }
+            ]
+          }
         }
       ],
       "additionalProperties": false
@@ -1429,7 +1467,7 @@
       "properties": {
         "path": {
           "type": "string",
-          "description": "JSONPath or JMESPath expression"
+          "description": "JSONPath expression"
         },
         "output_key": {
           "type": "string",

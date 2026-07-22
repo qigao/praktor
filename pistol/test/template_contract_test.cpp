@@ -5,7 +5,7 @@
 #include <yml/task_parser.hpp>
 
 #include <catch2/catch_all.hpp>
-#include <jsoncons/json.hpp>
+#include "data/workflow_value.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -105,10 +105,8 @@ struct ExecutionResult {
 ExecutionResult executeWorkflow(const std::filesystem::path& workflow_path,
                                 std::unordered_map<std::string, std::string> input_values = {})
 {
-    auto workflow = TaskParser::parseFileWithImports(workflow_path.string(), workflow_path.parent_path().string());
+    auto workflow = TaskParser::parseFileWithIncludes(workflow_path.string(), workflow_path.parent_path().string());
     auto context = std::make_unique<WorkflowContext>();
-    context->setEmbeddedModules(workflow.embedded);
-    context->setNativeModules(workflow.native_modules);
     context->setSourcePath(workflow.source_path);
 
     const auto set_workflow_variable = [&context](const std::string& key, const std::string& value) {

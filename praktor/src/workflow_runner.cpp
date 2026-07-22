@@ -2,7 +2,6 @@
 #include "util/env_parser.hpp"
 #include "util/logging.hpp"
 #include "util/file_utils.hpp"
-#include "util/native_loader.hpp"
 #include "util/path_utils.hpp"
 #include "util/system_info.hpp"
 #include "yml/task_parser.hpp"
@@ -58,7 +57,8 @@ void mergeEnvironmentOverrides(std::unordered_map<std::string, std::string>& tar
     }
 }
 
-void setWorkflowVariable(WorkflowContext& context, const std::string& key, const std::string& value) {
+void setWorkflowVariable(WorkflowContext& context, const std::string& key,
+                         const WorkflowValue& value) {
     context.setValue(key, value);
     context.setValue("variables." + key, value);
 }
@@ -85,19 +85,9 @@ void populateWorkflowEnvironmentContext(
     }
 }
 
-void preloadNativeModules(const Workflow& workflow) {
-    if (workflow.native_modules.empty()) {
-        return;
-    }
-
-    TLOG_DEBUG("Pre-loading {} native module libraries", workflow.native_modules.size());
-    Praktor::Native::NativeLoader::instance().loadModuleLibraries(
-        workflow.native_modules, workflow.source_path);
-}
-
 void populateWorkflowVariables(WorkflowContext& context,
                                const Workflow& workflow,
-                               const std::unordered_map<std::string, std::string>& input_values) {
+                               const WorkflowInputs& input_values) {
     for (const auto& [key, value] : input_values) {
         setWorkflowVariable(context, key, value);
         TLOG_DEBUG("Set input variable: {}", key);
@@ -122,26 +112,61 @@ struct PreparedWorkflow {
 
 PreparedWorkflow prepareExecution(const std::string& yaml_path,
                                   const std::filesystem::path& base_directory,
-                                  const std::unordered_map<std::string, std::string>& input_values,
+                                  const WorkflowInputs& input_values,
                                   const std::unordered_map<std::string, std::string>& base_environment) {
     PreparedWorkflow prepared;
-    prepared.workflow = TaskParser::parseFileWithImports(yaml_path, base_directory.string());
+    prepared.workflow = TaskParser::parseFileWithIncludes(yaml_path, base_directory.string());
     prepared.runtime_environment = buildRuntimeEnvironment(prepared.workflow, base_environment);
     prepared.graph = TaskParser::buildGraph(prepared.workflow);
-    prepared.context = std::make_unique<WorkflowContext>(input_values);
-    prepared.context->setEmbeddedModules(prepared.workflow.embedded);
-    prepared.context->setNativeModules(prepared.workflow.native_modules);
+    prepared.context = std::make_unique<WorkflowContext>();
     prepared.context->setSourcePath(prepared.workflow.source_path);
     populateWorkflowEnvironmentContext(*prepared.context, prepared.runtime_environment);
-    preloadNativeModules(prepared.workflow);
     populateWorkflowVariables(*prepared.context, prepared.workflow, input_values);
     return prepared;
+}
+
+WorkflowInputs convertStringInputs(
+    std::unordered_map<std::string, std::string> input_values) {
+    WorkflowInputs result;
+    result.reserve(input_values.size());
+    for (auto& [key, value] : input_values) {
+        result.emplace(std::move(key), WorkflowValue(std::move(value)));
+    }
+    return result;
+}
+
+WorkflowExecutionResult makeExecutionResult(const WorkflowContext& context) {
+    WorkflowExecutionResult result;
+    result.value["workflow_status"] =
+        context.getValueOrDefault<std::string>("workflow_status", "unknown");
+    result.value["tasks"] = context.getTasksSnapshot();
+    result.success = result.value["workflow_status"].as<std::string>() != "failed";
+    if (!result.success) {
+        result.error_message = "Workflow execution failed";
+        result.value["error"] = result.error_message;
+    }
+    return result;
+}
+
+WorkflowExecutionResult makeFailedExecutionResult(std::string message) {
+    WorkflowExecutionResult result;
+    result.value["workflow_status"] = "failed";
+    result.value["tasks"] = WorkflowValue::object();
+    result.value["error"] = message;
+    result.error_message = std::move(message);
+    return result;
 }
 
 } // namespace
 
 WorkflowRunner::WorkflowRunner(std::string const& yamlPath,
                                std::unordered_map<std::string, std::string> inputValues,
+                               std::unordered_map<std::string, std::string> baseEnvironment)
+    : WorkflowRunner(yamlPath, convertStringInputs(std::move(inputValues)),
+                     std::move(baseEnvironment)) {}
+
+WorkflowRunner::WorkflowRunner(std::string const& yamlPath,
+                               WorkflowInputs inputValues,
                                std::unordered_map<std::string, std::string> baseEnvironment)
     : yamlPath_(yamlPath)
     , inputValues_(std::move(inputValues))
@@ -150,7 +175,7 @@ WorkflowRunner::WorkflowRunner(std::string const& yamlPath,
 
 WorkflowRunner::~WorkflowRunner() = default;
 
-bool WorkflowRunner::run(bool useConcurrent, int maxConcurrency) {
+WorkflowExecutionResult WorkflowRunner::execute(bool useConcurrent, int maxConcurrency) {
     try {
         TLOG_DEBUG("Loading workflow from: {}", yamlPath_);
         auto prepared = prepareExecution(yamlPath_, base_directory_, inputValues_, baseEnvironment_);
@@ -167,26 +192,29 @@ bool WorkflowRunner::run(bool useConcurrent, int maxConcurrency) {
             false);
         executor.execute(*prepared.context);
 
-        std::string status =
-            prepared.context->getValueOrDefault<std::string>("workflow_status", "unknown");
-        if (status == "failed") {
+        auto result = makeExecutionResult(*prepared.context);
+        if (!result.success) {
             if (!Praktor::Logging::isVerboseEnabled()) {
                 Praktor::Logging::printWorkflowStatus("FAILED");
             }
             TLOG_ERROR("Workflow execution failed.");
-            return false;
+            return result;
         }
 
         if (!Praktor::Logging::isVerboseEnabled()) {
             Praktor::Logging::printWorkflowStatus("SUCCESS");
         }
         TLOG_DEBUG("Workflow finished successfully.");
-        return true;
+        return result;
 
     } catch (const std::exception& e) {
         TLOG_ERROR("An error occurred during workflow execution: {}", e.what());
-        return false;
+        return makeFailedExecutionResult(e.what());
     }
+}
+
+bool WorkflowRunner::run(bool useConcurrent, int maxConcurrency) {
+    return execute(useConcurrent, maxConcurrency).success;
 }
 
 bool WorkflowRunner::runTask(std::string const& taskName, bool useConcurrent, int maxConcurrency) {

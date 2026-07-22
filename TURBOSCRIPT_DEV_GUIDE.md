@@ -85,12 +85,12 @@ static exprtk_value_t make_str(const char* str, size_t len);
 ### 2.3 JSON ↔ exprtk_value_t 转换（script_engine.cpp 内已定义）
 
 ```cpp
-// jsoncons::json → exprtk_value_t（深度转换）
-static exprtk_value_t json_to_exprtk_value(const jsoncons::json& value,
+// WorkflowValue → exprtk_value_t（深度转换）
+static exprtk_value_t json_to_exprtk_value(const WorkflowValue& value,
                                             ScriptEvalContext& eval_ctx);
 
-// exprtk_value_t → jsoncons::json（深度转换）
-static jsoncons::json exprtk_scalar_to_json(const exprtk_value_t& value);
+// exprtk_value_t → WorkflowValue（深度转换）
+static WorkflowValue exprtk_scalar_to_json(const exprtk_value_t& value);
 ```
 
 这两个函数处理所有类型的嵌套转换，包括对象、数组、数值、字符串和 null。
@@ -174,8 +174,8 @@ bool is_null = (args[i].type == EXPRTK_VAL_NULL);
 
 // 读取 MAP 类型（对象）
 if (args[i].type == EXPRTK_VAL_MAP) {
-  jsoncons::json obj = exprtk_scalar_to_json(args[i]);
-  // 通过 jsoncons 访问 obj["key"]
+  WorkflowValue obj = exprtk_scalar_to_json(args[i]);
+  // 通过 WorkflowValue 访问 obj["key"]
 }
 ```
 
@@ -225,7 +225,7 @@ static exprtk_value_t ctx_output_fn(size_t argc, exprtk_value_t* args, void* use
   }
   auto* eval_ctx = static_cast<ScriptEvalContext*>(user_data);
   std::string key(args[0].data.string.data, args[0].data.string.len);
-  jsoncons::json val = exprtk_scalar_to_json(args[1]);
+  WorkflowValue val = exprtk_scalar_to_json(args[1]);
   eval_ctx->workflow_context.setCurrentTaskOutput(key, val);
   return make_null();
 }
@@ -263,14 +263,14 @@ static exprtk_value_t shell_exec_fn(size_t argc, exprtk_value_t* args, void* use
 
   // 第二个参数是可选的选项对象
   if (argc >= 2) {
-    jsoncons::json options = build_shell_options(args[1]);
+    WorkflowValue options = build_shell_options(args[1]);
     // 从 options 读取各字段...
   }
 
   auto result = actions::ShellExecutor::execute(command, ...);
 
   // 返回 JSON 对象：序列化为字符串，通过 keep() 延长生命周期
-  jsoncons::json payload = jsoncons::json::object();
+  WorkflowValue payload = WorkflowValue::object();
   payload["exit_code"] = result.exit_code;
   payload["stdout"] = result.stdout_output;
   return eval_ctx->keep(payload.to_string());
@@ -457,7 +457,7 @@ std::string s = eval_ctx->workflow_context.getValueOrDefault<std::string>("varia
 
 ```cpp
 // 写入当前任务的输出（推荐：通过 setCurrentTaskOutput）
-jsoncons::json result_val = ...;
+WorkflowValue result_val = ...;
 eval_ctx->workflow_context.setCurrentTaskOutput("result_key", result_val);
 
 // 写入任意变量（禁止写保留路径，见 §12）
@@ -470,9 +470,9 @@ eval_ctx->workflow_context.setValue("variables.MY_VAR", some_json_value);
 bool exists = eval_ctx->workflow_context.hasKey("tasks.build.outputs.stdout");
 ```
 
-### 8.4 WorkflowValue（jsoncons::json 别名）
+### 8.4 WorkflowValue（Turbo Parser RAII 值）
 
-`WorkflowValue` 就是 `jsoncons::json`，支持所有 jsoncons 操作：
+`WorkflowValue` 拥有独立的 Turbo JSON DOM；复制执行深拷贝，查询结果不会借用已释放文档：
 
 ```cpp
 WorkflowValue val = eval_ctx->workflow_context.getValueByPath(path);
@@ -562,10 +562,10 @@ return eval_ctx->keepList(std::move(items));  // 列表存入池中
 
 ### 10.4 返回 MAP（对象）类型
 
-对于 MAP，通过 `json_to_exprtk_value` 转换 `jsoncons::json` 对象，其内部字符串会自动通过 `eval_ctx->keep()` 管理：
+对于 MAP，通过 `json_to_exprtk_value` 转换 `WorkflowValue` 对象，其内部字符串会自动通过 `eval_ctx->keep()` 管理：
 
 ```cpp
-jsoncons::json obj = jsoncons::json::object();
+WorkflowValue obj = WorkflowValue::object();
 obj["key1"] = "value1";
 obj["key2"] = 42;
 return json_to_exprtk_value(obj, *eval_ctx);

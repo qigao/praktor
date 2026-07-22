@@ -9,7 +9,6 @@
 #include "yml/task_parser.hpp"
 
 #include <filesystem>
-#include <jsoncons/json.hpp>
 #include <algorithm>
 #include <sstream>
 
@@ -67,7 +66,7 @@ TaskResult UsesExecutor::execute(const Task &task, WorkflowContext &context) {
 
     // Parse nested workflow
     std::filesystem::path base_dir = resolved.parent_path();
-    Workflow nested = TaskParser::parseFileWithImports(resolved.string(), base_dir.string());
+    Workflow nested = TaskParser::parseFileWithIncludes(resolved.string(), base_dir.string());
     nested.source_path = resolved.string();
 
     for (const auto& nested_task : nested.tasks) {
@@ -203,16 +202,6 @@ std::unique_ptr<WorkflowContext> UsesExecutor::createIsolatedContext(
     }
   }
 
-  // Load nested workflow's embedded modules
-  if (!nested.embedded.empty()) {
-    ctx->setEmbeddedModules(nested.embedded);
-  }
-
-  // Load nested workflow's native modules
-  if (!nested.native_modules.empty()) {
-    ctx->setNativeModules(nested.native_modules);
-  }
-
   // Set source path for relative path resolution
   ctx->setSourcePath(nested.source_path);
 
@@ -251,7 +240,7 @@ void UsesExecutor::exportOutputsToParent(
     const WorkflowContext &nested_context,
     WorkflowContext &parent_context) {
 
-  jsoncons::json aggregated_outputs = jsoncons::json::object();
+  WorkflowValue aggregated_outputs = WorkflowValue::object();
   auto alias_outputs = nested_context.getValueByPath("tasks." + task_name + ".outputs");
   if (alias_outputs.is_object()) {
     for (const auto& item : alias_outputs.object_range()) {
@@ -261,7 +250,7 @@ void UsesExecutor::exportOutputsToParent(
 
   auto nested_tasks = nested_context.getValueByPath("tasks");
   if (nested_tasks.is_object()) {
-    jsoncons::json nested_task_summary = jsoncons::json::object();
+    WorkflowValue nested_task_summary = WorkflowValue::object();
     for (const auto& item : nested_tasks.object_range()) {
       if (item.key() == task_name) {
         continue;

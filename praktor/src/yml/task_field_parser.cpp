@@ -1,13 +1,14 @@
 #include "task_yaml_internal.hpp"
 
 #include <string>
+#include <unordered_set>
 #include <variant>
 
 namespace {
 
 using namespace TaskYamlDetail;
 
-CommandOutputFormat parse_output_format(const ryml::ConstNodeRef& node, const std::string& value) {
+CommandOutputFormat parse_output_format(const TaskYamlDetail::YamlNodeRef& node, const std::string& value) {
     if (value.empty()) {
         return CommandOutputFormat::Text;
     }
@@ -22,7 +23,7 @@ CommandOutputFormat parse_output_format(const ryml::ConstNodeRef& node, const st
     throw_parse_error(node, "Unsupported output_format value: '" + value + "'");
 }
 
-TriggerAction parse_trigger_action_node(const ryml::ConstNodeRef& node) {
+TriggerAction parse_trigger_action_node(const TaskYamlDetail::YamlNodeRef& node) {
     if (!node.has_val()) {
         throw_parse_error(node, "Trigger action must be a task name (string)");
     }
@@ -37,7 +38,7 @@ TriggerAction parse_trigger_action_node(const ryml::ConstNodeRef& node) {
     return task_name;
 }
 
-std::vector<TriggerAction> parse_trigger_action_list(const ryml::ConstNodeRef& node) {
+std::vector<TriggerAction> parse_trigger_action_list(const TaskYamlDetail::YamlNodeRef& node) {
     if (!node.is_seq()) {
         throw_parse_error(node, "Trigger action list must be a sequence");
     }
@@ -46,12 +47,15 @@ std::vector<TriggerAction> parse_trigger_action_list(const ryml::ConstNodeRef& n
     for (const auto& item : node) {
         actions.emplace_back(parse_trigger_action_node(item));
     }
+    if (actions.empty()) {
+        throw_parse_error(node, "Trigger action list must contain at least one task name");
+    }
     return actions;
 }
 
 } // namespace
 
-StrList node_to_string_vector(const ryml::ConstNodeRef& node) {
+StrList node_to_string_vector(const TaskYamlDetail::YamlNodeRef& node) {
     StrList result;
     if (node.is_seq()) {
         for (const auto& child : node) {
@@ -71,14 +75,14 @@ StrList node_to_string_vector(const ryml::ConstNodeRef& node) {
     return result;
 }
 
-Vars node_to_string_map(const ryml::ConstNodeRef& node) {
+Vars node_to_string_map(const TaskYamlDetail::YamlNodeRef& node) {
     if (!node.is_map()) {
         TaskYamlDetail::throw_parse_error(node, "Expected mapping when converting to string map");
     }
 
     Vars result;
     for (const auto& child : node) {
-        std::string key(child.key().str, child.key().len);
+        std::string key = child.key();
         std::string value;
         child >> value;
         result[key] = value;
@@ -86,10 +90,15 @@ Vars node_to_string_map(const ryml::ConstNodeRef& node) {
     return result;
 }
 
-Each parse_each(const ryml::ConstNodeRef& node) {
+Each parse_each(const TaskYamlDetail::YamlNodeRef& node) {
     if (!node.is_map()) {
         TaskYamlDetail::throw_parse_error(node, "each must be a map");
     }
+
+    static const std::unordered_set<std::string> allowed_keys = {
+        "items", "matrix", "as", "index_variable"
+    };
+    TaskYamlDetail::check_unknown_keys(node, allowed_keys);
 
     Each each;
     if (node.has_child("items")) {
@@ -102,7 +111,7 @@ Each parse_each(const ryml::ConstNodeRef& node) {
             TaskYamlDetail::throw_parse_error(matrix_node, "each.matrix must be a map");
         }
         for (const auto& child : matrix_node) {
-            std::string key(child.key().str, child.key().len);
+            std::string key = child.key();
             each.matrix[key] = node_to_string_vector(child);
         }
     }
@@ -128,10 +137,15 @@ Each parse_each(const ryml::ConstNodeRef& node) {
     return each;
 }
 
-Triggers parse_triggers(const ryml::ConstNodeRef& node) {
+Triggers parse_triggers(const TaskYamlDetail::YamlNodeRef& node) {
     if (!node.is_map()) {
         TaskYamlDetail::throw_parse_error(node, "triggers must be a map");
     }
+
+    static const std::unordered_set<std::string> allowed_keys = {
+        "on_success", "on_failure", "on_complete"
+    };
+    TaskYamlDetail::check_unknown_keys(node, allowed_keys);
 
     Triggers triggers;
 
@@ -152,9 +166,22 @@ Triggers parse_triggers(const ryml::ConstNodeRef& node) {
     return triggers;
 }
 
-RunCommandParams parse_run_command_params(const ryml::ConstNodeRef& node) {
+RunCommandParams parse_run_command_params(const TaskYamlDetail::YamlNodeRef& node) {
     if (!node.has_child("command")) {
         TaskYamlDetail::throw_parse_error(node, "run_command task requires a 'command'");
+    }
+
+    const char* selected_parser = nullptr;
+    for (const char* parser_key : {"parse_regex", "parse_json", "parse_lines", "parse_keyvalue"}) {
+        if (!node.has_child(parser_key)) {
+            continue;
+        }
+        if (selected_parser) {
+            TaskYamlDetail::throw_parse_error(
+                node[parser_key], "command task cannot combine '" + std::string(selected_parser) +
+                                      "' and '" + parser_key + "'");
+        }
+        selected_parser = parser_key;
     }
 
     RunCommandParams params;
@@ -164,21 +191,21 @@ RunCommandParams parse_run_command_params(const ryml::ConstNodeRef& node) {
         if (command_list.empty()) {
             TaskYamlDetail::throw_parse_error(command_node, "command array must contain at least one entry");
         }
+        for (const auto& command : command_list) {
+            if (command.empty()) {
+                TaskYamlDetail::throw_parse_error(
+                    command_node, "command array entries cannot be empty");
+            }
+        }
         params.command = command_list;
     } else if (command_node.has_val()) {
-        auto value = command_node.val();
-        std::string command(value.str, value.len);
+        std::string command = command_node.scalar();
         if (command.empty()) {
             TaskYamlDetail::throw_parse_error(command_node, "command string cannot be empty");
         }
         params.command = command;
     } else {
-        std::string command;
-        command_node >> command;
-        if (command.empty()) {
-            TaskYamlDetail::throw_parse_error(command_node, "command string cannot be empty");
-        }
-        params.command = command;
+        TaskYamlDetail::throw_parse_error(command_node, "command must be a scalar or sequence");
     }
 
     if (node.has_child("output_format")) {
@@ -192,6 +219,10 @@ RunCommandParams parse_run_command_params(const ryml::ConstNodeRef& node) {
         if (!pr.is_map()) {
             TaskYamlDetail::throw_parse_error(pr, "parse_regex must be a map");
         }
+        static const std::unordered_set<std::string> allowed_keys = {
+            "pattern", "capture_group", "output_key"
+        };
+        TaskYamlDetail::check_unknown_keys(pr, allowed_keys);
 
         ParseRegexConfig config;
         if (!pr.has_child("pattern")) {
@@ -214,6 +245,8 @@ RunCommandParams parse_run_command_params(const ryml::ConstNodeRef& node) {
         if (!pj.is_map()) {
             TaskYamlDetail::throw_parse_error(pj, "parse_json must be a map");
         }
+        static const std::unordered_set<std::string> allowed_keys = {"path", "output_key"};
+        TaskYamlDetail::check_unknown_keys(pj, allowed_keys);
 
         ParseJsonConfig config;
         if (!pj.has_child("path")) {
@@ -233,6 +266,8 @@ RunCommandParams parse_run_command_params(const ryml::ConstNodeRef& node) {
         if (!pl.is_map()) {
             TaskYamlDetail::throw_parse_error(pl, "parse_lines must be a map");
         }
+        static const std::unordered_set<std::string> allowed_keys = {"filter", "output_key"};
+        TaskYamlDetail::check_unknown_keys(pl, allowed_keys);
 
         ParseLinesConfig config;
         if (pl.has_child("filter")) {
@@ -250,6 +285,10 @@ RunCommandParams parse_run_command_params(const ryml::ConstNodeRef& node) {
         if (!pkv.is_map()) {
             TaskYamlDetail::throw_parse_error(pkv, "parse_keyvalue must be a map");
         }
+        static const std::unordered_set<std::string> allowed_keys = {
+            "delimiter", "line_separator", "output_key"
+        };
+        TaskYamlDetail::check_unknown_keys(pkv, allowed_keys);
 
         ParseKeyValueConfig config;
         if (pkv.has_child("delimiter")) {
@@ -268,7 +307,7 @@ RunCommandParams parse_run_command_params(const ryml::ConstNodeRef& node) {
     return params;
 }
 
-ProgramParams parse_program_params(const ryml::ConstNodeRef& node) {
+ProgramParams parse_program_params(const TaskYamlDetail::YamlNodeRef& node) {
     if (!node.has_child("program")) {
         TaskYamlDetail::throw_parse_error(node, "program task requires a 'program'");
     }
@@ -300,11 +339,10 @@ ProgramParams parse_program_params(const ryml::ConstNodeRef& node) {
     return params;
 }
 
-UsesParams parse_uses_params(const ryml::ConstNodeRef& node) {
+UsesParams parse_uses_params(const TaskYamlDetail::YamlNodeRef& node) {
     UsesParams params;
     if (node.has_val()) {
-        auto value = node.val();
-        params.path.assign(value.str, value.len);
+        params.path = node.scalar();
     } else {
         node >> params.path;
     }
@@ -314,10 +352,13 @@ UsesParams parse_uses_params(const ryml::ConstNodeRef& node) {
     return params;
 }
 
-DynamicTasksParams parse_dynamic_tasks_params(const ryml::ConstNodeRef& node) {
+DynamicTasksParams parse_dynamic_tasks_params(const TaskYamlDetail::YamlNodeRef& node) {
     if (!node.is_map()) {
         TaskYamlDetail::throw_parse_error(node, "dynamic_tasks must be a map");
     }
+
+    static const std::unordered_set<std::string> allowed_keys = {"items_variable", "template"};
+    TaskYamlDetail::check_unknown_keys(node, allowed_keys);
 
     DynamicTasksParams params;
 
@@ -337,11 +378,19 @@ DynamicTasksParams parse_dynamic_tasks_params(const ryml::ConstNodeRef& node) {
     if (!tmpl_node.is_map()) {
         TaskYamlDetail::throw_parse_error(tmpl_node, "dynamic_tasks 'template' must be a map");
     }
+    static const std::unordered_set<std::string> allowed_template_keys = {
+        "name", "command", "timeout", "when", "depends_on", "env"
+    };
+    TaskYamlDetail::check_unknown_keys(tmpl_node, allowed_template_keys);
 
     if (!tmpl_node.has_child("name")) {
         TaskYamlDetail::throw_parse_error(tmpl_node, "dynamic_tasks template requires 'name'");
     }
     tmpl_node["name"] >> params.task_template.name;
+    if (params.task_template.name.empty()) {
+        TaskYamlDetail::throw_parse_error(tmpl_node["name"],
+                                          "dynamic_tasks template 'name' cannot be empty");
+    }
 
     if (!tmpl_node.has_child("command")) {
         TaskYamlDetail::throw_parse_error(tmpl_node, "dynamic_tasks template requires 'command'");
@@ -349,9 +398,24 @@ DynamicTasksParams parse_dynamic_tasks_params(const ryml::ConstNodeRef& node) {
     const auto& cmd_node = tmpl_node["command"];
     if (cmd_node.is_seq()) {
         params.task_template.command = node_to_string_vector(cmd_node);
+        const auto& command_list = std::get<StrList>(params.task_template.command);
+        if (command_list.empty()) {
+            TaskYamlDetail::throw_parse_error(cmd_node,
+                                              "dynamic_tasks template 'command' cannot be empty");
+        }
+        for (const auto& command : command_list) {
+            if (command.empty()) {
+                TaskYamlDetail::throw_parse_error(
+                    cmd_node, "dynamic_tasks template command entries cannot be empty");
+            }
+        }
     } else {
         std::string cmd;
         cmd_node >> cmd;
+        if (cmd.empty()) {
+            TaskYamlDetail::throw_parse_error(cmd_node,
+                                              "dynamic_tasks template 'command' cannot be empty");
+        }
         params.task_template.command = cmd;
     }
 

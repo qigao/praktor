@@ -1,8 +1,7 @@
 #include "yml/task_parser.hpp"
-#include "yml/task_yaml.hpp"
+#include "task_yaml_internal.hpp"
 
-#include "util/logging.hpp"
-
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -16,25 +15,40 @@ namespace TaskParser {
 
 namespace {
 struct ParseContext {
-    std::vector<std::string> import_stack;
-    std::unordered_set<std::string> import_set;  // mirrors import_stack for O(1) lookup
+    std::vector<std::string> include_stack;
     std::unordered_map<std::string, Workflow> cache;
 
     bool is_circular(const std::string& path) const {
-        return import_set.count(path) > 0;
+        return std::find(include_stack.begin(), include_stack.end(), path) != include_stack.end();
     }
 
-    void push_import(const std::string& path) {
-        import_stack.push_back(path);
-        import_set.insert(path);
+    void push_include(const std::string& path) {
+        include_stack.push_back(path);
     }
 
-    void pop_import() {
-        if (!import_stack.empty()) {
-            import_set.erase(import_stack.back());
-            import_stack.pop_back();
+    void pop_include() {
+        if (!include_stack.empty()) {
+            include_stack.pop_back();
         }
     }
+};
+
+class IncludeScope {
+public:
+    IncludeScope(ParseContext& context, const std::string& path)
+        : context_(context) {
+        context_.push_include(path);
+    }
+
+    ~IncludeScope() {
+        context_.pop_include();
+    }
+
+    IncludeScope(const IncludeScope&) = delete;
+    IncludeScope& operator=(const IncludeScope&) = delete;
+
+private:
+    ParseContext& context_;
 };
 
 void applyTaskDefaults(Task& task, const TaskDefaults& defaults) {
@@ -112,93 +126,6 @@ void validateUniqueTaskNames(const Workflow& workflow) {
     }
 }
 
-// Load modules from imported .yml or .js files
-void loadImportedModules(Workflow& workflow, const fs::path& base_dir, ParseContext& ctx) {
-    for (const auto& import_file : workflow.imports.files) {
-        fs::path import_path = base_dir / import_file;
-        std::string abs_path = fs::absolute(import_path).lexically_normal().string();
-
-        if (!fs::exists(abs_path)) {
-            throw std::runtime_error("Import file not found: " + abs_path);
-        }
-
-        std::string ext = import_path.extension().string();
-
-        if (ext == ".yml" || ext == ".yaml") {
-            // Import embedded modules from YAML file
-            std::string content = readFileToString(abs_path);
-            ryml::Tree tree = ryml::parse_in_arena(ryml::to_csubstr(content));
-            auto root = tree.rootref();
-
-            if (root.has_child("embedded")) {
-                const auto& embedded_node = root["embedded"];
-                if (embedded_node.is_map()) {
-                    for (const auto& module_node : embedded_node) {
-                        std::string module_name(module_node.key().str, module_node.key().len);
-
-                        // Don't override existing modules
-                        if (workflow.embedded.find(module_name) != workflow.embedded.end()) {
-                            continue;
-                        }
-
-                        if (!module_node.is_map()) continue;
-
-                        EmbeddedModule module;
-                        if (module_node.has_child("language")) {
-                            module_node["language"] >> module.language;
-                        }
-                        if (module_node.has_child("source")) {
-                            module_node["source"] >> module.source;
-                        }
-                        if (module_node.has_child("path")) {
-                            module_node["path"] >> module.path;
-                            // Resolve path relative to the imported YAML file
-                            if (!module.path.empty() && !fs::path(module.path).is_absolute()) {
-                                module.path = (import_path.parent_path() / module.path).lexically_normal().string();
-                            }
-                        }
-
-                        if (!module.source.empty() || !module.path.empty()) {
-                            workflow.embedded[module_name] = std::move(module);
-                        }
-                    }
-                }
-            }
-        } else if (ext == ".js" || ext == ".mjs") {
-            // Import .js file as a module (use filename without extension as module name)
-            std::string module_name = import_path.stem().string();
-
-            // Don't override existing modules
-            if (workflow.embedded.find(module_name) != workflow.embedded.end()) {
-                continue;
-            }
-
-            EmbeddedModule module;
-            module.language = "javascript";
-            module.path = abs_path;
-            workflow.embedded[module_name] = std::move(module);
-        }
-    }
-}
-
-// Load source content for modules that have 'path' instead of inline 'source'
-void loadExternalModuleSources(Workflow& workflow, const fs::path& base_dir) {
-    for (auto& [name, module] : workflow.embedded) {
-        if (module.isExternal() && module.source.empty()) {
-            fs::path module_path = module.path;
-            if (!module_path.is_absolute()) {
-                module_path = base_dir / module_path;
-            }
-
-            if (!fs::exists(module_path)) {
-                throw std::runtime_error("Module file not found: " + module_path.string() + " (module: " + name + ")");
-            }
-
-            module.source = readFileToString(module_path.string());
-        }
-    }
-}
-
 bool isDynamicTriggerReference(const std::string& action) {
     return action.find("{{") != std::string::npos || action.find("}}") != std::string::npos;
 }
@@ -239,13 +166,13 @@ Workflow parseInternal(const std::string& filePath, ParseContext& ctx) {
 
     if (ctx.is_circular(absolutePath)) {
         std::string stack_str;
-        for (const auto& s : ctx.import_stack) {
+        for (const auto& s : ctx.include_stack) {
             stack_str += s + " -> ";
         }
-        throw std::runtime_error("Circular import detected: " + stack_str + absolutePath);
+        throw std::runtime_error("Circular include detected: " + stack_str + absolutePath);
     }
 
-    ctx.push_import(absolutePath);
+    IncludeScope include_scope(ctx, absolutePath);
 
     if (!fs::exists(absolutePath)) {
         throw std::runtime_error("YAML file not found: " + absolutePath);
@@ -253,36 +180,38 @@ Workflow parseInternal(const std::string& filePath, ParseContext& ctx) {
 
     try {
         std::string content = readFileToString(absolutePath);
-        ryml::Tree tree = ryml::parse_in_arena(ryml::to_csubstr(content));
-        auto root = tree.rootref();
+        TaskYamlDetail::YamlDocument document(content);
+        auto root = document.root();
         Workflow workflow = parse_workflow(root, absolutePath);
         workflow.source_path = absolutePath;
 
         if (root.has_child("includes")) {
             const auto& includes_node = root["includes"];
-            if (includes_node.is_map()) {
-                for (const auto& child : includes_node) {
-                    std::string include_path_str;
-                    child >> include_path_str;
+            if (!includes_node.is_map()) {
+                TaskYamlDetail::throw_parse_error(includes_node, "'includes' must be a map");
+            }
+            for (const auto& child : includes_node) {
+                std::string include_path_str = TaskYamlDetail::read_scalar_or_throw(
+                    child, "include path must be a scalar");
+                if (include_path_str.empty()) {
+                    TaskYamlDetail::throw_parse_error(child, "include path cannot be empty");
+                }
 
-                    fs::path include_path = fs::path(absolutePath).parent_path() / include_path_str;
-                    Workflow included = parseInternal(include_path.string(), ctx);
+                fs::path include_path = fs::path(absolutePath).parent_path() / include_path_str;
+                Workflow included = parseInternal(include_path.string(), ctx);
 
-                    // Merge tasks
-                    for (auto& t : included.tasks) {
-                        workflow.tasks.push_back(std::move(t));
+                for (auto& t : included.tasks) {
+                    workflow.tasks.push_back(std::move(t));
+                }
+                // Included values act as defaults for the including workflow.
+                for (const auto& [key, val] : included.variables) {
+                    if (workflow.variables.find(key) == workflow.variables.end()) {
+                        workflow.variables[key] = val;
                     }
-                    // Merge variables (included files act as defaults)
-                    for (const auto& [key, val] : included.variables) {
-                        if (workflow.variables.find(key) == workflow.variables.end()) {
-                            workflow.variables[key] = val;
-                        }
-                    }
-                    // Merge environment
-                    for (const auto& [key, val] : included.env) {
-                        if (workflow.env.find(key) == workflow.env.end()) {
-                            workflow.env[key] = val;
-                        }
+                }
+                for (const auto& [key, val] : included.env) {
+                    if (workflow.env.find(key) == workflow.env.end()) {
+                        workflow.env[key] = val;
                     }
                 }
             }
@@ -290,21 +219,10 @@ Workflow parseInternal(const std::string& filePath, ParseContext& ctx) {
 
         normalizeWorkflow(workflow);
 
-        // Process module imports
-        if (!workflow.imports.empty()) {
-            loadImportedModules(workflow, fs::path(absolutePath).parent_path(), ctx);
-        }
-
-        // Load external module files (modules with 'path' instead of 'source')
-        loadExternalModuleSources(workflow, fs::path(absolutePath).parent_path());
-
         ctx.cache[absolutePath] = workflow;
-        ctx.pop_import();
         return workflow;
     } catch (const std::exception& e) {
         std::string error_msg = absolutePath + ": " + e.what();
-        TLOG_ERROR("YAML parsing error: {}", error_msg);
-        ctx.pop_import();
         throw std::runtime_error(error_msg);
     }
 }
@@ -343,9 +261,13 @@ DependencyGraph<Task> buildGraph(const Workflow& workflow) {
     return graph;
 }
 
-Workflow parseFileWithImports(const std::string& filePath, const std::string& /*basePath*/) {
+Workflow parseFileWithIncludes(const std::string& filePath, const std::string& basePath) {
     ParseContext ctx;
-    return parseInternal(filePath, ctx);
+    fs::path resolved_path(filePath);
+    if (resolved_path.is_relative() && !basePath.empty()) {
+        resolved_path = fs::path(basePath) / resolved_path;
+    }
+    return parseInternal(resolved_path.string(), ctx);
 }
 
 } // namespace TaskParser

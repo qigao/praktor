@@ -10,6 +10,9 @@ configure_file(
 
 set(SOURCE_FILES
     src/workflow_runner.cpp
+    src/data/workflow_value.cpp
+    src/data/structured_document_query.cpp
+    src/yml/yaml_document.cpp
     src/yml/task_parser.cpp
     src/yml/orch_parser.cpp
     src/yml/task_field_parser.cpp
@@ -28,7 +31,6 @@ set(SOURCE_FILES
     src/util/praktor_init.cpp
     src/util/file_hash.cpp
     src/util/mustache_substitutor.cpp
-    src/util/native_loader.cpp
     # Script engine (TurboScript)
     src/script/script_engine.cpp
 )
@@ -45,12 +47,10 @@ set(folder_name "${TARGET_NAME_EXE}")
 target_link_libraries(
     ${TARGET_NAME_LIB}
     PUBLIC Threads::Threads
-           jsoncons::jsoncons
-           ryml::ryml
            TurboUtils::Core
+           TurboUtils::Parser
            TurboUtils::Mustache
            cxxopts::cxxopts
-           TurboScript::ExprTk
            TurboScript::TurboScript
            actions
 )

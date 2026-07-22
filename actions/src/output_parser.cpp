@@ -2,14 +2,24 @@
 
 #include <algorithm>
 #include <cctype>
-#include <optional>
+#include <memory>
 #include <sstream>
 
-#include <jsoncons/json.hpp>
+#include <turbo_parser.h>
 
 namespace actions {
 
 namespace {
+
+struct JsonDocumentDeleter {
+    void operator()(turbo_json_doc_t* document) const noexcept {
+        turbo_free_json(&document);
+    }
+};
+
+struct SerializedJsonDeleter {
+    void operator()(char* text) const noexcept { turbo_json_serialize_free(text); }
+};
 
 std::string trimCopy(const std::string& input) {
     size_t start = 0;
@@ -25,33 +35,17 @@ std::string trimCopy(const std::string& input) {
     return input.substr(start, end - start);
 }
 
-bool parsePathSegment(const std::string& segment, std::string& key, std::optional<size_t>& index) {
-    key.clear();
-    index.reset();
-
-    size_t bracket = segment.find('[');
-    if (bracket == std::string::npos) {
-        key = segment;
-        return !key.empty();
+std::string normalizeJsonPath(std::string_view path) {
+    if (path.empty()) {
+        return "$";
     }
-
-    if (segment.back() != ']') {
-        return false;
+    if (path.front() == '$') {
+        return std::string(path);
     }
-
-    key = segment.substr(0, bracket);
-    std::string index_str = segment.substr(bracket + 1, segment.size() - bracket - 2);
-    if (index_str.empty()) {
-        return false;
+    if (path.front() == '[') {
+        return "$" + std::string(path);
     }
-
-    try {
-        index = static_cast<size_t>(std::stoul(index_str));
-    } catch (const std::exception&) {
-        return false;
-    }
-
-    return true;
+    return "$." + std::string(path);
 }
 
 } // namespace
@@ -84,64 +78,32 @@ bool OutputParser::parseJson(
     const std::string& path,
     std::string& output
 ) {
-    try {
-        jsoncons::json current = jsoncons::json::parse(input);
-        std::string normalized = trimCopy(path);
-
-        if (normalized.empty() || normalized == "$") {
-            output = current.is_string() ? current.as<std::string>() : current.to_string();
-            return true;
-        }
-
-        if (normalized.rfind("$.", 0) == 0) {
-            normalized.erase(0, 2);
-        } else if (!normalized.empty() && normalized.front() == '$') {
-            normalized.erase(0, 1);
-        }
-
-        if (normalized.empty()) {
-            output = current.is_string() ? current.as<std::string>() : current.to_string();
-            return true;
-        }
-
-        size_t start = 0;
-        while (start < normalized.size()) {
-            size_t dot = normalized.find('.', start);
-            std::string segment = normalized.substr(start, dot == std::string::npos ? std::string::npos : dot - start);
-
-            std::string key;
-            std::optional<size_t> index;
-            if (!parsePathSegment(segment, key, index)) {
-                return false;
-            }
-
-            if (!key.empty()) {
-                if (!current.is_object() || !current.contains(key)) {
-                    return false;
-                }
-                jsoncons::json next = current.at(key);
-                current = std::move(next);
-            }
-
-            if (index.has_value()) {
-                if (!current.is_array() || index.value() >= current.size()) {
-                    return false;
-                }
-                jsoncons::json next = current.at(index.value());
-                current = std::move(next);
-            }
-
-            if (dot == std::string::npos) {
-                break;
-            }
-            start = dot + 1;
-        }
-
-        output = current.is_string() ? current.as<std::string>() : current.to_string();
-        return true;
-    } catch (const std::exception&) {
+    turbo_json_doc_t* parsed_document = nullptr;
+    if (turbo_parse_json(reinterpret_cast<const uint8_t*>(input.data()), input.size(),
+                         &parsed_document) != 0 || !parsed_document) {
         return false;
     }
+    std::unique_ptr<turbo_json_doc_t, JsonDocumentDeleter> document(parsed_document);
+
+    const std::string expression = normalizeJsonPath(trimCopy(path));
+    const json_value_t* value = turbo_json_path_get(document.get(), expression.c_str());
+    if (!value) {
+        return false;
+    }
+
+    if (turbo_json_type(value) == TURBO_JSON_STRING) {
+        const char* text = turbo_json_string(value);
+        output.assign(text ? text : "", turbo_json_string_len(value));
+    } else {
+        size_t length = 0;
+        std::unique_ptr<char, SerializedJsonDeleter> serialized(
+            turbo_json_serialize(value, &length));
+        if (!serialized) {
+            return false;
+        }
+        output.assign(serialized.get(), length);
+    }
+    return true;
 }
 
 std::vector<std::string> OutputParser::parseLines(

@@ -17,7 +17,7 @@ namespace Praktor::Execution
  *
  * Executes nested workflows in complete isolation:
  * - Independent WorkflowContext (not shared with parent)
- * - Own variables, env, embedded modules
+ * - Own variables and environment
  * - Outputs exported back to parent after completion
  */
 class UsesExecutor : public TaskExecutor

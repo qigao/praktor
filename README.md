@@ -4,7 +4,7 @@ Praktor is a high-performance, concurrent workflow engine written in modern C++2
 
 ## Core Features
 
-- **🚀 High-Performance YAML Parsing**: Powered by `ryml` for 5-10x faster YAML parsing compared to traditional parsers
+- **High-Performance YAML Parsing**: Powered by TurboUtils Parser with owned documents, structured diagnostics, and YPATH queries
 - **📝 Declarative YAML Syntax**: Define your workflows in a simple, human-readable YAML format
 - **⚡ Concurrent Execution**: DAG-based executor runs independent tasks in parallel to maximize performance
 - **📦 Reusable Workflows**: Compose complex pipelines using the `uses` keyword to execute external workflow files
@@ -93,8 +93,8 @@ In the example above:
 ## Technology Stack
 
 - **C++20**: Modern C++ features for performance and safety
-- **ryml (Rapid YAML)**: Ultra-fast YAML parsing library (5-10x faster than yaml-cpp)
-- **jsoncons**: Powers JMESPath queries and advanced JSON context management
+- **TurboUtils Parser**: Shared YAML parsing, structured diagnostics, node traversal, and YPATH support
+- **Turbo Parser**: Owns JSON/YAML/XML/CSV parsing and JSONPath/YPATH/XPath/CSVPath queries
 - **re2c + lemon**: Lexer and parser generator for the built-in script engine
 - **exprtk**: Expression evaluation for `when` conditions
 - **vcpkg**: Modern C++ package management for easy dependency resolution
@@ -280,7 +280,7 @@ Any task can include a `script:` block that runs after the task action completes
 | Module | Functions | Purpose |
 |--------|-----------|---------|
 | `ctx` | `get(path)`, `output(key, val)`, `set(path, val)` | Read/write workflow context |
-| `json` | `parse(str)`, `stringify(val)`, `query(val, jmespath)` | JSON operations via jsoncons |
+| `json` | `parse(str)`, `stringify(val)`, `query(val, jsonpath)` | JSON operations via Turbo Parser |
 | `http` | `get(url)`, `post(url, body)`, `put/del/patch/head/options` | Async HTTP client (TurboNet) |
 | `fs` | `read(path)`, `write(path, data)`, `append(path, data)`, `exists/stat/mkdir/remove` | File system via turbo_fs |
 | `base64` | `encode(str)`, `decode(str)` | Base64 encoding/decoding |
@@ -297,7 +297,7 @@ tasks:
     output_format: json
     script: |
       var data = ctx.get("tasks.fetch_data.outputs.data");
-      var active = json.query(data, "[?status=='active']");
+      var active = json.query(data, "$[@.status == \"active\"]");
       ctx.output("active_count", json.query(active, "length(@)"));
       for (item in active) {
         log.info("Active: " + item.name);
@@ -315,9 +315,13 @@ tasks:
     script: |
       var users = ctx.get("tasks.fetch_users.outputs.data");
       var orders = ctx.get("tasks.fetch_orders.outputs.data");
+      var order_total = 0;
+      for (order in orders) {
+        order_total = order_total + order.amount;
+      }
       var summary = map{
         user_count: json.query(users, "length(@)"),
-        order_total: json.query(orders, "sum([].amount)")
+        order_total: order_total
       };
       fs.write("./report.json", json.stringify(summary));
       ctx.output("summary", summary);
@@ -364,7 +368,7 @@ Praktor is designed with performance and modularity in mind:
 ```
 ┌─────────────────┐    ┌──────────────────┐    ┌─────────────────────┐
 │   YAML Files    │───▶│   Task Parser    │───▶│   Enhanced Graph    │
-│  (+ imports)    │    │   (ryml-based)   │    │    (DAG Builder)    │
+│  (+ includes)   │    │ (Turbo Parser)   │    │    (DAG Builder)    │
 └─────────────────┘    └──────────────────┘    └─────────────────────┘
                                                           │
                                                           ▼
@@ -381,7 +385,7 @@ Praktor is designed with performance and modularity in mind:
 ```
 
 **Core Components:**
-- **Task Parser**: High-speed YAML engine using `ryml` for zero-allocation parsing
+- **Task Parser**: Turbo Parser-backed YAML adapter with explicit ownership and source diagnostics
 - **Enhanced Graph**: Advanced DAG orchestration with cycle detection and parallel scheduling
 - **Workflow Executor**: Concurrent runtime that manages thread pools and execution context
 - **Script Engine**: Built-in scripting language (re2c lexer + lemon parser + MIR/JIT backend)
@@ -486,7 +490,7 @@ praktor/
 
 ## Performance Characteristics
 
-- **YAML Parsing**: 5-10x faster than yaml-cpp thanks to ryml
+- **YAML Parsing**: Shared TurboUtils Parser implementation across workflows and structured queries
 - **Memory Usage**: Minimal allocations with object pools and move semantics
 - **Concurrency**: Deadlock-free parallel execution with custom thread pool
 - **Scalability**: Tested with workflows containing 100+ tasks and deep dependency chains
@@ -495,7 +499,7 @@ praktor/
 
 Praktor is actively developed and production-ready. The core engine is feature-complete with:
 - ✅ Full YAML workflow specification support
-- ✅ Cross-file imports and modular design
+- ✅ Cross-file includes and modular design
 - ✅ Thread-safe concurrent execution
 - ✅ Built-in script engine with JSON, HTTP, file system, base64, math (exprtk), and logging modules
 - ✅ Script-only tasks (no command action required)

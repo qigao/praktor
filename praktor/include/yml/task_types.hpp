@@ -108,30 +108,6 @@ struct Triggers {
   bool empty() const { return on_success.empty() && on_failure.empty() && on_complete.empty(); }
 };
 
-struct EmbeddedModule {
-  std::string language = "javascript";
-  std::string source;
-  std::string path;  // External file path (alternative to inline source)
-
-  bool isExternal() const { return !path.empty(); }
-};
-
-// Import configuration for external modules
-struct ModuleImports {
-  StrList files;  // List of .yml or .js files to import modules from
-
-  bool empty() const { return files.empty(); }
-};
-
-// Native module (DLL/SO) configuration
-struct NativeModule {
-  std::string name;           // Module name for native call dispatch
-  std::string path;           // Path to .dll/.so file
-  std::unordered_map<std::string, std::string> hooks;  // hook_name -> symbol_name
-};
-
-using NativeModules = std::vector<NativeModule>;
-
 // orch Node Type Registry
 struct OrchNodeSpec {
   std::string name;

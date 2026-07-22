@@ -111,7 +111,6 @@ tasks:
       template:
         name: "remote_{{ item.id }}"
         command: "{{ item.command }}"
-    continue_on_error: true
     triggers:
       on_failure: [alert_ops_failure]
 
@@ -132,7 +131,6 @@ tasks:
       if (math.eval(cpu + " > " + threshold)) {
         fail("CPU at " + cpu + "% exceeds " + threshold + "%");
       }
-    continue_on_error: true
     triggers:
       on_failure: [alert_ops_failure]
 
@@ -153,7 +151,6 @@ tasks:
       if (math.eval(mem + " > " + threshold)) {
         fail("Memory at " + mem + "% exceeds " + threshold + "%");
       }
-    continue_on_error: true
     triggers:
       on_failure: [alert_ops_failure]
 
@@ -174,7 +171,6 @@ tasks:
       if (math.eval(disk + " > " + threshold)) {
         fail("Disk at " + disk + "% exceeds " + threshold + "%");
       }
-    continue_on_error: true
     triggers:
       on_failure: [alert_ops_failure]
 
@@ -199,7 +195,6 @@ tasks:
       template:
         name: "svc_check_{{ item.name }}"
         command: "pgrep -x {{ item.name }} || tasklist /FI \"IMAGENAME eq {{ item.name }}.exe\" /NH 2>nul | findstr /I \"{{ item.name }}\""
-    continue_on_error: true
     triggers:
       on_failure: [alert_ops_failure]
 

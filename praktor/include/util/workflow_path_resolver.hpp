@@ -4,9 +4,7 @@
 #include <string>
 #include <string_view>
 
-#include <jsoncons/json.hpp>
-#include <jsoncons_ext/jmespath/jmespath.hpp>
-
+#include "data/structured_document_query.hpp"
 #include "dag/task_registry.hpp"
 #include "dag/variable_scope.hpp"
 
@@ -19,16 +17,16 @@ namespace Praktor::util {
  * - task registry lookups under `tasks.*`
  * - direct scope values
  * - nested JSON object traversal
- * - JMESPath queries against scope values
+ * - JSONPath queries against scope values
  */
 class WorkflowPathResolver {
 public:
-    static jsoncons::json getValueByPath(const VariableScope* scope,
-                                         const TaskRegistry& task_registry,
-                                         const std::string& path) {
+    static WorkflowValue getValueByPath(const VariableScope* scope,
+                                        const TaskRegistry& task_registry,
+                                        const std::string& path) {
         std::string_view trimmed = trimPath(path);
         if (trimmed.empty() || scope == nullptr) {
-            return jsoncons::json::null();
+            return WorkflowValue::null();
         }
 
         if (trimmed.substr(0, 5) == "tasks") {
@@ -47,13 +45,13 @@ public:
         return traverseNestedPath(*scope, trimmed);
     }
 
-    static jsoncons::json getJsonValue(const VariableScope& scope,
-                                       const std::string& key,
-                                       const std::string& jmespath_query) {
+    static WorkflowValue getJsonValue(const VariableScope& scope,
+                                      const std::string& key,
+                                      const std::string& json_path) {
         try {
-            return jsoncons::jmespath::search(scope.get(key), jmespath_query);
-        } catch (const jsoncons::jmespath::jmespath_error& e) {
-            throw std::runtime_error("JMESPath query failed for key '" + key + "': " +
+            return Praktor::Data::StructuredDocumentQuery::queryJson(scope.get(key), json_path);
+        } catch (const std::exception& e) {
+            throw std::runtime_error("JSONPath query failed for key '" + key + "': " +
                                      e.what());
         }
     }
@@ -69,9 +67,9 @@ private:
         return std::string_view(path).substr(first, last - first + 1);
     }
 
-    static jsoncons::json resolveTaskPath(const TaskRegistry& task_registry,
-                                          const VariableScope* scope,
-                                          std::string_view path) {
+    static WorkflowValue resolveTaskPath(const TaskRegistry& task_registry,
+                                         const VariableScope* scope,
+                                         std::string_view path) {
         if (path == "tasks" || path == "tasks.") {
             return task_registry.toJson();
         }
@@ -85,7 +83,7 @@ private:
         const std::string_view rest = path.substr(dot1 + 1);
 
         if (rest == "status") {
-            return jsoncons::json(task_registry.getStatus(task_name));
+            return WorkflowValue(task_registry.getStatus(task_name));
         }
         if (rest == "outputs") {
             return task_registry.getAllOutputs(task_name);
@@ -94,17 +92,17 @@ private:
             return resolveTaskOutput(task_registry, scope, task_name, rest.substr(8));
         }
 
-        return jsoncons::json::null();
+        return WorkflowValue::null();
     }
 
-    static jsoncons::json resolveTaskOutput(const TaskRegistry& task_registry,
-                                            const VariableScope* scope,
-                                            const std::string& task_name,
-                                            std::string_view output_path) {
+    static WorkflowValue resolveTaskOutput(const TaskRegistry& task_registry,
+                                           const VariableScope* scope,
+                                           const std::string& task_name,
+                                           std::string_view output_path) {
         const auto dot = output_path.find('.');
         const std::string base_key(output_path.substr(0, dot));
 
-        jsoncons::json current = jsoncons::json::null();
+        WorkflowValue current = WorkflowValue::null();
         try {
             current = task_registry.getOutput(task_name, base_key);
         } catch (const std::exception&) {
@@ -112,7 +110,7 @@ private:
             if (scope->has(mirrored_path)) {
                 current = scope->get(mirrored_path);
             } else {
-                return jsoncons::json::null();
+                return WorkflowValue::null();
             }
         }
 
@@ -123,11 +121,11 @@ private:
         return traverseJson(current, output_path.substr(dot + 1));
     }
 
-    static jsoncons::json traverseNestedPath(const VariableScope& scope,
-                                             std::string_view path) {
+    static WorkflowValue traverseNestedPath(const VariableScope& scope,
+                                            std::string_view path) {
         const auto dot = path.find('.');
         if (dot == std::string_view::npos) {
-            return jsoncons::json::null();
+            return WorkflowValue::null();
         }
 
         const std::string base_key(path.substr(0, dot));
@@ -138,8 +136,8 @@ private:
         return traverseJson(scope.get(base_key), path.substr(dot + 1));
     }
 
-    static jsoncons::json traverseJson(jsoncons::json current,
-                                       std::string_view remaining_path) {
+    static WorkflowValue traverseJson(WorkflowValue current,
+                                      std::string_view remaining_path) {
         size_t start = 0;
         while (start < remaining_path.size()) {
             const auto dot = remaining_path.find('.', start);
@@ -148,10 +146,10 @@ private:
             const std::string segment(remaining_path.substr(start, end - start));
 
             if (!current.is_object() || !current.contains(segment)) {
-                return jsoncons::json::null();
+                return WorkflowValue::null();
             }
 
-            jsoncons::json next = current.at(segment);
+            WorkflowValue next = current.at(segment);
             current = std::move(next);
             start = (dot == std::string_view::npos) ? remaining_path.size() : dot + 1;
         }

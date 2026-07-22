@@ -55,7 +55,7 @@ bool looksLikeStructuredValue(const std::string& value) {
 WorkflowValue parseWorkflowValue(const std::string& value) {
   if (looksLikeStructuredValue(value)) {
     try {
-      return jsoncons::json::parse(value);
+      return WorkflowValue::parse(value);
     } catch (const std::exception&) {
     }
   }

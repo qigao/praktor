@@ -32,12 +32,13 @@ target_include_directories(
 )
 
 target_compile_features(actions PUBLIC cxx_std_17)
+target_compile_definitions(actions PRIVATE $<$<BOOL:WIN32>:NOMINMAX>)
 set_target_properties(actions PROPERTIES POSITION_INDEPENDENT_CODE ON)
 cmake_config_target(actions NO_INSTALL FOLDER "actions/" VERSION ${PROJECT_VERSION})
 
 # ── DEPENDENCIES ──
 
-target_link_libraries(actions PUBLIC praktor_shell PRIVATE jsoncons::jsoncons)
+target_link_libraries(actions PUBLIC praktor_shell PRIVATE TurboUtils::Parser)
 
 if(WIN32)
     target_link_libraries(actions PRIVATE psapi)

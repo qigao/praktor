@@ -205,71 +205,7 @@ A Praktor workflow is a YAML map with the following top-level keys:
 | `env` | Map<String, String> | No | Global environment variables exported to all tasks. |
 | `dotEnv` | String or Array<String> | No | Paths to `.env` files to load into the global environment. |
 | `defaults` | Map | No | Default `timeout` applied to all tasks. |
-| `native_modules` | Array<NativeModule> | No | Native DLL/SO modules to load, callable via `dll.call()` in scripts. |
 | `tasks` | Array<Task> | **Yes** | The list of task definitions. |
-
-### 4.1. Native Modules (DLL/SO)
-
-The `native_modules` key allows loading native C/C++ libraries that can be called from `script` blocks via the `dll` built-in module.
-
-**Attributes:**
-
-| Key | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| `name` | String | **Yes** | Module name used as the first argument to `dll.call()`. |
-| `path` | String | **Yes** | Path to the DLL (Windows) or SO (Linux/macOS) file. |
-
-**Example:**
-
-```yaml
-native_modules:
-  - name: native_processor
-    path: ./native/native_processor.dll    # Windows
-    # path: ./native/libnative_processor.so  # Linux
-
-  - name: crypto_ext
-    path: ./native/crypto_ext.dll
-
-tasks:
-  - name: use_native
-    command: "echo 'processing'"
-    script: |
-      var result = dll.call("native_processor", "processData", ctx.get("tasks.use_native.outputs.stdout"))
-      var hash = dll.call("crypto_ext", "sha256", "hello")
-      ctx.output("result", result)
-      ctx.output("hash", hash)
-```
-
-**Native Module Interface:**
-
-Native modules must export C functions that the runtime can discover and invoke. Functions receive and return JSON-serializable values. The runtime handles marshalling between the script layer and native code.
-
-**Cross-platform considerations:**
-
-- Windows: Use `.dll` extension, compile with `__declspec(dllexport)`
-- Linux: Use `.so` extension, compile with `-shared -fPIC`
-- macOS: Use `.dylib` extension, compile with `-dynamiclib`
-
-**Example:**
-
-```yaml
-variables:
-  APP_NAME: "my-app"
-  VERSION: "1.0.0"
-
-env:
-  NODE_ENV: "production"
-
-dotEnv:
-  - ".env.production"
-
-defaults:
-  timeout: "10m"
-
-tasks:
-  - name: build
-    command: "npm run build"
-```
 
 ## 5. Task Definition
 
@@ -453,6 +389,8 @@ tasks:
 
 The `script` field is an optional inline string that runs after a task's runner completes. It uses a custom built-in scripting language for in-memory data transformation and context manipulation. Any task type (`command`, `program`, `uses`, `dynamic_tasks`) can attach a `script` block.
 
+External script capabilities are loaded exclusively through TurboScript plugins with `import("name")`, for example `import("net")`, `import("parser")`, or `import("rules_forge")`. Workflow files do not accept native library paths or define a separate plugin ABI.
+
 **Syntax:**
 
 - `script` (String, Optional): Inline script code as a YAML block scalar.
@@ -471,7 +409,6 @@ The script language provides 8 built-in modules available in every script:
 | `base64` | Base64 encoding/decoding |
 | `log` | Logging at various levels |
 | `math` | Math functions + exprtk expression evaluator |
-| `dll` | Call functions in native modules |
 
 **`ctx` — Context Access:**
 
@@ -483,7 +420,7 @@ The script language provides 8 built-in modules available in every script:
 
 - `json.parse(str)`: Parse a JSON string into a value.
 - `json.stringify(val)`: Serialize a value to a JSON string.
-- `json.query(val, expr)`: Query a value using a JMESPath expression.
+- `json.query(val, expr)`: Query a value using a JSONPath expression.
 
 **`http` — Async HTTP Client (TurboNet):**
 
@@ -531,10 +468,6 @@ Compatibility:
 - `base64.encode(str)`: Encode a string to base64.
 - `base64.decode(str)`: Decode a base64 string.
 
-**`dll` — Native Module Calls:**
-
-- `dll.call(module, function, ...args)`: Call a function exported by a native module (see Section 4.1).
-
 **`log` — Logging:**
 
 - `log.info(msg)`: Log at info level.
@@ -572,16 +505,9 @@ tasks:
     output_format: json
     script: |
       var users = ctx.get("tasks.transform_data.outputs.data")
-      var active = json.query(users, "[?status=='active']")
+      var active = json.query(users, "$[@.status == \"active\"]")
       ctx.output("active_users", active)
       ctx.output("count", json.query(active, "length(@)"))
-
-  - name: use_native
-    command: "echo 'ready'"
-    script: |
-      var input = ctx.get("tasks.use_native.outputs.stdout")
-      var result = dll.call("native_processor", "processData", input)
-      ctx.output("processed", result)
 
   - name: write_report
     depends_on: [transform_data]
@@ -1550,7 +1476,7 @@ tasks:
     script: |
       var config = ctx.get("tasks.fetch_config.outputs.data")
       ctx.output("app_version", config.version)
-      var enabled = json.query(config, "features[?enabled].name")
+      var enabled = json.query(config, "$.features[@.enabled == true].name")
       ctx.output("enabled_features", enabled)
 
   - name: deploy_with_features
@@ -1674,11 +1600,6 @@ dotEnv:
 defaults:
   timeout: "10m"
 
-# Optional: Native DLL/SO modules
-native_modules:
-  - name: native_processor
-    path: ./native/native_processor.dll
-
 # Required: at least one task
 tasks:
   - name: "task_name"
@@ -1736,12 +1657,11 @@ tasks:
 | Module | Functions |
 | :--- | :--- |
 | `ctx` | `get(path)`, `output(key, value)`, `set(path, value)` |
-| `json` | `parse(str)`, `stringify(val)`, `query(val, jmespath_expr)` |
+| `json` | `parse(str)`, `stringify(val)`, `query(val, jsonpath_expr)` |
 | `http` | `get(url [,opts])`, `post(url, body [,opts])`, `put(url, body [,opts])`, `del(url [,opts])`, `patch(url, body [,opts])`, `head(url [,opts])`, `options(url [,opts])` |
 | `fs` | `read(path)`, `write(path, data)`, `append(path, data)`, `exists(path)`, `stat(path)`, `mkdir(path)`, `remove(path)` |
 | `base64` | `encode(str)`, `decode(str)` |
 | `log` | `info(msg)`, `warn(msg)`, `error(msg)`, `debug(msg)` |
 | `math` | `abs(x)`, `ceil(x)`, `floor(x)`, `round(x)`, `sqrt(x)`, `pow(x,y)`, `sin(x)`, `cos(x)`, `tan(x)`, `asin(x)`, `acos(x)`, `atan(x)`, `atan2(y,x)`, `log(x)`, `log10(x)`, `exp(x)`, `min(...)`, `max(...)`, `clamp(val,lo,hi)`, `random()`, `eval(expr [, vars])` |
-| `dll` | `call(module, function, ...args)` |
 
 ---

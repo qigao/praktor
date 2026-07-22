@@ -7,11 +7,11 @@ namespace {
 
 using namespace TaskYamlDetail;
 
-void validate_required_params(const ryml::ConstNodeRef& node,
+void validate_required_params(const TaskYamlDetail::YamlNodeRef& node,
                               const OrchNodeSpec& spec,
                               const OrchNode& parsed_node,
                               const std::string& node_type_lower);
-void validate_child_shape(const ryml::ConstNodeRef& node,
+void validate_child_shape(const TaskYamlDetail::YamlNodeRef& node,
                           const OrchNodeSpec& spec,
                           const OrchNode& parsed_node,
                           const std::string& node_type_lower);
@@ -53,24 +53,24 @@ bool is_runtime_substituted_scalar(const std::string& value) {
     return value.find('{') != std::string::npos || value.find('}') != std::string::npos;
 }
 
-bool is_flat_if_form(const ryml::ConstNodeRef& node) {
+bool is_flat_if_form(const TaskYamlDetail::YamlNodeRef& node) {
     return node.is_map() && node.has_child("if") && node.has_child("then");
 }
 
-bool is_flat_while_form(const ryml::ConstNodeRef& node) {
+bool is_flat_while_form(const TaskYamlDetail::YamlNodeRef& node) {
     return node.is_map() && node.has_child("while") && node.has_child("do");
 }
 
-bool is_flat_switch_form(const ryml::ConstNodeRef& node) {
+bool is_flat_switch_form(const TaskYamlDetail::YamlNodeRef& node) {
     return node.is_map() && node.has_child("switch") && node.has_child("cases");
 }
 
-bool is_flat_set_variable_form(const ryml::ConstNodeRef& node) {
+bool is_flat_set_variable_form(const TaskYamlDetail::YamlNodeRef& node) {
     return node.is_map() && node.has_child("set_variable") &&
            (node.has_child("value") || node.has_child("from"));
 }
 
-bool is_flat_single_child_form(const ryml::ConstNodeRef& node, const char* key) {
+bool is_flat_single_child_form(const TaskYamlDetail::YamlNodeRef& node, const char* key) {
     return node.is_map() && node.has_child(key) && node.has_child("child");
 }
 
@@ -80,13 +80,13 @@ bool is_task_level_metadata_key(const std::string& normalized_key) {
         "each", "timeout", "triggers",
         "workingdir", "silent", "sources", "generates", "finally",
         "command", "uses", "dynamictasks", "outputformat",
-        "parseregex", "parsejson", "parselines", "parsekeyvalue", "continueonerror",
+        "parseregex", "parsejson", "parselines", "parsekeyvalue",
         "script", "actions"
     };
     return task_keys.find(normalized_key) != task_keys.end();
 }
 
-void validate_integer_like_orch_param(const ryml::ConstNodeRef& node,
+void validate_integer_like_orch_param(const TaskYamlDetail::YamlNodeRef& node,
                                        const std::string& node_type_lower,
                                        const std::string& key,
                                        const std::string& value) {
@@ -117,7 +117,7 @@ void validate_integer_like_orch_param(const ryml::ConstNodeRef& node,
     }
 }
 
-void validate_boolean_like_orch_param(const ryml::ConstNodeRef& node,
+void validate_boolean_like_orch_param(const TaskYamlDetail::YamlNodeRef& node,
                                        const std::string& node_type_lower,
                                        const std::string& key,
                                        const std::string& value) {
@@ -140,7 +140,7 @@ void validate_boolean_like_orch_param(const ryml::ConstNodeRef& node,
                                 node_type_lower + "' must be a boolean");
 }
 
-void append_sequence_children(const ryml::ConstNodeRef& seq_node,
+void append_sequence_children(const TaskYamlDetail::YamlNodeRef& seq_node,
                               std::vector<OrchNode>& children,
                               int depth) {
     if (!seq_node.is_seq()) {
@@ -152,7 +152,7 @@ void append_sequence_children(const ryml::ConstNodeRef& seq_node,
     }
 }
 
-OrchNode parse_branch_node(const ryml::ConstNodeRef& node, int depth) {
+OrchNode parse_branch_node(const TaskYamlDetail::YamlNodeRef& node, int depth) {
     if (node.is_seq()) {
         OrchNode branch;
         branch.type = "Sequence";
@@ -166,13 +166,13 @@ OrchNode parse_branch_node(const ryml::ConstNodeRef& node, int depth) {
     return TaskYamlDetail::parse_orch_node(node, depth);
 }
 
-OrchNode parse_flat_if_node(const ryml::ConstNodeRef& node, int depth,
+OrchNode parse_flat_if_node(const TaskYamlDetail::YamlNodeRef& node, int depth,
                              bool allow_task_metadata = false) {
     auto* spec_ptr = findNodeSpec("IfThenElse");
     const OrchNodeSpec& spec = *spec_ptr;
 
     for (const auto& entry : node) {
-        std::string key(entry.key().str, entry.key().len);
+        std::string key = entry.key();
         const std::string normalized_key = normalize_lookup_key(key);
         if (allow_task_metadata && is_task_level_metadata_key(normalized_key)) {
             continue;
@@ -206,13 +206,13 @@ OrchNode parse_flat_if_node(const ryml::ConstNodeRef& node, int depth,
     return parsed_node;
 }
 
-OrchNode parse_flat_while_node(const ryml::ConstNodeRef& node, int depth,
+OrchNode parse_flat_while_node(const TaskYamlDetail::YamlNodeRef& node, int depth,
                                 bool allow_task_metadata = false) {
     auto* spec_ptr = findNodeSpec("WhileDo");
     const OrchNodeSpec& spec = *spec_ptr;
 
     for (const auto& entry : node) {
-        std::string key(entry.key().str, entry.key().len);
+        std::string key = entry.key();
         const std::string normalized_key = normalize_lookup_key(key);
         if (allow_task_metadata && is_task_level_metadata_key(normalized_key)) {
             continue;
@@ -250,13 +250,13 @@ OrchNode parse_flat_while_node(const ryml::ConstNodeRef& node, int depth,
     return parsed_node;
 }
 
-OrchNode parse_flat_switch_node(const ryml::ConstNodeRef& node, int depth,
+OrchNode parse_flat_switch_node(const TaskYamlDetail::YamlNodeRef& node, int depth,
                                  bool allow_task_metadata = false) {
     auto* spec_ptr = findNodeSpec("Switch");
     const OrchNodeSpec& spec = *spec_ptr;
 
     for (const auto& entry : node) {
-        std::string key(entry.key().str, entry.key().len);
+        std::string key = entry.key();
         const std::string normalized_key = normalize_lookup_key(key);
         if (allow_task_metadata && is_task_level_metadata_key(normalized_key)) {
             continue;
@@ -288,13 +288,13 @@ OrchNode parse_flat_switch_node(const ryml::ConstNodeRef& node, int depth,
     return parsed_node;
 }
 
-OrchNode parse_flat_set_variable_node(const ryml::ConstNodeRef& node,
+OrchNode parse_flat_set_variable_node(const TaskYamlDetail::YamlNodeRef& node,
                                        bool allow_task_metadata = false) {
     auto* spec_ptr = findNodeSpec("SetVariable");
     const OrchNodeSpec& spec = *spec_ptr;
 
     for (const auto& entry : node) {
-        std::string key(entry.key().str, entry.key().len);
+        std::string key = entry.key();
         const std::string normalized_key = normalize_lookup_key(key);
         if (allow_task_metadata && is_task_level_metadata_key(normalized_key)) {
             continue;
@@ -334,7 +334,7 @@ OrchNode parse_flat_set_variable_node(const ryml::ConstNodeRef& node,
     return parsed_node;
 }
 
-OrchNode parse_flat_single_child_scalar_node(const ryml::ConstNodeRef& node,
+OrchNode parse_flat_single_child_scalar_node(const TaskYamlDetail::YamlNodeRef& node,
                                               int depth,
                                               const std::string& external_name,
                                               const std::string& internal_name,
@@ -344,7 +344,7 @@ OrchNode parse_flat_single_child_scalar_node(const ryml::ConstNodeRef& node,
     const OrchNodeSpec& spec = *spec_ptr;
 
     for (const auto& entry : node) {
-        std::string key(entry.key().str, entry.key().len);
+        std::string key = entry.key();
         const std::string normalized_key = normalize_lookup_key(key);
         if (allow_task_metadata && is_task_level_metadata_key(normalized_key)) {
             continue;
@@ -369,7 +369,7 @@ OrchNode parse_flat_single_child_scalar_node(const ryml::ConstNodeRef& node,
     return parsed_node;
 }
 
-OrchNode parse_flat_single_child_node(const ryml::ConstNodeRef& node,
+OrchNode parse_flat_single_child_node(const TaskYamlDetail::YamlNodeRef& node,
                                        int depth,
                                        const std::string& external_name,
                                        const std::string& internal_name,
@@ -378,7 +378,7 @@ OrchNode parse_flat_single_child_node(const ryml::ConstNodeRef& node,
     const OrchNodeSpec& spec = *spec_ptr;
 
     for (const auto& entry : node) {
-        std::string key(entry.key().str, entry.key().len);
+        std::string key = entry.key();
         const std::string normalized_key = normalize_lookup_key(key);
         if (allow_task_metadata && is_task_level_metadata_key(normalized_key)) {
             continue;
@@ -402,7 +402,7 @@ OrchNode parse_flat_single_child_node(const ryml::ConstNodeRef& node,
     return parsed_node;
 }
 
-void validate_required_params(const ryml::ConstNodeRef& node,
+void validate_required_params(const TaskYamlDetail::YamlNodeRef& node,
                               const OrchNodeSpec& spec,
                               const OrchNode& parsed_node,
                               const std::string& node_type_lower) {
@@ -422,7 +422,7 @@ void validate_required_params(const ryml::ConstNodeRef& node,
     }
 }
 
-void validate_child_shape(const ryml::ConstNodeRef& node,
+void validate_child_shape(const TaskYamlDetail::YamlNodeRef& node,
                           const OrchNodeSpec& spec,
                           const OrchNode& parsed_node,
                           const std::string& node_type_lower) {
@@ -469,7 +469,7 @@ void validate_child_shape(const ryml::ConstNodeRef& node,
     }
 }
 
-void parse_map_style_btdsl_node(const ryml::ConstNodeRef& node,
+void parse_map_style_btdsl_node(const TaskYamlDetail::YamlNodeRef& node,
                                 const OrchNodeSpec& spec,
                                 OrchNode& parsed_node,
                                 int depth,
@@ -478,7 +478,7 @@ void parse_map_style_btdsl_node(const ryml::ConstNodeRef& node,
     bool has_child_key = false;
 
     for (const auto& entry : node) {
-        std::string key(entry.key().str, entry.key().len);
+        std::string key = entry.key();
         const std::string normalized_key = normalize_lookup_key(key);
 
         if (normalized_key == "children") {
@@ -536,7 +536,7 @@ void parse_map_style_btdsl_node(const ryml::ConstNodeRef& node,
 }
 
 OrchNode parse_named_btdsl_node(const std::string& node_type,
-                                 const ryml::ConstNodeRef& node,
+                                 const TaskYamlDetail::YamlNodeRef& node,
                                  int depth) {
     if (depth > MAX_BTDSL_NESTING_DEPTH) {
         throw_parse_error(node, "Maximum nesting depth of " +
@@ -629,7 +629,7 @@ OrchNode parse_named_btdsl_node(const std::string& node_type,
 
 namespace TaskYamlDetail {
 
-OrchNode parse_orch_node(const ryml::ConstNodeRef& node, int depth) {
+OrchNode parse_orch_node(const TaskYamlDetail::YamlNodeRef& node, int depth) {
     if (!node.is_map()) {
         throw_parse_error(node, "Orchestration node must be a map");
     }
@@ -661,13 +661,13 @@ OrchNode parse_orch_node(const ryml::ConstNodeRef& node, int depth) {
     }
 
     auto child = node.first_child();
-    std::string node_type(child.key().str, child.key().len);
+    std::string node_type = child.key();
     return parse_named_btdsl_node(node_type, child, depth);
 }
 
 } // namespace TaskYamlDetail
 
-OrchParams parse_orch_params(const ryml::ConstNodeRef& task_node, const std::string& node_type) {
+OrchParams parse_orch_params(const TaskYamlDetail::YamlNodeRef& task_node, const std::string& node_type) {
     OrchParams params;
     if (node_type == "if") {
         params.root = parse_flat_if_node(task_node, 0, true);
@@ -707,13 +707,13 @@ OrchParams parse_orch_params(const ryml::ConstNodeRef& task_node, const std::str
     return params;
 }
 
-bool isBtdslControlNode(const ryml::ConstNodeRef& node) {
+bool isBtdslControlNode(const TaskYamlDetail::YamlNodeRef& node) {
     if (!node.is_map()) {
         return false;
     }
 
     for (const auto& child : node) {
-        std::string key(child.key().str, child.key().len);
+        std::string key = child.key();
         auto* spec = findNodeSpec(key);
         if (spec && spec->isControl) {
             return true;
@@ -723,13 +723,13 @@ bool isBtdslControlNode(const ryml::ConstNodeRef& node) {
     return false;
 }
 
-bool isBtdslLeafNode(const ryml::ConstNodeRef& node) {
+bool isBtdslLeafNode(const TaskYamlDetail::YamlNodeRef& node) {
     if (!node.is_map()) {
         return false;
     }
 
     for (const auto& child : node) {
-        std::string key(child.key().str, child.key().len);
+        std::string key = child.key();
         auto* spec = findNodeSpec(key);
         if (spec && !spec->isControl) {
             return true;
@@ -739,6 +739,6 @@ bool isBtdslLeafNode(const ryml::ConstNodeRef& node) {
     return false;
 }
 
-OrchNode parseOrchNode(const ryml::ConstNodeRef& yaml, int depth) {
+OrchNode parseOrchNode(const TaskYamlDetail::YamlNodeRef& yaml, int depth) {
     return TaskYamlDetail::parse_orch_node(yaml, depth);
 }

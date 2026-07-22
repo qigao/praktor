@@ -6,8 +6,6 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-#include "exprtk.h"
-#include "exprtk_module.h"
 #include "exprtk_types.h"
 #ifdef __cplusplus
 }
@@ -16,7 +14,7 @@ extern "C" {
 #include "util/logging.hpp"
 #include "util/system_info.hpp"
 #include "util/turbo_script_runtime.hpp"
-#include <jsoncons_ext/jmespath/jmespath.hpp>
+#include "data/structured_document_query.hpp"
 #include <cctype>
 #include <deque>
 #include <filesystem>
@@ -26,8 +24,8 @@ extern "C" {
 
 namespace Praktor::Script {
 
-static jsoncons::json parse_string_or_keep(std::string_view raw);
-static jsoncons::json exprtk_scalar_to_json(const exprtk_value_t &value);
+static WorkflowValue parse_string_or_keep(std::string_view raw);
+static WorkflowValue exprtk_scalar_to_json(const exprtk_value_t &value);
 
 namespace {
 
@@ -94,7 +92,7 @@ struct ScriptEvalContext {
   exprtk_value_t keepList(std::vector<exprtk_value_t> items) {
     list_pool.push_back(std::move(items));
     auto &last = list_pool.back();
-    return exprtk_val_list_ex(last.empty() ? nullptr : last.data(), last.size(), 0);
+    return turbo_script_value_list_borrowed(last.empty() ? nullptr : last.data(), last.size());
   }
 };
 
@@ -117,20 +115,20 @@ std::string resolve_script_working_dir(const WorkflowContext &workflow_context,
   return (std::filesystem::path(source_path).parent_path() / path).lexically_normal().string();
 }
 
-jsoncons::json build_shell_options(const exprtk_value_t &value) {
+WorkflowValue build_shell_options(const exprtk_value_t &value) {
   if (value.type == EXPRTK_VAL_MAP) {
     return exprtk_scalar_to_json(value);
   }
 
   if (value.type == EXPRTK_VAL_STRING) {
-    const jsoncons::json parsed =
+    const WorkflowValue parsed =
         parse_string_or_keep(std::string_view(value.data.string.data, value.data.string.len));
     if (parsed.is_object()) {
       return parsed;
     }
   }
 
-  return jsoncons::json::object();
+  return WorkflowValue::object();
 }
 
 } // namespace
@@ -156,7 +154,7 @@ static exprtk_value_t make_str(const char *str, size_t len) {
   return v;
 }
 
-static exprtk_value_t json_to_exprtk_value(const jsoncons::json &value, ScriptEvalContext &eval_ctx) {
+static exprtk_value_t json_to_exprtk_value(const WorkflowValue &value, ScriptEvalContext &eval_ctx) {
   if (value.is_null()) {
     return make_null();
   }
@@ -174,7 +172,7 @@ static exprtk_value_t json_to_exprtk_value(const jsoncons::json &value, ScriptEv
   }
   if (value.is_string()) {
     std::string raw = value.as<std::string>();
-    const jsoncons::json parsed = parse_string_or_keep(raw);
+    const WorkflowValue parsed = parse_string_or_keep(raw);
     if (parsed.is_object() || parsed.is_array()) {
       return json_to_exprtk_value(parsed, eval_ctx);
     }
@@ -189,10 +187,11 @@ static exprtk_value_t json_to_exprtk_value(const jsoncons::json &value, ScriptEv
     return eval_ctx.keepList(std::move(items));
   }
   if (value.is_object()) {
-    exprtk_value_t map = exprtk_val_map();
+    exprtk_value_t map = turbo_script_value_map();
     for (const auto &member : value.object_range()) {
       const std::string key(member.key());
-      exprtk_map_set(&map, key.c_str(), json_to_exprtk_value(member.value(), eval_ctx));
+      turbo_script_value_map_set(&map, key.c_str(),
+                                 json_to_exprtk_value(member.value(), eval_ctx));
     }
     return map;
   }
@@ -213,11 +212,11 @@ static std::string trim_copy(std::string_view value) {
   return std::string(value.substr(begin, end - begin));
 }
 
-static jsoncons::json parse_string_or_keep(std::string_view raw) {
+static WorkflowValue parse_string_or_keep(std::string_view raw) {
   const std::string trimmed = trim_copy(raw);
   if (!trimmed.empty() && (trimmed.front() == '{' || trimmed.front() == '[')) {
     try {
-      return jsoncons::json::parse(trimmed);
+      return WorkflowValue::parse(trimmed);
     } catch (const std::exception &) {
       // Fall through and preserve the original string.
     }
@@ -225,42 +224,42 @@ static jsoncons::json parse_string_or_keep(std::string_view raw) {
   return std::string(raw);
 }
 
-static jsoncons::json exprtk_scalar_to_json(const exprtk_value_t &value) {
+static WorkflowValue exprtk_scalar_to_json(const exprtk_value_t &value) {
   switch (value.type) {
   case EXPRTK_VAL_NUMBER:
     return value.data.number;
   case EXPRTK_VAL_STRING:
     return parse_string_or_keep(std::string_view(value.data.string.data, value.data.string.len));
   case EXPRTK_VAL_VECTOR: {
-    jsoncons::json result = jsoncons::json::array();
+    WorkflowValue result = WorkflowValue::array();
     for (size_t i = 0; i < value.data.vector.size; ++i) {
       result.push_back(value.data.vector.data[i]);
     }
     return result;
   }
   case EXPRTK_VAL_NULL:
-    return jsoncons::json::null();
+    return WorkflowValue::null();
   case EXPRTK_VAL_MAP: {
-    jsoncons::json obj = jsoncons::json::object();
-    exprtk_map_iter_t it = exprtk_map_iter_begin(&value);
+    WorkflowValue obj = WorkflowValue::object();
+    turbo_script_value_map_iterator_t it = turbo_script_value_map_iter_begin(&value);
     const char *key = nullptr;
     exprtk_value_t entry;
-    while (exprtk_map_iter_next(&it, &key, &entry)) {
+    while (turbo_script_value_map_iter_next(&it, &key, &entry)) {
       obj[key] = exprtk_scalar_to_json(entry);
     }
     return obj;
   }
   case EXPRTK_VAL_LIST: {
-    jsoncons::json arr = jsoncons::json::array();
+    WorkflowValue arr = WorkflowValue::array();
     for (size_t i = 0; i < value.data.list.count; ++i) {
       arr.push_back(exprtk_scalar_to_json(value.data.list.items[i]));
     }
     return arr;
   }
   case EXPRTK_VAL_FUNCTION:
-    return jsoncons::json::null();
+    return WorkflowValue::null();
   }
-  return jsoncons::json::null();
+  return WorkflowValue::null();
 }
 
 // Native function for json.stringify(value) — converts any TurboScript value to a JSON string
@@ -272,13 +271,13 @@ static exprtk_value_t json_stringify_fn(size_t argc, exprtk_value_t *args, void 
 
   if (args[0].type == EXPRTK_VAL_STRING) {
     const std::string raw(args[0].data.string.data, args[0].data.string.len);
-    const jsoncons::json parsed = parse_string_or_keep(raw);
+    const WorkflowValue parsed = parse_string_or_keep(raw);
     if (parsed.is_object() || parsed.is_array()) {
       return eval_ctx->keep(parsed.to_string());
     }
   }
 
-  jsoncons::json j = exprtk_scalar_to_json(args[0]);
+  WorkflowValue j = exprtk_scalar_to_json(args[0]);
   return eval_ctx->keep(j.to_string());
 }
 
@@ -293,7 +292,7 @@ static exprtk_value_t json_parse_fn(size_t argc, exprtk_value_t *args, void *use
   const std::string raw(args[0].data.string.data, args[0].data.string.len);
 
   try {
-    const jsoncons::json parsed = jsoncons::json::parse(trim_copy(raw));
+    const WorkflowValue parsed = WorkflowValue::parse(trim_copy(raw));
     return json_to_exprtk_value(parsed, *eval_ctx);
   } catch (const std::exception &) {
     return eval_ctx->keep(raw);
@@ -306,11 +305,19 @@ static exprtk_value_t json_query_fn(size_t argc, exprtk_value_t *args, void *use
   }
 
   auto *eval_ctx = static_cast<ScriptEvalContext *>(user_data);
-  const jsoncons::json source = exprtk_scalar_to_json(args[0]);
+  const WorkflowValue source = exprtk_scalar_to_json(args[0]);
   const std::string query(args[1].data.string.data, args[1].data.string.len);
 
   try {
-    const jsoncons::json result = jsoncons::jmespath::search(source, query);
+    // Keep the established scalar helper while path selection moves to JSONPath.
+    if (query == "length(@)") {
+      if (!source.is_array() && !source.is_object() && !source.is_string()) {
+        return make_null();
+      }
+      return make_num(static_cast<double>(source.size()));
+    }
+    const WorkflowValue result =
+        Praktor::Data::StructuredDocumentQuery::queryJson(source, query);
     return json_to_exprtk_value(result, *eval_ctx);
   } catch (const std::exception &) {
     return make_null();
@@ -344,7 +351,7 @@ static exprtk_value_t shell_exec_fn(size_t argc, exprtk_value_t *args, void *use
   }
 
   if (argc >= 2) {
-    jsoncons::json options = build_shell_options(args[1]);
+    WorkflowValue options = build_shell_options(args[1]);
     if (options.is_object()) {
       if (options.contains("input") && options["input"].is_string()) {
         input = options["input"].as<std::string>();
@@ -386,7 +393,7 @@ static exprtk_value_t shell_exec_fn(size_t argc, exprtk_value_t *args, void *use
   const auto result = actions::ShellExecutor::execute(command, input, resolved_working_dir,
                                                     timeout_ms, environment, stream_output);
 
-  jsoncons::json payload = jsoncons::json::object();
+  WorkflowValue payload = WorkflowValue::object();
   payload["exit_code"] = result.exit_code;
   payload["stdout"] = result.stdout_output;
   payload["stderr"] = result.stderr_output;
@@ -434,7 +441,7 @@ static exprtk_value_t ctx_output_fn(size_t argc, exprtk_value_t *args, void *use
   }
   auto *eval_ctx = static_cast<ScriptEvalContext *>(user_data);
   std::string key(args[0].data.string.data, args[0].data.string.len);
-  jsoncons::json val = exprtk_scalar_to_json(args[1]);
+  WorkflowValue val = exprtk_scalar_to_json(args[1]);
   eval_ctx->workflow_context.setCurrentTaskOutput(key, val);
   return make_null();
 }

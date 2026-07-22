@@ -22,7 +22,6 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
-#include <jsoncons/json.hpp>
 #include <optional>
 #include <queue>
 #include <sstream>
@@ -36,7 +35,7 @@ namespace {
 using EnvMap = std::unordered_map<std::string, std::string>;
 constexpr size_t kMaxLoggedTaskOutputBytes = 4096;
 
-std::vector<jsoncons::json>
+std::vector<WorkflowValue>
 generateMatrixCombinations(const std::unordered_map<std::string, StrList> &matrix) {
   if (matrix.empty())
     return {};
@@ -48,11 +47,11 @@ generateMatrixCombinations(const std::unordered_map<std::string, StrList> &matri
     values.push_back(list);
   }
 
-  std::vector<jsoncons::json> results;
+  std::vector<WorkflowValue> results;
   std::vector<size_t> indices(keys.size(), 0);
   bool done = false;
   while (!done) {
-    jsoncons::json combination = jsoncons::json::object();
+    WorkflowValue combination = WorkflowValue::object();
     for (size_t i = 0; i < keys.size(); ++i) {
       combination[keys[i]] = values[i][indices[i]];
     }
@@ -73,11 +72,11 @@ generateMatrixCombinations(const std::unordered_map<std::string, StrList> &matri
   return results;
 }
 
-std::vector<jsoncons::json> generateEachCombinations(const Each &each) {
+std::vector<WorkflowValue> generateEachCombinations(const Each &each) {
   if (each.hasItems()) {
-    std::vector<jsoncons::json> results;
+    std::vector<WorkflowValue> results;
     for (const auto &item : each.items) {
-      results.push_back(jsoncons::json(item));
+      results.push_back(WorkflowValue(item));
     }
     return results;
   }
@@ -233,7 +232,6 @@ std::string computeTaskActionHash(const Task& task) {
   }
   appendOptionalString(stream, "working_dir", task.working_dir);
   appendField(stream, "silent", task.silent ? "1" : "0");
-  appendField(stream, "continue_on_error", task.continue_on_error ? "1" : "0");
   appendStringList(stream, "sources", task.sources);
   appendStringList(stream, "generates", task.generates);
   appendOptionalString(stream, "script", task.script);
@@ -526,7 +524,9 @@ void WorkflowExecutor::loadCache(const std::string &workflow_path) {
     return;
 
   std::ifstream is(path);
-  jsoncons::json j = jsoncons::json::parse(is);
+  const std::string cache_contents((std::istreambuf_iterator<char>(is)),
+                                   std::istreambuf_iterator<char>());
+  WorkflowValue j = WorkflowValue::parse(cache_contents);
   for (auto const &item : j.array_range()) {
     std::string task_name = item["task"].as_string();
     TaskCacheState state;
@@ -546,12 +546,12 @@ void WorkflowExecutor::saveCache() {
   if (cache_file_.empty() || cache_.empty())
     return;
 
-  jsoncons::json j = jsoncons::json::array();
+  WorkflowValue j = WorkflowValue::array();
   for (auto const &[name, state] : cache_) {
-    jsoncons::json item;
+    WorkflowValue item;
     item["task"] = name;
     item["action_hash"] = state.action_hash;
-    jsoncons::json sources = jsoncons::json::object();
+    WorkflowValue sources = WorkflowValue::object();
     for (auto const &[path, hash] : state.source_hashes) {
       sources[path] = hash;
     }
@@ -560,7 +560,7 @@ void WorkflowExecutor::saveCache() {
   }
 
   std::ofstream os(cache_file_);
-  os << jsoncons::pretty_print(j);
+  os << j.pretty_string();
 }
 
 bool WorkflowExecutor::checkSkipTask(const Task &task, WorkflowContext &context) {
@@ -628,8 +628,8 @@ bool WorkflowExecutor::executeTask(const Task &task, WorkflowContext &context,
 
     bool all_success = true;
     bool any_executed = false;
-    WorkflowValue iteration_results = jsoncons::json::array();
-    WorkflowValue last_executed_outputs = jsoncons::json::object();
+    WorkflowValue iteration_results = WorkflowValue::array();
+    WorkflowValue last_executed_outputs = WorkflowValue::object();
     for (size_t i = 0; i < combinations.size(); ++i) {
       clearTaskExecutionOutputs(task, context, alias);
       auto child_context = context.fork();
@@ -655,7 +655,7 @@ bool WorkflowExecutor::executeTask(const Task &task, WorkflowContext &context,
         last_executed_outputs = getTaskOutputsSnapshot(task, context);
       }
 
-      WorkflowValue iteration = jsoncons::json::object();
+      WorkflowValue iteration = WorkflowValue::object();
       iteration["index"] = static_cast<int64_t>(i);
       iteration["item"] = combinations[i];
       iteration["status"] = outcome.status;
@@ -664,7 +664,7 @@ bool WorkflowExecutor::executeTask(const Task &task, WorkflowContext &context,
     }
 
     clearTaskExecutionOutputs(task, context, alias);
-    WorkflowValue aggregated_outputs = jsoncons::json::object();
+    WorkflowValue aggregated_outputs = WorkflowValue::object();
     if (last_executed_outputs.is_object()) {
       for (const auto& item : last_executed_outputs.object_range()) {
         aggregated_outputs[item.key()] = item.value();
@@ -748,7 +748,7 @@ void WorkflowExecutor::mergeTaskExecutionOutputs(const Task& task, WorkflowConte
 WorkflowValue WorkflowExecutor::getTaskOutputsSnapshot(const Task& task,
                                                        const WorkflowContext& context) const {
   WorkflowValue outputs = context.getValueByPath("tasks." + task.name + ".outputs");
-  return outputs.is_object() ? outputs : jsoncons::json::object();
+  return outputs.is_object() ? outputs : WorkflowValue::object();
 }
 
 WorkflowExecutor::TaskExecutionOutcome WorkflowExecutor::executeTaskInternal(
@@ -814,29 +814,15 @@ WorkflowExecutor::TaskExecutionOutcome WorkflowExecutor::executeTaskInternal(
       }
 
       if (!outcome.success) {
-        if (task.continue_on_error) {
-          logw("Task '{}' failed, but continue_on_error is set. Proceeding...", task.name);
-          outcome.success = true;
-          outcome.status = "success";
-        } else {
-          outcome.status = "failed";
-        }
+        outcome.status = "failed";
       }
     }
   } catch (const std::exception &e) {
     loge("Task '{}' failed: {}", task.name, e.what());
-    if (task.continue_on_error) {
-      logw("Exception in task '{}', but continue_on_error is set. Proceeding...", task.name);
-      outcome.success = true;
-      outcome.status = "success";
-      last_result.success = true; // Mark result as success to avoid propagates failure
-      last_result.error_message = e.what();
-    } else {
-      outcome.success = false;
-      outcome.status = "failed";
-      last_result.success = false;
-      last_result.error_message = e.what();
-    }
+    outcome.success = false;
+    outcome.status = "failed";
+    last_result.success = false;
+    last_result.error_message = e.what();
   }
 
   if (has_task_result) {

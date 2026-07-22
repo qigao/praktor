@@ -8,6 +8,7 @@
 #include "yml/task_types.hpp"
 
 #include <memory>
+#include <map>
 #include <optional>
 #include <string>
 #include <string_view>

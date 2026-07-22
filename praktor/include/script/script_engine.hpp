@@ -1,7 +1,7 @@
 #ifndef PRAKTOR_SCRIPT_ENGINE_HPP
 #define PRAKTOR_SCRIPT_ENGINE_HPP
 
-#include <jsoncons/json.hpp>
+#include "data/workflow_value.hpp"
 #include <string>
 #include <vector>
 
@@ -16,7 +16,7 @@ struct ScriptError {
 
 struct ScriptResult {
     bool success = true;
-    jsoncons::json value;              // return value (if any)
+    WorkflowValue value;               // return value (if any)
     std::vector<ScriptError> errors;   // parse or runtime errors
     std::string error_message;         // first error as string
 };

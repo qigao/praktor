@@ -25,7 +25,6 @@ struct Task {
     // Execution context
     std::optional<std::string> working_dir;  // Working directory for command execution
     bool silent = false;  // Suppress command output
-    bool continue_on_error = false;  // Do not fail workflow if this task fails
 
     // Incremental build
     StrList sources;    // Input files/globs - if unchanged, skip task
@@ -52,10 +51,6 @@ struct Workflow {
     DotEnv dot_env;
     TaskDefaults defaults;
     std::vector<Task> tasks;
-    std::unordered_map<std::string, EmbeddedModule> embedded;
-    ModuleImports imports;      // External module imports
-    NativeModules native_modules;  // Native DLL/SO modules
-
     std::string name;
     std::string description;
     std::string source_path;

@@ -8,14 +8,14 @@ tasks:
     output_format: json
 
   - name: transform
-    description: "Extract admin users using JMESPath"
+    description: "Extract admin users using JSONPath"
     depends_on: [fetch_data]
     command: "echo extracting admins"
     script: |
       var users = ctx.get("tasks.fetch_data.outputs.data");
-      var admins = json.query(users, "users[?role=='admin'].name");
+      var admins = json.query(users, "$.users[@.role == \"admin\"].name");
       ctx.output("admin_names", json.stringify(admins));
-      ctx.output("count", json.query(users, "users[?role=='admin'] | length(@)"));
+      ctx.output("count", json.query(admins, "length(@)"));
 
   - name: report
     description: "Output the transformed data"

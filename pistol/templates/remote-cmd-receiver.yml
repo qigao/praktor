@@ -89,8 +89,6 @@ tasks:
       template:
         name: "exec_cmd_{{ item.id }}"
         command: "{{ item.command }}"
-    continue_on_error: true
-
   - name: report_results
     depends_on: [dispatch_commands]
     script: |

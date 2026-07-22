@@ -6,10 +6,13 @@
 #include <unordered_set>
 #include <vector>
 
-TaskDefaults parse_defaults(const ryml::ConstNodeRef& node) {
+TaskDefaults parse_defaults(const TaskYamlDetail::YamlNodeRef& node) {
     if (!node.is_map()) {
         TaskYamlDetail::throw_parse_error(node, "defaults must be a map");
     }
+
+    static const std::unordered_set<std::string> allowed_default_keys = {"timeout"};
+    TaskYamlDetail::check_unknown_keys(node, allowed_default_keys);
 
     TaskDefaults defaults;
     if (node.has_child("timeout")) {
@@ -20,32 +23,34 @@ TaskDefaults parse_defaults(const ryml::ConstNodeRef& node) {
     return defaults;
 }
 
-Task parse_task(const ryml::ConstNodeRef& node, const std::string& source_path) {
+Task parse_task(const TaskYamlDetail::YamlNodeRef& node, const std::string& source_path) {
     if (!node.is_map()) {
         TaskYamlDetail::throw_parse_error(node, "task must be a map");
     }
 
-    std::unordered_set<std::string> allowed_task_keys = {
+    static const std::unordered_set<std::string> allowed_task_keys = {
         "name", "description", "depends_on", "vars", "env", "dotEnv", "when",
         "each", "timeout", "triggers",
         "working_dir", "silent", "sources", "generates", "finally",
         "command", "program", "args", "stdin", "uses", "dynamic_tasks", "output_format",
-        "parse_regex", "parse_json", "parse_lines", "parse_keyvalue",
         "script", "actions",
         "sequence", "parallel", "reactive_sequence", "pipeline_sequence",
         "inverter", "force_success", "force_failure", "repeat",
-        "timeout", "delay", "switch", "if", "then", "else", "while", "do", "max_iterations",
+        "delay", "switch", "if", "then", "else", "while", "do", "max_iterations",
         "child", "cases",
         "shell", "parse_json", "parse_regex", "parse_lines", "parse_keyvalue",
         "check_exit_code", "wait_event", "file_exists", "sleep", "set_variable", "subtree",
-        "fallback", "selector", "continue_on_error",
+        "fallback", "selector",
         "run_once", "keep_running_until_failure", "consume_queue", "precondition", "entry_updated"
     };
     if (node.has_child("set_variable")) {
-        allowed_task_keys.insert("value");
-        allowed_task_keys.insert("from");
+        auto set_variable_keys = allowed_task_keys;
+        set_variable_keys.insert("value");
+        set_variable_keys.insert("from");
+        TaskYamlDetail::check_unknown_keys(node, set_variable_keys);
+    } else {
+        TaskYamlDetail::check_unknown_keys(node, allowed_task_keys);
     }
-    TaskYamlDetail::check_unknown_keys(node, allowed_task_keys);
 
     Task task;
 
@@ -104,17 +109,7 @@ Task parse_task(const ryml::ConstNodeRef& node, const std::string& source_path) 
     }
 
     if (node.has_child("silent")) {
-        std::string value;
-        node["silent"] >> value;
-        const std::string lowered = TaskYamlDetail::to_lower_copy(value);
-        task.silent = (lowered == "true" || lowered == "yes" || lowered == "1");
-    }
-
-    if (node.has_child("continue_on_error")) {
-        std::string value;
-        node["continue_on_error"] >> value;
-        const std::string lowered = TaskYamlDetail::to_lower_copy(value);
-        task.continue_on_error = (lowered == "true" || lowered == "yes" || lowered == "1");
+        task.silent = TaskYamlDetail::read_bool_or_throw(node["silent"], "silent");
     }
 
     if (node.has_child("sources")) {
@@ -127,29 +122,33 @@ Task parse_task(const ryml::ConstNodeRef& node, const std::string& source_path) 
     if (node.has_child("finally")) {
         std::string finally_task;
         node["finally"] >> finally_task;
-        if (!finally_task.empty()) {
-            if (!task.triggers) {
-                task.triggers = Triggers{};
-            }
-            auto& on_complete = task.triggers->on_complete;
-            if (std::find(on_complete.begin(), on_complete.end(), finally_task) == on_complete.end()) {
-                on_complete.push_back(finally_task);
-            }
+        if (finally_task.empty()) {
+            TaskYamlDetail::throw_parse_error(node["finally"], "'finally' cannot be empty");
+        }
+        if (!task.triggers) {
+            task.triggers = Triggers{};
+        }
+        auto& on_complete = task.triggers->on_complete;
+        if (std::find(on_complete.begin(), on_complete.end(), finally_task) == on_complete.end()) {
+            on_complete.push_back(finally_task);
         }
     }
 
     int action_count = 0;
-    bool runner_selected = false;
+    auto select_runner = [&](TaskAction action, const char* declared_runner, auto&& parser) {
+        ++action_count;
+        if (action_count != 1) {
+            return;
+        }
+        task.action = action;
+        task.declared_runner = declared_runner;
+        task.specifics = parser();
+    };
 
     if (node.has_child("command")) {
-        auto cmd_params = parse_run_command_params(node);
-        if (!runner_selected) {
-            task.action = TaskAction::Orch;
-            task.declared_runner = "command";
-            task.specifics = desugarCommandToorch(cmd_params);
-            runner_selected = true;
-        }
-        ++action_count;
+        select_runner(TaskAction::Orch, "command", [&] {
+            return desugarCommandToorch(parse_run_command_params(node));
+        });
     }
 
     if (node.has_child("actions")) {
@@ -157,82 +156,59 @@ Task parse_task(const ryml::ConstNodeRef& node, const std::string& source_path) 
         if (!bt_node.is_map()) {
             TaskYamlDetail::throw_parse_error(bt_node, "orch node must be a map");
         }
-        if (!runner_selected) {
-            task.action = TaskAction::Orch;
-            task.declared_runner = "actions";
+        select_runner(TaskAction::Orch, "actions", [&] {
             OrchParams orch_params;
             orch_params.root = TaskYamlDetail::parse_orch_node(bt_node);
-            task.specifics = orch_params;
-            runner_selected = true;
-        }
-        ++action_count;
+            return orch_params;
+        });
     }
 
     if (node.has_child("program")) {
-        if (!runner_selected) {
-            task.action = TaskAction::Program;
-            task.declared_runner = "program";
-            task.specifics = parse_program_params(node);
-            runner_selected = true;
-        }
-        ++action_count;
+        select_runner(TaskAction::Program, "program", [&] { return parse_program_params(node); });
     }
 
     if (node.has_child("uses")) {
-        if (!runner_selected) {
-            task.action = TaskAction::Uses;
-            task.declared_runner = "uses";
-            task.specifics = parse_uses_params(node["uses"]);
-            runner_selected = true;
-        }
-        ++action_count;
+        select_runner(TaskAction::Uses, "uses", [&] { return parse_uses_params(node["uses"]); });
     }
 
     if (node.has_child("dynamic_tasks")) {
-        if (!runner_selected) {
-            task.action = TaskAction::DynamicTasks;
-            task.declared_runner = "dynamic_tasks";
-            task.specifics = parse_dynamic_tasks_params(node["dynamic_tasks"]);
-            runner_selected = true;
-        }
-        ++action_count;
+        select_runner(TaskAction::DynamicTasks, "dynamic_tasks", [&] {
+            return parse_dynamic_tasks_params(node["dynamic_tasks"]);
+        });
     }
 
-    const std::vector<std::string> orch_control_nodes = {
+    static const std::vector<std::string> orch_control_nodes = {
         "sequence", "parallel", "reactive_sequence", "pipeline_sequence", "fallback", "selector"
     };
-    const std::vector<std::string> orch_leaf_nodes = {
+    static const std::vector<std::string> orch_leaf_nodes = {
         "shell", "parse_json", "parse_regex", "parse_lines", "parse_keyvalue",
         "check_exit_code", "wait_event", "file_exists", "sleep", "set_variable", "subtree"
     };
-    const std::vector<std::string> orch_decorator_nodes = {
+    static const std::unordered_set<std::string> command_parser_keys = {
+        "parse_json", "parse_regex", "parse_lines", "parse_keyvalue"
+    };
+    static const std::vector<std::string> orch_decorator_nodes = {
         "inverter", "force_success", "force_failure", "repeat",
         "timeout", "delay", "run_once", "keep_running_until_failure", "consume_queue",
         "precondition", "entry_updated"
     };
-    const std::vector<std::string> orch_advanced_nodes = {"switch", "if", "while"};
+    static const std::vector<std::string> orch_advanced_nodes = {"switch", "if", "while"};
 
     for (const auto& bt_type : orch_control_nodes) {
         if (node.has_child(bt_type.c_str())) {
-            if (!runner_selected) {
-                task.action = TaskAction::Orch;
-                task.declared_runner = "actions";
-                task.specifics = parse_orch_params(node, bt_type);
-                runner_selected = true;
-            }
-            ++action_count;
+            select_runner(TaskAction::Orch, "actions", [&] {
+                return parse_orch_params(node, bt_type);
+            });
         }
     }
 
     for (const auto& bt_type : orch_leaf_nodes) {
-        if (node.has_child(bt_type.c_str())) {
-            if (!runner_selected) {
-                task.action = TaskAction::Orch;
-                task.declared_runner = "actions";
-                task.specifics = parse_orch_params(node, bt_type);
-                runner_selected = true;
-            }
-            ++action_count;
+        const bool is_command_parser = node.has_child("command") &&
+                                       command_parser_keys.find(bt_type) != command_parser_keys.end();
+        if (node.has_child(bt_type.c_str()) && !is_command_parser) {
+            select_runner(TaskAction::Orch, "actions", [&] {
+                return parse_orch_params(node, bt_type);
+            });
         }
     }
 
@@ -247,13 +223,9 @@ Task parse_task(const ryml::ConstNodeRef& node, const std::string& source_path) 
             ((bt_type == "inverter" || bt_type == "force_success" || bt_type == "force_failure") &&
              node.has_child(bt_type.c_str()));
         if (matches_root) {
-            if (!runner_selected) {
-                task.action = TaskAction::Orch;
-                task.declared_runner = "actions";
-                task.specifics = parse_orch_params(node, bt_type);
-                runner_selected = true;
-            }
-            ++action_count;
+            select_runner(TaskAction::Orch, "actions", [&] {
+                return parse_orch_params(node, bt_type);
+            });
         }
     }
 
@@ -263,44 +235,48 @@ Task parse_task(const ryml::ConstNodeRef& node, const std::string& source_path) 
             (bt_type == "while" && node.has_child("while") && node.has_child("do")) ||
             (bt_type == "switch" && node.has_child("switch") && node.has_child("cases"));
         if (matches_root) {
-            if (!runner_selected) {
-                task.action = TaskAction::Orch;
-                task.declared_runner = "actions";
-                task.specifics = parse_orch_params(node, bt_type);
-                runner_selected = true;
-            }
-            ++action_count;
+            select_runner(TaskAction::Orch, "actions", [&] {
+                return parse_orch_params(node, bt_type);
+            });
         }
     }
 
-    if (action_count == 0 && !node.has_child("script")) {
-        TaskYamlDetail::throw_parse_error(
-            node, "task '" + task.name +
-                      "' must declare a runner (command/program/uses/dynamic_tasks) or script");
-    }
     if (action_count > 1) {
         TaskYamlDetail::throw_parse_error(node, "task '" + task.name + "' declares multiple runners");
     }
 
     if (node.has_child("script")) {
-        std::string script_src;
-        node["script"] >> script_src;
-        if (!script_src.empty()) {
-            task.script = script_src;
-            if (action_count == 0) {
-                task.declared_runner = "script";
-            }
+        std::string script_src = TaskYamlDetail::read_scalar_or_throw(
+            node["script"], "'script' must be a scalar");
+        if (script_src.empty()) {
+            TaskYamlDetail::throw_parse_error(node["script"], "'script' cannot be empty");
         }
+        task.script = std::move(script_src);
+        if (action_count == 0) {
+            task.declared_runner = "script";
+        }
+    }
+
+    if (action_count == 0 && !task.script) {
+        TaskYamlDetail::throw_parse_error(
+            node, "task '" + task.name +
+                      "' must declare a runner (command/program/uses/dynamic_tasks) or script");
     }
 
     task.source_path = source_path;
     return task;
 }
 
-Workflow parse_workflow(const ryml::ConstNodeRef& node, const std::string& source_path) {
+Workflow parse_workflow(const TaskYamlDetail::YamlNodeRef& node, const std::string& source_path) {
     if (!node.is_map()) {
-        throw std::runtime_error("workflow must be a map");
+        TaskYamlDetail::throw_parse_error(node, "workflow must be a map");
     }
+
+    static const std::unordered_set<std::string> allowed_workflow_keys = {
+        "name", "description", "variables", "env", "dotEnv", "defaults",
+        "includes", "tasks"
+    };
+    TaskYamlDetail::check_unknown_keys(node, allowed_workflow_keys);
 
     Workflow workflow;
 
@@ -320,89 +296,17 @@ Workflow parse_workflow(const ryml::ConstNodeRef& node, const std::string& sourc
         workflow.dot_env = node_to_string_vector(node["dotEnv"]);
     }
 
-    if (node.has_child("embedded")) {
-        const auto& embedded_node = node["embedded"];
-        if (!embedded_node.is_map()) {
-            throw std::runtime_error("workflow 'embedded' section must be a map of modules");
-        }
-        for (const auto& module_node : embedded_node) {
-            std::string module_name(module_node.key().str, module_node.key().len);
-            if (!module_node.is_map()) {
-                throw std::runtime_error("Embedded module '" + module_name + "' must be a map");
-            }
-
-            EmbeddedModule module;
-            module.language = get_optional<std::string>(
-                module_node, "language", std::string("javascript"));
-            if (module_node.has_child("source")) {
-                module_node["source"] >> module.source;
-            }
-            if (module_node.has_child("path")) {
-                module_node["path"] >> module.path;
-            }
-            if (module.source.empty() && module.path.empty()) {
-                throw std::runtime_error("Embedded module '" + module_name +
-                                         "' requires either 'source' or 'path' field");
-            }
-            workflow.embedded[module_name] = std::move(module);
-        }
-    }
-
-    if (node.has_child("imports")) {
-        const auto& imports_node = node["imports"];
-        if (imports_node.is_map() && imports_node.has_child("modules")) {
-            workflow.imports.files = node_to_string_vector(imports_node["modules"]);
-        } else if (imports_node.is_seq()) {
-            workflow.imports.files = node_to_string_vector(imports_node);
-        }
-    }
-
-    if (node.has_child("native_modules")) {
-        const auto& native_node = node["native_modules"];
-        if (!native_node.is_seq()) {
-            throw std::runtime_error("'native_modules' must be a sequence");
-        }
-        for (const auto& mod_node : native_node) {
-            if (!mod_node.is_map()) {
-                throw std::runtime_error("Each native module must be a map");
-            }
-
-            NativeModule native_mod;
-            if (!mod_node.has_child("name")) {
-                throw std::runtime_error("Native module requires 'name' field");
-            }
-            mod_node["name"] >> native_mod.name;
-
-            if (!mod_node.has_child("path")) {
-                throw std::runtime_error("Native module '" + native_mod.name + "' requires 'path' field");
-            }
-            mod_node["path"] >> native_mod.path;
-
-            if (mod_node.has_child("hooks")) {
-                native_mod.hooks = node_to_string_map(mod_node["hooks"]);
-            } else if (mod_node.has_child("init")) {
-                std::string init_func;
-                mod_node["init"] >> init_func;
-                native_mod.hooks["init"] = init_func;
-            } else {
-                native_mod.hooks["init"] = "js_init_" + native_mod.name;
-            }
-
-            workflow.native_modules.push_back(std::move(native_mod));
-        }
-    }
-
     if (node.has_child("defaults")) {
         workflow.defaults = parse_defaults(node["defaults"]);
     }
 
     if (!node.has_child("tasks")) {
-        throw std::runtime_error("workflow must define a 'tasks' list");
+        TaskYamlDetail::throw_parse_error(node, "workflow must define a 'tasks' list");
     }
 
     const auto& tasks_node = node["tasks"];
     if (!tasks_node.is_seq()) {
-        throw std::runtime_error("'tasks' must be a sequence");
+        TaskYamlDetail::throw_parse_error(tasks_node, "'tasks' must be a sequence");
     }
 
     for (const auto& task_node : tasks_node) {
@@ -410,7 +314,7 @@ Workflow parse_workflow(const ryml::ConstNodeRef& node, const std::string& sourc
     }
 
     if (workflow.tasks.empty()) {
-        throw std::runtime_error("workflow must define at least one task");
+        TaskYamlDetail::throw_parse_error(tasks_node, "workflow must define at least one task");
     }
 
     return workflow;

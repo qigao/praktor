@@ -7,7 +7,7 @@
 #include <iostream>
 #include <stdexcept>
 #include <string>
-#include <jsoncons/json.hpp>
+#include "data/workflow_value.hpp"
 
 
 namespace Praktor {
@@ -19,16 +19,16 @@ public:
     std::string graphTmpl = TemplateLoader::loadTemplate("exporters/dot", "graph.dot");
 
     // Convert workflow to JSON for Mustache
-    jsoncons::json data = jsoncons::json::object();
+    WorkflowValue data = WorkflowValue::object();
     data["name"] = workflow.name.empty() ? "Praktor Workflow" : workflow.name;
     
-    jsoncons::json tasks = jsoncons::json::array();
+    WorkflowValue tasks = WorkflowValue::array();
     for (const auto &task : workflow.tasks) {
-      jsoncons::json t = jsoncons::json::object();
+      WorkflowValue t = WorkflowValue::object();
       t["name"] = task.name;
       t["description"] = task.description;
       
-      jsoncons::json deps = jsoncons::json::array();
+      WorkflowValue deps = WorkflowValue::array();
       for (const auto &dep : task.depends_on) {
         deps.push_back(dep);
       }
@@ -46,8 +46,8 @@ public:
     // Actually, I'll just put the fields directly into the context root-level scope if possible.
     // WorkflowContext::setValue takes a string value or json.
     
-    for (auto const& [key, value] : data.object_range()) {
-        context.setValue(key, value);
+    for (const auto& member : data.object_range()) {
+        context.setValue(member.key(), member.value());
     }
 
     std::string final_content = Praktor::Util::substituteMustache(graphTmpl, context);

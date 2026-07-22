@@ -10,19 +10,31 @@
 #include <string>
 #include <unordered_map>
 
+using WorkflowInputs = std::unordered_map<std::string, WorkflowValue>;
+
+struct WorkflowExecutionResult {
+    bool success{false};
+    WorkflowValue value{WorkflowValue::object()};
+    std::string error_message;
+};
+
 class WorkflowRunner {
 public:
     explicit WorkflowRunner(std::string const& yamlPath,
                             std::unordered_map<std::string, std::string> inputValues = {},
                             std::unordered_map<std::string, std::string> baseEnvironment = {});
+    WorkflowRunner(std::string const& yamlPath,
+                   WorkflowInputs inputValues,
+                   std::unordered_map<std::string, std::string> baseEnvironment = {});
     ~WorkflowRunner(); // Declared destructor
 
+    WorkflowExecutionResult execute(bool useConcurrent = false, int maxConcurrency = 4);
     bool run(bool useConcurrent = false, int maxConcurrency = 4);
     bool runTask(std::string const& taskName, bool useConcurrent = false, int maxConcurrency = 4);
 
 private:
     std::string yamlPath_;
-    std::unordered_map<std::string, std::string> inputValues_;  // New: store input values
+    WorkflowInputs inputValues_;
     std::unordered_map<std::string, std::string> baseEnvironment_;
     std::filesystem::path base_directory_; // New: store the base directory for the workflow
 };

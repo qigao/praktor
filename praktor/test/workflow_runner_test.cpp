@@ -906,3 +906,31 @@ TEST_CASE("workflow env does not leak into the host process")
 
     std::filesystem::remove_all(dir);
 }
+
+TEST_CASE("workflow runner preserves structured inputs and returns task results")
+{
+    auto dir = createTempDir();
+    auto workflow_path = dir / "structured-input.yml";
+
+    writeFile(workflow_path, R"(
+tasks:
+  - name: inspect
+    script: |
+      if (ctx.get("payload.name") != "demo") fail("nested name was not preserved");
+      if (ctx.get("payload.count") != 7) fail("nested count was not preserved");
+      ctx.output("count", ctx.get("payload.count"));
+)" );
+
+    WorkflowInputs inputs;
+    inputs["payload"] = WorkflowValue::parse(R"({"name":"demo","count":7})");
+    WorkflowRunner runner(workflow_path.string(), std::move(inputs));
+
+    const auto result = runner.execute();
+    REQUIRE(result.success);
+    CHECK(result.value["workflow_status"].as<std::string>() == "success");
+    CHECK(result.value["tasks"]["inspect"]["status"].as<std::string>() == "success");
+    CHECK(result.value["tasks"]["inspect"]["outputs"]["count"].as<int>() == 7);
+    CHECK_FALSE(result.value.contains("error"));
+
+    std::filesystem::remove_all(dir);
+}

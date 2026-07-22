@@ -55,9 +55,9 @@ public:
 
 private:
   TaskFailureContext buildGeneratedTaskFailureContext(const Task& generated_task,
-                                                      const jsoncons::json& item, size_t index,
+                                                      const WorkflowValue& item, size_t index,
                                                       const WorkflowContext& context) const;
-  jsoncons::json buildGeneratedTaskResult(const Task& generated_task, const jsoncons::json& item,
+  WorkflowValue buildGeneratedTaskResult(const Task& generated_task, const WorkflowValue& item,
                                           size_t index, bool callback_success,
                                           WorkflowContext& context) const;
 
@@ -65,12 +65,12 @@ private:
    * @brief Generate a single Task from the template and item
    */
   Task generateTask(const Task& parent_task, const DynamicTaskTemplate &tmpl,
-                    const jsoncons::json &item, size_t index);
+                    const WorkflowValue &item, size_t index);
 
   /**
    * @brief Substitute {{ item }} and {{ item.field }} placeholders in a string
    */
-  std::string substituteItemPlaceholders(const std::string &input, const jsoncons::json &item,
+  std::string substituteItemPlaceholders(const std::string &input, const WorkflowValue &item,
                                          size_t index);
 
   SubTaskCallback subtask_callback_;

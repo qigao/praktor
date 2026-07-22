@@ -51,7 +51,6 @@ tasks:
       template:
         name: "check_{{ item.name }}"
         command: "pgrep -x {{ item.name }} || tasklist /FI \"IMAGENAME eq {{ item.name }}.exe\" /NH 2>nul | findstr /I \"{{ item.name }}\""
-    continue_on_error: true
     triggers:
       on_failure: [alert_process_down]
 

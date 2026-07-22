@@ -25,7 +25,7 @@ TEST_CASE("Parser Improvements - Line Numbers & Validation", "[parser][schema]")
     fs::path temp_file = "temp_invalid.yml";
 
     SECTION("Unknown keys throw with line info") {
-        std::string invalid_yml = "version: '1.0'\nname: Test\ntasks:\n  - name: my_task\n    typO: command\n";
+        std::string invalid_yml = "name: Test\ntasks:\n  - name: my_task\n    typO: command\n";
         {
             std::ofstream ofs(temp_file);
             ofs << invalid_yml;
@@ -45,7 +45,7 @@ TEST_CASE("Parser Improvements - Line Numbers & Validation", "[parser][schema]")
     if (fs::exists(temp_file)) fs::remove(temp_file);
 }
 
-TEST_CASE("Import System - Circular Detection", "[parser][imports]") {
+TEST_CASE("Include System - Circular Detection", "[parser][includes]") {
     fs::path a = fs::absolute("circ_a.yml");
     fs::path b = fs::absolute("circ_b.yml");
 
@@ -54,13 +54,13 @@ TEST_CASE("Import System - Circular Detection", "[parser][imports]") {
         std::ofstream(b) << "includes:\n  a: ./circ_a.yml\ntasks:\n  - name: t2\n    command: echo B\n";
     }
 
-    SECTION("Circular import detected") {
+    SECTION("Circular include detected") {
         try {
             TaskParser::parseFile(a.string());
-            FAIL("Should have thrown for circular import");
+            FAIL("Should have thrown for circular include");
         } catch (const std::exception& e) {
             std::string msg = e.what();
-            REQUIRE(msg.find("Circular import detected") != std::string::npos);
+            REQUIRE(msg.find("Circular include detected") != std::string::npos);
             REQUIRE(msg.find("circ_a.yml") != std::string::npos);
             REQUIRE(msg.find("circ_b.yml") != std::string::npos);
         }

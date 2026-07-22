@@ -66,10 +66,6 @@ dotEnv:                    # 加载 .env 文件
 defaults:                  # 所有任务的默认属性
   timeout: "10m"
 
-native_modules:            # 原生 DLL 模块（供 dll.call() 使用）
-  - name: crypto_ext
-    path: "./libs/crypto_ext.dll"
-
 tasks:                     # 任务列表（至少 1 个）
   - name: task_a
     command: echo "running"
@@ -600,7 +596,7 @@ shell:
   output_format: json
   script: |
     var data = ctx.get("tasks.process_data.outputs.data")
-    var items = json.query(data, "[?status=='active']")
+    var items = json.query(data, "$[@.status == \"active\"]")
     ctx.output("active_count", items.length)
     ctx.output("active_items", json.stringify(items))
 ```
@@ -632,15 +628,15 @@ ctx.set("variables.NEXT_VERSION", "2.0.0")
 |------|------|
 | `json.parse(str)` | 将 JSON 字符串解析为对象 |
 | `json.stringify(val)` | 将对象序列化为 JSON 字符串 |
-| `json.query(val, expr)` | 使用 JMESPath 表达式查询 |
+| `json.query(val, expr)` | 使用 JSONPath 表达式查询 |
 
 ```javascript
 var raw = ctx.get("tasks.fetch.outputs.stdout")
 var data = json.parse(raw)
 
-// JMESPath 查询
-var users = json.query(data, "users[?active==`true`]")
-var names = json.query(users, "[].name")
+// JSONPath 查询
+var users = json.query(data, "$.users[@.active == true]")
+var names = json.query(users, "$[*].name")
 
 ctx.output("user_names", json.stringify(names))
 ```
@@ -745,15 +741,15 @@ var result = math.abs(-42)
 var expr_result = math.eval("2 * (3 + 4)")   // exprtk 表达式求值
 ```
 
-### 6.9 dll 模块 — 原生扩展
+TurboScript 扩展统一通过标准插件导入，不接受工作流中的 DLL 路径或自定义 ABI：
 
 ```javascript
-// 需要在工作流顶层声明 native_modules
-var hash = dll.call("crypto_ext", "sha256", "hello world")
-var result = dll.call("data_processor", "transform", raw_data)
+import("net")
+import("parser")
+import("rules_forge")
 ```
 
-### 6.10 fail() — 主动失败
+### 6.9 fail() — 主动失败
 
 ```javascript
 var data = json.parse(ctx.get("tasks.fetch.outputs.stdout"))
@@ -919,7 +915,7 @@ tasks:
     depends_on: [fetch]
     script: |
       var data = ctx.get("tasks.fetch.outputs.data")
-      var processed = json.query(data, "items[?active].name")
+      var processed = json.query(data, "$.items[@.active == true].name")
       ctx.output("names", json.stringify(processed))
 
   - name: report
@@ -1025,7 +1021,7 @@ tasks:
     depends_on: [fetch_data]
     script: |
       var data = ctx.get("tasks.fetch_data.outputs.data")
-      var records = json.query(data, "records[?status=='active']")
+      var records = json.query(data, "$.records[@.status == \"active\"]")
       var count = records.length
 
       log.info("Processing " + count + " active records")

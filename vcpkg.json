@@ -3,14 +3,6 @@
     "version-semver": "0.1.0",
     "dependencies": [
         {
-            "name": "jsoncons",
-            "version>=": "1.3.2"
-        },
-        {
-            "name": "ryml",
-            "version>=": "0.9.0"
-        },
-        {
             "name": "catch2",
             "version>=": "3.7.1"
         },

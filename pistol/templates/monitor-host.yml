@@ -59,7 +59,6 @@ tasks:
       if (math.eval(cpu + " > " + threshold)) {
         fail("CPU at " + cpu + "% exceeds threshold " + threshold + "%");
       }
-    continue_on_error: true
     triggers:
       on_failure: [alert_high_resource]
 
@@ -79,7 +78,6 @@ tasks:
       if (math.eval(mem + " > " + threshold)) {
         fail("Memory at " + mem + "% exceeds threshold " + threshold + "%");
       }
-    continue_on_error: true
     triggers:
       on_failure: [alert_high_resource]
 
@@ -99,7 +97,6 @@ tasks:
       if (math.eval(disk + " > " + threshold)) {
         fail("Disk at " + disk + "% exceeds threshold " + threshold + "%");
       }
-    continue_on_error: true
     triggers:
       on_failure: [alert_high_resource]
 

@@ -52,8 +52,8 @@ TEST_CASE("WorkflowContext Core Functionality", "[context]") {
     }
 
     SECTION("Nested paths resolve through JSON objects") {
-        WorkflowValue payload = jsoncons::json::object();
-        payload["meta"] = jsoncons::json::object();
+        WorkflowValue payload = WorkflowValue::object();
+        payload["meta"] = WorkflowValue::object();
         payload["meta"]["region"] = "apac";
         context.setValue("payload", payload);
 
@@ -69,11 +69,11 @@ TEST_CASE("WorkflowContext Core Functionality", "[context]") {
         REQUIRE(context.getValueByPath("tasks.build.outputs.artifact").as<std::string>() == "pkg.zip");
     }
 
-    SECTION("JMESPath queries still work through the facade") {
-        WorkflowValue payload = jsoncons::json::object();
-        payload["servers"] = jsoncons::json::array();
-        payload["servers"].push_back(jsoncons::json::object({{"name", "api"}, {"port", 8080}}));
-        payload["servers"].push_back(jsoncons::json::object({{"name", "worker"}, {"port", 9090}}));
+    SECTION("JSONPath queries work through the facade") {
+        WorkflowValue payload = WorkflowValue::object();
+        payload["servers"] = WorkflowValue::array();
+        payload["servers"].push_back(WorkflowValue::object({{"name", "api"}, {"port", 8080}}));
+        payload["servers"].push_back(WorkflowValue::object({{"name", "worker"}, {"port", 9090}}));
         context.setValue("payload", payload);
 
         auto ports = context.getJsonValue("payload", "servers[*].port");
@@ -117,28 +117,6 @@ TEST_CASE("WorkflowContext Core Functionality", "[context]") {
         REQUIRE_FALSE(context.isInFailureContext());
         CHECK(context.getVariable("failed_task_name").empty());
         CHECK(context.getValueByPath("failed_task").is_null());
-    }
-
-    SECTION("Module store is copied on fork and queried through the facade") {
-        EmbeddedModule embedded;
-        embedded.language = "javascript";
-        embedded.source = "export const value = 1;";
-
-        NativeModule native;
-        native.name = "demo";
-        native.path = "demo.dll";
-        native.hooks["run"] = "demo_run";
-
-        context.setEmbeddedModules({{"demo", embedded}});
-        context.setNativeModules({native});
-
-        auto child = context.fork();
-
-        REQUIRE(child->hasEmbeddedModule("demo"));
-        REQUIRE(child->getEmbeddedModule("demo") != nullptr);
-        CHECK(child->getEmbeddedModule("demo")->source == "export const value = 1;");
-        REQUIRE(child->getNativeModules().size() == 1);
-        CHECK(child->getNativeModules().front().name == "demo");
     }
 
     SECTION("Source path is copied on fork") {

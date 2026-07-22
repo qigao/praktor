@@ -36,7 +36,7 @@ TEST_CASE("TaskRegistry State Machine", "[registry]") {
 
     SECTION("Task re-entry support") {
         registry.startTask("task_a");
-        registry.setOutput("task_a", "before", jsoncons::json("stale"));
+        registry.setOutput("task_a", "before", WorkflowValue("stale"));
         registry.markCompleted("task_a");
         REQUIRE(registry.isCompleted("task_a"));
 
@@ -63,7 +63,7 @@ TEST_CASE("TaskRegistry Output Immutability", "[registry]") {
 
     SECTION("setOutput allowed during Running state") {
         registry.startTask("task_a");
-        REQUIRE_NOTHROW(registry.setOutput("task_a", "result", jsoncons::json("value")));
+        REQUIRE_NOTHROW(registry.setOutput("task_a", "result", WorkflowValue("value")));
 
         auto outputs = registry.getAllOutputs("task_a");
         REQUIRE(outputs["result"].as<std::string>() == "value");
@@ -71,17 +71,17 @@ TEST_CASE("TaskRegistry Output Immutability", "[registry]") {
 
     SECTION("setOutput auto-starts Pending task") {
         REQUIRE(registry.getState("task_a") == TaskState::Pending);
-        registry.setOutput("task_a", "key", jsoncons::json(42));
+        registry.setOutput("task_a", "key", WorkflowValue(42));
         REQUIRE(registry.getState("task_a") == TaskState::Running);
     }
 
     SECTION("setOutput throws after Completed") {
         registry.startTask("task_a");
-        registry.setOutput("task_a", "before", jsoncons::json("ok"));
+        registry.setOutput("task_a", "before", WorkflowValue("ok"));
         registry.markCompleted("task_a");
 
         REQUIRE_THROWS_WITH(
-            registry.setOutput("task_a", "after", jsoncons::json("fail")),
+            registry.setOutput("task_a", "after", WorkflowValue("fail")),
             Catch::Matchers::ContainsSubstring("immutable after completion"));
     }
 
@@ -90,14 +90,14 @@ TEST_CASE("TaskRegistry Output Immutability", "[registry]") {
         registry.markFailed("task_a", "error");
 
         REQUIRE_THROWS_WITH(
-            registry.setOutput("task_a", "key", jsoncons::json("value")),
+            registry.setOutput("task_a", "key", WorkflowValue("value")),
             Catch::Matchers::ContainsSubstring("immutable after completion"));
     }
 
     SECTION("mergeOutputs works during Running") {
         registry.startTask("task_a");
 
-        jsoncons::json outputs = jsoncons::json::object();
+        WorkflowValue outputs = WorkflowValue::object();
         outputs["stdout"] = "hello world";
         outputs["exit_code"] = 0;
 
@@ -114,7 +114,7 @@ TEST_CASE("TaskRegistry Output Access", "[registry]") {
 
     SECTION("getOutput returns correct value") {
         registry.startTask("task_a");
-        registry.setOutput("task_a", "data", jsoncons::json::array({1, 2, 3}));
+        registry.setOutput("task_a", "data", WorkflowValue::array({1, 2, 3}));
         registry.markCompleted("task_a");
 
         auto data = registry.getOutput("task_a", "data");
@@ -129,7 +129,7 @@ TEST_CASE("TaskRegistry Output Access", "[registry]") {
 
     SECTION("getOutput throws for missing key") {
         registry.startTask("task_a");
-        registry.setOutput("task_a", "exists", jsoncons::json(true));
+        registry.setOutput("task_a", "exists", WorkflowValue(true));
         registry.markCompleted("task_a");
 
         REQUIRE_THROWS_WITH(registry.getOutput("task_a", "missing"),
@@ -184,7 +184,7 @@ TEST_CASE("TaskRegistry toJson", "[registry]") {
     TaskRegistry registry;
 
     registry.startTask("task_a");
-    registry.setOutput("task_a", "result", jsoncons::json("success"));
+    registry.setOutput("task_a", "result", WorkflowValue("success"));
     registry.markCompleted("task_a");
 
     registry.startTask("task_b");

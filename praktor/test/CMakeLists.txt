@@ -14,9 +14,9 @@ set(TEST_SOURCES
     workflow_runner_test.cpp
     core_improvements_test.cpp
     matrix_test.cpp
-    native_loader_test.cpp
     script_engine_test.cpp
     declarative_tree_executor_test.cpp
+    structured_document_query_test.cpp
 )
 
 cmake_add_test(

@@ -5,9 +5,8 @@
 #include <string>
 #include <unordered_map>
 
-#include <jsoncons/json.hpp>
+#include "data/workflow_value.hpp"
 
-using WorkflowValue = jsoncons::json;
 
 /**
  * @struct TaskFailureContext
@@ -68,7 +67,7 @@ struct TaskFailureContext {
     }
 
     WorkflowValue toJson() const {
-        WorkflowValue failed_task = jsoncons::json::object();
+        WorkflowValue failed_task = WorkflowValue::object();
         failed_task["name"] = task_name;
         failed_task["type"] = task_type;
         failed_task["exit_code"] = exit_code;
@@ -87,7 +86,7 @@ struct TaskFailureContext {
 private:
     static WorkflowValue buildOutputsJson(
         const std::unordered_map<std::string, WorkflowValue>& outputs) {
-        WorkflowValue json = jsoncons::json::object();
+        WorkflowValue json = WorkflowValue::object();
         for (const auto& [key, value] : outputs) {
             json[key] = value;
         }

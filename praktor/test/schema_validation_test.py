@@ -233,6 +233,176 @@ tasks:
 
     validate_text(
         validator,
+        "reject_unknown_dynamic_template_key",
+        """
+name: bad-dynamic-template
+tasks:
+  - name: fanout
+    dynamic_tasks:
+      items_variable: tasks.query.outputs.data
+      template:
+        name: generated_{{ index }}
+        command: echo generated
+        timeuot: 5s
+""",
+        False,
+    )
+
+    validate_text(
+        validator,
+        "reject_multiple_command_post_processors",
+        """
+name: bad-command-post-processors
+tasks:
+  - name: ambiguous
+    command: echo data
+    parse_json:
+      path: $.status
+      output_key: status
+    parse_lines:
+      output_key: lines
+""",
+        False,
+    )
+
+    validate_text(
+        validator,
+        "accept_modular_workflow_fields",
+        """
+name: modular
+includes:
+  common: common-tasks.yml
+tasks:
+  - name: build
+    command: echo build
+""",
+        True,
+    )
+
+    validate_text(
+        validator,
+        "accept_task_runtime_fields",
+        """
+name: task-runtime-fields
+tasks:
+  - name: cleanup
+    command: echo cleanup
+  - name: build
+    sources:
+      - src/**/*.cpp
+    generates: build/app.exe
+    finally: cleanup
+    actions:
+      sequence:
+        - shell: echo build
+""",
+        True,
+    )
+
+    validate_text(
+        validator,
+        "reject_command_with_actions_runner",
+        """
+name: conflicting-actions
+tasks:
+  - name: build
+    command: echo build
+    actions:
+      shell: echo duplicate
+""",
+        False,
+    )
+
+    validate_text(
+        validator,
+        "reject_unknown_top_level_key",
+        """
+name: bad-root
+varibles:
+  BUILD: release
+tasks:
+  - name: build
+    command: echo build
+""",
+        False,
+    )
+
+    validate_text(
+        validator,
+        "reject_removed_imports",
+        """
+name: removed-imports
+imports: []
+tasks:
+  - name: build
+    command: echo build
+""",
+        False,
+    )
+
+    validate_text(
+        validator,
+        "reject_removed_embedded",
+        """
+name: removed-embedded
+embedded: {}
+tasks:
+  - name: build
+    command: echo build
+""",
+        False,
+    )
+
+    validate_text(
+        validator,
+        "reject_empty_runtime_values",
+        """
+name: empty-values
+tasks:
+  - name: ""
+    command: echo invalid
+  - name: invalid-finally
+    command: echo invalid
+    finally: ""
+  - name: invalid-dynamic
+    dynamic_tasks:
+      items_variable: ""
+      template:
+        name: ""
+        command: ""
+""",
+        False,
+    )
+
+    validate_text(
+        validator,
+        "reject_empty_command_array_entry",
+        """
+name: empty-command-entry
+tasks:
+  - name: build
+    command: [echo build, ""]
+""",
+        False,
+    )
+
+    validate_text(
+        validator,
+        "reject_removed_native_modules",
+        """
+name: removed-native-modules
+native_modules:
+  - name: native
+    path: native.dll
+tasks:
+  - name: build
+    command: echo build
+""",
+        False,
+    )
+
+    validate_text(
+        validator,
         "legacy_set_variable_inline",
         """
 name: bad-legacy-setter

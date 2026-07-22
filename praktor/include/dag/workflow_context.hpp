@@ -10,15 +10,11 @@
 #include <vector>
 #include <type_traits>
 
-// jsoncons includes
-#include <jsoncons/json.hpp>
-
 // Project includes
 #include "dag/failure_context_state.hpp"
 #include "dag/task_failure_context.hpp"
 #include "dag/task_registry.hpp"
 #include "dag/variable_scope.hpp"
-#include "dag/workflow_module_store.hpp"
 #include "util/system_info.hpp"
 #include "util/logging.hpp"
 #include "util/workflow_path_resolver.hpp"
@@ -29,7 +25,7 @@
  * @brief A context for storing and sharing data between tasks in a workflow.
  *
  * This class provides a key-value store for sharing data between tasks.
- * It stores values as jsoncons::json, allowing for structured data.
+ * It stores values as WorkflowValue, allowing for structured data.
  */
 class WorkflowContext {
 public:
@@ -66,7 +62,6 @@ public:
         // Reset scope to be a child of this scope
         child->scope_ = std::make_unique<VariableScope>(this->scope_.get());
         child->task_registry_ = this->task_registry_;
-        child->module_store_ = this->module_store_;
         child->task_scope_stack_ = this->task_scope_stack_;
         child->source_path_ = this->source_path_;
         // Failure context is not inherited
@@ -74,7 +69,7 @@ public:
     }
 
     /**
-     * @brief Sets a jsoncons::json value in the context.
+     * @brief Sets a structured value in the context.
      *
      * Fully delegates to VariableScope.
      */
@@ -126,16 +121,16 @@ public:
     }
 
     /**
-     * @brief Gets a JSON value from the context using a JMESPath query.
+     * @brief Gets a JSON value from the context using a JSONPath query.
      * @param key The key of the top-level JSON value.
-     * @param jmespath_query The JMESPath query string.
-     * @return The result of the JMESPath query as a WorkflowValue.
+     * @param json_path The JSONPath query string.
+     * @return The result of the JSONPath query as a WorkflowValue.
      * @throws std::runtime_error if the key is not found or query fails.
      *
      * Now uses VariableScope.
      */
-    WorkflowValue getJsonValue(std::string const& key, std::string const& jmespath_query) const {
-        return Praktor::util::WorkflowPathResolver::getJsonValue(*scope_, key, jmespath_query);
+    WorkflowValue getJsonValue(std::string const& key, std::string const& json_path) const {
+        return Praktor::util::WorkflowPathResolver::getJsonValue(*scope_, key, json_path);
     }
 
     /**
@@ -210,6 +205,10 @@ public:
     std::unordered_map<std::string, WorkflowValue> getAllVisibleValues() const {
         logd("getAllVisibleValues: retrieving all visible WorkflowValues");
         return scope_->getAllVisible();
+    }
+
+    WorkflowValue getTasksSnapshot() const {
+        return task_registry_->toJson();
     }
 
     /**
@@ -364,30 +363,6 @@ public:
         return failure_state_.isActive();
     }
 
-    void setEmbeddedModules(const std::unordered_map<std::string, EmbeddedModule>& modules) {
-        module_store_.setEmbeddedModules(modules);
-    }
-
-    bool hasEmbeddedModule(const std::string& name) const {
-        return module_store_.hasEmbeddedModule(name);
-    }
-
-    const EmbeddedModule* getEmbeddedModule(const std::string& name) const {
-        return module_store_.getEmbeddedModule(name);
-    }
-
-    const std::unordered_map<std::string, EmbeddedModule>& getEmbeddedModules() const {
-        return module_store_.getEmbeddedModules();
-    }
-
-    void setNativeModules(const NativeModules& modules) {
-        module_store_.setNativeModules(modules);
-    }
-
-    const NativeModules& getNativeModules() const {
-        return module_store_.getNativeModules();
-    }
-
     void setSourcePath(const std::string& path) {
         source_path_ = path;
     }
@@ -403,7 +378,6 @@ private:
 
     // Supporting members
     std::vector<std::pair<std::string, std::optional<std::string>>> task_scope_stack_;
-    WorkflowModuleStore module_store_;
     std::string source_path_;
     FailureContextState failure_state_;
 };

@@ -26,12 +26,12 @@ namespace TaskParser {
     DependencyGraph<Task> buildGraph(const Workflow& workflow);
 
     /**
-     * @brief Parses a workflow file with imports, recursively loading all dependencies.
+     * @brief Parses a workflow file with includes, recursively loading all dependencies.
      * @param filePath The path to the main YAML file.
-     * @param basePath The base directory for resolving relative imports.
-     * @return A merged Workflow object containing all imported tasks.
+     * @param basePath The base directory for resolving relative includes.
+     * @return A merged Workflow object containing all included tasks.
      */
-    Workflow parseFileWithImports(const std::string& filePath, const std::string& basePath = "");
+    Workflow parseFileWithIncludes(const std::string& filePath, const std::string& basePath = "");
 
 } // namespace TaskParser
 

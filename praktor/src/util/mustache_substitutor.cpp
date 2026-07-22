@@ -43,7 +43,7 @@ static int bridge_dump(void* node_ptr, int (*out_fn)(const char*, size_t, void*)
 static void* bridge_get_root(void* provider_data) {
     MustacheContext* ctx = static_cast<MustacheContext*>(provider_data);
     // Root represents the global context. We give it a dummy object value so checks pass.
-    return ctx->createNode(jsoncons::json::object(), "");
+    return ctx->createNode(WorkflowValue::object(), "");
 }
 
 static void *bridge_get_child_by_name(void *node_ptr, const char *name, size_t size, void *provider_data) {

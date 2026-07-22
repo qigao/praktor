@@ -23,8 +23,6 @@ tasks:
       - shell:
           cmd: "if command -v systemctl >/dev/null 2>&1; then systemctl is-active '{{ SERVICE_NAME }}'; elif command -v service >/dev/null 2>&1; then service '{{ SERVICE_NAME }}' status; else pgrep -x '{{ SERVICE_NAME }}' | head -n 1; fi"
           output_key: status_raw
-    continue_on_error: true
-
   - name: emit_result
     depends_on: [query_status]
     script: |

@@ -50,6 +50,48 @@ TEST_CASE("parse minimal run_command task")
     CHECK(build.when.has_value());
 }
 
+TEST_CASE("parse command post-processor as part of the command runner")
+{
+    auto wf = writeTempWorkflow("command_parse_json.yml",
+        "tasks:\n"
+        "  - name: query\n"
+        "    command: echo '{\"status\":\"ok\"}'\n"
+        "    parse_json:\n"
+        "      path: $.status\n"
+        "      output_key: status\n");
+
+    Workflow workflow = TaskParser::parseFile(wf.string());
+    REQUIRE(workflow.tasks.size() == 1);
+    const Task& task = workflow.tasks[0];
+    CHECK(task.declared_runner == "command");
+    REQUIRE(std::holds_alternative<OrchParams>(task.specifics));
+
+    const auto& params = std::get<OrchParams>(task.specifics);
+    REQUIRE(params.root.children.size() == 2);
+    CHECK(params.root.children[0].type == "Shell");
+    CHECK(params.root.children[1].type == "ParseJson");
+    CHECK(params.root.children[1].params.at("path") == "$.status");
+    CHECK(params.root.children[1].params.at("output_key") == "status");
+}
+
+TEST_CASE("parse rejects multiple command post-processors")
+{
+    auto wf = writeTempWorkflow("multiple_command_parsers.yml",
+        "tasks:\n"
+        "  - name: ambiguous\n"
+        "    command: echo data\n"
+        "    parse_json:\n"
+        "      path: $.status\n"
+        "      output_key: status\n"
+        "    parse_lines:\n"
+        "      output_key: lines\n");
+
+    REQUIRE_THROWS_WITH(TaskParser::parseFile(wf.string()),
+        Catch::Matchers::ContainsSubstring(
+            "command task cannot combine 'parse_json' and 'parse_lines'") &&
+        Catch::Matchers::ContainsSubstring("line 7"));
+}
+
 TEST_CASE("parse uses tasks")
 {
     auto reused = writeTempWorkflow("reusable.yml",
@@ -112,30 +154,6 @@ TEST_CASE("parse program task")
     CHECK(params.output_format == CommandOutputFormat::Json);
 }
 
-
-
-TEST_CASE("parse workflow embedded modules")
-{
-    const std::string content =
-        "embedded:\n"
-        "  helpers:\n"
-        "    source: |\n"
-        "      export function identity(value) {\n"
-        "        return value;\n"
-        "      }\n"
-        "tasks:\n"
-        "  - name: consumer\n"
-        "    command: echo using module\n";
-
-    auto wf = writeTempWorkflow("embedded.yml", content);
-
-    Workflow workflow = TaskParser::parseFile(wf.string());
-    REQUIRE(workflow.embedded.size() == 1);
-    auto it = workflow.embedded.find("helpers");
-    REQUIRE(it != workflow.embedded.end());
-    CHECK(it->second.language == "javascript");
-    CHECK(it->second.source.find("identity") != std::string::npos);
-}
 
 
 TEST_CASE("parse scalar depends_on and dotEnv fields")
@@ -238,6 +256,249 @@ TEST_CASE("parse silent attribute")
     CHECK(workflow.tasks[1].silent == true);
 }
 
+TEST_CASE("parse rejects invalid silent values")
+{
+    auto wf = writeTempWorkflow("invalid_silent.yml",
+        "tasks:\n"
+        "  - name: quiet\n"
+        "    command: echo quiet\n"
+        "    silent: ture\n");
+
+    REQUIRE_THROWS_WITH(TaskParser::parseFile(wf.string()),
+        Catch::Matchers::ContainsSubstring("'silent' must be a boolean") &&
+        Catch::Matchers::ContainsSubstring("line 4"));
+}
+
+TEST_CASE("parse rejects removed continue_on_error field")
+{
+    auto wf = writeTempWorkflow("removed_continue_on_error.yml",
+        "tasks:\n"
+        "  - name: tolerant\n"
+        "    command: echo tolerant\n"
+        "    continue_on_error: true\n");
+
+    REQUIRE_THROWS_WITH(TaskParser::parseFile(wf.string()),
+        Catch::Matchers::ContainsSubstring("Unknown key: 'continue_on_error'") &&
+        Catch::Matchers::ContainsSubstring("line 4"));
+}
+
+TEST_CASE("parse rejects empty script-only tasks")
+{
+    auto wf = writeTempWorkflow("empty_script.yml",
+        "tasks:\n"
+        "  - name: empty\n"
+        "    script: \"\"\n");
+
+    REQUIRE_THROWS_WITH(TaskParser::parseFile(wf.string()),
+        Catch::Matchers::ContainsSubstring("'script' cannot be empty") &&
+        Catch::Matchers::ContainsSubstring("line 3"));
+}
+
+TEST_CASE("parse rejects empty task lifecycle values")
+{
+    SECTION("finally") {
+        auto wf = writeTempWorkflow("empty_finally.yml",
+            "tasks:\n"
+            "  - name: build\n"
+            "    command: echo build\n"
+            "    finally: \"\"\n");
+
+        REQUIRE_THROWS_WITH(TaskParser::parseFile(wf.string()),
+            Catch::Matchers::ContainsSubstring("'finally' cannot be empty") &&
+            Catch::Matchers::ContainsSubstring("line 4"));
+    }
+
+    SECTION("dynamic template") {
+        auto wf = writeTempWorkflow("empty_dynamic_template.yml",
+            "tasks:\n"
+            "  - name: fanout\n"
+            "    dynamic_tasks:\n"
+            "      items_variable: items\n"
+            "      template:\n"
+            "        name: \"\"\n"
+            "        command: \"\"\n");
+
+        REQUIRE_THROWS_WITH(TaskParser::parseFile(wf.string()),
+            Catch::Matchers::ContainsSubstring(
+                "dynamic_tasks template 'name' cannot be empty") &&
+            Catch::Matchers::ContainsSubstring("line 6"));
+    }
+}
+
+TEST_CASE("parse rejects empty command array entries")
+{
+    auto wf = writeTempWorkflow("empty_command_entry.yml",
+        "tasks:\n"
+        "  - name: build\n"
+        "    command: [echo build, \"\"]\n");
+
+    REQUIRE_THROWS_WITH(TaskParser::parseFile(wf.string()),
+        Catch::Matchers::ContainsSubstring("command array entries cannot be empty") &&
+        Catch::Matchers::ContainsSubstring("line 3"));
+}
+
+TEST_CASE("parse rejects removed native_modules field")
+{
+    auto wf = writeTempWorkflow("removed_native_modules.yml",
+        "native_modules: []\n"
+        "tasks:\n"
+        "  - name: build\n"
+        "    command: echo build\n");
+
+    REQUIRE_THROWS_WITH(TaskParser::parseFile(wf.string()),
+        Catch::Matchers::ContainsSubstring("Unknown key: 'native_modules'") &&
+        Catch::Matchers::ContainsSubstring("line 1"));
+}
+
+TEST_CASE("parse rejects unknown nested workflow keys")
+{
+    SECTION("defaults") {
+        auto wf = writeTempWorkflow("invalid_defaults_key.yml",
+            "defaults:\n"
+            "  timeuot: 30s\n"
+            "tasks:\n"
+            "  - name: build\n"
+            "    command: echo build\n");
+
+        REQUIRE_THROWS_WITH(TaskParser::parseFile(wf.string()),
+            Catch::Matchers::ContainsSubstring("Unknown key: 'timeuot'") &&
+            Catch::Matchers::ContainsSubstring("line 2"));
+    }
+
+}
+
+TEST_CASE("parse rejects removed workflow module fields")
+{
+    SECTION("embedded") {
+        auto wf = writeTempWorkflow("removed_embedded.yml",
+            "embedded: {}\n"
+            "tasks:\n"
+            "  - name: build\n"
+            "    command: echo build\n");
+
+        REQUIRE_THROWS_WITH(TaskParser::parseFile(wf.string()),
+            Catch::Matchers::ContainsSubstring("Unknown key: 'embedded'") &&
+            Catch::Matchers::ContainsSubstring("line 1"));
+    }
+
+    SECTION("imports") {
+        auto wf = writeTempWorkflow("removed_imports.yml",
+            "imports: []\n"
+            "tasks:\n"
+            "  - name: build\n"
+            "    command: echo build\n");
+
+        REQUIRE_THROWS_WITH(TaskParser::parseFile(wf.string()),
+            Catch::Matchers::ContainsSubstring("Unknown key: 'imports'") &&
+            Catch::Matchers::ContainsSubstring("line 1"));
+    }
+}
+
+TEST_CASE("parse rejects unknown top-level workflow keys")
+{
+    auto wf = writeTempWorkflow("invalid_workflow_key.yml",
+        "name: invalid-root\n"
+        "varibles:\n"
+        "  BUILD: release\n"
+        "tasks:\n"
+        "  - name: build\n"
+        "    command: echo build\n");
+
+    REQUIRE_THROWS_WITH(TaskParser::parseFile(wf.string()),
+        Catch::Matchers::ContainsSubstring("Unknown key: 'varibles'") &&
+        Catch::Matchers::ContainsSubstring("line 2"));
+}
+
+TEST_CASE("parse rejects unknown nested task configuration keys")
+{
+    SECTION("each") {
+        auto wf = writeTempWorkflow("invalid_each_key.yml",
+            "tasks:\n"
+            "  - name: fanout\n"
+            "    command: echo item\n"
+            "    each:\n"
+            "      items: [one]\n"
+            "      index_varible: index\n");
+
+        REQUIRE_THROWS_WITH(TaskParser::parseFile(wf.string()),
+            Catch::Matchers::ContainsSubstring("Unknown key: 'index_varible'") &&
+            Catch::Matchers::ContainsSubstring("line 6"));
+    }
+
+    SECTION("triggers") {
+        auto wf = writeTempWorkflow("invalid_trigger_key.yml",
+            "tasks:\n"
+            "  - name: build\n"
+            "    command: echo build\n"
+            "    triggers:\n"
+            "      on_failuer: [notify]\n");
+
+        REQUIRE_THROWS_WITH(TaskParser::parseFile(wf.string()),
+            Catch::Matchers::ContainsSubstring("Unknown key: 'on_failuer'") &&
+            Catch::Matchers::ContainsSubstring("line 5"));
+    }
+
+    SECTION("command parser") {
+        auto wf = writeTempWorkflow("invalid_command_parser_key.yml",
+            "tasks:\n"
+            "  - name: query\n"
+            "    command: echo data\n"
+            "    parse_json:\n"
+            "      path: $.value\n"
+            "      output_ky: value\n"
+            "      output_key: value\n");
+
+        REQUIRE_THROWS_WITH(TaskParser::parseFile(wf.string()),
+            Catch::Matchers::ContainsSubstring("Unknown key: 'output_ky'") &&
+            Catch::Matchers::ContainsSubstring("line 6"));
+    }
+
+    SECTION("dynamic task template") {
+        auto wf = writeTempWorkflow("invalid_dynamic_template_key.yml",
+            "tasks:\n"
+            "  - name: fanout\n"
+            "    dynamic_tasks:\n"
+            "      items_variable: tasks.query.outputs.data\n"
+            "      template:\n"
+            "        name: generated_{{ index }}\n"
+            "        command: echo generated\n"
+            "        timeuot: 5s\n");
+
+        REQUIRE_THROWS_WITH(TaskParser::parseFile(wf.string()),
+            Catch::Matchers::ContainsSubstring("Unknown key: 'timeuot'") &&
+            Catch::Matchers::ContainsSubstring("line 8"));
+    }
+}
+
+TEST_CASE("parse rejects empty trigger action lists")
+{
+    auto wf = writeTempWorkflow("empty_trigger_list.yml",
+        "tasks:\n"
+        "  - name: build\n"
+        "    command: echo build\n"
+        "    triggers:\n"
+        "      on_success: []\n"
+        "      on_failure: [notify]\n");
+
+    REQUIRE_THROWS_WITH(TaskParser::parseFile(wf.string()),
+        Catch::Matchers::ContainsSubstring(
+            "Trigger action list must contain at least one task name") &&
+        Catch::Matchers::ContainsSubstring("line 5"));
+}
+
+TEST_CASE("parse rejects mapping command values with source location")
+{
+    auto wf = writeTempWorkflow("mapping_command.yml",
+        "tasks:\n"
+        "  - name: invalid\n"
+        "    command:\n"
+        "      cmd: echo invalid\n");
+
+    REQUIRE_THROWS_WITH(TaskParser::parseFile(wf.string()),
+        Catch::Matchers::ContainsSubstring("command must be a scalar or sequence") &&
+        Catch::Matchers::ContainsSubstring("line 3"));
+}
+
 TEST_CASE("top-level defaults apply to included tasks")
 {
     auto included = writeTempWorkflow("defaults_included.yml",
@@ -265,6 +526,51 @@ TEST_CASE("top-level defaults apply to included tasks")
     CHECK(it->timeout.value() == "30s");
 }
 
+TEST_CASE("parse rejects invalid include shapes")
+{
+    SECTION("includes must be a map") {
+        auto wf = writeTempWorkflow("invalid_includes.yml",
+            "includes:\n"
+            "  - child.yml\n"
+            "tasks:\n"
+            "  - name: root\n"
+            "    command: echo root\n");
+
+        REQUIRE_THROWS_WITH(TaskParser::parseFile(wf.string()),
+            Catch::Matchers::ContainsSubstring("'includes' must be a map") &&
+            Catch::Matchers::ContainsSubstring("line 1"));
+    }
+
+    SECTION("include paths cannot be empty") {
+        auto wf = writeTempWorkflow("empty_include_path.yml",
+            "includes:\n"
+            "  child: \"\"\n"
+            "tasks:\n"
+            "  - name: root\n"
+            "    command: echo root\n");
+
+        REQUIRE_THROWS_WITH(TaskParser::parseFile(wf.string()),
+            Catch::Matchers::ContainsSubstring("include path cannot be empty") &&
+            Catch::Matchers::ContainsSubstring("line 2"));
+    }
+
+}
+
+TEST_CASE("parseFileWithIncludes resolves a relative workflow against basePath")
+{
+    auto wf = writeTempWorkflow("relative_main.yml",
+        "tasks:\n"
+        "  - name: root\n"
+        "    command: echo root\n");
+
+    Workflow workflow = TaskParser::parseFileWithIncludes(
+        wf.filename().string(), wf.parent_path().string());
+
+    REQUIRE(workflow.tasks.size() == 1);
+    CHECK(workflow.tasks[0].name == "root");
+    CHECK(std::filesystem::path(workflow.source_path) == std::filesystem::absolute(wf));
+}
+
 TEST_CASE("build graph rejects duplicate task names")
 {
     const std::string content =
@@ -279,6 +585,21 @@ TEST_CASE("build graph rejects duplicate task names")
 
     REQUIRE_THROWS_WITH(TaskParser::buildGraph(workflow),
         Catch::Matchers::ContainsSubstring("Duplicate task name: 'duplicate'"));
+}
+
+TEST_CASE("parse rejects duplicate YAML mapping keys with source location")
+{
+    const std::string content =
+        "tasks:\n"
+        "  - name: first\n"
+        "    name: second\n"
+        "    command: echo duplicate\n";
+
+    auto wf = writeTempWorkflow("duplicate_yaml_key.yml", content);
+
+    REQUIRE_THROWS_WITH(TaskParser::parseFile(wf.string()),
+        Catch::Matchers::ContainsSubstring("Duplicate mapping key") &&
+        Catch::Matchers::ContainsSubstring("line 3"));
 }
 
 TEST_CASE("parse rejects http_request BT node in workflow grammar")

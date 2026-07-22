@@ -1,6 +1,6 @@
 #pragma once
 
-#include <jsoncons/json.hpp>
+#include "data/workflow_value.hpp"
 #include <memory>
 #include <mutex>
 #include <shared_mutex>
@@ -40,7 +40,7 @@ public:
     /**
      * @brief Set a variable in the current scope
      */
-    void set(const std::string& key, const jsoncons::json& value) {
+    void set(const std::string& key, const WorkflowValue& value) {
         std::unique_lock lock(mutex_);
         local_[key] = value;
     }
@@ -49,7 +49,7 @@ public:
      * @brief Get a variable, searching up the scope chain
      * @throws std::runtime_error if key not found
      */
-    jsoncons::json get(const std::string& key) const {
+    WorkflowValue get(const std::string& key) const {
         VariableScope* parent = nullptr;
         {
             std::shared_lock lock(mutex_);
@@ -102,8 +102,8 @@ public:
     /**
      * @brief Get all variables visible in current scope (includes parent chain)
      */
-    std::unordered_map<std::string, jsoncons::json> getAllVisible() const {
-        std::unordered_map<std::string, jsoncons::json> result;
+    std::unordered_map<std::string, WorkflowValue> getAllVisible() const {
+        std::unordered_map<std::string, WorkflowValue> result;
 
         VariableScope* parent = nullptr;
         {
@@ -128,7 +128,7 @@ public:
     /**
      * @brief Get only local variables (not including parent)
      */
-    std::unordered_map<std::string, jsoncons::json> getLocalSnapshot() const {
+    std::unordered_map<std::string, WorkflowValue> getLocalSnapshot() const {
         std::shared_lock lock(mutex_);
         return local_;
     }
@@ -142,7 +142,7 @@ public:
 
 private:
     mutable std::shared_mutex mutex_;
-    std::unordered_map<std::string, jsoncons::json> local_;
+    std::unordered_map<std::string, WorkflowValue> local_;
     VariableScope* parent_;
 };
 

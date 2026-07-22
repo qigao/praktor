@@ -437,7 +437,7 @@ TEST_CASE("Script engine: context integration", "[script]") {
     }
 
     SECTION("ctx.get returns structured arrays for iteration") {
-        context.setValue("items", jsoncons::json::parse(R"([{"name":"alpha"},{"name":"beta"}])"));
+        context.setValue("items", WorkflowValue::parse(R"([{"name":"alpha"},{"name":"beta"}])"));
 
         auto r = Praktor::Script::execute(R"script(
             items = ctx.get("items");
@@ -458,7 +458,7 @@ TEST_CASE("Script engine: context integration", "[script]") {
     }
 
     SECTION("ctx.get returns structured objects for member access") {
-        context.setValue("payload", jsoncons::json::parse(R"({"name":"demo","meta":{"ok":true}})"));
+        context.setValue("payload", WorkflowValue::parse(R"({"name":"demo","meta":{"ok":true}})"));
 
         auto r = Praktor::Script::execute(R"(
             payload = ctx.get("payload");

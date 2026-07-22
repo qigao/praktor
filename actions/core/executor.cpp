@@ -2,15 +2,75 @@
 #include "core/execution_context.hpp"
 #include "actions/shell_executor.hpp"
 #include "actions/output_parser.hpp"
-#include <jsoncons/json.hpp>
+#include <turbo_parser.h>
 #include <cmath>
 #include <limits>
 #include <stdexcept>
 #include <chrono>
 #include <filesystem>
+#include <iostream>
+#include <memory>
 #include <thread>
 
 namespace actions {
+
+namespace {
+
+struct JsonDeleter {
+  void operator()(json_value_t* value) const noexcept {
+    auto* document = reinterpret_cast<turbo_json_doc_t*>(value);
+    turbo_free_json(&document);
+  }
+};
+
+struct SerializedJsonDeleter {
+  void operator()(char* text) const noexcept { turbo_json_serialize_free(text); }
+};
+
+using OwnedJson = std::unique_ptr<json_value_t, JsonDeleter>;
+using OwnedSerializedJson = std::unique_ptr<char, SerializedJsonDeleter>;
+
+std::string serializeJson(const json_value_t* value) {
+  size_t size = 0;
+  OwnedSerializedJson text(turbo_json_serialize(value, &size));
+  if (!text) {
+    throw std::runtime_error("Failed to serialize JSON value");
+  }
+  return std::string(text.get(), size);
+}
+
+bool consumeJsonArrayFront(std::string_view input, std::string& item, std::string& remaining,
+                           bool& has_more) {
+  turbo_json_doc_t* parsed_document = nullptr;
+  if (turbo_parse_json(reinterpret_cast<const uint8_t*>(input.data()), input.size(), &parsed_document) !=
+          0 ||
+      !parsed_document) {
+    return false;
+  }
+  OwnedJson document(reinterpret_cast<json_value_t*>(parsed_document));
+  if (turbo_json_type(document.get()) != TURBO_JSON_ARRAY ||
+      turbo_json_array_size(document.get()) == 0) {
+    return false;
+  }
+
+  item = serializeJson(turbo_json_array_get(document.get(), 0));
+  OwnedJson tail(turbo_json_create_array());
+  if (!tail) {
+    throw std::bad_alloc();
+  }
+  for (size_t index = 1; index < turbo_json_array_size(document.get()); ++index) {
+    OwnedJson child(turbo_json_clone(turbo_json_array_get(document.get(), index)));
+    if (!child || !turbo_json_array_add_checked(tail.get(), child.get())) {
+      throw std::runtime_error("Failed to rebuild JSON queue");
+    }
+    child.release();
+  }
+  remaining = serializeJson(tail.get());
+  has_more = turbo_json_array_size(tail.get()) != 0;
+  return true;
+}
+
+} // namespace
 
 // Forward declaration - WorkflowContext is defined in Praktor
 class WorkflowContext;
@@ -558,12 +618,17 @@ void Executor::registerBuiltins() {
     std::string input = bb.get(input_key);
     auto parsed = OutputParser::parseKeyValue(input, delimiter, line_separator);
 
-    jsoncons::json result = jsoncons::json::object();
+    json_value_t* result = turbo_json_create_object();
+    if (!result) {
+      return NodeStatus::FAILURE;
+    }
     for (const auto& [key, value] : parsed) {
-      result[key] = value;
+      turbo_json_object_set_string(result, key.c_str(), value.c_str());
     }
 
-    bb.set(output_key, result.to_string());
+    bb.set(output_key, serializeJson(result));
+    auto* result_document = reinterpret_cast<turbo_json_doc_t*>(result);
+    turbo_free_json(&result_document);
     return NodeStatus::SUCCESS;
   });
 
@@ -1500,27 +1565,24 @@ NodeStatus Executor::executeConsumeQueue(const Node& node, Blackboard& bb) {
   std::string queue_data = bb.get(queue_key);
   
   try {
-    auto queue = jsoncons::json::parse(queue_data);
-    
-    if (!queue.is_array() || queue.empty()) {
+    std::string item;
+    std::string remaining;
+    bool has_more = false;
+    if (!consumeJsonArrayFront(queue_data, item, remaining, has_more)) {
       return NodeStatus::FAILURE;
     }
-    
-    // Pop first item from queue
-    auto item = queue[0];
-    queue.erase(queue.array_range().begin());
-    
+
     // Update queue in blackboard
-    bb.set(queue_key, queue.to_string());
+    bb.set(queue_key, remaining);
     
     // Set current item in blackboard for child to consume
     std::string item_key = getTaskStringParam(node.params, bb, "item_key", "current_item");
-    bb.set(item_key, item.to_string());
+    bb.set(item_key, item);
     
     // Execute child with the item
     NodeStatus status = execute(node.children[0], bb);
     
-    if (status == NodeStatus::SUCCESS && !queue.empty()) {
+    if (status == NodeStatus::SUCCESS && has_more) {
       // More items to process, return RUNNING to continue
       return NodeStatus::RUNNING;
     }
@@ -1547,23 +1609,21 @@ NodeStatus Executor::executeConsumeQueue(const Node& node, Blackboard& bb, Execu
   std::string queue_data = bb.get(queue_key);
 
   try {
-    auto queue = jsoncons::json::parse(queue_data);
-
-    if (!queue.is_array() || queue.empty()) {
+    std::string item;
+    std::string remaining;
+    bool has_more = false;
+    if (!consumeJsonArrayFront(queue_data, item, remaining, has_more)) {
       return NodeStatus::FAILURE;
     }
 
-    auto item = queue[0];
-    queue.erase(queue.array_range().begin());
-
-    bb.set(queue_key, queue.to_string());
+    bb.set(queue_key, remaining);
 
     std::string item_key = getTaskStringParam(node.params, bb, "item_key", "current_item");
-    bb.set(item_key, item.to_string());
+    bb.set(item_key, item);
 
     NodeStatus status = execute(node.children[0], bb, ctx);
 
-    if (status == NodeStatus::SUCCESS && !queue.empty()) {
+    if (status == NodeStatus::SUCCESS && has_more) {
       return NodeStatus::RUNNING;
     }
 

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <jsoncons/json.hpp>
+#include "data/workflow_value.hpp"
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
@@ -125,7 +125,7 @@ public:
      * Plan A: Outputs can only be written during execution, never after.
      */
     void setOutput(const std::string& task_name, const std::string& key,
-                   const jsoncons::json& value) {
+                   const WorkflowValue& value) {
         std::lock_guard<std::recursive_mutex> lock(mutex_);
         TaskState state = getStateInternal(task_name);
         if (state != TaskState::Running && state != TaskState::Pending) {
@@ -147,7 +147,7 @@ public:
      * Uses recursive_mutex to allow nested locking.
      * @throws std::runtime_error if task is not in Running state
      */
-    void mergeOutputs(const std::string& task_name, const jsoncons::json& outputs) {
+    void mergeOutputs(const std::string& task_name, const WorkflowValue& outputs) {
         if (!outputs.is_object()) {
             return;
         }
@@ -168,7 +168,7 @@ public:
      * Plan A: Only allows reading outputs from completed/failed tasks,
      * ensuring the data is final and won't change.
      */
-    jsoncons::json getOutput(const std::string& task_name, const std::string& key) const {
+    WorkflowValue getOutput(const std::string& task_name, const std::string& key) const {
         std::lock_guard<std::recursive_mutex> lock(mutex_);
         auto task_it = task_outputs_.find(task_name);
         if (task_it == task_outputs_.end()) {
@@ -186,14 +186,14 @@ public:
     /**
      * @brief Get all outputs for a task
      */
-    jsoncons::json getAllOutputs(const std::string& task_name) const {
+    WorkflowValue getAllOutputs(const std::string& task_name) const {
         std::lock_guard<std::recursive_mutex> lock(mutex_);
         auto it = task_outputs_.find(task_name);
         if (it == task_outputs_.end()) {
-            return jsoncons::json::object();
+            return WorkflowValue::object();
         }
 
-        jsoncons::json result = jsoncons::json::object();
+        WorkflowValue result = WorkflowValue::object();
         for (const auto& [key, value] : it->second) {
             result[key] = value;
         }
@@ -253,17 +253,17 @@ public:
     /**
      * @brief Build a JSON representation of all tasks for context access
      */
-    jsoncons::json toJson() const {
+    WorkflowValue toJson() const {
         std::lock_guard<std::recursive_mutex> lock(mutex_);
-        jsoncons::json result = jsoncons::json::object();
+        WorkflowValue result = WorkflowValue::object();
 
         for (const auto& [task_name, state] : task_state_) {
-            jsoncons::json task_obj = jsoncons::json::object();
+            WorkflowValue task_obj = WorkflowValue::object();
             task_obj["status"] = taskStateToString(state);
 
             auto outputs_it = task_outputs_.find(task_name);
             if (outputs_it != task_outputs_.end()) {
-                jsoncons::json outputs_obj = jsoncons::json::object();
+                WorkflowValue outputs_obj = WorkflowValue::object();
                 for (const auto& [key, value] : outputs_it->second) {
                     outputs_obj[key] = value;
                 }
@@ -286,6 +286,6 @@ private:
     std::unordered_map<std::string, TaskState> task_state_;
     std::unordered_set<std::string> completed_tasks_;
     std::unordered_map<std::string, std::string> failed_tasks_;
-    std::unordered_map<std::string, std::unordered_map<std::string, jsoncons::json>> task_outputs_;
+    std::unordered_map<std::string, std::unordered_map<std::string, WorkflowValue>> task_outputs_;
 };
 

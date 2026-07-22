@@ -39,8 +39,6 @@ tasks:
               pattern: "([A-Za-z0-9._-]+|[0-9]+)"
               capture_group: 1
               output_key: restarted_pid
-    continue_on_error: true
-
   - name: emit_status
     depends_on: [ensure_service]
     script: |

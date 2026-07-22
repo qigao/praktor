@@ -4,7 +4,6 @@
 #include "util/variable_substitution.hpp"
 #include "yml/task_yaml.hpp"
 
-#include <jsoncons/json.hpp>
 #include <regex>
 #include <sstream>
 #include <stdexcept>
@@ -94,7 +93,7 @@ TaskResult DynamicTasksExecutor::execute(const Task& task, WorkflowContext& cont
         }
 
         // Retrieve the items array from context
-        jsoncons::json items_json;
+        WorkflowValue items_json;
         try {
             items_json = context.getValueByPath(items_var);
             TLOG_DEBUG("Retrieved items_variable '{}': is_null={}, is_array={}, type={}",
@@ -112,7 +111,7 @@ TaskResult DynamicTasksExecutor::execute(const Task& task, WorkflowContext& cont
         }
 
         TLOG_DEBUG("Generating {} tasks from template", items_json.size());
-        jsoncons::json generated_results = jsoncons::json::array();
+        WorkflowValue generated_results = WorkflowValue::array();
         context.setCurrentTaskOutput("generated_tasks", generated_results);
         context.setCurrentTaskOutput("generated_count", static_cast<int64_t>(0));
         context.setCurrentTaskOutput("success_count", static_cast<int64_t>(0));
@@ -146,7 +145,7 @@ TaskResult DynamicTasksExecutor::execute(const Task& task, WorkflowContext& cont
             TLOG_DEBUG("Executing generated task: {}", generated.name);
 
             bool callback_success = subtask_callback_(generated, context);
-            jsoncons::json generated_result =
+            WorkflowValue generated_result =
                 buildGeneratedTaskResult(generated, item, index, callback_success, context);
             const std::string status = generated_result["status"].as<std::string>();
             if (status == "success") {
@@ -204,7 +203,7 @@ TaskResult DynamicTasksExecutor::execute(const Task& task, WorkflowContext& cont
 }
 
 TaskFailureContext DynamicTasksExecutor::buildGeneratedTaskFailureContext(
-    const Task& generated_task, const jsoncons::json& item, size_t index,
+    const Task& generated_task, const WorkflowValue& item, size_t index,
     const WorkflowContext& context) const
 {
     TaskFailureContext failure;
@@ -223,13 +222,13 @@ TaskFailureContext DynamicTasksExecutor::buildGeneratedTaskFailureContext(
     return failure;
 }
 
-jsoncons::json DynamicTasksExecutor::buildGeneratedTaskResult(const Task& generated_task,
-                                                             const jsoncons::json& item,
-                                                             size_t index,
-                                                             bool callback_success,
-                                                             WorkflowContext& context) const
+WorkflowValue DynamicTasksExecutor::buildGeneratedTaskResult(const Task& generated_task,
+                                                            const WorkflowValue& item,
+                                                            size_t index,
+                                                            bool callback_success,
+                                                            WorkflowContext& context) const
 {
-    jsoncons::json result = jsoncons::json::object();
+    WorkflowValue result = WorkflowValue::object();
     result["index"] = static_cast<int64_t>(index);
     result["item"] = item;
     result["name"] = generated_task.name;
@@ -241,13 +240,13 @@ jsoncons::json DynamicTasksExecutor::buildGeneratedTaskResult(const Task& genera
     result["status"] = status;
 
     auto outputs = context.getValueByPath("tasks." + generated_task.name + ".outputs");
-    result["outputs"] = outputs.is_object() ? outputs : jsoncons::json::object();
+    result["outputs"] = outputs.is_object() ? outputs : WorkflowValue::object();
     return result;
 }
 
 Task DynamicTasksExecutor::generateTask(const Task& parent_task,
                                          const DynamicTaskTemplate& tmpl,
-                                         const jsoncons::json& item,
+                                         const WorkflowValue& item,
                                          size_t index)
 {
     Task task;
@@ -294,7 +293,7 @@ Task DynamicTasksExecutor::generateTask(const Task& parent_task,
 }
 
 std::string DynamicTasksExecutor::substituteItemPlaceholders(const std::string& input,
-                                                              const jsoncons::json& item,
+                                                              const WorkflowValue& item,
                                                               size_t index)
 {
     std::string result = input;

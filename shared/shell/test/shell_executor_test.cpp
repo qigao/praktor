@@ -26,6 +26,7 @@
 namespace {
 
 constexpr int kLongLineLength = 6000;
+constexpr int kProcessTreeTimeoutMs = 3000;
 constexpr std::size_t kDuplexPayloadSize = 256 * 1024;
 constexpr const char* kTailFragment = "tail_fragment";
 
@@ -488,7 +489,8 @@ TEST_CASE("shell executor timeout terminates the spawned process", "[shell]") {
     const auto script = createKillScript(dir, pid_file, finished_file);
 
     const auto result =
-        Praktor::Shell::ShellExecutor::execute(commandForScript(script), "", "", 800, {}, false);
+        Praktor::Shell::ShellExecutor::execute(
+            commandForScript(script), "", "", kProcessTreeTimeoutMs, {}, false);
 
     CHECK(result.exit_code == -1);
     CHECK_FALSE(result.success());

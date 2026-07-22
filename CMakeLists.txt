@@ -52,8 +52,6 @@ set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 
 find_package(TurboUtils CONFIG REQUIRED PATHS ${TURBO_UTILS_ROOT})
 find_package(TurboScript CONFIG REQUIRED PATHS "${TURBOSCRIPT_ROOT}")
-find_package(ryml CONFIG REQUIRED)
-find_package(jsoncons CONFIG REQUIRED)
 find_package(cxxopts CONFIG REQUIRED)
 if(ENABLE_TESTS)
     find_package(Catch2 CONFIG REQUIRED)
