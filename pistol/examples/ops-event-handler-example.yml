@@ -1,0 +1,54 @@
+name: Ops Event Handler Example
+description: |
+  Event-driven Behavior Tree (BT) workflow for reactive operations.
+  Listens for an operational JSON event, parses payload, and routes execution dynamically.
+
+tasks:
+  - name: handle_ops_event
+    sequence:
+      # Step 1: Wait for operational event signal
+      - wait_event:
+          event: "ops_dispatch_event"
+          timeout: 30000
+
+      # Step 2: Parse incoming JSON payload from blackboard
+      - parse_json:
+          input_key: "event_payload"
+          path: "$.action"
+          output_key: "requested_action"
+
+      - parse_json:
+          input_key: "event_payload"
+          path: "$.target"
+          output_key: "target_name"
+
+      # Step 3: Branching logic using IfThenElse node based on parsed action
+      - if: "{requested_action} == 'status'"
+        then:
+          - set_variable: "ops_status"
+            value: "completed"
+        else:
+          - set_variable: "ops_status"
+            value: "processed"
+
+  - name: emit_result
+    depends_on: [handle_ops_event]
+    script: |
+      import("mapper");
+      class OpsEventResult {
+        event: string;
+        action: string;
+        target: string;
+        status: string;
+      }
+      var status = ctx.get("tasks.handle_ops_event.outputs.ops_status");
+      var action = ctx.get("tasks.handle_ops_event.outputs.requested_action");
+      var target = ctx.get("tasks.handle_ops_event.outputs.target_name");
+      var payload = OpsEventResult();
+      payload.event = "ops_dispatch_event";
+      payload.action = action;
+      payload.target = target;
+      payload.status = status;
+      var jsonStr = mapper.write_json(payload);
+      ctx.output("result", jsonStr);
+      log.info("Ops event result: " + jsonStr);

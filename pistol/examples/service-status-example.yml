@@ -1,17 +1,35 @@
 name: Service Status Example
 description: |
-  Minimal wrapper around the reusable service status template.
+  Standalone Behavior Tree (BT) workflow for querying service status.
+  Uses the TurboScript os module and formats its structured result.
 
 variables:
   SERVICE_NAME: "nginx"
 
 tasks:
   - name: service_status
-    uses: ../templates/service-status.yml
-    vars:
-      SERVICE_NAME: "{{ SERVICE_NAME }}"
+    script: |
+      import("os");
+      var result = os.service_status(ctx.get("SERVICE_NAME"));
+      ctx.output("result", result);
 
   - name: emit_result
     depends_on: [service_status]
     script: |
-      ctx.output("result", ctx.get("tasks.service_status.outputs.result"));
+      import("mapper");
+      class ServiceStatusResult {
+        service: string;
+        running: bool;
+        raw: string;
+        status: string;
+      }
+      var result = ctx.get("tasks.service_status.outputs.result");
+      var running = result != null and result.active == 1;
+      var payload = ServiceStatusResult();
+      payload.service = ctx.get("SERVICE_NAME");
+      payload.running = running;
+      payload.raw = result.output;
+      payload.status = result.state;
+      var jsonStr = mapper.write_json(payload);
+      ctx.output("result", jsonStr);
+      log.info("Service status: " + jsonStr);

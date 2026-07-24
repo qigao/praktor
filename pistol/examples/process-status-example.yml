@@ -1,19 +1,53 @@
 name: Process Status Example
 description: |
-  Minimal wrapper around the reusable process status template.
+  Standalone Behavior Tree (BT) workflow for querying process status by name.
 
 variables:
-  PROCESS_NAME: "nginx"
-  PID: ""
+  PROCESS_NAME: "ping"
 
 tasks:
   - name: process_status
-    uses: ../templates/process-status.yml
-    vars:
-      PROCESS_NAME: "{{ PROCESS_NAME }}"
-      PID: "{{ PID }}"
+    script: |
+      import("os");
+      var process_name = ctx.get("PROCESS_NAME");
+      var handle = null;
+      if (os.platform_name() == "windows") {
+        handle = os.process_start("powershell.exe", "-NoProfile", "-Command", "(Get-Process -Name $args[0] -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty Id)", process_name);
+      } else {
+        handle = os.process_start("pgrep", "-x", process_name);
+      }
+      var process_result = null;
+      var pid_raw = "";
+      var running = false;
+      if (handle != null) {
+        process_result = os.process_wait(handle);
+        pid_raw = os.process_read_stdout(handle);
+        if (pid_raw == "") {
+          pid_raw = os.process_read_stderr(handle);
+        }
+        os.process_close(handle);
+        running = process_result.exit_code == 0 and process_result.error_code == 0 and process_result.wait_code == 0;
+      }
+      ctx.output("running", running);
+      ctx.output("pid", pid_raw);
+      ctx.output("process", process_result);
 
   - name: emit_result
     depends_on: [process_status]
     script: |
-      ctx.output("result", ctx.get("tasks.process_status.outputs.result"));
+      import("mapper");
+      class ProcessStatusResult {
+        process: string;
+        running: bool;
+        pid: string;
+        details: map;
+      }
+      var running = ctx.get("tasks.process_status.outputs.running") == true;
+      var payload = ProcessStatusResult();
+      payload.process = ctx.get("PROCESS_NAME");
+      payload.running = running;
+      payload.pid = ctx.get("tasks.process_status.outputs.pid");
+      payload.details = ctx.get("tasks.process_status.outputs.process");
+      var jsonStr = mapper.write_json(payload);
+      ctx.output("result", jsonStr);
+      log.info("Process status: " + jsonStr);

@@ -1,113 +1,73 @@
-# Pistol Examples
+# Pistol Examples (BT-Native)
 
-This directory contains minimal wrapper workflows for the reusable templates in `../templates`.
+This directory contains standalone, Behavior Tree (BT) powered operational workflows.
 
-The rule is simple:
-
-- Pick the smallest template that matches the job.
-- Pass explicit variables.
-- Read the nested `result` object from `tasks.<alias>.outputs.result`.
+Each workflow is self-contained. Operational scripts import TurboScript's `os` module; child-process calls pass an executable and separate arguments without shell parsing.
 
 ## Service Operations
 
 - `service-status-example.yml`
-  - Uses `../templates/service-status.yml`
-  - Query whether a service is running
+  - `os.service_status` query with a structured result.
 - `service-start-example.yml`
-  - Uses `../templates/service-start.yml`
-  - Start a service and verify it is running
+  - `os.service_start` operation with explicit success reporting.
 - `service-stop-example.yml`
-  - Uses `../templates/service-stop.yml`
-  - Stop a service and verify it is stopped
+  - `os.service_stop` operation with explicit success reporting.
 - `service-restart-example.yml`
-  - Uses `../templates/service-restart.yml`
-  - Restart a service and verify it returns to running
+  - `os.service_stop` followed by `os.service_start` with both results preserved.
 
 ## Process Operations
 
 - `process-status-example.yml`
-  - Uses `../templates/process-status.yml`
-  - Query whether a process exists by exact name or PID
+  - `os.process_start` query for a process PID, followed by wait/read/close.
 - `process-stop-example.yml`
-  - Uses `../templates/process-stop.yml`
-  - Stop a process by exact name or PID
+  - `os.process_start` invocation of the platform process terminator.
 
-## Host Operations
+## Event-Driven Operations
+
+- `ops-event-handler-example.yml`
+  - BT Sequence + `wait_event` + `parse_json` + `if` branching. Demonstrates reactive operational workflow triggered by JSON events.
+
+## Host & Session Operations
 
 - `host-shutdown-example.yml`
-  - Uses `../templates/host-shutdown.yml`
-  - Schedule a host shutdown with an explicit delay
+  - `os.shutdown` with the native action result.
 - `host-reboot-example.yml`
-  - Uses `../templates/host-reboot.yml`
-  - Schedule a host reboot with an explicit delay
+  - `os.reboot` with the native action result.
 - `host-suspend-example.yml`
-  - Uses `../templates/host-suspend.yml`
-  - Request host suspend / sleep
+  - `os.process_start` with platform-specific executable arguments.
 - `host-hibernate-example.yml`
-  - Uses `../templates/host-hibernate.yml`
-  - Request host hibernation
+  - `os.process_start` with platform-specific executable arguments.
 - `power-profile-example.yml`
-  - Uses `../templates/power-profile.yml`
-  - Request a host power profile change
+  - `os.process_start` query for the platform power profile.
 - `session-lock-example.yml`
-  - Uses `../templates/session-lock.yml`
-  - Lock the current interactive session
+  - `os.process_start` invocation of the platform session locker.
 - `session-logoff-example.yml`
-  - Uses `../templates/session-logoff.yml`
-  - Log off the current interactive session
+  - `os.process_start` invocation of the platform session logoff command.
 
-## Other Reusable Templates
-
-These templates do not yet have wrapper examples in this directory, but they are ready to use directly:
-
-- `../templates/file-download.yml`
-- `../templates/file-upload.yml`
-- `../templates/archive-create.yml`
-- `../templates/archive-extract.yml`
-- `../templates/host-shutdown.yml`
-- `../templates/host-reboot.yml`
-- `../templates/host-suspend.yml`
-- `../templates/host-hibernate.yml`
-- `../templates/power-profile.yml`
-- `../templates/session-lock.yml`
-- `../templates/session-logoff.yml`
-- `../templates/service-check.yml`
-- `../templates/monitor-host.yml`
-- `../templates/monitor-processes.yml`
-- `../templates/remote-cmd-receiver.yml`
-- `../templates/ops-agent.yml`
-
-## Minimal Pattern
+## Pattern & Validation
 
 ```yaml
 tasks:
-  - name: service_status
-    uses: ../templates/service-status.yml
-    vars:
-      SERVICE_NAME: "{{ SERVICE_NAME }}"
-
-  - name: emit_result
-    depends_on: [service_status]
-    script: |
-      ctx.output("result", ctx.get("tasks.service_status.outputs.result"));
+  - name: process_ops
+    sequence:
+      - wait_event:
+          event: "ops_dispatch_event"
+          timeout: "30000"
+      - parse_json:
+          input_key: "event_payload"
+          path: "$.action"
+          output_key: "requested_action"
+      - if: "{requested_action} == 'status'"
+        then:
+          - set_variable: "ops_status"
+            value: "completed"
 ```
 
-## Validate
-
-From the repository root:
-
+Validate workflow:
 ```powershell
-.\build\Msvc-ASan\bin\praktor.exe validate -f pistol\examples\service-status-example.yml
-.\build\Msvc-ASan\bin\praktor.exe validate -f pistol\templates\service-status.yml
+praktor validate -f pistol\examples\ops-event-handler-example.yml
 ```
 
-## Notes
-
-- These examples are intentionally small. They exist to show `uses` wiring, not to hide behavior.
-- Service templates prefer native service managers and only fall back when necessary.
-- Process templates support either exact process name or PID.
-- Host power templates use `DELAY_MINUTES` instead of fake cross-platform seconds semantics.
-- Suspend and hibernate templates are best-effort host power requests; they only report whether the command was accepted.
-- Power profile templates only expose three portable modes: `balanced`, `powersave`, `performance`.
-- Session templates are desktop-session actions, not server lifecycle operations.
-- File and archive templates are explicit operations. Do not replace them with generic `run_command` garbage.
+The reboot and shutdown examples call the native immediate power APIs. They can
+change external system state and may require administrator/root privileges;
+inspect the returned `success` field before treating the request as accepted.

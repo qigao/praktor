@@ -1,19 +1,33 @@
 name: Host Reboot Example
 description: |
-  Minimal wrapper around the reusable host reboot template.
+  Standalone Behavior Tree (BT) workflow for issuing a host reboot command.
 
 variables:
-  DELAY_MINUTES: "5"
-  MESSAGE: "Scheduled reboot by Praktor example"
+  REASON: "System update"
 
 tasks:
   - name: host_reboot
-    uses: ../templates/host-reboot.yml
-    vars:
-      DELAY_MINUTES: "{{ DELAY_MINUTES }}"
-      MESSAGE: "{{ MESSAGE }}"
+    script: |
+      import("os");
+      var result = os.reboot();
+      ctx.output("result", result);
 
   - name: emit_result
     depends_on: [host_reboot]
     script: |
-      ctx.output("result", ctx.get("tasks.host_reboot.outputs.result"));
+      import("mapper");
+      class HostRebootResult {
+        action: string;
+        accepted: bool;
+        reason: string;
+        details: map;
+      }
+      var result = ctx.get("tasks.host_reboot.outputs.result");
+      var payload = HostRebootResult();
+      payload.action = "reboot";
+      payload.accepted = result != null and result.success == 1;
+      payload.reason = ctx.get("REASON");
+      payload.details = result;
+      var jsonStr = mapper.write_json(payload);
+      ctx.output("result", jsonStr);
+      log.info("Host reboot result: " + jsonStr);

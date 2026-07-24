@@ -1,19 +1,33 @@
 name: Host Shutdown Example
 description: |
-  Minimal wrapper around the reusable host shutdown template.
+  Standalone Behavior Tree (BT) workflow for issuing a host shutdown command.
 
 variables:
-  DELAY_MINUTES: "5"
-  MESSAGE: "Scheduled shutdown by Praktor example"
+  REASON: "Scheduled maintenance"
 
 tasks:
   - name: host_shutdown
-    uses: ../templates/host-shutdown.yml
-    vars:
-      DELAY_MINUTES: "{{ DELAY_MINUTES }}"
-      MESSAGE: "{{ MESSAGE }}"
+    script: |
+      import("os");
+      var result = os.shutdown();
+      ctx.output("result", result);
 
   - name: emit_result
     depends_on: [host_shutdown]
     script: |
-      ctx.output("result", ctx.get("tasks.host_shutdown.outputs.result"));
+      import("mapper");
+      class HostShutdownResult {
+        action: string;
+        accepted: bool;
+        reason: string;
+        details: map;
+      }
+      var result = ctx.get("tasks.host_shutdown.outputs.result");
+      var payload = HostShutdownResult();
+      payload.action = "shutdown";
+      payload.accepted = result != null and result.success == 1;
+      payload.reason = ctx.get("REASON");
+      payload.details = result;
+      var jsonStr = mapper.write_json(payload);
+      ctx.output("result", jsonStr);
+      log.info("Host shutdown result: " + jsonStr);

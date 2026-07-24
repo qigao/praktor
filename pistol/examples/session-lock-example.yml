@@ -1,17 +1,48 @@
 name: Session Lock Example
 description: |
-  Minimal wrapper around the reusable session lock template.
-
-variables:
-  MESSAGE: "Session lock requested by Praktor example"
+  Standalone Behavior Tree (BT) workflow for locking the current user session.
 
 tasks:
   - name: session_lock
-    uses: ../templates/session-lock.yml
-    vars:
-      MESSAGE: "{{ MESSAGE }}"
+    script: |
+      import("os");
+      var handle = null;
+      if (os.platform_name() == "windows") {
+        handle = os.process_start("rundll32.exe", "user32.dll,LockWorkStation");
+      } else {
+        handle = os.process_start("loginctl", "lock-session");
+      }
+      var process_result = null;
+      var output = "";
+      var success = false;
+      if (handle != null) {
+        process_result = os.process_wait(handle);
+        output = os.process_read_stdout(handle);
+        if (output == "") {
+          output = os.process_read_stderr(handle);
+        }
+        os.process_close(handle);
+        success = process_result.exit_code == 0 and process_result.error_code == 0 and process_result.wait_code == 0;
+      }
+      ctx.output("success", success);
+      ctx.output("process", process_result);
+      ctx.output("output", output);
 
   - name: emit_result
     depends_on: [session_lock]
     script: |
-      ctx.output("result", ctx.get("tasks.session_lock.outputs.result"));
+      import("mapper");
+      class SessionLockResult {
+        action: string;
+        success: bool;
+        process: map;
+        output: string;
+      }
+      var payload = SessionLockResult();
+      payload.action = "lock";
+      payload.success = ctx.get("tasks.session_lock.outputs.success") == true;
+      payload.process = ctx.get("tasks.session_lock.outputs.process");
+      payload.output = ctx.get("tasks.session_lock.outputs.output");
+      var jsonStr = mapper.write_json(payload);
+      ctx.output("result", jsonStr);
+      log.info("Session lock result: " + jsonStr);

@@ -1,19 +1,51 @@
 name: Power Profile Example
 description: |
-  Minimal wrapper around the reusable power profile template.
+  Standalone Behavior Tree (BT) workflow for querying the host power profile.
 
 variables:
-  MODE: "balanced"
-  MESSAGE: "Power profile change requested by Praktor example"
+  PROFILE_NAME: "balanced"
 
 tasks:
   - name: power_profile
-    uses: ../templates/power-profile.yml
-    vars:
-      MODE: "{{ MODE }}"
-      MESSAGE: "{{ MESSAGE }}"
+    script: |
+      import("os");
+      var handle = null;
+      if (os.platform_name() == "windows") {
+        handle = os.process_start("powercfg.exe", "/getactivescheme");
+      } else {
+        handle = os.process_start("powerprofilesctl", "get");
+      }
+      var process_result = null;
+      var profile_raw = "";
+      var success = false;
+      if (handle != null) {
+        process_result = os.process_wait(handle);
+        profile_raw = os.process_read_stdout(handle);
+        if (profile_raw == "") {
+          profile_raw = os.process_read_stderr(handle);
+        }
+        os.process_close(handle);
+        success = process_result.exit_code == 0 and process_result.error_code == 0 and process_result.wait_code == 0;
+      }
+      ctx.output("success", success);
+      ctx.output("profile", profile_raw);
+      ctx.output("process", process_result);
 
   - name: emit_result
     depends_on: [power_profile]
     script: |
-      ctx.output("result", ctx.get("tasks.power_profile.outputs.result"));
+      import("mapper");
+      class PowerProfileResult {
+        requested: string;
+        current: string;
+        success: bool;
+        details: map;
+      }
+      var payload = PowerProfileResult();
+      payload.requested = ctx.get("PROFILE_NAME");
+      payload.current = ctx.get("tasks.power_profile.outputs.profile");
+      payload.success = ctx.get("tasks.power_profile.outputs.success") == true;
+      payload.details = ctx.get("tasks.power_profile.outputs.process");
+      var jsonStr = mapper.write_json(payload);
+      ctx.output("result", jsonStr);
+      log.info("Power profile result: " + jsonStr);

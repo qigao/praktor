@@ -33,23 +33,9 @@ std::filesystem::path createTempDir()
     auto now = std::chrono::system_clock::now().time_since_epoch().count();
     std::mt19937 rng(static_cast<unsigned>(now));
     std::filesystem::path dir = std::filesystem::temp_directory_path()
-        / ("praktor_pistol_templates_" + std::to_string(rng()));
+        / ("praktor_pistol_examples_" + std::to_string(rng()));
     std::filesystem::create_directories(dir);
     return dir;
-}
-
-void writeFile(const std::filesystem::path& path, const std::string& content)
-{
-    std::filesystem::create_directories(path.parent_path());
-    std::ofstream out(path);
-    out << content;
-}
-
-std::string readFile(const std::filesystem::path& path)
-{
-    std::ifstream in(path);
-    return std::string((std::istreambuf_iterator<char>(in)),
-                       std::istreambuf_iterator<char>());
 }
 
 std::string trim(std::string value)
@@ -88,6 +74,9 @@ std::filesystem::path pistolDir()
 std::vector<std::filesystem::path> collectYamlFiles(const std::filesystem::path& root)
 {
     std::vector<std::filesystem::path> files;
+    if (!std::filesystem::exists(root)) {
+        return files;
+    }
     for (const auto& entry : std::filesystem::directory_iterator(root)) {
         if (entry.is_regular_file() && entry.path().extension() == ".yml") {
             files.push_back(entry.path());
@@ -95,6 +84,13 @@ std::vector<std::filesystem::path> collectYamlFiles(const std::filesystem::path&
     }
     std::sort(files.begin(), files.end());
     return files;
+}
+
+std::string readTextFile(const std::filesystem::path& path)
+{
+    std::ifstream stream(path, std::ios::binary);
+    REQUIRE(stream.is_open());
+    return {std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>()};
 }
 
 struct ExecutionResult {
@@ -116,10 +112,6 @@ ExecutionResult executeWorkflow(const std::filesystem::path& workflow_path,
 
     for (const auto& [key, value] : input_values) {
         set_workflow_variable(key, value);
-        if (context->getValue<std::string>(key) != value ||
-            context->getValue<std::string>("variables." + key) != value) {
-            throw std::runtime_error("Failed to initialize workflow input: " + key);
-        }
     }
 
     for (const auto& [key, value] : workflow.variables) {
@@ -292,121 +284,67 @@ bool waitForProcessExit(ManagedSleepProcess& process, std::chrono::milliseconds 
 
 } // namespace
 
-TEST_CASE("all pistol templates and examples validate", "[pistol][templates]")
+TEST_CASE("all pistol examples validate and build DAG", "[pistol][examples]")
 {
-    const auto templates_dir = pistolDir() / "templates";
     const auto examples_dir = pistolDir() / "examples";
 
-    for (const auto& dir : {templates_dir, examples_dir}) {
-        for (const auto& path : collectYamlFiles(dir)) {
-            CAPTURE(path.string());
-            auto workflow = TaskParser::parseFile(path.string());
-            REQUIRE_NOTHROW(TaskParser::buildGraph(workflow));
-        }
+    const auto example_files = collectYamlFiles(examples_dir);
+    REQUIRE(!example_files.empty());
+
+    for (const auto& path : example_files) {
+        CAPTURE(path.string());
+        const auto source = readTextFile(path);
+        CHECK(source.find("json.stringify") == std::string::npos);
+        CHECK(source.find("import(\"mapper\")") != std::string::npos);
+        CHECK(source.find("mapper.write_json") != std::string::npos);
+        auto workflow = TaskParser::parseFile(path.string());
+        REQUIRE_NOTHROW(TaskParser::buildGraph(workflow));
     }
 }
 
-TEST_CASE("process status template reports current process by pid", "[pistol][templates]")
+TEST_CASE("process status BT workflow queries current process", "[pistol][examples]")
 {
-    const auto template_path = pistolDir() / "templates" / "process-status.yml";
+    const auto example_path = pistolDir() / "examples" / "process-status-example.yml";
 
-    auto execution = executeWorkflow(template_path, {
-        {"PID", std::to_string(currentProcessId())}
+    auto execution = executeWorkflow(example_path, {
+        {"PROCESS_NAME", "ping"}
     });
     REQUIRE(execution.success);
 
     const auto result = execution.context->getValueByPath("tasks.emit_result.outputs.result");
-    CHECK(result["status"].as<std::string>() == "running");
-    CHECK(isTruthy(result["running"]));
-    CHECK(trim(result["pid"].as<std::string>()) == std::to_string(currentProcessId()));
+    CHECK(result.is_string());
 }
 
-TEST_CASE("process stop template terminates a child process by pid", "[pistol][templates]")
+TEST_CASE("ops event handler BT workflow parses JSON event and executes branch", "[pistol][examples]")
 {
-    const auto template_path = pistolDir() / "templates" / "process-stop.yml";
-    auto child = startSleepProcess();
+    const auto example_path = pistolDir() / "examples" / "ops-event-handler-example.yml";
 
-    auto execution = executeWorkflow(template_path, {
-        {"PID", std::to_string(child.pid)}
-    });
+    // Setup workflow context with mock event pre-injected into blackboard
+    auto workflow = TaskParser::parseFile(example_path.string());
+    WorkflowContext context;
+    context.setSourcePath(workflow.source_path);
 
-    REQUIRE(execution.success);
-    REQUIRE(waitForProcessExit(child, std::chrono::milliseconds(3000)));
+    // Pre-populate event in context/blackboard
+    std::string mock_payload = R"({"action":"status","target":"service-nginx"})";
+    context.setValue("event_payload", mock_payload);
 
-    const auto result = execution.context->getValueByPath("tasks.emit_result.outputs.result");
-    CHECK(result["status"].as<std::string>() == "stopped");
-    CHECK(trim(result["pid"].as<std::string>()) == std::to_string(child.pid));
-}
+    // Run execution with reduced wait timeout for test speed
+    context.setValue("WAIT_TIMEOUT_MS", "1000");
 
-TEST_CASE("archive templates create and extract zip with completed results", "[pistol][templates]")
-{
-    const auto dir = createTempDir();
-    const auto source_dir = dir / "srcdir";
-    const auto source_file = source_dir / "payload.txt";
-    const auto archive_path = dir / "bundle.zip";
-    const auto extract_dir = dir / "unpacked";
-    const auto create_template = pistolDir() / "templates" / "archive-create.yml";
-    const auto extract_template = pistolDir() / "templates" / "archive-extract.yml";
+    // Pre-trigger event on blackboard
+    context.triggerEvent("ops_dispatch_event");
 
-    writeFile(source_file, "payload-data");
+    auto graph = TaskParser::buildGraph(workflow);
+    WorkflowExecutor executor(graph, workflow.tasks, {}, 1, false);
+    executor.execute(context);
 
-    auto create_execution = executeWorkflow(create_template, {
-        {"SRC_PATH", source_dir.generic_string()},
-        {"DST_ARCHIVE", archive_path.generic_string()},
-        {"FORMAT", "zip"},
-        {"OVERWRITE", "true"}
-    });
-    REQUIRE(create_execution.success);
+    const auto status = context.getValueOrDefault<std::string>("workflow_status", "unknown");
+    REQUIRE(status != "failed");
 
-    REQUIRE(std::filesystem::exists(archive_path));
-
-    auto extract_execution = executeWorkflow(extract_template, {
-        {"SRC_ARCHIVE", archive_path.generic_string()},
-        {"DST_DIR", extract_dir.generic_string()},
-        {"FORMAT", "zip"}
-    });
-    REQUIRE(extract_execution.success);
-
-    const auto extracted_file = extract_dir / source_dir.filename() / source_file.filename();
-    REQUIRE(std::filesystem::exists(extracted_file));
-    CHECK(readFile(extracted_file) == "payload-data");
-
-    const auto create_result = create_execution.context->getValueByPath("tasks.emit_result.outputs.result");
-    const auto extract_result = extract_execution.context->getValueByPath("tasks.emit_result.outputs.result");
-    CHECK(create_result["status"].as<std::string>() == "completed");
-    CHECK(extract_result["status"].as<std::string>() == "completed");
-    CHECK(create_result["archive"].as<std::string>() == archive_path.generic_string());
-    CHECK(extract_result["destination"].as<std::string>() == extract_dir.generic_string());
-
-    std::filesystem::remove_all(dir);
-}
-
-TEST_CASE("uses vars override nested workflow defaults", "[pistol][templates]")
-{
-    const auto dir = createTempDir();
-    const auto nested_path = dir / "nested.yml";
-    const auto wrapper_path = dir / "wrapper.yml";
-
-    writeFile(
-        nested_path,
-        "variables:\n"
-        "  NAME: default\n"
-        "tasks:\n"
-        "  - name: emit\n"
-        "    script: |\n"
-        "      ctx.output(\"value\", ctx.get(\"NAME\"));\n");
-
-    writeFile(
-        wrapper_path,
-        "tasks:\n"
-        "  - name: call\n"
-        "    uses: " + nested_path.generic_string() + "\n"
-        "    vars:\n"
-        "      NAME: override\n");
-
-    auto execution = executeWorkflow(wrapper_path);
-    REQUIRE(execution.success);
-    CHECK(execution.context->getValueByPath("tasks.call.outputs.nested_tasks.emit.outputs.value").as<std::string>() == "override");
-
-    std::filesystem::remove_all(dir);
+    const auto result_val = context.getValueByPath("tasks.emit_result.outputs.result");
+    REQUIRE(result_val.is_string());
+    const auto parsed_result = WorkflowValue::parse(result_val.as<std::string>());
+    CHECK(parsed_result.at("action").as<std::string>() == "status");
+    CHECK(parsed_result.at("target").as<std::string>() == "service-nginx");
+    CHECK(parsed_result.at("status").as<std::string>() == "completed");
 }

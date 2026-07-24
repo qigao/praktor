@@ -1,17 +1,49 @@
 name: Host Hibernate Example
 description: |
-  Minimal wrapper around the reusable host hibernate template.
-
-variables:
-  MESSAGE: "Hibernate requested by Praktor example"
+  Standalone Behavior Tree (BT) workflow for hibernating the host.
 
 tasks:
   - name: host_hibernate
-    uses: ../templates/host-hibernate.yml
-    vars:
-      MESSAGE: "{{ MESSAGE }}"
+    script: |
+      import("os");
+      var platform = os.platform_name();
+      var handle = null;
+      if (platform == "windows") {
+        handle = os.process_start("rundll32.exe", "powrprof.dll,SetSuspendState", "1", "1", "0");
+      } else {
+        handle = os.process_start("systemctl", "hibernate");
+      }
+      var process_result = null;
+      var output = "";
+      var success = false;
+      if (handle != null) {
+        process_result = os.process_wait(handle);
+        output = os.process_read_stdout(handle);
+        if (output == "") {
+          output = os.process_read_stderr(handle);
+        }
+        os.process_close(handle);
+        success = process_result.exit_code == 0 and process_result.error_code == 0 and process_result.wait_code == 0;
+      }
+      ctx.output("success", success);
+      ctx.output("process", process_result);
+      ctx.output("output", output);
 
   - name: emit_result
     depends_on: [host_hibernate]
     script: |
-      ctx.output("result", ctx.get("tasks.host_hibernate.outputs.result"));
+      import("mapper");
+      class HostHibernateResult {
+        action: string;
+        accepted: bool;
+        process: map;
+        output: string;
+      }
+      var payload = HostHibernateResult();
+      payload.action = "hibernate";
+      payload.accepted = ctx.get("tasks.host_hibernate.outputs.success") == true;
+      payload.process = ctx.get("tasks.host_hibernate.outputs.process");
+      payload.output = ctx.get("tasks.host_hibernate.outputs.output");
+      var jsonStr = mapper.write_json(payload);
+      ctx.output("result", jsonStr);
+      log.info("Host hibernate result: " + jsonStr);

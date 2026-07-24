@@ -1,17 +1,43 @@
 name: Service Restart Example
 description: |
-  Minimal wrapper around the reusable service restart template.
+  Standalone Behavior Tree (BT) workflow for restarting a system service.
 
 variables:
   SERVICE_NAME: "nginx"
 
 tasks:
   - name: service_restart
-    uses: ../templates/service-restart.yml
-    vars:
-      SERVICE_NAME: "{{ SERVICE_NAME }}"
+    script: |
+      import("os");
+      var service_name = ctx.get("SERVICE_NAME");
+      var stop_result = os.service_stop(service_name);
+      var start_result = null;
+      if (stop_result != null and stop_result.success == 1) {
+        start_result = os.service_start(service_name);
+      }
+      var success = stop_result != null and stop_result.success == 1 and start_result != null and start_result.success == 1;
+      ctx.output("success", success);
+      ctx.output("stop", stop_result);
+      ctx.output("start", start_result);
 
   - name: emit_result
     depends_on: [service_restart]
     script: |
-      ctx.output("result", ctx.get("tasks.service_restart.outputs.result"));
+      import("mapper");
+      class ServiceRestartResult {
+        service: string;
+        success: bool;
+        action: string;
+        stop: map;
+        start: map;
+      }
+      var success = ctx.get("tasks.service_restart.outputs.success") == true;
+      var payload = ServiceRestartResult();
+      payload.service = ctx.get("SERVICE_NAME");
+      payload.success = success;
+      payload.action = "restart";
+      payload.stop = ctx.get("tasks.service_restart.outputs.stop");
+      payload.start = ctx.get("tasks.service_restart.outputs.start");
+      var jsonStr = mapper.write_json(payload);
+      ctx.output("result", jsonStr);
+      log.info("Service restart result: " + jsonStr);
