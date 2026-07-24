@@ -29,5 +29,5 @@ tasks:
       payload.reason = ctx.get("REASON");
       payload.details = result;
       var jsonStr = mapper.write_json(payload);
-      ctx.output("result", jsonStr);
+      ctx.output_text("result", jsonStr);
       log.info("Host reboot result: " + jsonStr);

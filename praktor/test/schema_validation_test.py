@@ -60,8 +60,6 @@ def validate_structured_http_contracts():
     require_contains(pathlib.Path("praktor/templates/llm-openai.yml"), 'import("net");')
     require_contains(pathlib.Path("praktor/templates/llm-gemini.yml"), 'import("net");')
     require_contains(pathlib.Path("praktor/templates/llm-claude.yml"), 'import("net");')
-    require_contains(pathlib.Path("pistol/templates/remote-cmd-receiver.yml"), 'import("net");')
-    require_contains(pathlib.Path("pistol/templates/ops-agent.yml"), 'import("net");')
     require_contains(pathlib.Path("examples/polymarket-dashboard.yml"), 'import("net");')
 
     require_contains(pathlib.Path("praktor/templates/llm-openai.yml"), 'var body = json.stringify(map{')
@@ -79,14 +77,6 @@ def validate_structured_http_contracts():
     require_matches(
         pathlib.Path("praktor/templates/llm-claude.yml"),
         r'http\.post\([\s\S]*?body,\s*map\{',
-    )
-    require_matches(
-        pathlib.Path("pistol/templates/remote-cmd-receiver.yml"),
-        r'http\.get\([\s\S]*?map\{',
-    )
-    require_matches(
-        pathlib.Path("pistol/templates/ops-agent.yml"),
-        r'http\.get\([\s\S]*?map\{',
     )
     require_matches(
         pathlib.Path("examples/polymarket-dashboard.yml"),

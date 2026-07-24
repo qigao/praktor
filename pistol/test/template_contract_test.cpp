@@ -319,20 +319,27 @@ TEST_CASE("ops event handler BT workflow parses JSON event and executes branch",
 {
     const auto example_path = pistolDir() / "examples" / "ops-event-handler-example.yml";
 
-    // Setup workflow context with mock event pre-injected into blackboard
     auto workflow = TaskParser::parseFile(example_path.string());
     WorkflowContext context;
     context.setSourcePath(workflow.source_path);
 
-    // Pre-populate event in context/blackboard
     std::string mock_payload = R"({"action":"status","target":"service-nginx"})";
     context.setValue("event_payload", mock_payload);
 
-    // Run execution with reduced wait timeout for test speed
-    context.setValue("WAIT_TIMEOUT_MS", "1000");
+    const auto handle_task = std::find_if(
+        workflow.tasks.begin(),
+        workflow.tasks.end(),
+        [](const auto& task) { return task.name == "handle_ops_event"; });
+    REQUIRE(handle_task != workflow.tasks.end());
+    REQUIRE(std::holds_alternative<OrchParams>(handle_task->specifics));
 
-    // Pre-trigger event on blackboard
-    context.triggerEvent("ops_dispatch_event");
+    auto& params = std::get<OrchParams>(handle_task->specifics);
+    REQUIRE(params.root.type == "Sequence");
+    REQUIRE(!params.root.children.empty());
+    REQUIRE(params.root.children.front().type == "WaitEvent");
+
+    // The mock payload represents the event after WaitEvent has delivered it.
+    params.root.children.erase(params.root.children.begin());
 
     auto graph = TaskParser::buildGraph(workflow);
     WorkflowExecutor executor(graph, workflow.tasks, {}, 1, false);

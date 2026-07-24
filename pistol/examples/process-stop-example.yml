@@ -50,5 +50,5 @@ tasks:
       payload.process_result = ctx.get("tasks.process_stop.outputs.process");
       payload.output = ctx.get("tasks.process_stop.outputs.output");
       var jsonStr = mapper.write_json(payload);
-      ctx.output("result", jsonStr);
+      ctx.output_text("result", jsonStr);
       log.info("Process stop result: " + jsonStr);

@@ -26,7 +26,9 @@ tasks:
           pid_raw = os.process_read_stderr(handle);
         }
         os.process_close(handle);
-        running = process_result.exit_code == 0 and process_result.error_code == 0 and process_result.wait_code == 0;
+        if (process_result.exit_code == 0 and process_result.error_code == 0 and process_result.wait_code == 0) {
+          running = true;
+        }
       }
       ctx.output("running", running);
       ctx.output("pid", pid_raw);
@@ -42,12 +44,15 @@ tasks:
         pid: string;
         details: map;
       }
-      var running = ctx.get("tasks.process_status.outputs.running") == true;
       var payload = ProcessStatusResult();
       payload.process = ctx.get("PROCESS_NAME");
-      payload.running = running;
       payload.pid = ctx.get("tasks.process_status.outputs.pid");
       payload.details = ctx.get("tasks.process_status.outputs.process");
+      if (ctx.get("tasks.process_status.outputs.running")) {
+        payload.running = true;
+      } else {
+        payload.running = false;
+      }
       var jsonStr = mapper.write_json(payload);
-      ctx.output("result", jsonStr);
+      ctx.output_text("result", jsonStr);
       log.info("Process status: " + jsonStr);

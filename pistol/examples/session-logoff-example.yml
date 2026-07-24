@@ -44,5 +44,5 @@ tasks:
       payload.process = ctx.get("tasks.session_logoff.outputs.process");
       payload.output = ctx.get("tasks.session_logoff.outputs.output");
       var jsonStr = mapper.write_json(payload);
-      ctx.output("result", jsonStr);
+      ctx.output_text("result", jsonStr);
       log.info("Session logoff result: " + jsonStr);

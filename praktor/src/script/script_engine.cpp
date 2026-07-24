@@ -62,6 +62,7 @@ std::string normalize_script_source(std::string source) {
   replace_outside_strings(source, "ctx.get(", "ctx_get(");
   replace_outside_strings(source, "ctx.set(", "ctx_set(");
   replace_outside_strings(source, "ctx.output(", "ctx_output(");
+  replace_outside_strings(source, "ctx.output_text(", "ctx_output_text(");
   replace_outside_strings(source, "log.info(", "log_info(");
   replace_outside_strings(source, "log.warn(", "log_warn(");
   replace_outside_strings(source, "log.error(", "log_error(");
@@ -283,7 +284,8 @@ static WorkflowValue exprtk_scalar_to_json(const exprtk_value_t &value) {
 }
 
 // Native function for json.stringify(value) — converts any TurboScript value to a JSON string
-static exprtk_value_t json_stringify_fn(size_t argc, exprtk_value_t *args, void *user_data) {
+static exprtk_value_t json_stringify_fn(size_t argc, exprtk_value_t *args,
+                                        exprtk_env_t * /*env*/, void *user_data) {
   if (argc < 1 || !user_data) {
     return make_str("null", 4);
   }
@@ -303,7 +305,8 @@ static exprtk_value_t json_stringify_fn(size_t argc, exprtk_value_t *args, void 
 
 // Native function for json.parse(string) — parses a JSON string into a structured TurboScript value.
 // If parsing fails, preserve the original string for compatibility.
-static exprtk_value_t json_parse_fn(size_t argc, exprtk_value_t *args, void *user_data) {
+static exprtk_value_t json_parse_fn(size_t argc, exprtk_value_t *args,
+                                    exprtk_env_t * /*env*/, void *user_data) {
   if (argc < 1 || args[0].type != EXPRTK_VAL_STRING || !user_data) {
     return make_null();
   }
@@ -319,7 +322,8 @@ static exprtk_value_t json_parse_fn(size_t argc, exprtk_value_t *args, void *use
   }
 }
 
-static exprtk_value_t json_query_fn(size_t argc, exprtk_value_t *args, void *user_data) {
+static exprtk_value_t json_query_fn(size_t argc, exprtk_value_t *args,
+                                    exprtk_env_t * /*env*/, void *user_data) {
   if (argc < 2 || args[1].type != EXPRTK_VAL_STRING || !user_data) {
     return make_null();
   }
@@ -345,7 +349,8 @@ static exprtk_value_t json_query_fn(size_t argc, exprtk_value_t *args, void *use
 }
 
 // Native function for trim(string) — removes leading and trailing whitespace
-static exprtk_value_t trim_fn_call(size_t argc, exprtk_value_t *args, void *user_data) {
+static exprtk_value_t trim_fn_call(size_t argc, exprtk_value_t *args,
+                                   exprtk_env_t * /*env*/, void *user_data) {
   if (argc < 1 || args[0].type != EXPRTK_VAL_STRING || !user_data) {
     return make_null();
   }
@@ -354,7 +359,8 @@ static exprtk_value_t trim_fn_call(size_t argc, exprtk_value_t *args, void *user
       trim_copy(std::string_view(args[0].data.string.data, args[0].data.string.len)));
 }
 
-static exprtk_value_t shell_exec_fn(size_t argc, exprtk_value_t *args, void *user_data) {
+static exprtk_value_t shell_exec_fn(size_t argc, exprtk_value_t *args,
+                                    exprtk_env_t * /*env*/, void *user_data) {
   if (argc < 1 || args[0].type != EXPRTK_VAL_STRING || !user_data) {
     return make_null();
   }
@@ -428,7 +434,8 @@ static exprtk_value_t shell_exec_fn(size_t argc, exprtk_value_t *args, void *use
 }
 
 // Native function for ctx.get("path")
-static exprtk_value_t ctx_get_fn(size_t argc, exprtk_value_t *args, void *user_data) {
+static exprtk_value_t ctx_get_fn(size_t argc, exprtk_value_t *args,
+                                 exprtk_env_t * /*env*/, void *user_data) {
   if (argc != 1 || args[0].type != EXPRTK_VAL_STRING || !user_data) {
     return make_null();
   }
@@ -439,7 +446,8 @@ static exprtk_value_t ctx_get_fn(size_t argc, exprtk_value_t *args, void *user_d
 }
 
 // Native function for ctx.set("path", value)
-static exprtk_value_t ctx_set_fn(size_t argc, exprtk_value_t *args, void *user_data) {
+static exprtk_value_t ctx_set_fn(size_t argc, exprtk_value_t *args,
+                                 exprtk_env_t * /*env*/, void *user_data) {
   if (argc < 2 || args[0].type != EXPRTK_VAL_STRING || !user_data) {
     return make_null();
   }
@@ -455,7 +463,8 @@ static exprtk_value_t ctx_set_fn(size_t argc, exprtk_value_t *args, void *user_d
   return make_null();
 }
 
-static exprtk_value_t ctx_output_fn(size_t argc, exprtk_value_t *args, void *user_data) {
+static exprtk_value_t ctx_output_fn(size_t argc, exprtk_value_t *args,
+                                    exprtk_env_t * /*env*/, void *user_data) {
   if (argc < 2 || args[0].type != EXPRTK_VAL_STRING || !user_data) {
     return make_null();
   }
@@ -463,6 +472,19 @@ static exprtk_value_t ctx_output_fn(size_t argc, exprtk_value_t *args, void *use
   std::string key(args[0].data.string.data, args[0].data.string.len);
   WorkflowValue val = exprtk_scalar_to_json(args[1]);
   eval_ctx->workflow_context.setCurrentTaskOutput(key, val);
+  return make_null();
+}
+
+static exprtk_value_t ctx_output_text_fn(size_t argc, exprtk_value_t *args,
+                                         exprtk_env_t * /*env*/, void *user_data) {
+  if (argc < 2 || args[0].type != EXPRTK_VAL_STRING ||
+      args[1].type != EXPRTK_VAL_STRING || !user_data) {
+    return make_null();
+  }
+  auto *eval_ctx = static_cast<ScriptEvalContext *>(user_data);
+  std::string key(args[0].data.string.data, args[0].data.string.len);
+  std::string value(args[1].data.string.data, args[1].data.string.len);
+  eval_ctx->workflow_context.setCurrentTaskOutput(key, value);
   return make_null();
 }
 
@@ -477,19 +499,23 @@ static exprtk_value_t log_message_fn(size_t argc, exprtk_value_t *args,
   return make_null();
 }
 
-static exprtk_value_t log_info_fn(size_t argc, exprtk_value_t *args, void * /*user_data*/) {
+static exprtk_value_t log_info_fn(size_t argc, exprtk_value_t *args,
+                                  exprtk_env_t * /*env*/, void * /*user_data*/) {
   return log_message_fn(argc, args, Praktor::Logging::printScriptMessage);
 }
 
-static exprtk_value_t log_warn_fn(size_t argc, exprtk_value_t *args, void * /*user_data*/) {
+static exprtk_value_t log_warn_fn(size_t argc, exprtk_value_t *args,
+                                  exprtk_env_t * /*env*/, void * /*user_data*/) {
   return log_message_fn(argc, args, Praktor::Logging::printScriptMessage);
 }
 
-static exprtk_value_t log_error_fn(size_t argc, exprtk_value_t *args, void * /*user_data*/) {
+static exprtk_value_t log_error_fn(size_t argc, exprtk_value_t *args,
+                                   exprtk_env_t * /*env*/, void * /*user_data*/) {
   return log_message_fn(argc, args, Praktor::Logging::printScriptMessage);
 }
 
-static exprtk_value_t fail_fn(size_t argc, exprtk_value_t *args, void *user_data) {
+static exprtk_value_t fail_fn(size_t argc, exprtk_value_t *args,
+                              exprtk_env_t * /*env*/, void *user_data) {
   if (!user_data) {
     return make_null();
   }
@@ -522,6 +548,7 @@ ScriptResult execute(const std::string &source, WorkflowContext &context) {
   ts_bind_func(ctx, "ctx_get", ctx_get_fn, &eval_ctx);
   ts_bind_func(ctx, "ctx_set", ctx_set_fn, &eval_ctx);
   ts_bind_func(ctx, "ctx_output", ctx_output_fn, &eval_ctx);
+  ts_bind_func(ctx, "ctx_output_text", ctx_output_text_fn, &eval_ctx);
   ts_bind_func(ctx, "log_info", log_info_fn, nullptr);
   ts_bind_func(ctx, "log_warn", log_warn_fn, nullptr);
   ts_bind_func(ctx, "log_error", log_error_fn, nullptr);

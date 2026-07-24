@@ -110,6 +110,13 @@ void collectDeclaredOutputKeys(const actions::Node& node,
     output_keys.insert(stringifyDeclaredParam(output_it->second));
   }
 
+  if (node.id == "SetVariable") {
+    auto key_it = node.params.find("key");
+    if (key_it != node.params.end()) {
+      output_keys.insert(stringifyDeclaredParam(key_it->second));
+    }
+  }
+
   auto stderr_it = node.params.find("stderr_key");
   if (stderr_it != node.params.end()) {
     stderr_keys.insert(stringifyDeclaredParam(stderr_it->second));
