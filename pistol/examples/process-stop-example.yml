@@ -35,20 +35,20 @@ tasks:
   - name: emit_result
     depends_on: [process_stop]
     script: |
-      import("mapper");
-      class ProcessStopResult {
-        process: string;
-        success: bool;
-        action: string;
-        process_result: map;
-        output: string;
+      import("./result_models.tbs");
+      var success = ctx.get("tasks.process_stop.outputs.success") == true;
+      var status = "failed";
+      if (success) {
+        status = "success";
       }
-      var payload = ProcessStopResult();
+      var payload = ProcessResult();
+      payload.status = status;
       payload.process = ctx.get("PROCESS_NAME");
-      payload.success = ctx.get("tasks.process_stop.outputs.success") == true;
-      payload.action = "stop";
-      payload.process_result = ctx.get("tasks.process_stop.outputs.process");
+      payload.pid = "";
       payload.output = ctx.get("tasks.process_stop.outputs.output");
+      payload.action = make_action_result(
+        "stop", ctx.get("PROCESS_NAME"), success, false,
+        ctx.get("tasks.process_stop.outputs.process"));
       var jsonStr = mapper.write_json(payload);
       ctx.output_text("result", jsonStr);
       log.info("Process stop result: " + jsonStr);

@@ -32,18 +32,20 @@ tasks:
   - name: emit_result
     depends_on: [host_suspend]
     script: |
-      import("mapper");
-      class HostSuspendResult {
-        action: string;
-        accepted: bool;
-        process: map;
-        output: string;
+      import("./result_models.tbs");
+      var accepted = ctx.get("tasks.host_suspend.outputs.success") == true;
+      var status = "rejected";
+      if (accepted) {
+        status = "accepted";
       }
-      var payload = HostSuspendResult();
-      payload.action = "suspend";
-      payload.accepted = ctx.get("tasks.host_suspend.outputs.success") == true;
-      payload.process = ctx.get("tasks.host_suspend.outputs.process");
+      var payload = ProcessResult();
+      payload.status = status;
+      payload.process = "host";
+      payload.pid = "";
       payload.output = ctx.get("tasks.host_suspend.outputs.output");
+      payload.action = make_action_result(
+        "suspend", "host", accepted, false,
+        ctx.get("tasks.host_suspend.outputs.process"));
       var jsonStr = mapper.write_json(payload);
       ctx.output_text("result", jsonStr);
       log.info("Host suspend result: " + jsonStr);

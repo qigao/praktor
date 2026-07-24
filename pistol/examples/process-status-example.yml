@@ -37,22 +37,22 @@ tasks:
   - name: emit_result
     depends_on: [process_status]
     script: |
-      import("mapper");
-      class ProcessStatusResult {
-        process: string;
-        running: bool;
-        pid: string;
-        details: map;
+      import("./result_models.tbs");
+      var payload = ProcessResult();
+      var running = false;
+      if (ctx.get("tasks.process_status.outputs.running")) {
+        running = true;
       }
-      var payload = ProcessStatusResult();
+      payload.status = "stopped";
+      if (running) {
+        payload.status = "running";
+      }
       payload.process = ctx.get("PROCESS_NAME");
       payload.pid = ctx.get("tasks.process_status.outputs.pid");
-      payload.details = ctx.get("tasks.process_status.outputs.process");
-      if (ctx.get("tasks.process_status.outputs.running")) {
-        payload.running = true;
-      } else {
-        payload.running = false;
-      }
+      payload.output = "";
+      payload.action = make_action_result(
+        "status", ctx.get("PROCESS_NAME"), true, running,
+        ctx.get("tasks.process_status.outputs.process"));
       var jsonStr = mapper.write_json(payload);
       ctx.output_text("result", jsonStr);
       log.info("Process status: " + jsonStr);

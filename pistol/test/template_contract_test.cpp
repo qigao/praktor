@@ -287,6 +287,21 @@ bool waitForProcessExit(ManagedSleepProcess& process, std::chrono::milliseconds 
 TEST_CASE("all pistol examples validate and build DAG", "[pistol][examples]")
 {
     const auto examples_dir = pistolDir() / "examples";
+    const auto result_models_path = examples_dir / "result_models.tbs";
+    const auto result_models = readTextFile(result_models_path);
+
+    CHECK(result_models.find("import(\"mapper\")") != std::string::npos);
+    CHECK(result_models.find("class ActionResult") != std::string::npos);
+    CHECK(result_models.find("class StatusResult") != std::string::npos);
+    CHECK(result_models.find("class ProcessResult") != std::string::npos);
+
+    size_t class_count = 0;
+    for (size_t position = 0;
+         (position = result_models.find("class ", position)) != std::string::npos;
+         position += 6) {
+        ++class_count;
+    }
+    CHECK(class_count == 3);
 
     const auto example_files = collectYamlFiles(examples_dir);
     REQUIRE(!example_files.empty());
@@ -295,7 +310,8 @@ TEST_CASE("all pistol examples validate and build DAG", "[pistol][examples]")
         CAPTURE(path.string());
         const auto source = readTextFile(path);
         CHECK(source.find("json.stringify") == std::string::npos);
-        CHECK(source.find("import(\"mapper\")") != std::string::npos);
+        CHECK(source.find("import(\"./result_models.tbs\")") != std::string::npos);
+        CHECK(source.find("class ") == std::string::npos);
         CHECK(source.find("mapper.write_json") != std::string::npos);
         auto workflow = TaskParser::parseFile(path.string());
         REQUIRE_NOTHROW(TaskParser::buildGraph(workflow));
@@ -312,7 +328,11 @@ TEST_CASE("process status BT workflow queries current process", "[pistol][exampl
     REQUIRE(execution.success);
 
     const auto result = execution.context->getValueByPath("tasks.emit_result.outputs.result");
-    CHECK(result.is_string());
+    REQUIRE(result.is_string());
+    const auto parsed_result = WorkflowValue::parse(result.as<std::string>());
+    CHECK(parsed_result.at("process").as<std::string>() == "ping");
+    CHECK(parsed_result.at("action").at("running").is_bool());
+    CHECK(parsed_result.at("output").is_string());
 }
 
 TEST_CASE("ops event handler BT workflow parses JSON event and executes branch", "[pistol][examples]")
@@ -351,7 +371,8 @@ TEST_CASE("ops event handler BT workflow parses JSON event and executes branch",
     const auto result_val = context.getValueByPath("tasks.emit_result.outputs.result");
     REQUIRE(result_val.is_string());
     const auto parsed_result = WorkflowValue::parse(result_val.as<std::string>());
-    CHECK(parsed_result.at("action").as<std::string>() == "status");
-    CHECK(parsed_result.at("target").as<std::string>() == "service-nginx");
     CHECK(parsed_result.at("status").as<std::string>() == "completed");
+    CHECK(parsed_result.at("action").at("action").as<std::string>() == "status");
+    CHECK(parsed_result.at("action").at("target").as<std::string>() == "service-nginx");
+    CHECK(parsed_result.at("action").at("success").as<bool>());
 }

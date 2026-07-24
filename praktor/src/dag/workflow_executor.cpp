@@ -789,7 +789,7 @@ WorkflowExecutor::TaskExecutionOutcome WorkflowExecutor::executeTaskInternal(
 
       // Run script if present (as action for script-only tasks, or post-processing)
       if (result.success && task.script) {
-        auto script_result = Praktor::Script::execute(*task.script, context);
+        auto script_result = Praktor::Script::execute(*task.script, context, task.source_path);
         if (!script_result.success) {
           result.success = false;
           result.error_message = script_result.error_message;

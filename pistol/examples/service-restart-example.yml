@@ -23,21 +23,19 @@ tasks:
   - name: emit_result
     depends_on: [service_restart]
     script: |
-      import("mapper");
-      class ServiceRestartResult {
-        service: string;
-        success: bool;
-        action: string;
-        stop: map;
-        start: map;
-      }
+      import("./result_models.tbs");
       var success = ctx.get("tasks.service_restart.outputs.success") == true;
-      var payload = ServiceRestartResult();
-      payload.service = ctx.get("SERVICE_NAME");
-      payload.success = success;
-      payload.action = "restart";
-      payload.stop = ctx.get("tasks.service_restart.outputs.stop");
-      payload.start = ctx.get("tasks.service_restart.outputs.start");
+      var status = "failed";
+      if (success) {
+        status = "success";
+      }
+      var payload = StatusResult();
+      payload.status = status;
+      payload.action = make_action_result(
+        "restart", ctx.get("SERVICE_NAME"), success, false, map{
+        stop: ctx.get("tasks.service_restart.outputs.stop"),
+        start: ctx.get("tasks.service_restart.outputs.start")
+      });
       var jsonStr = mapper.write_json(payload);
       ctx.output_text("result", jsonStr);
       log.info("Service restart result: " + jsonStr);

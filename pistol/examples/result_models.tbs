@@ -1,0 +1,39 @@
+// Shared class-first mapper schemas for the Pistol examples.
+import("mapper");
+
+class ActionResult {
+    action: string;
+    target: string;
+    success: bool;
+    running: bool;
+    details: map;
+}
+
+class StatusResult {
+    status: string;
+    action: ActionResult;
+}
+
+class ProcessResult {
+    status: string;
+    action: ActionResult;
+    process: string;
+    pid: string;
+    output: string;
+}
+
+func make_action_result(action, target, success, running, details) {
+    var result = ActionResult();
+    result.action = action;
+    result.target = target;
+    result.success = false;
+    if (success) {
+        result.success = true;
+    }
+    result.running = false;
+    if (running) {
+        result.running = true;
+    }
+    result.details = details;
+    return result;
+}

@@ -15,19 +15,17 @@ tasks:
   - name: emit_result
     depends_on: [service_stop]
     script: |
-      import("mapper");
-      class ServiceStopResult {
-        service: string;
-        success: bool;
-        action: string;
-        details: map;
-      }
+      import("./result_models.tbs");
       var result = ctx.get("tasks.service_stop.outputs.result");
-      var payload = ServiceStopResult();
-      payload.service = ctx.get("SERVICE_NAME");
-      payload.success = result != null and result.success == 1;
-      payload.action = "stop";
-      payload.details = result;
+      var success = result != null and result.success == 1;
+      var status = "failed";
+      if (success) {
+        status = "success";
+      }
+      var payload = StatusResult();
+      payload.status = status;
+      payload.action = make_action_result(
+        "stop", ctx.get("SERVICE_NAME"), success, false, result);
       var jsonStr = mapper.write_json(payload);
       ctx.output_text("result", jsonStr);
       log.info("Service stop result: " + jsonStr);

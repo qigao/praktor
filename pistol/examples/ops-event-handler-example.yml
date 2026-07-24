@@ -34,21 +34,16 @@ tasks:
   - name: emit_result
     depends_on: [handle_ops_event]
     script: |
-      import("mapper");
-      class OpsEventResult {
-        event: string;
-        action: string;
-        target: string;
-        status: string;
-      }
+      import("./result_models.tbs");
       var status = ctx.get("tasks.handle_ops_event.outputs.ops_status");
       var action = ctx.get("tasks.handle_ops_event.outputs.requested_action");
       var target = ctx.get("tasks.handle_ops_event.outputs.target_name");
-      var payload = OpsEventResult();
-      payload.event = "ops_dispatch_event";
-      payload.action = action;
-      payload.target = target;
+      var payload = StatusResult();
       payload.status = status;
+      payload.action = make_action_result(
+        action, target, status == "completed", false, map{
+        event: "ops_dispatch_event"
+      });
       var jsonStr = mapper.write_json(payload);
       ctx.output_text("result", jsonStr);
       log.info("Ops event result: " + jsonStr);

@@ -31,18 +31,20 @@ tasks:
   - name: emit_result
     depends_on: [session_lock]
     script: |
-      import("mapper");
-      class SessionLockResult {
-        action: string;
-        success: bool;
-        process: map;
-        output: string;
+      import("./result_models.tbs");
+      var success = ctx.get("tasks.session_lock.outputs.success") == true;
+      var status = "failed";
+      if (success) {
+        status = "success";
       }
-      var payload = SessionLockResult();
-      payload.action = "lock";
-      payload.success = ctx.get("tasks.session_lock.outputs.success") == true;
-      payload.process = ctx.get("tasks.session_lock.outputs.process");
+      var payload = ProcessResult();
+      payload.status = status;
+      payload.process = "session";
+      payload.pid = "";
       payload.output = ctx.get("tasks.session_lock.outputs.output");
+      payload.action = make_action_result(
+        "lock", "session", success, false,
+        ctx.get("tasks.session_lock.outputs.process"));
       var jsonStr = mapper.write_json(payload);
       ctx.output_text("result", jsonStr);
       log.info("Session lock result: " + jsonStr);

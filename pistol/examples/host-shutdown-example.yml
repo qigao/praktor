@@ -15,19 +15,19 @@ tasks:
   - name: emit_result
     depends_on: [host_shutdown]
     script: |
-      import("mapper");
-      class HostShutdownResult {
-        action: string;
-        accepted: bool;
-        reason: string;
-        details: map;
-      }
+      import("./result_models.tbs");
       var result = ctx.get("tasks.host_shutdown.outputs.result");
-      var payload = HostShutdownResult();
-      payload.action = "shutdown";
-      payload.accepted = result != null and result.success == 1;
-      payload.reason = ctx.get("REASON");
-      payload.details = result;
+      var accepted = result != null and result.success == 1;
+      var status = "rejected";
+      if (accepted) {
+        status = "accepted";
+      }
+      var payload = StatusResult();
+      payload.status = status;
+      payload.action = make_action_result("shutdown", "host", accepted, false, map{
+        reason: ctx.get("REASON"),
+        result: result
+      });
       var jsonStr = mapper.write_json(payload);
       ctx.output_text("result", jsonStr);
       log.info("Host shutdown result: " + jsonStr);

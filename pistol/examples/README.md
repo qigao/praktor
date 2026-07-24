@@ -1,8 +1,16 @@
 # Pistol Examples (BT-Native)
 
-This directory contains standalone, Behavior Tree (BT) powered operational workflows.
+This directory contains Behavior Tree (BT) powered operational workflows.
 
-Each workflow is self-contained. Operational scripts import TurboScript's `os` module; child-process calls pass an executable and separate arguments without shell parsing.
+Operational scripts import TurboScript's `os` module; child-process calls pass an executable and separate arguments without shell parsing. Result schemas are shared through `result_models.tbs` and imported relative to each workflow file.
+
+Serialized outputs use two typed envelopes with a shared nested action model:
+
+- `ActionResult`: `action`, `target`, `success`, `running`, and `details`
+- `StatusResult`: `status` and `action: ActionResult`
+- `ProcessResult`: `status`, `action: ActionResult`, `process`, `pid`, and `output`
+
+Use `make_action_result(...)` from the same module to construct the nested action and normalize script conditions to mapper `bool` values.
 
 ## Service Operations
 

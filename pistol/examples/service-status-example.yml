@@ -16,20 +16,15 @@ tasks:
   - name: emit_result
     depends_on: [service_status]
     script: |
-      import("mapper");
-      class ServiceStatusResult {
-        service: string;
-        running: bool;
-        raw: string;
-        status: string;
-      }
+      import("./result_models.tbs");
       var result = ctx.get("tasks.service_status.outputs.result");
       var running = result != null and result.active == 1;
-      var payload = ServiceStatusResult();
-      payload.service = ctx.get("SERVICE_NAME");
-      payload.running = running;
-      payload.raw = result.output;
+      var payload = StatusResult();
       payload.status = result.state;
+      payload.action = make_action_result(
+        "status", ctx.get("SERVICE_NAME"), result != null, running, map{
+        raw: result.output
+      });
       var jsonStr = mapper.write_json(payload);
       ctx.output_text("result", jsonStr);
       log.info("Service status: " + jsonStr);

@@ -22,8 +22,10 @@ struct ScriptResult {
 };
 
 // Parse and execute a script string against a WorkflowContext.
-// The script can read/write context variables, call DLLs, make HTTP requests, etc.
-ScriptResult execute(const std::string& source, WorkflowContext& context);
+// Relative .tbs imports resolve from script_source_path, or from the context
+// source path when no task-specific source path is provided.
+ScriptResult execute(const std::string& source, WorkflowContext& context,
+                     const std::string& script_source_path = {});
 
 } // namespace Praktor::Script
 

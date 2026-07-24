@@ -554,6 +554,56 @@ TEST_CASE("Script engine: builtins and imported modules", "[script]") {
     }
 }
 
+TEST_CASE("Script engine resolves relative tbs imports from workflow source",
+          "[script][import]") {
+    const auto dir = createTempDir();
+    const auto module_path = dir / "result_models.tbs";
+    writeFile(module_path, R"script(
+        class ImportedResult {
+            value: string;
+        }
+    )script");
+
+    WorkflowContext context;
+    context.setSourcePath((dir / "workflow.yml").string());
+    auto result = Praktor::Script::execute(R"script(
+        import("./result_models.tbs");
+        var payload = ImportedResult();
+        payload.value = "resolved";
+        ctx.set("imported_value", payload.value);
+    )script", context);
+
+    INFO(result.error_message);
+    REQUIRE(result.success);
+    CHECK(context.getValue<std::string>("imported_value") == "resolved");
+
+    std::filesystem::remove_all(dir);
+}
+
+TEST_CASE("Script engine prefers task source for relative tbs imports",
+          "[script][import]") {
+    const auto dir = createTempDir();
+    const auto task_dir = dir / "included";
+    writeFile(task_dir / "task_models.tbs", R"script(
+        func imported_value() {
+            return "task-source";
+        }
+    )script");
+
+    WorkflowContext context;
+    context.setSourcePath((dir / "root.yml").string());
+    auto result = Praktor::Script::execute(R"script(
+        import("./task_models.tbs");
+        ctx.set("imported_value", imported_value());
+    )script", context, (task_dir / "task.yml").string());
+
+    INFO(result.error_message);
+    REQUIRE(result.success);
+    CHECK(context.getValue<std::string>("imported_value") == "task-source");
+
+    std::filesystem::remove_all(dir);
+}
+
 TEST_CASE("Script engine: shell module", "[script][shell]") {
     WorkflowContext context;
 

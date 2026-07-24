@@ -74,6 +74,129 @@ std::string normalize_script_source(std::string source) {
   return source;
 }
 
+bool is_identifier_char(char ch) {
+  const auto value = static_cast<unsigned char>(ch);
+  return std::isalnum(value) || ch == '_';
+}
+
+bool parse_script_import_literal(const std::string &source, size_t offset,
+                                 size_t &path_begin, size_t &path_end, char &quote) {
+  std::string_view keyword;
+  if (source.compare(offset, 13, "import_module") == 0) {
+    keyword = "import_module";
+  } else if (source.compare(offset, 6, "import") == 0) {
+    keyword = "import";
+  } else {
+    return false;
+  }
+
+  if ((offset > 0 && is_identifier_char(source[offset - 1])) ||
+      (offset + keyword.size() < source.size() &&
+       is_identifier_char(source[offset + keyword.size()]))) {
+    return false;
+  }
+
+  size_t cursor = offset + keyword.size();
+  while (cursor < source.size() &&
+         std::isspace(static_cast<unsigned char>(source[cursor]))) {
+    ++cursor;
+  }
+  if (cursor >= source.size() || source[cursor++] != '(') {
+    return false;
+  }
+  while (cursor < source.size() &&
+         std::isspace(static_cast<unsigned char>(source[cursor]))) {
+    ++cursor;
+  }
+  if (cursor >= source.size() || (source[cursor] != '"' && source[cursor] != '\'')) {
+    return false;
+  }
+
+  quote = source[cursor++];
+  path_begin = cursor;
+  while (cursor < source.size()) {
+    if (source[cursor] == '\\' && cursor + 1 < source.size()) {
+      cursor += 2;
+      continue;
+    }
+    if (source[cursor] == quote) {
+      path_end = cursor;
+      return true;
+    }
+    ++cursor;
+  }
+  return false;
+}
+
+std::string escape_script_path(std::string_view path, char quote) {
+  std::string escaped;
+  escaped.reserve(path.size());
+  for (const char ch : path) {
+    if (ch == '\\' || ch == quote) {
+      escaped.push_back('\\');
+    }
+    escaped.push_back(ch);
+  }
+  return escaped;
+}
+
+std::string resolve_script_import_paths(std::string source,
+                                        const WorkflowContext &workflow_context,
+                                        const std::string &script_source_path) {
+  const std::string &source_path =
+      script_source_path.empty() ? workflow_context.getSourcePath() : script_source_path;
+  if (source_path.empty()) {
+    return source;
+  }
+
+  const auto source_dir = std::filesystem::absolute(source_path).parent_path();
+  size_t cursor = 0;
+  while (cursor < source.size()) {
+    if (source.compare(cursor, 2, "//") == 0) {
+      const size_t newline = source.find('\n', cursor + 2);
+      cursor = newline == std::string::npos ? source.size() : newline + 1;
+      continue;
+    }
+    if (source.compare(cursor, 2, "/*") == 0) {
+      const size_t comment_end = source.find("*/", cursor + 2);
+      cursor = comment_end == std::string::npos ? source.size() : comment_end + 2;
+      continue;
+    }
+    if (source[cursor] == '"' || source[cursor] == '\'') {
+      const char quote = source[cursor++];
+      while (cursor < source.size()) {
+        if (source[cursor] == '\\' && cursor + 1 < source.size()) {
+          cursor += 2;
+        } else if (source[cursor++] == quote) {
+          break;
+        }
+      }
+      continue;
+    }
+
+    size_t path_begin = 0;
+    size_t path_end = 0;
+    char quote = '\0';
+    if (!parse_script_import_literal(source, cursor, path_begin, path_end, quote)) {
+      ++cursor;
+      continue;
+    }
+
+    const std::string import_path = source.substr(path_begin, path_end - path_begin);
+    const std::filesystem::path path(import_path);
+    if (path.extension() != ".tbs" || path.is_absolute()) {
+      cursor = path_end + 1;
+      continue;
+    }
+
+    const auto resolved_path = (source_dir / path).lexically_normal().generic_string();
+    const std::string escaped_path = escape_script_path(resolved_path, quote);
+    source.replace(path_begin, path_end - path_begin, escaped_path);
+    cursor = path_begin + escaped_path.size() + 1;
+  }
+  return source;
+}
+
 struct ScriptEvalContext {
   WorkflowContext &workflow_context;
   std::deque<std::string> string_pool;
@@ -530,9 +653,11 @@ static exprtk_value_t fail_fn(size_t argc, exprtk_value_t *args,
   return make_null();
 }
 
-ScriptResult execute(const std::string &source, WorkflowContext &context) {
+ScriptResult execute(const std::string &source, WorkflowContext &context,
+                     const std::string &script_source_path) {
   ScriptResult result;
-  const std::string normalized_source = normalize_script_source(source);
+  const std::string normalized_source =
+      normalize_script_source(resolve_script_import_paths(source, context, script_source_path));
   const Praktor::util::TurboScriptRuntimeGuard runtime_guard;
 
   turbo_script_ctx_t *ctx = turbo_script_init(TURBO_SCRIPT_INIT_DEFAULT);
