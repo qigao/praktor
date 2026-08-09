@@ -168,14 +168,18 @@ void stopAndJoinWriter(std::thread& writer, std::atomic_bool& stop) noexcept {
   }
 }
 
-HANDLE createKillOnCloseJob(HANDLE process) {
+// A plain container job used to terminate the whole process tree explicitly on
+// cancel/timeout/output-limit. It deliberately has no KILL_ON_JOB_CLOSE so the
+// Windows executor matches the POSIX executor: descendants survive normal task
+// completion, and the full tree is only killed through TerminateJobObject.
+HANDLE createManagedJob(HANDLE process) {
   HANDLE job = CreateJobObjectA(NULL, NULL);
   if (job == NULL) {
     return NULL;
   }
 
   JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits = {};
-  limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+  limits.BasicLimitInformation.LimitFlags = 0u;
   if (!SetInformationJobObject(job, JobObjectExtendedLimitInformation, &limits, sizeof(limits)) ||
       !AssignProcessToJobObject(job, process)) {
     CloseHandle(job);
@@ -262,7 +266,7 @@ PlatformProcessResult executeManagedWindows(const ProcessSpec& spec, ProcessCont
     return completed;
   }
 
-  HANDLE job = createKillOnCloseJob(process_info.hProcess);
+  HANDLE job = createManagedJob(process_info.hProcess);
   if (job == NULL) {
     TerminateProcess(process_info.hProcess, kManagedProcessExitCode);
     WaitForSingleObject(process_info.hProcess, INFINITE);

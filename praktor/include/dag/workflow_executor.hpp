@@ -9,6 +9,7 @@
 
 #include <memory>
 #include <map>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -22,11 +23,13 @@ public:
                      std::vector<Task> all_tasks,
                      std::unordered_map<std::string, std::string> base_environment = {},
                      size_t num_threads = 1,
-                     bool schedule_trigger_tasks = false);
+                     bool schedule_trigger_tasks = false,
+                     size_t max_trigger_depth = Praktor::Execution::kMaxTriggerChainDepth);
 
     WorkflowExecutor(DependencyGraph<Task>& graph,
                      std::unordered_map<std::string, std::string> base_environment = {},
-                     size_t num_threads = 1);
+                     size_t num_threads = 1,
+                     size_t max_trigger_depth = Praktor::Execution::kMaxTriggerChainDepth);
 
     void execute(WorkflowContext& context, std::optional<std::string> alias = std::nullopt);
 
@@ -38,8 +41,8 @@ private:
         bool has_task_result = false;
     };
 
-    bool executeTask(const Task& task, WorkflowContext& context, std::optional<std::string> alias = std::nullopt, bool ignore_when = false);
-    TaskExecutionOutcome executeTaskInternal(const Task& task, WorkflowContext& context, std::optional<std::string> alias = std::nullopt, bool ignore_when = false);
+    bool executeTask(const Task& task, WorkflowContext& context, std::optional<std::string> alias = std::nullopt, bool ignore_when = false, size_t trigger_depth = 0);
+    TaskExecutionOutcome executeTaskInternal(const Task& task, WorkflowContext& context, std::optional<std::string> alias = std::nullopt, bool ignore_when = false, bool report_terminal_status = true);
     void setTaskExecutionStatus(const Task& task, WorkflowContext& context,
                                 std::optional<std::string> alias, std::string_view status,
                                 const std::string& error_message = {}) const;
@@ -50,11 +53,11 @@ private:
                                    const WorkflowValue& outputs) const;
     WorkflowValue getTaskOutputsSnapshot(const Task& task, const WorkflowContext& context) const;
     bool evaluateWhen(const Task& task, WorkflowContext& context) const;
-    bool executeTriggers(const Task& task, bool success, WorkflowContext& context);
-    bool executeTriggeredTask(const Task& task, WorkflowContext& context);
+    bool executeTriggers(const Task& task, bool success, WorkflowContext& context, size_t trigger_depth = 0);
+    bool executeTriggeredTask(const Task& task, WorkflowContext& context, size_t trigger_depth);
     bool executeTriggeredTask(const Task& task, WorkflowContext& context,
                              std::unordered_set<std::string>& active_stack,
-                             bool dependency_only);
+                             bool dependency_only, size_t trigger_depth);
     std::unordered_map<std::string, std::string> buildTaskEnvironment(
         const Task& task,
         const std::unordered_map<std::string, std::string>& inherited_env,
@@ -115,5 +118,10 @@ private:
     std::vector<Task> all_tasks_;
     std::unordered_map<std::string, Task> all_task_lookup_;
     std::unordered_set<std::string> trigger_only_tasks_;
+    // Task names for which a __TASK__:RUNNING status line was already emitted in
+    // this workflow run. A task can execute many times (each/matrix iterations,
+    // trigger re-entry); RUNNING is reported once per run to avoid log flooding.
+    std::unordered_set<std::string> running_reported_;
+    std::mutex status_log_mutex_;
     bool schedule_trigger_tasks_ = false;
 };

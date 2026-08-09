@@ -9,7 +9,7 @@ namespace Execution {
 
 bool TriggerExecutor::executeTriggers(const Task &task, bool success, WorkflowContext &context,
                                       const std::vector<Task> &all_tasks,
-                                      ExecutionCallback callback) {
+                                      ExecutionCallback callback, size_t depth) {
   if (!task.triggers || task.triggers->empty()) {
     return true;
   }
@@ -38,7 +38,7 @@ bool TriggerExecutor::executeTriggers(const Task &task, bool success, WorkflowCo
   bool any_trigger_failed = false;
   for (const auto &action : actions_to_execute) {
     try {
-      if (!executeTriggerAction(action, context, all_tasks, callback, visited_triggers)) {
+      if (!executeTriggerAction(action, context, all_tasks, callback, visited_triggers, depth)) {
         any_trigger_failed = true;
       }
     } catch (const std::exception &e) {
@@ -54,7 +54,8 @@ bool TriggerExecutor::executeTriggers(const Task &task, bool success, WorkflowCo
 bool TriggerExecutor::executeTriggerAction(const TriggerAction &action, WorkflowContext &context,
                                            const std::vector<Task> &all_tasks,
                                            ExecutionCallback callback,
-                                           std::unordered_set<std::string> &visited_triggers) {
+                                           std::unordered_set<std::string> &visited_triggers,
+                                           size_t depth) {
 
   // TriggerAction is now just a task name string
   std::string task_name = substituteVariables(action, context);
@@ -63,6 +64,12 @@ bool TriggerExecutor::executeTriggerAction(const TriggerAction &action, Workflow
   if (visited_triggers.count(task_name) > 0) {
     loge("Circular trigger dependency detected: task '{}' is already in the trigger call chain", task_name);
     throw std::runtime_error("Circular trigger dependency detected for task: " + task_name);
+  }
+
+  if (depth >= max_trigger_depth_) {
+    throw std::runtime_error(
+        "Trigger chain exceeded maximum depth (" + std::to_string(max_trigger_depth_) +
+        "); possible circular triggers involving task '" + task_name + "'");
   }
 
   visited_triggers.insert(task_name);
@@ -84,7 +91,7 @@ bool TriggerExecutor::executeTriggerAction(const TriggerAction &action, Workflow
   }
 
   logd("Executing trigger task '{}'", task_name);
-  bool success = callback(*trigger_task);
+  bool success = callback(*trigger_task, depth + 1);
   if (!success) {
     logw("Trigger task '{}' failed", task_name);
   }

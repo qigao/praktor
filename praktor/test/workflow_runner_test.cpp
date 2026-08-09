@@ -934,3 +934,67 @@ tasks:
 
     std::filesystem::remove_all(dir);
 }
+
+TEST_CASE("dynamic trigger cycles fail fast instead of recursing forever")
+{
+    auto dir = createTempDir();
+    auto workflow_path = dir / "trigger-cycle.yml";
+
+    // build and validate_request re-trigger each other through dynamic
+    // references, so the cycle is invisible to parse-time validation. The
+    // runtime trigger-depth guard must turn this into a controlled workflow
+    // failure instead of unbounded recursion (stack overflow).
+    writeFile(workflow_path, R"(
+variables:
+  NEXT_B: build
+  NEXT_A: validate_request
+tasks:
+  - name: build
+    command: "echo build-done"
+    triggers:
+      on_complete: ["{{ NEXT_A }}"]
+  - name: validate_request
+    command: "echo validate-done"
+    triggers:
+      on_complete: ["{{ NEXT_B }}"]
+)" );
+
+    WorkflowRunner runner(workflow_path.string());
+    REQUIRE_FALSE(runner.run());
+    std::filesystem::remove_all(dir);
+}
+
+TEST_CASE("multi-hop trigger chains complete without being mistaken for cycles")
+{
+    auto dir = createTempDir();
+    auto workflow_path = dir / "trigger-chain.yml";
+
+    // A terminating chain where each task triggers the next; only t1 is a
+    // regular root, the rest are trigger-only. Depth stays well below the
+    // guard limit and the workflow must succeed.
+    writeFile(workflow_path, R"(
+tasks:
+  - name: t1
+    command: "echo 1"
+    triggers:
+      on_success: [t2]
+  - name: t2
+    command: "echo 2"
+    triggers:
+      on_success: [t3]
+  - name: t3
+    command: "echo 3"
+    triggers:
+      on_success: [t4]
+  - name: t4
+    command: "echo 4"
+    triggers:
+      on_success: [t5]
+  - name: t5
+    command: "echo 5"
+)" );
+
+    WorkflowRunner runner(workflow_path.string());
+    REQUIRE(runner.run());
+    std::filesystem::remove_all(dir);
+}

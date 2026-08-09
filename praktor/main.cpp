@@ -33,6 +33,11 @@ namespace {
     constexpr int MIN_CONCURRENCY = 1;
     constexpr int MAX_CONCURRENCY = 32;
 
+    // Trigger-chain depth safety bound: mirrors Praktor::Execution::kMaxTriggerChainDepth.
+    constexpr int DEFAULT_MAX_TRIGGER_DEPTH = static_cast<int>(Praktor::Execution::kMaxTriggerChainDepth);
+    constexpr int MIN_TRIGGER_DEPTH = 1;
+    constexpr int MAX_TRIGGER_DEPTH = 256;
+
     enum class ColorMode {
         Auto,
         Always,
@@ -50,6 +55,7 @@ namespace {
         bool showVersion = false;
         bool benchmark = false;
         int maxConcurrency = DEFAULT_MAX_CONCURRENCY;
+        int maxTriggerDepth = DEFAULT_MAX_TRIGGER_DEPTH;
         std::string color = "auto";
         std::vector<std::string> inputParams;
     };
@@ -265,6 +271,10 @@ namespace {
     bool isValidConcurrency(int value) {
         return value >= MIN_CONCURRENCY && value <= MAX_CONCURRENCY;
     }
+
+    bool isValidTriggerDepth(int value) {
+        return value >= MIN_TRIGGER_DEPTH && value <= MAX_TRIGGER_DEPTH;
+    }
 } // namespace
 
 int main(int argc, char* argv[]) {
@@ -278,6 +288,7 @@ int main(int argc, char* argv[]) {
         ("c,concurrent", "Use concurrent execution mode", cxxopts::value<bool>(config.useConcurrent))
         ("v,verbose", "Enable verbose output", cxxopts::value<bool>(config.verbose))
         ("j,jobs", "Max concurrent tasks", cxxopts::value<int>(config.maxConcurrency)->default_value(std::to_string(DEFAULT_MAX_CONCURRENCY)))
+        ("max-trigger-depth", "Max nested trigger hops before a workflow fails as a circular trigger chain", cxxopts::value<int>(config.maxTriggerDepth)->default_value(std::to_string(DEFAULT_MAX_TRIGGER_DEPTH)))
         ("i,input", "Input parameter key=value", cxxopts::value<std::vector<std::string>>(config.inputParams))
         ("o,output", "Output file path (for visualize)", cxxopts::value<std::string>(config.outputPath))
         ("template", "Template for init", cxxopts::value<std::string>(config.templateName))
@@ -307,6 +318,12 @@ int main(int argc, char* argv[]) {
         if (!isValidConcurrency(config.maxConcurrency)) {
             std::cerr << "Error: --jobs must be between " << MIN_CONCURRENCY
                       << " and " << MAX_CONCURRENCY << std::endl;
+            return 1;
+        }
+
+        if (!isValidTriggerDepth(config.maxTriggerDepth)) {
+            std::cerr << "Error: --max-trigger-depth must be between " << MIN_TRIGGER_DEPTH
+                      << " and " << MAX_TRIGGER_DEPTH << std::endl;
             return 1;
         }
 
@@ -358,7 +375,8 @@ int main(int argc, char* argv[]) {
             WorkflowRunner runner(
                 config.yamlPath,
                 parseInputParams(config.inputParams),
-                buildColorEnvironment(use_color)
+                buildColorEnvironment(use_color),
+                static_cast<size_t>(config.maxTriggerDepth)
             );
             if (!config.taskName.empty()) {
                 success = runner.runTask(config.taskName, config.useConcurrent, config.maxConcurrency);

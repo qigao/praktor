@@ -288,6 +288,19 @@ void logTaskOutputs(const Task& task, const TaskResult& result) {
   }
 }
 
+void printTaskTerminalStatus(const Task& task, std::string_view status) {
+  if (Praktor::Logging::isVerboseEnabled()) {
+    return;
+  }
+  if (status == "success") {
+    Praktor::Logging::printTaskStatus(task.name, "SUCCESS");
+  } else if (status == "failed") {
+    Praktor::Logging::printTaskStatus(task.name, "FAILED");
+  } else {
+    Praktor::Logging::printTaskStatus(task.name, "SKIPPED");
+  }
+}
+
 std::unordered_set<std::string> collectTriggerTargetNames(const std::vector<Task>& tasks) {
   std::unordered_set<std::string> names;
   for (const auto& task : tasks) {
@@ -314,10 +327,13 @@ WorkflowExecutor::WorkflowExecutor(DependencyGraph<Task> &graph,
                                    std::vector<Task> all_tasks,
                                    std::unordered_map<std::string, std::string> base_environment,
                                    size_t num_threads,
-                                   bool schedule_trigger_tasks)
+                                   bool schedule_trigger_tasks,
+                                   size_t max_trigger_depth)
     : graph_(graph), base_environment_(std::move(base_environment)), max_concurrency_(std::max<size_t>(1, num_threads)),
       use_shared_pool_(num_threads > 1), all_tasks_(std::move(all_tasks)),
       schedule_trigger_tasks_(schedule_trigger_tasks) {
+
+  trigger_executor_.setMaxTriggerDepth(max_trigger_depth);
 
   if (all_tasks_.empty()) {
     all_tasks_ = graph_.getNodes();
@@ -355,8 +371,10 @@ WorkflowExecutor::WorkflowExecutor(DependencyGraph<Task> &graph,
 
 WorkflowExecutor::WorkflowExecutor(DependencyGraph<Task> &graph,
                                    std::unordered_map<std::string, std::string> base_environment,
-                                   size_t num_threads)
-    : WorkflowExecutor(graph, graph.getNodes(), std::move(base_environment), num_threads, false) {}
+                                   size_t num_threads,
+                                   size_t max_trigger_depth)
+    : WorkflowExecutor(graph, graph.getNodes(), std::move(base_environment), num_threads, false,
+                       max_trigger_depth) {}
 
 void WorkflowExecutor::execute(WorkflowContext &context, std::optional<std::string> alias) {
   auto nodes = graph_.getNodes();
@@ -614,7 +632,8 @@ void WorkflowExecutor::updateTaskCache(const Task &task, WorkflowContext &contex
 }
 
 bool WorkflowExecutor::executeTask(const Task &task, WorkflowContext &context,
-                                   std::optional<std::string> alias, bool ignore_when) {
+                                   std::optional<std::string> alias, bool ignore_when,
+                                   size_t trigger_depth) {
   // Mark as running in registry to allow setOutput calls
   setTaskExecutionStatus(task, context, alias, "running");
 
@@ -638,7 +657,7 @@ bool WorkflowExecutor::executeTask(const Task &task, WorkflowContext &context,
         child_context->setValue(task.each->index_variable, std::to_string(i));
       }
 
-      auto outcome = executeTaskInternal(task, *child_context, alias, ignore_when);
+      auto outcome = executeTaskInternal(task, *child_context, alias, ignore_when, false);
       child_context->unsetValue(task.each->as);
       if (!task.each->index_variable.empty()) {
         child_context->unsetValue(task.each->index_variable);
@@ -679,6 +698,10 @@ bool WorkflowExecutor::executeTask(const Task &task, WorkflowContext &context,
     } else {
       final_status = overall_success ? "success" : "failed";
     }
+
+    // Report one terminal status for the whole each/matrix task instead of
+    // one line per iteration.
+    printTaskTerminalStatus(task, final_status);
   } else {
     auto outcome = executeTaskInternal(task, context, alias, ignore_when);
     overall_success = outcome.success;
@@ -696,7 +719,7 @@ bool WorkflowExecutor::executeTask(const Task &task, WorkflowContext &context,
     has_failure_context = true;
   }
 
-  const bool triggers_success = executeTriggers(task, overall_success, context);
+  const bool triggers_success = executeTriggers(task, overall_success, context, trigger_depth);
   if (has_failure_context) {
     context.clearFailureContext();
   }
@@ -752,9 +775,20 @@ WorkflowValue WorkflowExecutor::getTaskOutputsSnapshot(const Task& task,
 }
 
 WorkflowExecutor::TaskExecutionOutcome WorkflowExecutor::executeTaskInternal(
-    const Task &task, WorkflowContext &context, std::optional<std::string> alias, bool ignore_when) {
+    const Task &task, WorkflowContext &context, std::optional<std::string> alias, bool ignore_when,
+    bool report_terminal_status) {
   if (!Praktor::Logging::isVerboseEnabled()) {
-    Praktor::Logging::printTaskStatus(task.name, "RUNNING");
+    // Report RUNNING once per task per run; a task can execute many times
+    // (each/matrix iterations, trigger re-entry) and repeating the same
+    // RUNNING line floods logs. Terminal statuses are still emitted for
+    // every execution.
+    const bool report_running = [&] {
+      std::lock_guard<std::mutex> lock(status_log_mutex_);
+      return running_reported_.insert(task.name).second;
+    }();
+    if (report_running) {
+      Praktor::Logging::printTaskStatus(task.name, "RUNNING");
+    }
   }
   logd("Executing task: {} (action={}, ignore_when={})", task.name, static_cast<int>(task.action),
        ignore_when);
@@ -829,14 +863,8 @@ WorkflowExecutor::TaskExecutionOutcome WorkflowExecutor::executeTaskInternal(
     logTaskOutputs(task, last_result);
   }
 
-  if (!Praktor::Logging::isVerboseEnabled()) {
-    if (outcome.status == "success") {
-      Praktor::Logging::printTaskStatus(task.name, "SUCCESS");
-    } else if (outcome.status == "failed") {
-      Praktor::Logging::printTaskStatus(task.name, "FAILED");
-    } else {
-      Praktor::Logging::printTaskStatus(task.name, "SKIPPED");
-    }
+  if (report_terminal_status) {
+    printTaskTerminalStatus(task, outcome.status);
   }
 
   outcome.result = std::move(last_result);
@@ -878,7 +906,8 @@ std::unordered_map<std::string, std::string> WorkflowExecutor::buildTaskEnvironm
   return env;
 }
 
-bool WorkflowExecutor::executeTriggers(const Task &task, bool success, WorkflowContext &context) {
+bool WorkflowExecutor::executeTriggers(const Task &task, bool success, WorkflowContext &context,
+                                       size_t trigger_depth) {
   if (!task.triggers || task.triggers->empty()) {
     return true;
   }
@@ -886,19 +915,22 @@ bool WorkflowExecutor::executeTriggers(const Task &task, bool success, WorkflowC
   logd("Executing triggers for task '{}' (success={})", task.name, success);
 
   return trigger_executor_.executeTriggers(
-      task, success, context, all_tasks_, [this, &context](const Task &t) {
-        return this->executeTriggeredTask(t, context);
-      });
+      task, success, context, all_tasks_,
+      [this, &context](const Task &t, size_t depth) {
+        return this->executeTriggeredTask(t, context, depth);
+      },
+      trigger_depth);
 }
 
-bool WorkflowExecutor::executeTriggeredTask(const Task& task, WorkflowContext& context) {
+bool WorkflowExecutor::executeTriggeredTask(const Task& task, WorkflowContext& context,
+                                            size_t trigger_depth) {
   std::unordered_set<std::string> active_stack;
-  return executeTriggeredTask(task, context, active_stack, false);
+  return executeTriggeredTask(task, context, active_stack, false, trigger_depth);
 }
 
 bool WorkflowExecutor::executeTriggeredTask(const Task& task, WorkflowContext& context,
                                            std::unordered_set<std::string>& active_stack,
-                                           bool dependency_only) {
+                                           bool dependency_only, size_t trigger_depth) {
   const std::string status = context.getTaskStatus(task.name);
   if (dependency_only &&
       (status == "success" || status == "skipped" || status == "failed" || status == "running")) {
@@ -921,12 +953,12 @@ bool WorkflowExecutor::executeTriggeredTask(const Task& task, WorkflowContext& c
                                "' depends on unknown task '" + dependency_name + "'");
     }
 
-    if (!executeTriggeredTask(*dependency, context, active_stack, true)) {
+    if (!executeTriggeredTask(*dependency, context, active_stack, true, trigger_depth)) {
       active_stack.erase(task.name);
       return false;
     }
   }
 
   active_stack.erase(task.name);
-  return executeTask(task, context, std::nullopt, true);
+  return executeTask(task, context, std::nullopt, true, trigger_depth);
 }

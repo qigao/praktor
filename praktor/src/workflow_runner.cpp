@@ -161,17 +161,20 @@ WorkflowExecutionResult makeFailedExecutionResult(std::string message) {
 
 WorkflowRunner::WorkflowRunner(std::string const& yamlPath,
                                std::unordered_map<std::string, std::string> inputValues,
-                               std::unordered_map<std::string, std::string> baseEnvironment)
+                               std::unordered_map<std::string, std::string> baseEnvironment,
+                               size_t maxTriggerDepth)
     : WorkflowRunner(yamlPath, convertStringInputs(std::move(inputValues)),
-                     std::move(baseEnvironment)) {}
+                     std::move(baseEnvironment), maxTriggerDepth) {}
 
 WorkflowRunner::WorkflowRunner(std::string const& yamlPath,
                                WorkflowInputs inputValues,
-                               std::unordered_map<std::string, std::string> baseEnvironment)
+                               std::unordered_map<std::string, std::string> baseEnvironment,
+                               size_t maxTriggerDepth)
     : yamlPath_(yamlPath)
     , inputValues_(std::move(inputValues))
     , baseEnvironment_(std::move(baseEnvironment))
-    , base_directory_(std::filesystem::path(yamlPath).parent_path()) {}
+    , base_directory_(std::filesystem::path(yamlPath).parent_path())
+    , max_trigger_depth_(maxTriggerDepth) {}
 
 WorkflowRunner::~WorkflowRunner() = default;
 
@@ -189,7 +192,8 @@ WorkflowExecutionResult WorkflowRunner::execute(bool useConcurrent, int maxConcu
             prepared.workflow.tasks,
             prepared.runtime_environment,
             useConcurrent ? maxConcurrency : 1,
-            false);
+            false,
+            max_trigger_depth_);
         executor.execute(*prepared.context);
 
         auto result = makeExecutionResult(*prepared.context);
@@ -238,7 +242,8 @@ bool WorkflowRunner::runTask(std::string const& taskName, bool useConcurrent, in
             prepared.workflow.tasks,
             prepared.runtime_environment,
             useConcurrent ? maxConcurrency : 1,
-            true);
+            true,
+            max_trigger_depth_);
         executor.execute(*prepared.context);
 
         std::string status =
