@@ -48,8 +48,8 @@ target_link_libraries(
     ${TARGET_NAME_LIB}
     PUBLIC Threads::Threads
            TurboUtils::Core
-           TurboUtils::Parser
-           TurboUtils::Mustache
+           TurboParser::Parser
+           TurboParser::Mustache
            cxxopts::cxxopts
            TurboScript::TurboScript
            actions

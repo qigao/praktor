@@ -1,5 +1,8 @@
 @PACKAGE_INIT@
 
+include(CMakeFindDependencyMacro)
+find_dependency(TurboParser CONFIG)
+
 include("${CMAKE_CURRENT_LIST_DIR}/PraktorTargets.cmake")
 
 check_required_components(Praktor)
