@@ -35,6 +35,8 @@
                 "TURBOSCRIPT_ROOT": "$env{PKG_ROOT}/turbo_script",
                 "TURBO_UTILS_ROOT": "$env{PKG_ROOT}/turboutils",
                 "TURBOPARSER_ROOT": "$env{PKG_ROOT}/turboparser",
+                "TURBONET_ROOT": "$env{PKG_ROOT}/turbonet",
+                "TURBOHTTP_ROOT": "$env{PKG_ROOT}/turbohttp",
                 "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/praktor",
                 "CMAKE_MAKE_PROGRAM": "$env{NINJA_ROOT}/ninja.exe",
                 "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed",
@@ -51,6 +53,8 @@
             "toolchainFile": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
             "cacheVariables": {
                 "TURBOPARSER_ROOT": "$env{PKG_ROOT}/turboparser",
+                "TURBONET_ROOT": "$env{PKG_ROOT}/turbonet",
+                "TURBOHTTP_ROOT": "$env{PKG_ROOT}/turbohttp",
                 "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/turboutils",
                 "CMAKE_MAKE_PROGRAM": "/usr/bin/ninja",
                 "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed",

@@ -184,7 +184,23 @@ tasks:
 
 `output_format: json` 时，stdout 会被解析为 JSON 对象并写入 `tasks.TASK_NAME.outputs.data`。
 
-### 4.3 uses — 复用子工作流
+### 4.3 download — HTTPS 流式下载
+
+```yaml
+- name: fetch_package
+  download:
+    url: "{{ DOWNLOAD_URL }}"
+    path: ./packages/release.zip
+    sha256: "{{ SHA256 }}"
+    overwrite: true
+    timeout_ms: 300000
+```
+
+`download` 只接受绝对 `https://` URL。响应先流式写入临时文件；HTTP 成功且可选
+SHA-256 校验通过后，才原子替换目标文件。输出包括 `path`、`bytes` 和
+`sha256_verified`。`overwrite` 默认为 `false`。
+
+### 4.4 uses — 复用子工作流
 
 ```yaml
 - name: deploy_backend
@@ -198,7 +214,7 @@ tasks:
 
 子工作流的所有任务输出通过 `tasks.TASK_NAME.outputs.*` 在父工作流中可见。
 
-### 4.4 dynamic_tasks — 运行时生成任务
+### 4.5 dynamic_tasks — 运行时生成任务
 
 ```yaml
 - name: fetch_services
@@ -214,7 +230,7 @@ tasks:
       timeout: "5m"
 ```
 
-### 4.5 actions — 编排控制流
+### 4.6 actions — 编排控制流
 
 ```yaml
 - name: resilient_deploy

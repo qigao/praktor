@@ -154,6 +154,47 @@ TEST_CASE("parse program task")
     CHECK(params.output_format == CommandOutputFormat::Json);
 }
 
+TEST_CASE("parse download task")
+{
+    const std::string content =
+        "tasks:\n"
+        "  - name: fetch_package\n"
+        "    download:\n"
+        "      url: '{{ DOWNLOAD_URL }}'\n"
+        "      path: packages/release.zip\n"
+        "      sha256: '{{ SHA256 }}'\n"
+        "      overwrite: true\n"
+        "      timeout_ms: 300000\n";
+
+    auto wf = writeTempWorkflow("download.yml", content);
+    Workflow workflow = TaskParser::parseFile(wf.string());
+    REQUIRE(workflow.tasks.size() == 1);
+
+    const Task& task = workflow.tasks[0];
+    CHECK(task.action == TaskAction::Download);
+    CHECK(task.declared_runner == "download");
+    REQUIRE(std::holds_alternative<DownloadParams>(task.specifics));
+    const auto& params = std::get<DownloadParams>(task.specifics);
+    CHECK(params.url == "{{ DOWNLOAD_URL }}");
+    CHECK(params.path == "packages/release.zip");
+    CHECK(params.sha256 == "{{ SHA256 }}");
+    CHECK(params.overwrite);
+    CHECK(params.timeout_ms == 300000);
+}
+
+TEST_CASE("download task rejects missing required fields")
+{
+    const std::string content =
+        "tasks:\n"
+        "  - name: fetch_package\n"
+        "    download:\n"
+        "      path: packages/release.zip\n";
+
+    auto wf = writeTempWorkflow("download_missing_url.yml", content);
+    CHECK_THROWS_WITH(TaskParser::parseFile(wf.string()),
+                      Catch::Matchers::ContainsSubstring("download requires 'url'"));
+}
+
 
 
 TEST_CASE("parse scalar depends_on and dotEnv fields")

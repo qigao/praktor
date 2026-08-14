@@ -31,6 +31,12 @@ std::string taskTypeName(const Task& task)
             return "dynamic_tasks";
         case TaskAction::Orch:
             return "actions";
+        case TaskAction::Download:
+            return "download";
+        case TaskAction::Program:
+            return "program";
+        case TaskAction::Command:
+            return "command";
         case TaskAction::None:
             break;
     }

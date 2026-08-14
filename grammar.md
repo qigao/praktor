@@ -151,6 +151,22 @@ tasks:
     stdin: "{{ tasks.prepare.outputs.payload }}"
 ```
 
+HTTPS download runner:
+
+```yaml
+tasks:
+  - name: fetch_package
+    download:
+      url: "{{ DOWNLOAD_URL }}"
+      path: ./packages/release.zip
+      sha256: "{{ SHA256 }}"
+      overwrite: true
+      timeout_ms: 300000
+```
+
+The download runner requires an absolute HTTPS URL, writes through a temporary file,
+optionally verifies a 64-character SHA-256 digest, and atomically replaces the destination.
+
 Action runner:
 
 ```yaml

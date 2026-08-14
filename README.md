@@ -33,6 +33,7 @@ Praktor has two distinct orchestration levels:
 Common runners include:
 
 - **`command`**: call an external process.
+- **`download`**: stream an HTTPS response to a local file with optional SHA-256 verification.
 - **`actions`**: define internal action control flow for one task.
 - **`uses` / `dynamic_tasks`**: compose or generate more tasks at runtime.
 
@@ -78,6 +79,22 @@ tasks:
             path: "$.status"
             output_key: "deploy_status"
 ```
+
+Native package download:
+
+```yaml
+tasks:
+  - name: fetch_package
+    download:
+      url: "{{ DOWNLOAD_URL }}"
+      path: ./packages/release.zip
+      sha256: "{{ SHA256 }}"
+      overwrite: true
+      timeout_ms: 300000
+```
+
+`download` accepts only absolute `https://` URLs. It streams to a temporary file and
+atomically replaces `path` only after the response and optional checksum validation succeed.
 
 In the example above:
 

@@ -25,6 +25,7 @@ set(SOURCE_FILES
     src/executors/uses_executor.cpp
     src/executors/declarative_tree_executor.cpp
     src/executors/program_executor.cpp
+    src/executors/download_executor.cpp
     src/expressions/expression_evaluator.cpp
     src/expressions/expression_lexer.cpp
     src/util/system_info.cpp
@@ -52,6 +53,8 @@ target_link_libraries(
            TurboParser::Mustache
            cxxopts::cxxopts
            TurboScript::TurboScript
+           TurboHttp::TurboHttp
+           TurboNet::Crypto
            actions
 )
 if(UNIX AND NOT APPLE)
@@ -77,6 +80,16 @@ cmake_config_target(
 add_executable(${TARGET_NAME_EXE})
 target_sources(${TARGET_NAME_EXE} PRIVATE main.cpp)
 target_link_libraries(${TARGET_NAME_EXE} PRIVATE ${TARGET_NAME_LIB})
+if(WIN32)
+    add_custom_command(
+        TARGET ${TARGET_NAME_EXE} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                $<TARGET_RUNTIME_DLLS:${TARGET_NAME_EXE}>
+                "$<TARGET_FILE_DIR:${TARGET_NAME_EXE}>"
+        COMMAND_EXPAND_LISTS
+        VERBATIM
+    )
+endif()
 
 # Copy template files next to the runtime output so `praktor init` works from
 # the built binary.
@@ -90,10 +103,20 @@ file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/templates
      DESTINATION ${CMAKE_CURRENT_BINARY_DIR}
 )
 
-cmake_config_target(${TARGET_NAME_EXE} NO_INSTALL FOLDER ${folder_name})
+cmake_config_target(
+    ${TARGET_NAME_EXE}
+    NO_INSTALL
+    ALIAS Praktor::CLI
+    EXPORT_NAME CLI
+    FOLDER ${folder_name}
+)
 
 install(
     TARGETS ${TARGET_NAME_EXE}
+    EXPORT PraktorTargets
+    RUNTIME_DEPENDENCIES
+        PRE_EXCLUDE_REGEXES "api-ms-.*" "ext-ms-.*"
+        POST_EXCLUDE_REGEXES ".*[Ww][Ii][Nn][Dd][Oo][Ww][Ss][/\\\\][Ss]ystem32[/\\\\].*"
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
 if(ENABLE_TESTS)

@@ -339,6 +339,52 @@ ProgramParams parse_program_params(const TaskYamlDetail::YamlNodeRef& node) {
     return params;
 }
 
+DownloadParams parse_download_params(const TaskYamlDetail::YamlNodeRef& node) {
+    const auto& download = node["download"];
+    if (!download.is_map()) {
+        TaskYamlDetail::throw_parse_error(download, "download must be a map");
+    }
+
+    static const std::unordered_set<std::string> allowed_keys = {
+        "url", "path", "sha256", "overwrite", "timeout_ms"
+    };
+    TaskYamlDetail::check_unknown_keys(download, allowed_keys);
+    if (!download.has_child("url")) {
+        TaskYamlDetail::throw_parse_error(download, "download requires 'url'");
+    }
+    if (!download.has_child("path")) {
+        TaskYamlDetail::throw_parse_error(download, "download requires 'path'");
+    }
+
+    DownloadParams params;
+    params.url = TaskYamlDetail::read_scalar_or_throw(
+        download["url"], "download.url must be a scalar");
+    params.path = TaskYamlDetail::read_scalar_or_throw(
+        download["path"], "download.path must be a scalar");
+    if (params.url.empty()) {
+        TaskYamlDetail::throw_parse_error(download["url"], "download.url cannot be empty");
+    }
+    if (params.path.empty()) {
+        TaskYamlDetail::throw_parse_error(download["path"], "download.path cannot be empty");
+    }
+    if (download.has_child("sha256")) {
+        params.sha256 = TaskYamlDetail::read_scalar_or_throw(
+            download["sha256"], "download.sha256 must be a scalar");
+    }
+    if (download.has_child("overwrite")) {
+        params.overwrite =
+            TaskYamlDetail::read_bool_or_throw(download["overwrite"], "download.overwrite");
+    }
+    if (download.has_child("timeout_ms")) {
+        download["timeout_ms"] >> params.timeout_ms;
+        if (params.timeout_ms <= 0) {
+            TaskYamlDetail::throw_parse_error(download["timeout_ms"],
+                                               "download.timeout_ms must be positive");
+        }
+    }
+    return params;
+}
+
 UsesParams parse_uses_params(const TaskYamlDetail::YamlNodeRef& node) {
     UsesParams params;
     if (node.has_val()) {

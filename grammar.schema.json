@@ -230,6 +230,19 @@
           "minLength": 1,
           "description": "Executable path or program name for raw process execution. Does not invoke a shell."
         },
+        "download": {
+          "type": "object",
+          "description": "Streams one absolute HTTPS URL to a local file, with optional SHA-256 verification and atomic replacement.",
+          "properties": {
+            "url": { "type": "string", "minLength": 1 },
+            "path": { "type": "string", "minLength": 1 },
+            "sha256": { "type": "string" },
+            "overwrite": { "type": "boolean", "default": false },
+            "timeout_ms": { "type": "integer", "minimum": 1, "default": 300000 }
+          },
+          "required": ["url", "path"],
+          "additionalProperties": false
+        },
         "args": {
           "type": "array",
           "description": "Argument vector passed to program without shell parsing.",
@@ -459,6 +472,11 @@
             },
             {
               "required": [
+                "download"
+              ]
+            },
+            {
+              "required": [
                 "uses"
               ]
             },
@@ -681,6 +699,11 @@
             },
             {
               "required": [
+                "download"
+              ]
+            },
+            {
+              "required": [
                 "uses"
               ]
             },
@@ -898,6 +921,11 @@
                   {
                     "required": [
                       "program"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "download"
                     ]
                   },
                   {

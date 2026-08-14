@@ -10,7 +10,7 @@ using Vars = std::unordered_map<std::string, std::string>;
 using StrList = std::vector<std::string>;
 using DotEnv = std::vector<std::string>;
 
-enum class TaskAction { None, Uses, DynamicTasks, Orch, Program, Command };
+enum class TaskAction { None, Uses, DynamicTasks, Orch, Program, Download, Command };
 
 enum class CommandOutputFormat { Text, Json };
 
@@ -54,6 +54,14 @@ struct ProgramParams {
   StrList args;
   std::string input;
   CommandOutputFormat output_format = CommandOutputFormat::Text;
+};
+
+struct DownloadParams {
+  std::string url;
+  std::string path;
+  std::string sha256;
+  bool overwrite = false;
+  int timeout_ms = 300000;
 };
 
 struct UsesParams {
@@ -143,5 +151,7 @@ struct TaskDefaults {
   std::optional<std::string> timeout;
 };
 
-using TaskSpecifics = std::variant<std::monostate, UsesParams, DynamicTasksParams, OrchParams, ProgramParams>;
+using TaskSpecifics =
+    std::variant<std::monostate, UsesParams, DynamicTasksParams, OrchParams, ProgramParams,
+                 DownloadParams>;
 

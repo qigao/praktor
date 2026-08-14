@@ -32,7 +32,7 @@ Task parse_task(const TaskYamlDetail::YamlNodeRef& node, const std::string& sour
         "name", "description", "depends_on", "vars", "env", "dotEnv", "when",
         "each", "timeout", "triggers",
         "working_dir", "silent", "sources", "generates", "finally",
-        "command", "program", "args", "stdin", "uses", "dynamic_tasks", "output_format",
+        "command", "program", "args", "stdin", "download", "uses", "dynamic_tasks", "output_format",
         "script", "actions",
         "sequence", "parallel", "reactive_sequence", "pipeline_sequence",
         "inverter", "force_success", "force_failure", "repeat",
@@ -167,6 +167,12 @@ Task parse_task(const TaskYamlDetail::YamlNodeRef& node, const std::string& sour
         select_runner(TaskAction::Program, "program", [&] { return parse_program_params(node); });
     }
 
+    if (node.has_child("download")) {
+        select_runner(TaskAction::Download, "download", [&] {
+            return parse_download_params(node);
+        });
+    }
+
     if (node.has_child("uses")) {
         select_runner(TaskAction::Uses, "uses", [&] { return parse_uses_params(node["uses"]); });
     }
@@ -260,7 +266,7 @@ Task parse_task(const TaskYamlDetail::YamlNodeRef& node, const std::string& sour
     if (action_count == 0 && !task.script) {
         TaskYamlDetail::throw_parse_error(
             node, "task '" + task.name +
-                      "' must declare a runner (command/program/uses/dynamic_tasks) or script");
+                      "' must declare a runner (command/program/download/uses/dynamic_tasks) or script");
     }
 
     task.source_path = source_path;

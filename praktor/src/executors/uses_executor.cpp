@@ -38,6 +38,8 @@ std::string taskTypeName(const Task& task) {
       return "command";
     case TaskAction::Program:
       return "program";
+    case TaskAction::Download:
+      return "download";
     case TaskAction::None:
       break;
   }

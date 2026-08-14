@@ -1,3 +1,6 @@
+// Each repeated --input argument is one complete key=value record. Values may
+// contain JSON commas, so cxxopts must not split vector items on commas.
+#define CXXOPTS_VECTOR_DELIMITER '\0'
 #include <cxxopts.hpp>
 #include <tlog.h>
 
