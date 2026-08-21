@@ -69,10 +69,16 @@ if(WIN32)
     add_dependencies(managed_process_executor_test.${TARGET_NAME_LIB}
                      managed_process_fixture
                      managed_process_fixture_alt)
+    add_dependencies(workflow_runner_test.${TARGET_NAME_LIB}
+                     managed_process_fixture)
     target_compile_definitions(
         managed_process_executor_test.${TARGET_NAME_LIB}
         PRIVATE PRAKTOR_MANAGED_PROCESS_FIXTURE="$<TARGET_FILE:managed_process_fixture>"
                 PRAKTOR_MANAGED_PROCESS_FIXTURE_ALT="$<TARGET_FILE:managed_process_fixture_alt>"
+    )
+    target_compile_definitions(
+        workflow_runner_test.${TARGET_NAME_LIB}
+        PRIVATE PRAKTOR_MANAGED_PROCESS_FIXTURE="$<TARGET_FILE:managed_process_fixture>"
     )
 endif()
 

@@ -91,6 +91,76 @@ def main():
         for path in sorted((REPO_ROOT / folder).glob("*.yml")):
             validate_file(validator, folder / path.name)
 
+    validate_file(validator, pathlib.Path("praktor/test/workflows/system-actions.yml"))
+
+    validate_text(
+        validator,
+        "accept_service_action",
+        """
+name: valid-service-action
+tasks:
+  - name: query_service
+    service:
+      operation: status
+      name: EventLog
+      profile: windows_scm
+      arguments: [--literal, "argument with spaces"]
+      timeout_ms: 30000
+      poll_interval_ms: 200
+""",
+        True,
+    )
+
+    validate_text(
+        validator,
+        "reject_invalid_service_action",
+        """
+name: invalid-service-action
+tasks:
+  - name: reload_service
+    service:
+      operation: reload
+      name: EventLog
+""",
+        False,
+    )
+
+    validate_text(
+        validator,
+        "accept_managed_process_action",
+        """
+name: valid-managed-process-action
+tasks:
+  - name: start_worker
+    managed_process:
+      operation: start
+      executable: worker.exe
+      arguments: [--mode, "safe value"]
+      working_directory: C:/workers
+      identity:
+        image_name: worker.exe
+      startup_timeout_ms: 5000
+      stop_timeout_ms: 5000
+      force_terminate: true
+""",
+        True,
+    )
+
+    validate_text(
+        validator,
+        "reject_invalid_managed_process_action",
+        """
+name: invalid-managed-process-action
+tasks:
+  - name: start_worker
+    managed_process:
+      operation: start
+      identity:
+        image_name: worker.exe
+""",
+        False,
+    )
+
     validate_text(
         validator,
         "flat_bt_inline",

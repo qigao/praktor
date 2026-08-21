@@ -1,4 +1,5 @@
 #include "workflow_runner.hpp"
+#include "system/managed_process.hpp"
 #include "util/file_utils.hpp"
 
 #include <catch2/catch_all.hpp>
@@ -7,7 +8,16 @@
 #include <fstream>
 #include <random>
 #include <chrono>
+#include <cstdint>
 #include <cstdlib>
+#include <sstream>
+#include <thread>
+#include <utility>
+#include <vector>
+
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 namespace {
 
@@ -122,6 +132,115 @@ std::string failOnMatchCommand(const std::string& value_expr, const std::string&
     return "if [ " + value_expr + " = " + expected + " ]; then exit 1; else printf '%s' " + value_expr + "; fi";
 #endif
 }
+
+#ifdef _WIN32
+using Praktor::System::IManagedProcessBackend;
+using Praktor::System::ManagedProcessCommandResult;
+using Praktor::System::ManagedProcessState;
+
+ManagedProcessCommandResult cleanupManagedProcessFixture(
+    IManagedProcessBackend& backend,
+    const ManagedProcessIdentity& identity)
+{
+    constexpr auto cleanup_timeout = std::chrono::seconds(3);
+    constexpr auto poll_interval = std::chrono::milliseconds(20);
+    const auto deadline = std::chrono::steady_clock::now() + cleanup_timeout;
+    bool termination_requested = false;
+    std::uint32_t terminated_pid = 0;
+    std::uint64_t terminated_token = 0;
+
+    do {
+        auto queried = backend.query(identity);
+        if (!queried.ok) {
+            return {false, queried.native_error, std::move(queried.message)};
+        }
+        if (queried.value.state == ManagedProcessState::NotRunning) {
+            return {true, 0, {}};
+        }
+
+        const bool new_instance = !termination_requested ||
+            queried.value.pid != terminated_pid ||
+            queried.value.instance_token != terminated_token;
+        if (new_instance) {
+            auto terminated = backend.terminate(queried.value);
+            if (!terminated.ok) {
+                return terminated;
+            }
+            termination_requested = true;
+            terminated_pid = queried.value.pid;
+            terminated_token = queried.value.instance_token;
+        }
+        std::this_thread::sleep_for(poll_interval);
+    } while (std::chrono::steady_clock::now() < deadline);
+
+    auto final_query = backend.query(identity);
+    if (!final_query.ok) {
+        return {false, final_query.native_error, std::move(final_query.message)};
+    }
+    if (final_query.value.state == ManagedProcessState::NotRunning) {
+        return {true, 0, {}};
+    }
+    return {false, ERROR_TIMEOUT,
+            "timed out waiting for managed process fixture cleanup"};
+}
+
+class ManagedProcessFixtureCleanup {
+public:
+    ManagedProcessFixtureCleanup(IManagedProcessBackend& backend,
+                                 ManagedProcessIdentity identity)
+        : backend_(backend), identity_(std::move(identity)) {}
+
+    ~ManagedProcessFixtureCleanup() noexcept
+    {
+        try {
+            static_cast<void>(cleanupManagedProcessFixture(backend_, identity_));
+        } catch (...) {
+        }
+    }
+
+    ManagedProcessFixtureCleanup(const ManagedProcessFixtureCleanup&) = delete;
+    ManagedProcessFixtureCleanup& operator=(const ManagedProcessFixtureCleanup&) = delete;
+
+private:
+    IManagedProcessBackend& backend_;
+    ManagedProcessIdentity identity_;
+};
+
+struct ManagedProcessCacheSpec {
+    std::string operation{"status"};
+    std::string executable{"C:/praktor-cache-probe/worker.exe"};
+    std::vector<std::string> arguments{"--mode", "baseline"};
+    std::string working_directory{"C:/praktor-cache-probe"};
+    std::string image_name;
+    int startup_timeout_ms{1000};
+    int stop_timeout_ms{1000};
+    bool force_terminate{false};
+};
+
+std::string managedProcessCacheWorkflow(const ManagedProcessCacheSpec& spec)
+{
+    std::ostringstream yaml;
+    yaml << "tasks:\n"
+         << "  - name: cached_process_status\n"
+         << "    sources: [source.txt]\n"
+         << "    generates: [marker.txt]\n"
+         << "    managed_process:\n"
+         << "      operation: " << spec.operation << "\n"
+         << "      executable: \"" << spec.executable << "\"\n"
+         << "      arguments:\n";
+    for (const auto& argument : spec.arguments) {
+        yaml << "        - \"" << argument << "\"\n";
+    }
+    yaml << "      working_directory: \"" << spec.working_directory << "\"\n"
+         << "      identity:\n"
+         << "        image_name: \"" << spec.image_name << "\"\n"
+         << "      startup_timeout_ms: " << spec.startup_timeout_ms << "\n"
+         << "      stop_timeout_ms: " << spec.stop_timeout_ms << "\n"
+         << "      force_terminate: "
+         << (spec.force_terminate ? "true" : "false") << "\n";
+    return yaml.str();
+}
+#endif
 
 }
 
@@ -997,4 +1116,145 @@ tasks:
     WorkflowRunner runner(workflow_path.string());
     REQUIRE(runner.run());
     std::filesystem::remove_all(dir);
+}
+
+TEST_CASE("system actions execute through WorkflowRunner and preserve failure metadata")
+{
+#ifdef _WIN32
+    const auto workflow_path = std::filesystem::path(__FILE__).parent_path()
+        / "workflows" / "system-actions.yml";
+    const auto fixture_path = std::filesystem::path(PRAKTOR_MANAGED_PROCESS_FIXTURE);
+    REQUIRE(std::filesystem::exists(workflow_path));
+    REQUIRE(std::filesystem::exists(fixture_path));
+
+    auto backend = Praktor::System::createManagedProcessBackend();
+    REQUIRE(backend != nullptr);
+    ManagedProcessIdentity identity;
+    identity.image_name = fixture_path.filename().string();
+    const auto setup_cleanup = cleanupManagedProcessFixture(*backend, identity);
+    INFO(setup_cleanup.native_error << ":" << setup_cleanup.message);
+    REQUIRE(setup_cleanup.ok);
+    ManagedProcessFixtureCleanup cleanup(*backend, identity);
+
+    WorkflowInputs inputs;
+    inputs["fixture_executable"] = fixture_path.generic_string();
+    inputs["fixture_working_directory"] = fixture_path.parent_path().generic_string();
+    inputs["fixture_image_name"] = identity.image_name;
+    inputs["invalid_service_profile"] = "praktor_missing_profile";
+
+    WorkflowRunner runner(workflow_path.string(), std::move(inputs));
+    const auto result = runner.execute();
+
+    CHECK_FALSE(result.success);
+    CHECK(result.value["workflow_status"].as<std::string>() == "failed");
+    CHECK(result.error_message == "Workflow execution failed");
+    const WorkflowValue tasks = result.value["tasks"];
+
+    const auto check_process = [&](const std::string& name,
+                                   const std::string& operation,
+                                   const std::string& state,
+                                   bool changed) {
+        INFO(name);
+        CHECK(tasks[name]["status"].as<std::string>() == "success");
+        const WorkflowValue outputs = tasks[name]["outputs"];
+        CHECK(outputs["image_name"].as<std::string>() == identity.image_name);
+        CHECK(outputs["operation"].as<std::string>() == operation);
+        CHECK(outputs["state"].as<std::string>() == state);
+        CHECK(outputs["changed"].as<bool>() == changed);
+        CHECK(outputs["duration_ms"].as<std::int64_t>() >= 0);
+        CHECK(outputs["pid"].as<std::int64_t>() >= 0);
+    };
+
+    check_process("process_initial_status", "status", "not_running", false);
+    check_process("process_start", "start", "running", true);
+    CHECK(tasks["process_start"]["outputs"]["pid"].as<std::int64_t>() > 0);
+    check_process("process_running_status", "status", "running", false);
+    check_process("process_restart", "restart", "running", true);
+    CHECK(tasks["process_restart"]["outputs"]["pid"].as<std::int64_t>() > 0);
+    check_process("process_stop", "stop", "not_running", true);
+    check_process("process_final_status", "status", "not_running", false);
+
+    CHECK(tasks["service_profile_failure"]["status"].as<std::string>() == "failed");
+    const WorkflowValue service_outputs = tasks["service_profile_failure"]["outputs"];
+    CHECK(service_outputs["name"].as<std::string>() == "PraktorContractService");
+    CHECK(service_outputs["operation"].as<std::string>() == "status");
+    CHECK(service_outputs["state"].as<std::string>().empty());
+    CHECK_FALSE(service_outputs["changed"].as<bool>());
+    CHECK(service_outputs["duration_ms"].as<std::int64_t>() >= 0);
+
+    CHECK(tasks["capture_service_failure"]["status"].as<std::string>() == "success");
+    const WorkflowValue failure = tasks["capture_service_failure"]["outputs"];
+    CHECK(failure["task_name"].as<std::string>() == "service_profile_failure");
+    CHECK(failure["task_type"].as<std::string>() == "service");
+    CHECK(failure["error_code"].as<std::string>() == "service_state_failed");
+    CHECK(failure["error_phase"].as<std::string>() == "profile");
+    CHECK(failure["error_details"]["name"].as<std::string>() ==
+          "PraktorContractService");
+    CHECK(failure["error_details"]["profile"].as<std::string>() ==
+          "praktor_missing_profile");
+    CHECK(failure["error_details"]["operation"].as<std::string>() == "status");
+    CHECK(failure["failed_outputs"]["operation"].as<std::string>() == "status");
+
+    const auto final_cleanup = cleanupManagedProcessFixture(*backend, identity);
+    INFO(final_cleanup.native_error << ":" << final_cleanup.message);
+    REQUIRE(final_cleanup.ok);
+#else
+    SKIP("managed_process WorkflowRunner integration is Windows-only");
+#endif
+}
+
+TEST_CASE("managed process cache invalidates when every action parameter changes")
+{
+#ifdef _WIN32
+    const auto dir = createTempDir();
+    const auto workflow_path = dir / "managed-process-cache.yml";
+    writeFile(dir / "source.txt", "stable source");
+    writeFile(dir / "marker.txt", "existing output");
+
+    ManagedProcessCacheSpec baseline;
+    baseline.image_name = "praktor_cache_probe_" + dir.filename().string() + ".exe";
+
+    std::vector<std::pair<std::string, ManagedProcessCacheSpec>> variants;
+    auto add_variant = [&](std::string name, auto mutate) {
+        auto variant = baseline;
+        mutate(variant);
+        variants.emplace_back(std::move(name), std::move(variant));
+    };
+    add_variant("operation", [](auto& value) { value.operation = "stop"; });
+    add_variant("executable", [](auto& value) { value.executable += ".changed"; });
+    add_variant("arguments", [](auto& value) { value.arguments.push_back("changed"); });
+    add_variant("working_directory", [](auto& value) { value.working_directory += "/changed"; });
+    add_variant("identity.image_name", [](auto& value) {
+        value.image_name = "praktor_cache_probe_changed.exe";
+    });
+    add_variant("startup_timeout_ms", [](auto& value) { value.startup_timeout_ms = 1001; });
+    add_variant("stop_timeout_ms", [](auto& value) { value.stop_timeout_ms = 1001; });
+    add_variant("force_terminate", [](auto& value) { value.force_terminate = true; });
+
+    for (const auto& [field, variant] : variants) {
+        INFO("changed field: " << field);
+        std::filesystem::remove(dir / ".praktor_cache");
+        writeFile(workflow_path, managedProcessCacheWorkflow(baseline));
+
+        const auto first = WorkflowRunner(workflow_path.string()).execute();
+        REQUIRE(first.success);
+        CHECK(first.value["tasks"]["cached_process_status"]["status"].as<std::string>() ==
+              "success");
+
+        const auto cached = WorkflowRunner(workflow_path.string()).execute();
+        REQUIRE(cached.success);
+        CHECK(cached.value["tasks"]["cached_process_status"]["status"].as<std::string>() ==
+              "skipped");
+
+        writeFile(workflow_path, managedProcessCacheWorkflow(variant));
+        const auto changed = WorkflowRunner(workflow_path.string()).execute();
+        REQUIRE(changed.success);
+        CHECK(changed.value["tasks"]["cached_process_status"]["status"].as<std::string>() ==
+              "success");
+    }
+
+    std::filesystem::remove_all(dir);
+#else
+    SKIP("managed_process cache integration is Windows-only");
+#endif
 }

@@ -1,0 +1,75 @@
+name: system-actions-contract
+
+tasks:
+  - name: process_initial_status
+    managed_process:
+      operation: status
+      identity:
+        image_name: "{{ fixture_image_name }}"
+
+  - name: process_start
+    depends_on: [process_initial_status]
+    managed_process:
+      operation: start
+      executable: "{{ fixture_executable }}"
+      working_directory: "{{ fixture_working_directory }}"
+      identity:
+        image_name: "{{ fixture_image_name }}"
+      startup_timeout_ms: 3000
+      stop_timeout_ms: 3000
+      force_terminate: false
+
+  - name: process_running_status
+    depends_on: [process_start]
+    managed_process:
+      operation: status
+      identity:
+        image_name: "{{ fixture_image_name }}"
+
+  - name: process_restart
+    depends_on: [process_running_status]
+    managed_process:
+      operation: restart
+      executable: "{{ fixture_executable }}"
+      working_directory: "{{ fixture_working_directory }}"
+      identity:
+        image_name: "{{ fixture_image_name }}"
+      startup_timeout_ms: 3000
+      stop_timeout_ms: 3000
+      force_terminate: true
+
+  - name: process_stop
+    depends_on: [process_restart]
+    managed_process:
+      operation: stop
+      identity:
+        image_name: "{{ fixture_image_name }}"
+      stop_timeout_ms: 3000
+      force_terminate: true
+
+  - name: process_final_status
+    depends_on: [process_stop]
+    managed_process:
+      operation: status
+      identity:
+        image_name: "{{ fixture_image_name }}"
+
+  - name: service_profile_failure
+    depends_on: [process_final_status]
+    service:
+      operation: status
+      name: PraktorContractService
+      profile: "{{ invalid_service_profile }}"
+      timeout_ms: 1000
+      poll_interval_ms: 10
+    triggers:
+      on_failure: [capture_service_failure]
+
+  - name: capture_service_failure
+    script: |
+      ctx.output("task_name", ctx.get("failed_task_name"));
+      ctx.output("task_type", ctx.get("failed_task_type"));
+      ctx.output("error_code", ctx.get("failed_task_error_code"));
+      ctx.output("error_phase", ctx.get("failed_task_error_phase"));
+      ctx.output("error_details", ctx.get("failed_task_error_details"));
+      ctx.output("failed_outputs", ctx.get("failed_task_outputs"));

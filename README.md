@@ -288,6 +288,83 @@ tasks:
 - ✅ **Namespaced Outputs**: Module results available via `{{ tasks.<task_name>.outputs.<key> }}`
 - ✅ **Clean Pipelines**: Keep your main workflow high-level and readable
 
+## System Actions
+
+Praktor has two typed system runners. Both accept exactly four operations:
+`status`, `start`, `stop`, and `restart`. Invalid YAML (including unknown keys,
+unsupported operations, non-positive timeouts, or a `managed_process` start
+without an executable) is rejected during parsing, before a process or operating
+system boundary is accessed.
+
+### Process-backed services
+
+```yaml
+tasks:
+  - name: restart_camera
+    service:
+      operation: restart
+      name: RetroCamera
+      profile: windows_scm
+      arguments: [--literal, "argument with spaces"]
+      timeout_ms: 30000
+      poll_interval_ms: 200
+```
+
+`service` is process-backed. The built-in `windows_scm` profile executes
+`sc.exe` directly with an argument vector; it does not concatenate arguments
+into a shell command. Service state is parsed from the numeric `STATE` value in
+`sc.exe query` output: `1` is `stopped`, `2` is `start_pending`, `3` is
+`stop_pending`, and `4` is `running`. Missing, malformed, or unsupported state
+values fail explicitly. `timeout_ms` is the overall query/mutation/poll deadline,
+and `poll_interval_ms` controls state-query polling.
+
+Stable service outputs are `name` (string), `operation` (string), `state`
+(string), `changed` (boolean), and `duration_ms` (integer milliseconds).
+
+### Managed processes
+
+```yaml
+tasks:
+  - name: start_saver
+    managed_process:
+      operation: start
+      executable: RetroScreenSaver.exe
+      arguments: [--fullscreen]
+      working_directory: C:/Retro
+      identity:
+        image_name: RetroScreenSaver.exe
+      startup_timeout_ms: 5000
+      stop_timeout_ms: 5000
+      force_terminate: true
+```
+
+`managed_process` is for a long-lived process whose lifecycle continues after
+the task returns. This differs from `program`, which starts one raw process,
+waits for it to exit, and captures its output. The current managed-process
+backend is Windows-only and matches the exact image name in the current session;
+it also revalidates the process instance before stop or termination.
+
+`startup_timeout_ms` bounds the wait for a started process to become running.
+`stop_timeout_ms` first bounds graceful stop. When `force_terminate` is `true`,
+a graceful-stop timeout permits an identity-revalidated termination followed by
+one more bounded wait; when it is `false`, that timeout is returned as a failure.
+
+Stable managed-process outputs are `image_name` (string), `operation` (string),
+`state` (`not_running` or `running`), `pid` (integer; `0` when not running),
+`changed` (boolean), and `duration_ms` (integer milliseconds).
+
+For both runners, `changed=false` means the requested state already held (or the
+operation was `status`); `changed=true` means Praktor issued a state-changing
+request. It does not claim exactly-once delivery. Failures retain the stable
+outputs observed so far and expose `error_code`, `error_phase`, and
+`error_details` to failure triggers as `failed_task_error_code`,
+`failed_task_error_phase`, and `failed_task_error_details`.
+
+When task caching is enabled through `sources` and `generates`, every system
+action parameter participates in the action hash. Changing an operation, name or
+identity, profile/executable/path, any argv entry, timeout, polling value, or
+`force_terminate` invalidates the cached task.
+
 ## Post-Processing Script Engine
 
 Any task can include a `script:` block that runs after the task action completes. A task can also be script-only (no `command:` required). The script uses a custom language built with re2c (lexer) and lemon (parser).

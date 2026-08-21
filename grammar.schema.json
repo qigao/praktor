@@ -163,6 +163,65 @@
       ],
       "additionalProperties": false
     },
+    "systemOperation": {
+      "type": "string",
+      "enum": ["status", "start", "stop", "restart"]
+    },
+    "serviceAction": {
+      "type": "object",
+      "properties": {
+        "operation": { "$ref": "#/$defs/systemOperation" },
+        "name": { "type": "string", "minLength": 1 },
+        "profile": { "type": "string", "minLength": 1 },
+        "arguments": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "timeout_ms": { "type": "integer", "minimum": 1 },
+        "poll_interval_ms": { "type": "integer", "minimum": 1 }
+      },
+      "required": ["name"],
+      "additionalProperties": false
+    },
+    "managedProcessAction": {
+      "type": "object",
+      "properties": {
+        "operation": { "$ref": "#/$defs/systemOperation" },
+        "executable": { "type": "string" },
+        "arguments": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "working_directory": { "type": "string", "minLength": 1 },
+        "identity": {
+          "type": "object",
+          "properties": {
+            "image_name": { "type": "string", "minLength": 1 }
+          },
+          "required": ["image_name"],
+          "additionalProperties": false
+        },
+        "startup_timeout_ms": { "type": "integer", "minimum": 1 },
+        "stop_timeout_ms": { "type": "integer", "minimum": 1 },
+        "force_terminate": { "type": "boolean" }
+      },
+      "required": ["identity"],
+      "allOf": [
+        {
+          "if": {
+            "properties": { "operation": { "const": "start" } },
+            "required": ["operation"]
+          },
+          "then": {
+            "required": ["executable"],
+            "properties": {
+              "executable": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      ],
+      "additionalProperties": false
+    },
     "taskDefinition": {
       "type": "object",
       "properties": {
@@ -242,6 +301,12 @@
           },
           "required": ["url", "path"],
           "additionalProperties": false
+        },
+        "service": {
+          "$ref": "#/$defs/serviceAction"
+        },
+        "managed_process": {
+          "$ref": "#/$defs/managedProcessAction"
         },
         "args": {
           "type": "array",
@@ -477,6 +542,16 @@
             },
             {
               "required": [
+                "service"
+              ]
+            },
+            {
+              "required": [
+                "managed_process"
+              ]
+            },
+            {
+              "required": [
                 "uses"
               ]
             },
@@ -704,6 +779,16 @@
             },
             {
               "required": [
+                "service"
+              ]
+            },
+            {
+              "required": [
+                "managed_process"
+              ]
+            },
+            {
+              "required": [
                 "uses"
               ]
             },
@@ -926,6 +1011,16 @@
                   {
                     "required": [
                       "download"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "service"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "managed_process"
                     ]
                   },
                   {
