@@ -10,6 +10,13 @@ namespace TaskYamlDetail {
 
 namespace {
 
+struct JsonValueDeleter {
+    void operator()(json_value_t* value) const noexcept {
+        auto* document = reinterpret_cast<turbo_json_doc_t*>(value);
+        turbo_free_json(&document);
+    }
+};
+
 turbo_yaml_node_t* resolve_alias(turbo_yaml_node_t* node) noexcept {
     while (node && turbo_yaml_node_type(node) == TURBO_YAML_NODE_ALIAS) {
         turbo_yaml_node_t* target = turbo_yaml_alias_target(node);
@@ -149,6 +156,29 @@ std::string YamlNodeRef::location() const {
     }
     return " at line " + std::to_string(location.start_line) + ", column " +
            std::to_string(location.start_column);
+}
+
+std::optional<bool> YamlNodeRef::bool_integer_value() const {
+    turbo_yaml_node_t* node = resolved_node();
+    if (!document_ || !node ||
+        turbo_yaml_scalar_kind(document_, node) != TURBO_YAML_SCALAR_INT) {
+        return std::nullopt;
+    }
+
+    std::unique_ptr<json_value_t, JsonValueDeleter> value(
+        turbo_yaml_node_to_json(document_, node));
+    if (!value || turbo_json_type(value.get()) != TURBO_JSON_NUMBER) {
+        return std::nullopt;
+    }
+
+    const double number = turbo_json_number(value.get());
+    if (number == 0.0) {
+        return false;
+    }
+    if (number == 1.0) {
+        return true;
+    }
+    return std::nullopt;
 }
 
 const YamlNodeRef& YamlNodeRef::operator>>(std::string& value) const {

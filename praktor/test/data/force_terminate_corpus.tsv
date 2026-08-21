@@ -1,0 +1,27 @@
+# name	scalar	yaml_type	should_pass	expected_value
+boolean_true	true	bool	pass	true
+boolean_false	false	bool	pass	false
+mixed_case_yes	"YeS"	str	pass	true
+mixed_case_no	"nO"	str	pass	false
+mixed_case_true	"TrUe"	str	pass	true
+mixed_case_false	"FaLsE"	str	pass	false
+quoted_one	"1"	str	pass	true
+quoted_zero	"0"	str	pass	false
+quoted_leading_zero_one	"01"	str	pass	true
+quoted_binary_one	"0b1"	str	pass	true
+quoted_negative_zero	"-0"	str	pass	false
+quoted_underscore_one	"0_1"	str	pass	true
+quoted_hex_two	"0x2"	str	reject	-
+numeric_one	1	int	pass	true
+numeric_zero	0	int	pass	false
+leading_zero_one	01	int	pass	true
+positive_one	+1	int	pass	true
+hex_one	0x1	int	pass	true
+binary_one	0b1	int	pass	true
+leading_zero_zero	00	int	pass	false
+negative_zero	-0	int	pass	false
+numeric_two	2	int	reject	-
+negative_one	-1	int	reject	-
+hex_two	0x2	int	reject	-
+invalid_string	maybe	str	reject	-
+null_value	null	null	reject	-

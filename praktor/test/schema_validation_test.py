@@ -14,6 +14,9 @@ except ImportError as exc:
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 SCHEMA_PATH = REPO_ROOT / "grammar.schema.json"
+FORCE_TERMINATE_CORPUS_PATH = (
+    REPO_ROOT / "praktor" / "test" / "data" / "force_terminate_corpus.tsv"
+)
 
 
 def load_validator():
@@ -85,22 +88,17 @@ def validate_structured_http_contracts():
 
 
 def validate_force_terminate_forms(validator):
-    cases = [
-        ("numeric_one", "1", int, True),
-        ("numeric_zero", "0", int, True),
-        ("mixed_case_yes", '"YeS"', str, True),
-        ("mixed_case_no", '"nO"', str, True),
-        ("mixed_case_true", '"TrUe"', str, True),
-        ("mixed_case_false", '"FaLsE"', str, True),
-        ("quoted_one", '"1"', str, True),
-        ("quoted_zero", '"0"', str, True),
-        ("invalid_numeric", "2", int, False),
-        ("invalid_string", '"maybe"', str, False),
-        ("invalid_boolean_like_string", '"ON"', str, False),
-        ("invalid_null", "null", type(None), False),
-    ]
+    expected_types = {"bool": bool, "int": int, "str": str, "null": type(None)}
+    lines = FORCE_TERMINATE_CORPUS_PATH.read_text(encoding="utf-8").splitlines()
+    cases = [line.split("\t") for line in lines if line and not line.startswith("#")]
 
-    for name, scalar, expected_type, should_pass in cases:
+    for fields in cases:
+        if len(fields) != 5:
+            print(f"invalid force_terminate corpus row: {fields!r}", file=sys.stderr)
+            sys.exit(1)
+        name, scalar, yaml_type, disposition, _ = fields
+        expected_type = expected_types[yaml_type]
+        should_pass = disposition == "pass"
         text = f"""
 name: force-terminate-{name}
 tasks:

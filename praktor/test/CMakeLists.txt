@@ -1,4 +1,6 @@
 string(REPLACE "\\" "\\\\" PYTHON3_EXECUTABLE_ESCAPED "${Python3_EXECUTABLE}")
+string(REPLACE "\\" "\\\\" FORCE_TERMINATE_CORPUS_ESCAPED
+       "${CMAKE_CURRENT_SOURCE_DIR}/data/force_terminate_corpus.tsv")
 
 set(TEST_SOURCES
     dynamic_tasks_executor_test.cpp
@@ -45,6 +47,10 @@ endif()
 
 target_compile_definitions(script_engine_test.${TARGET_NAME_LIB} PRIVATE
     PRAKTOR_TEST_PYTHON="${PYTHON3_EXECUTABLE_ESCAPED}"
+)
+
+target_compile_definitions(task_parser_test.${TARGET_NAME_LIB} PRIVATE
+    PRAKTOR_FORCE_TERMINATE_CORPUS="${FORCE_TERMINATE_CORPUS_ESCAPED}"
 )
 
 target_include_directories(

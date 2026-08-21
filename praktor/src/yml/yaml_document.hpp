@@ -4,6 +4,7 @@
 
 #include <cstddef>
 #include <iterator>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -26,6 +27,7 @@ public:
     [[nodiscard]] std::string key() const;
     [[nodiscard]] std::string scalar() const;
     [[nodiscard]] std::string location() const;
+    [[nodiscard]] std::optional<bool> bool_integer_value() const;
 
     const YamlNodeRef& operator>>(std::string& value) const;
     const YamlNodeRef& operator>>(int& value) const;

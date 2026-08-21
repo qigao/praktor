@@ -5,7 +5,9 @@
 
 #include <filesystem>
 #include <fstream>
+#include <sstream>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -17,6 +19,46 @@ std::filesystem::path writeTempWorkflow(const std::string& name, const std::stri
     std::ofstream out(path);
     out << content;
     return path;
+}
+
+struct ForceTerminateCase {
+    std::string name;
+    std::string scalar;
+    bool should_pass{false};
+    bool expected_value{false};
+};
+
+std::vector<ForceTerminateCase> loadForceTerminateCorpus()
+{
+    std::ifstream input(PRAKTOR_FORCE_TERMINATE_CORPUS);
+    if (!input) {
+        throw std::runtime_error("Cannot open force_terminate corpus");
+    }
+
+    std::vector<ForceTerminateCase> cases;
+    std::string line;
+    while (std::getline(input, line)) {
+        if (line.empty() || line.front() == '#') {
+            continue;
+        }
+
+        std::vector<std::string> fields;
+        std::istringstream row(line);
+        std::string field;
+        while (std::getline(row, field, '\t')) {
+            fields.push_back(field);
+        }
+        if (fields.size() != 5) {
+            throw std::runtime_error("Invalid force_terminate corpus row");
+        }
+
+        const bool should_pass = fields[3] == "pass";
+        cases.push_back(ForceTerminateCase{
+            fields[0], fields[1], should_pass,
+            should_pass && fields[4] == "true",
+        });
+    }
+    return cases;
 }
 
 }
@@ -265,6 +307,34 @@ tasks:
     CHECK(process.startup_timeout_ms == 5000);
     CHECK(process.stop_timeout_ms == 5000);
     CHECK_FALSE(process.force_terminate);
+}
+
+TEST_CASE("force_terminate corpus has identical TaskParser boolean semantics")
+{
+    for (const auto& test_case : loadForceTerminateCorpus()) {
+        CAPTURE(test_case.name, test_case.scalar);
+        const auto wf = writeTempWorkflow(
+            "force_terminate_" + test_case.name + ".yml",
+            "tasks:\n"
+            "  - name: query_worker\n"
+            "    managed_process:\n"
+            "      operation: status\n"
+            "      identity:\n"
+            "        image_name: worker.exe\n"
+            "      force_terminate: " + test_case.scalar + "\n");
+
+        if (!test_case.should_pass) {
+            REQUIRE_THROWS_WITH(
+                TaskParser::parseFile(wf.string()),
+                Catch::Matchers::ContainsSubstring("'force_terminate' must be a boolean"));
+            continue;
+        }
+
+        const Workflow workflow = TaskParser::parseFile(wf.string());
+        REQUIRE(workflow.tasks.size() == 1);
+        const auto& process = std::get<ManagedProcessParams>(workflow.tasks[0].specifics);
+        CHECK(process.force_terminate == test_case.expected_value);
+    }
 }
 
 TEST_CASE("parse rejects invalid system action schemas with source lines")
