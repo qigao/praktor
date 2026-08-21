@@ -27,7 +27,10 @@ set(SOURCE_FILES
     src/executors/program_executor.cpp
     src/executors/download_executor.cpp
     src/executors/service_executor.cpp
+    src/executors/managed_process_executor.cpp
     src/system/service_controller.cpp
+    src/system/managed_process.cpp
+    src/system/managed_process_win.cpp
     src/expressions/expression_evaluator.cpp
     src/expressions/expression_lexer.cpp
     src/util/system_info.cpp

@@ -8,6 +8,7 @@
 #include "executors/uses_executor.hpp"
 #include "executors/declarative_tree_executor.hpp"
 #include "executors/download_executor.hpp"
+#include "executors/managed_process_executor.hpp"
 #include "executors/program_executor.hpp"
 #include "executors/service_executor.hpp"
 #include "expressions/expression_evaluator.hpp"
@@ -387,6 +388,8 @@ WorkflowExecutor::WorkflowExecutor(DependencyGraph<Task> &graph,
       Praktor::Execution::createDownloadExecutor();
   executors_[TaskAction::Service] =
       Praktor::Execution::createServiceExecutor();
+  executors_[TaskAction::ManagedProcess] =
+      Praktor::Execution::createManagedProcessExecutor();
 
   // DynamicTasks executor needs a callback to execute generated subtasks
   auto dynamic_executor = Praktor::Execution::createDynamicTasksExecutor();

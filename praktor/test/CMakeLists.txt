@@ -18,6 +18,7 @@ set(TEST_SOURCES
     declarative_tree_executor_test.cpp
     download_executor_test.cpp
     service_executor_test.cpp
+    managed_process_executor_test.cpp
     structured_document_query_test.cpp
 )
 
@@ -45,6 +46,22 @@ endif()
 target_compile_definitions(script_engine_test.${TARGET_NAME_LIB} PRIVATE
     PRAKTOR_TEST_PYTHON="${PYTHON3_EXECUTABLE_ESCAPED}"
 )
+
+if(WIN32)
+    add_executable(managed_process_fixture helpers/managed_process_fixture.cpp)
+    cmake_config_target(
+        managed_process_fixture
+        NO_INSTALL
+        NO_VERSION
+        FOLDER "${folder_name}/test/helpers"
+    )
+    add_dependencies(managed_process_executor_test.${TARGET_NAME_LIB}
+                     managed_process_fixture)
+    target_compile_definitions(
+        managed_process_executor_test.${TARGET_NAME_LIB}
+        PRIVATE PRAKTOR_MANAGED_PROCESS_FIXTURE="$<TARGET_FILE:managed_process_fixture>"
+    )
+endif()
 
 add_test(
     NAME schema_validation_test
