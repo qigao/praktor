@@ -26,6 +26,8 @@ set(SOURCE_FILES
     src/executors/declarative_tree_executor.cpp
     src/executors/program_executor.cpp
     src/executors/download_executor.cpp
+    src/executors/service_executor.cpp
+    src/system/service_controller.cpp
     src/expressions/expression_evaluator.cpp
     src/expressions/expression_lexer.cpp
     src/util/system_info.cpp

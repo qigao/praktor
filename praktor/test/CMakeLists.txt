@@ -17,6 +17,7 @@ set(TEST_SOURCES
     script_engine_test.cpp
     declarative_tree_executor_test.cpp
     download_executor_test.cpp
+    service_executor_test.cpp
     structured_document_query_test.cpp
 )
 
