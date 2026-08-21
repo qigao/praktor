@@ -10,9 +10,11 @@ using Vars = std::unordered_map<std::string, std::string>;
 using StrList = std::vector<std::string>;
 using DotEnv = std::vector<std::string>;
 
-enum class TaskAction { None, Uses, DynamicTasks, Orch, Program, Download, Command };
+enum class TaskAction { None, Uses, DynamicTasks, Orch, Program, Download, Command, Service, ManagedProcess };
 
 enum class CommandOutputFormat { Text, Json };
+
+enum class SystemOperation { Status, Start, Stop, Restart };
 
 struct ParseRegexConfig {
   std::string pattern;
@@ -62,6 +64,30 @@ struct DownloadParams {
   std::string sha256;
   bool overwrite = false;
   int timeout_ms = 300000;
+};
+
+struct ServiceParams {
+  SystemOperation operation{SystemOperation::Status};
+  std::string name;
+  std::string profile{"windows_scm"};
+  StrList arguments;
+  int timeout_ms{30000};
+  int poll_interval_ms{200};
+};
+
+struct ManagedProcessIdentity {
+  std::string image_name;
+};
+
+struct ManagedProcessParams {
+  SystemOperation operation{SystemOperation::Status};
+  std::string executable;
+  StrList arguments;
+  std::string working_directory;
+  ManagedProcessIdentity identity;
+  int startup_timeout_ms{5000};
+  int stop_timeout_ms{5000};
+  bool force_terminate{false};
 };
 
 struct UsesParams {
@@ -153,5 +179,4 @@ struct TaskDefaults {
 
 using TaskSpecifics =
     std::variant<std::monostate, UsesParams, DynamicTasksParams, OrchParams, ProgramParams,
-                 DownloadParams>;
-
+                 DownloadParams, ServiceParams, ManagedProcessParams>;

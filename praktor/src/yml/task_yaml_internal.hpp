@@ -114,6 +114,8 @@ Triggers parse_triggers(const TaskYamlDetail::YamlNodeRef& node);
 RunCommandParams parse_run_command_params(const TaskYamlDetail::YamlNodeRef& node);
 ProgramParams parse_program_params(const TaskYamlDetail::YamlNodeRef& node);
 DownloadParams parse_download_params(const TaskYamlDetail::YamlNodeRef& node);
+ServiceParams parse_service_params(const TaskYamlDetail::YamlNodeRef& node);
+ManagedProcessParams parse_managed_process_params(const TaskYamlDetail::YamlNodeRef& node);
 UsesParams parse_uses_params(const TaskYamlDetail::YamlNodeRef& node);
 DynamicTasksParams parse_dynamic_tasks_params(const TaskYamlDetail::YamlNodeRef& node);
 OrchParams parse_orch_params(const TaskYamlDetail::YamlNodeRef& task_node,

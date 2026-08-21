@@ -266,6 +266,28 @@ std::string computeTaskActionHash(const Task& task) {
     appendField(stream, "program.input", params.input);
     appendField(stream, "program.output_format",
                 params.output_format == CommandOutputFormat::Json ? "json" : "text");
+  } else if (std::holds_alternative<ServiceParams>(task.specifics)) {
+    const auto& params = std::get<ServiceParams>(task.specifics);
+    appendField(stream, "specifics", "service");
+    appendField(stream, "service.operation", std::to_string(static_cast<int>(params.operation)));
+    appendField(stream, "service.name", params.name);
+    appendField(stream, "service.profile", params.profile);
+    appendStringList(stream, "service.arguments", params.arguments);
+    appendField(stream, "service.timeout_ms", std::to_string(params.timeout_ms));
+    appendField(stream, "service.poll_interval_ms", std::to_string(params.poll_interval_ms));
+  } else if (std::holds_alternative<ManagedProcessParams>(task.specifics)) {
+    const auto& params = std::get<ManagedProcessParams>(task.specifics);
+    appendField(stream, "specifics", "managed_process");
+    appendField(stream, "managed_process.operation",
+                std::to_string(static_cast<int>(params.operation)));
+    appendField(stream, "managed_process.executable", params.executable);
+    appendStringList(stream, "managed_process.arguments", params.arguments);
+    appendField(stream, "managed_process.working_directory", params.working_directory);
+    appendField(stream, "managed_process.identity.image_name", params.identity.image_name);
+    appendField(stream, "managed_process.startup_timeout_ms",
+                std::to_string(params.startup_timeout_ms));
+    appendField(stream, "managed_process.stop_timeout_ms", std::to_string(params.stop_timeout_ms));
+    appendField(stream, "managed_process.force_terminate", params.force_terminate ? "1" : "0");
   } else {
     appendField(stream, "specifics", "none");
   }

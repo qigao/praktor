@@ -23,6 +23,45 @@ CommandOutputFormat parse_output_format(const TaskYamlDetail::YamlNodeRef& node,
     throw_parse_error(node, "Unsupported output_format value: '" + value + "'");
 }
 
+SystemOperation parse_system_operation(const TaskYamlDetail::YamlNodeRef& node,
+                                       const std::string& value,
+                                       const char* field_name) {
+    if (value == "status") {
+        return SystemOperation::Status;
+    }
+    if (value == "start") {
+        return SystemOperation::Start;
+    }
+    if (value == "stop") {
+        return SystemOperation::Stop;
+    }
+    if (value == "restart") {
+        return SystemOperation::Restart;
+    }
+    throw_parse_error(node, "Unsupported " + std::string(field_name) + " value: '" + value + "'");
+}
+
+void require_positive_timeout(const TaskYamlDetail::YamlNodeRef& node,
+                              int value,
+                              const char* field_name) {
+    if (value <= 0) {
+        throw_parse_error(node, std::string(field_name) + " must be positive");
+    }
+}
+
+StrList parse_argument_list(const TaskYamlDetail::YamlNodeRef& node, const char* field_name) {
+    if (!node.is_seq()) {
+        throw_parse_error(node, std::string(field_name) + " must be a sequence");
+    }
+
+    StrList arguments;
+    for (const auto& argument : node) {
+        arguments.push_back(read_scalar_or_throw(
+            argument, std::string(field_name) + " entries must be scalars"));
+    }
+    return arguments;
+}
+
 TriggerAction parse_trigger_action_node(const TaskYamlDetail::YamlNodeRef& node) {
     if (!node.has_val()) {
         throw_parse_error(node, "Trigger action must be a task name (string)");
@@ -381,6 +420,124 @@ DownloadParams parse_download_params(const TaskYamlDetail::YamlNodeRef& node) {
             TaskYamlDetail::throw_parse_error(download["timeout_ms"],
                                                "download.timeout_ms must be positive");
         }
+    }
+    return params;
+}
+
+ServiceParams parse_service_params(const TaskYamlDetail::YamlNodeRef& node) {
+    const auto& service = node["service"];
+    if (!service.is_map()) {
+        TaskYamlDetail::throw_parse_error(service, "service must be a map");
+    }
+
+    static const std::unordered_set<std::string> allowed_keys = {
+        "operation", "name", "profile", "arguments", "timeout_ms", "poll_interval_ms"
+    };
+    TaskYamlDetail::check_unknown_keys(service, allowed_keys);
+    if (!service.has_child("name")) {
+        TaskYamlDetail::throw_parse_error(service, "service requires 'name'");
+    }
+
+    ServiceParams params;
+    params.name = TaskYamlDetail::read_scalar_or_throw(service["name"], "service.name must be a scalar");
+    if (params.name.empty()) {
+        TaskYamlDetail::throw_parse_error(service["name"], "service.name cannot be empty");
+    }
+    if (service.has_child("operation")) {
+        const std::string operation = TaskYamlDetail::read_scalar_or_throw(
+            service["operation"], "service.operation must be a scalar");
+        params.operation = parse_system_operation(service["operation"], operation, "service.operation");
+    }
+    if (service.has_child("profile")) {
+        params.profile = TaskYamlDetail::read_scalar_or_throw(service["profile"], "service.profile must be a scalar");
+        if (params.profile.empty()) {
+            TaskYamlDetail::throw_parse_error(service["profile"], "service.profile cannot be empty");
+        }
+    }
+    if (service.has_child("arguments")) {
+        params.arguments = parse_argument_list(service["arguments"], "service.arguments");
+    }
+    if (service.has_child("timeout_ms")) {
+        service["timeout_ms"] >> params.timeout_ms;
+        require_positive_timeout(service["timeout_ms"], params.timeout_ms, "service.timeout_ms");
+    }
+    if (service.has_child("poll_interval_ms")) {
+        service["poll_interval_ms"] >> params.poll_interval_ms;
+        require_positive_timeout(service["poll_interval_ms"], params.poll_interval_ms,
+                                 "service.poll_interval_ms");
+    }
+    return params;
+}
+
+ManagedProcessParams parse_managed_process_params(const TaskYamlDetail::YamlNodeRef& node) {
+    const auto& process = node["managed_process"];
+    if (!process.is_map()) {
+        TaskYamlDetail::throw_parse_error(process, "managed_process must be a map");
+    }
+
+    static const std::unordered_set<std::string> allowed_keys = {
+        "operation", "executable", "arguments", "working_directory", "identity",
+        "startup_timeout_ms", "stop_timeout_ms", "force_terminate"
+    };
+    static const std::unordered_set<std::string> allowed_identity_keys = {"image_name"};
+    TaskYamlDetail::check_unknown_keys(process, allowed_keys);
+    if (!process.has_child("identity")) {
+        TaskYamlDetail::throw_parse_error(process, "managed_process requires 'identity'");
+    }
+
+    const auto& identity = process["identity"];
+    if (!identity.is_map()) {
+        TaskYamlDetail::throw_parse_error(identity, "managed_process.identity must be a map");
+    }
+    TaskYamlDetail::check_unknown_keys(identity, allowed_identity_keys);
+    if (!identity.has_child("image_name")) {
+        TaskYamlDetail::throw_parse_error(identity, "managed_process.identity requires 'image_name'");
+    }
+
+    ManagedProcessParams params;
+    params.identity.image_name = TaskYamlDetail::read_scalar_or_throw(
+        identity["image_name"], "managed_process.identity.image_name must be a scalar");
+    if (params.identity.image_name.empty()) {
+        TaskYamlDetail::throw_parse_error(identity["image_name"],
+                                           "managed_process.identity.image_name cannot be empty");
+    }
+    if (process.has_child("operation")) {
+        const std::string operation = TaskYamlDetail::read_scalar_or_throw(
+            process["operation"], "managed_process.operation must be a scalar");
+        params.operation = parse_system_operation(process["operation"], operation,
+                                                  "managed_process.operation");
+    }
+    if (process.has_child("executable")) {
+        params.executable = TaskYamlDetail::read_scalar_or_throw(
+            process["executable"], "managed_process.executable must be a scalar");
+    }
+    if (params.operation == SystemOperation::Start && params.executable.empty()) {
+        TaskYamlDetail::throw_parse_error(process, "managed_process.start requires 'executable'");
+    }
+    if (process.has_child("arguments")) {
+        params.arguments = parse_argument_list(process["arguments"], "managed_process.arguments");
+    }
+    if (process.has_child("working_directory")) {
+        params.working_directory = TaskYamlDetail::read_scalar_or_throw(
+            process["working_directory"], "managed_process.working_directory must be a scalar");
+        if (params.working_directory.empty()) {
+            TaskYamlDetail::throw_parse_error(process["working_directory"],
+                                               "managed_process.working_directory cannot be empty");
+        }
+    }
+    if (process.has_child("startup_timeout_ms")) {
+        process["startup_timeout_ms"] >> params.startup_timeout_ms;
+        require_positive_timeout(process["startup_timeout_ms"], params.startup_timeout_ms,
+                                 "managed_process.startup_timeout_ms");
+    }
+    if (process.has_child("stop_timeout_ms")) {
+        process["stop_timeout_ms"] >> params.stop_timeout_ms;
+        require_positive_timeout(process["stop_timeout_ms"], params.stop_timeout_ms,
+                                 "managed_process.stop_timeout_ms");
+    }
+    if (process.has_child("force_terminate")) {
+        params.force_terminate = TaskYamlDetail::read_bool_or_throw(
+            process["force_terminate"], "force_terminate");
     }
     return params;
 }

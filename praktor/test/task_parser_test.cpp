@@ -182,6 +182,240 @@ TEST_CASE("parse download task")
     CHECK(params.timeout_ms == 300000);
 }
 
+TEST_CASE("parse service and managed_process tasks")
+{
+    auto wf = writeTempWorkflow("system_actions.yml", R"(
+tasks:
+  - name: start_camera
+    service:
+      operation: start
+      name: RetroCamera
+      profile: windows_scm
+      arguments: [--verbose]
+      timeout_ms: 30000
+      poll_interval_ms: 200
+  - name: start_saver
+    managed_process:
+      operation: start
+      executable: RetroScreenSaver.exe
+      arguments: [--fullscreen]
+      working_directory: C:/Retro
+      identity:
+        image_name: RetroScreenSaver.exe
+      startup_timeout_ms: 5000
+      stop_timeout_ms: 5000
+      force_terminate: true
+)");
+
+    Workflow workflow = TaskParser::parseFile(wf.string());
+    REQUIRE(workflow.tasks.size() == 2);
+
+    const Task& service_task = workflow.tasks[0];
+    CHECK(service_task.action == TaskAction::Service);
+    CHECK(service_task.declared_runner == "service");
+    REQUIRE(std::holds_alternative<ServiceParams>(service_task.specifics));
+    const auto& service = std::get<ServiceParams>(service_task.specifics);
+    CHECK(service.operation == SystemOperation::Start);
+    CHECK(service.name == "RetroCamera");
+    CHECK(service.profile == "windows_scm");
+    CHECK(service.arguments == StrList{"--verbose"});
+    CHECK(service.timeout_ms == 30000);
+    CHECK(service.poll_interval_ms == 200);
+
+    const Task& process_task = workflow.tasks[1];
+    CHECK(process_task.action == TaskAction::ManagedProcess);
+    CHECK(process_task.declared_runner == "managed_process");
+    REQUIRE(std::holds_alternative<ManagedProcessParams>(process_task.specifics));
+    const auto& process = std::get<ManagedProcessParams>(process_task.specifics);
+    CHECK(process.operation == SystemOperation::Start);
+    CHECK(process.executable == "RetroScreenSaver.exe");
+    CHECK(process.arguments == StrList{"--fullscreen"});
+    CHECK(process.working_directory == "C:/Retro");
+    CHECK(process.identity.image_name == "RetroScreenSaver.exe");
+    CHECK(process.startup_timeout_ms == 5000);
+    CHECK(process.stop_timeout_ms == 5000);
+    CHECK(process.force_terminate);
+}
+
+TEST_CASE("parse system action defaults")
+{
+    auto wf = writeTempWorkflow("system_action_defaults.yml", R"(
+tasks:
+  - name: query_camera
+    service:
+      name: RetroCamera
+  - name: query_saver
+    managed_process:
+      identity:
+        image_name: RetroScreenSaver.exe
+)");
+
+    Workflow workflow = TaskParser::parseFile(wf.string());
+    REQUIRE(workflow.tasks.size() == 2);
+
+    const auto& service = std::get<ServiceParams>(workflow.tasks[0].specifics);
+    CHECK(service.operation == SystemOperation::Status);
+    CHECK(service.profile == "windows_scm");
+    CHECK(service.timeout_ms == 30000);
+    CHECK(service.poll_interval_ms == 200);
+
+    const auto& process = std::get<ManagedProcessParams>(workflow.tasks[1].specifics);
+    CHECK(process.operation == SystemOperation::Status);
+    CHECK(process.executable.empty());
+    CHECK(process.startup_timeout_ms == 5000);
+    CHECK(process.stop_timeout_ms == 5000);
+    CHECK_FALSE(process.force_terminate);
+}
+
+TEST_CASE("parse rejects invalid system action schemas with source lines")
+{
+    SECTION("service rejects unknown keys and invalid operation") {
+        auto unknown_key = writeTempWorkflow("service_unknown_key.yml", R"(
+tasks:
+  - name: start_camera
+    service:
+      name: RetroCamera
+      profile_name: windows_scm
+)");
+        REQUIRE_THROWS_WITH(TaskParser::parseFile(unknown_key.string()),
+            Catch::Matchers::ContainsSubstring("Unknown key: 'profile_name'") &&
+            Catch::Matchers::ContainsSubstring("line 6"));
+
+        auto invalid_operation = writeTempWorkflow("service_invalid_operation.yml", R"(
+tasks:
+  - name: start_camera
+    service:
+      operation: enable
+      name: RetroCamera
+)");
+        REQUIRE_THROWS_WITH(TaskParser::parseFile(invalid_operation.string()),
+            Catch::Matchers::ContainsSubstring("Unsupported service.operation value: 'enable'") &&
+            Catch::Matchers::ContainsSubstring("line 5"));
+    }
+
+    SECTION("service rejects empty names and non-positive timeouts") {
+        auto empty_name = writeTempWorkflow("service_empty_name.yml", R"(
+tasks:
+  - name: start_camera
+    service:
+      name: ""
+)");
+        REQUIRE_THROWS_WITH(TaskParser::parseFile(empty_name.string()),
+            Catch::Matchers::ContainsSubstring("service.name cannot be empty") &&
+            Catch::Matchers::ContainsSubstring("line 5"));
+
+        auto zero_timeout = writeTempWorkflow("service_zero_timeout.yml", R"(
+tasks:
+  - name: start_camera
+    service:
+      name: RetroCamera
+      timeout_ms: 0
+)");
+        REQUIRE_THROWS_WITH(TaskParser::parseFile(zero_timeout.string()),
+            Catch::Matchers::ContainsSubstring("service.timeout_ms must be positive") &&
+            Catch::Matchers::ContainsSubstring("line 6"));
+
+        auto scalar_arguments = writeTempWorkflow("service_scalar_arguments.yml", R"(
+tasks:
+  - name: start_camera
+    service:
+      name: RetroCamera
+      arguments: --verbose
+)");
+        REQUIRE_THROWS_WITH(TaskParser::parseFile(scalar_arguments.string()),
+            Catch::Matchers::ContainsSubstring("service.arguments must be a sequence") &&
+            Catch::Matchers::ContainsSubstring("line 6"));
+    }
+
+    SECTION("managed process rejects invalid fields and missing start executable") {
+        auto unknown_identity_key = writeTempWorkflow("managed_process_unknown_identity_key.yml", R"(
+tasks:
+  - name: start_saver
+    managed_process:
+      identity:
+        image: RetroScreenSaver.exe
+)");
+        REQUIRE_THROWS_WITH(TaskParser::parseFile(unknown_identity_key.string()),
+            Catch::Matchers::ContainsSubstring("Unknown key: 'image'") &&
+            Catch::Matchers::ContainsSubstring("line 6"));
+
+        auto missing_executable = writeTempWorkflow("managed_process_missing_executable.yml", R"(
+tasks:
+  - name: start_saver
+    managed_process:
+      operation: start
+      identity:
+        image_name: RetroScreenSaver.exe
+)");
+        REQUIRE_THROWS_WITH(TaskParser::parseFile(missing_executable.string()),
+            Catch::Matchers::ContainsSubstring("managed_process.start requires 'executable'") &&
+            Catch::Matchers::ContainsSubstring("line 4"));
+
+        auto scalar_arguments = writeTempWorkflow("managed_process_scalar_arguments.yml", R"(
+tasks:
+  - name: start_saver
+    managed_process:
+      executable: RetroScreenSaver.exe
+      arguments: --fullscreen
+      identity:
+        image_name: RetroScreenSaver.exe
+)");
+        REQUIRE_THROWS_WITH(TaskParser::parseFile(scalar_arguments.string()),
+            Catch::Matchers::ContainsSubstring("managed_process.arguments must be a sequence") &&
+            Catch::Matchers::ContainsSubstring("line 6"));
+    }
+
+    SECTION("managed process rejects empty identity, non-positive timeout, and missing identity") {
+        auto empty_identity = writeTempWorkflow("managed_process_empty_identity.yml", R"(
+tasks:
+  - name: stop_saver
+    managed_process:
+      identity:
+        image_name: ""
+)");
+        REQUIRE_THROWS_WITH(TaskParser::parseFile(empty_identity.string()),
+            Catch::Matchers::ContainsSubstring("managed_process.identity.image_name cannot be empty") &&
+            Catch::Matchers::ContainsSubstring("line 6"));
+
+        auto negative_timeout = writeTempWorkflow("managed_process_negative_timeout.yml", R"(
+tasks:
+  - name: stop_saver
+    managed_process:
+      identity:
+        image_name: RetroScreenSaver.exe
+      stop_timeout_ms: -1
+)");
+        REQUIRE_THROWS_WITH(TaskParser::parseFile(negative_timeout.string()),
+            Catch::Matchers::ContainsSubstring("managed_process.stop_timeout_ms must be positive") &&
+            Catch::Matchers::ContainsSubstring("line 7"));
+
+        auto missing_identity = writeTempWorkflow("managed_process_missing_identity.yml", R"(
+tasks:
+  - name: stop_saver
+    managed_process:
+      operation: stop
+)");
+        REQUIRE_THROWS_WITH(TaskParser::parseFile(missing_identity.string()),
+            Catch::Matchers::ContainsSubstring("managed_process requires 'identity'") &&
+            Catch::Matchers::ContainsSubstring("line 4"));
+    }
+
+    SECTION("system actions remain mutually exclusive runners") {
+        auto wf = writeTempWorkflow("multiple_system_runners.yml", R"(
+tasks:
+  - name: ambiguous
+    service:
+      name: RetroCamera
+    managed_process:
+      identity:
+        image_name: RetroScreenSaver.exe
+)");
+        REQUIRE_THROWS_WITH(TaskParser::parseFile(wf.string()),
+            Catch::Matchers::ContainsSubstring("declares multiple runners") &&
+            Catch::Matchers::ContainsSubstring("line 3"));
+    }
+}
+
 TEST_CASE("download task rejects missing required fields")
 {
     const std::string content =
