@@ -32,18 +32,15 @@ ServiceParams substituteServiceParams(const ServiceParams& params,
 struct ServiceExecutor::Impl {
   Impl()
       : owned_runner(std::make_unique<ProcessExecutorRunner>()),
-        owned_profiles(
-            std::make_unique<Praktor::System::ServiceProfileRegistry>()),
         controller(std::make_unique<Praktor::System::ServiceController>(
-            *owned_runner, *owned_profiles)) {}
+            *owned_runner, Praktor::System::ServiceProfileRegistry{})) {}
 
   Impl(Praktor::System::IProcessRunner& process_runner,
-       const Praktor::System::ServiceProfileRegistry& profiles)
+       Praktor::System::ServiceProfileRegistry profiles)
       : controller(std::make_unique<Praktor::System::ServiceController>(
-            process_runner, profiles)) {}
+            process_runner, std::move(profiles))) {}
 
   std::unique_ptr<Praktor::System::IProcessRunner> owned_runner;
-  std::unique_ptr<Praktor::System::ServiceProfileRegistry> owned_profiles;
   std::unique_ptr<Praktor::System::ServiceController> controller;
 };
 
@@ -51,8 +48,8 @@ ServiceExecutor::ServiceExecutor() : impl_(std::make_unique<Impl>()) {}
 
 ServiceExecutor::ServiceExecutor(
     Praktor::System::IProcessRunner& process_runner,
-    const Praktor::System::ServiceProfileRegistry& profiles)
-    : impl_(std::make_unique<Impl>(process_runner, profiles)) {}
+    Praktor::System::ServiceProfileRegistry profiles)
+    : impl_(std::make_unique<Impl>(process_runner, std::move(profiles))) {}
 
 ServiceExecutor::~ServiceExecutor() = default;
 ServiceExecutor::ServiceExecutor(ServiceExecutor&&) noexcept = default;

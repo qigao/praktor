@@ -280,8 +280,8 @@ std::string_view systemOperationName(SystemOperation operation) {
 }
 
 ServiceController::ServiceController(IProcessRunner& process_runner,
-                                     const ServiceProfileRegistry& profiles) noexcept
-    : process_runner_(process_runner), profiles_(profiles) {}
+                                     ServiceProfileRegistry profiles)
+    : process_runner_(process_runner), profiles_(std::move(profiles)) {}
 
 ServiceExecutionResult ServiceController::execute(const ServiceParams& params) {
   const auto started_at = Clock::now();

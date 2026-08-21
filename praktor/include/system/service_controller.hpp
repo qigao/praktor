@@ -49,13 +49,13 @@ std::string_view systemOperationName(SystemOperation operation);
 class ServiceController {
 public:
   ServiceController(IProcessRunner& process_runner,
-                    const ServiceProfileRegistry& profiles) noexcept;
+                    ServiceProfileRegistry profiles);
 
   ServiceExecutionResult execute(const ServiceParams& params);
 
 private:
   IProcessRunner& process_runner_;
-  const ServiceProfileRegistry& profiles_;
+  const ServiceProfileRegistry profiles_;
 };
 
 }  // namespace Praktor::System

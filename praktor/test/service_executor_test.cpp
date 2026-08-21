@@ -329,3 +329,35 @@ TEST_CASE("built-in service profile uses sc.exe") {
   CHECK(profile->start_args == StrList{"start", "{service_name}", "{arguments}"});
   CHECK(profile->stop_args == StrList{"stop", "{service_name}", "{arguments}"});
 }
+
+TEST_CASE("service controller owns a frozen profile registry snapshot") {
+  auto registry = profiles();
+  ScriptedProcessRunner runner({serviceState(4)});
+  ServiceController controller(runner, registry);
+
+  ServiceCommandProfile late_profile;
+  late_profile.name = "late";
+  late_profile.program = "late-service-controller";
+  registry.registerProfile(std::move(late_profile));
+
+  auto request = params(SystemOperation::Status);
+  request.profile = "late";
+  const auto result = controller.execute(request);
+
+  CHECK_FALSE(result.task_result.success);
+  CHECK(result.task_result.error_code == "service_state_failed");
+  CHECK(result.task_result.error_phase == "profile");
+  CHECK(runner.calls.empty());
+}
+
+TEST_CASE("service controller safely owns a temporary profile registry") {
+  ScriptedProcessRunner runner({serviceState(4)});
+  ServiceController controller(runner, profiles());
+
+  const auto result = controller.execute(params(SystemOperation::Status));
+
+  REQUIRE(result.task_result.success);
+  CHECK(result.state == "running");
+  REQUIRE(runner.calls.size() == 1);
+  checkArgs(runner.calls[0], {"query", "Retro Camera Service"});
+}

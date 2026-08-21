@@ -12,7 +12,7 @@ class ServiceExecutor final : public TaskExecutor {
 public:
   ServiceExecutor();
   ServiceExecutor(Praktor::System::IProcessRunner& process_runner,
-                  const Praktor::System::ServiceProfileRegistry& profiles);
+                  Praktor::System::ServiceProfileRegistry profiles);
   ~ServiceExecutor() override;
 
   ServiceExecutor(const ServiceExecutor&) = delete;
