@@ -68,6 +68,14 @@ if(WIN32)
         OUTPUT_NAME "managed_process_fixture"
         SUFFIX ".com"
     )
+    if(MSVC)
+        set_target_properties(managed_process_fixture_alt PROPERTIES
+            PDB_NAME "managed_process_fixture_alt"
+        )
+        target_link_options(managed_process_fixture_alt PRIVATE
+            "/ILK:$<TARGET_FILE_DIR:managed_process_fixture_alt>/managed_process_fixture_alt.ilk"
+        )
+    endif()
     cmake_config_target(
         managed_process_fixture
         NO_INSTALL
