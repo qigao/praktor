@@ -1,4 +1,5 @@
 #include "dag/workflow_executor.hpp"
+#include "workflow_executor_internal.hpp"
 
 #include "dag/scoped_variables.hpp"
 #include "dag/trigger_executor.hpp"
@@ -201,7 +202,7 @@ void appendOrchNode(std::ostringstream& stream, const OrchNode& node) {
   }
 }
 
-std::string computeTaskActionHash(const Task& task) {
+std::string computeTaskActionHashImpl(const Task& task) {
   std::ostringstream stream;
   appendField(stream, "name", task.name);
   appendField(stream, "runner", task.declared_runner);
@@ -350,6 +351,14 @@ std::unordered_set<std::string> collectTriggerTargetNames(const std::vector<Task
 }
 
 } // namespace
+
+namespace Praktor::Execution::Internal {
+
+std::string computeTaskActionHash(const Task& task) {
+  return computeTaskActionHashImpl(task);
+}
+
+}  // namespace Praktor::Execution::Internal
 
 WorkflowExecutor::WorkflowExecutor(DependencyGraph<Task> &graph,
                                    std::vector<Task> all_tasks,
@@ -624,7 +633,8 @@ bool WorkflowExecutor::checkSkipTask(const Task &task, WorkflowContext &context)
   if (it == cache_.end())
     return false;
 
-  if (it->second.action_hash != computeTaskActionHash(task)) {
+  if (it->second.action_hash !=
+      Praktor::Execution::Internal::computeTaskActionHash(task)) {
     return false;
   }
 
@@ -655,7 +665,7 @@ void WorkflowExecutor::updateTaskCache(const Task &task, WorkflowContext &contex
   }
 
   TaskCacheState state;
-  state.action_hash = computeTaskActionHash(task);
+  state.action_hash = Praktor::Execution::Internal::computeTaskActionHash(task);
   for (const auto &src : task.sources) {
     auto path = Praktor::util::resolveRelativePath(task.source_path, src);
     state.source_hashes[path.string()] = Praktor::Util::computeFileHash(path);

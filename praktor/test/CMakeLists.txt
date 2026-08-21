@@ -47,6 +47,11 @@ target_compile_definitions(script_engine_test.${TARGET_NAME_LIB} PRIVATE
     PRAKTOR_TEST_PYTHON="${PYTHON3_EXECUTABLE_ESCAPED}"
 )
 
+target_include_directories(
+    workflow_runner_test.${TARGET_NAME_LIB}
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../src
+)
+
 if(WIN32)
     add_executable(managed_process_fixture helpers/managed_process_fixture.cpp)
     add_executable(managed_process_fixture_alt helpers/managed_process_fixture.cpp)

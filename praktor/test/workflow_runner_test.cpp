@@ -1,4 +1,5 @@
 #include "workflow_runner.hpp"
+#include "dag/workflow_executor_internal.hpp"
 #include "system/managed_process.hpp"
 #include "util/file_utils.hpp"
 
@@ -1257,4 +1258,49 @@ TEST_CASE("managed process cache invalidates when every action parameter changes
 #else
     SKIP("managed_process cache integration is Windows-only");
 #endif
+}
+
+TEST_CASE("service action hash changes for every cache-relevant parameter")
+{
+    Task baseline;
+    baseline.name = "cached_service_status";
+    baseline.action = TaskAction::Service;
+    baseline.declared_runner = "service";
+    ServiceParams params;
+    params.operation = SystemOperation::Status;
+    params.name = "PraktorService";
+    params.profile = "windows_scm";
+    params.arguments = {"--mode", "baseline"};
+    params.timeout_ms = 30000;
+    params.poll_interval_ms = 200;
+    baseline.specifics = params;
+
+    const std::string baseline_hash =
+        Praktor::Execution::Internal::computeTaskActionHash(baseline);
+    std::vector<std::pair<std::string, ServiceParams>> variants;
+    auto add_variant = [&](std::string name, auto mutate) {
+        auto variant = params;
+        mutate(variant);
+        variants.emplace_back(std::move(name), std::move(variant));
+    };
+    add_variant("operation", [](auto& value) {
+        value.operation = SystemOperation::Start;
+    });
+    add_variant("name", [](auto& value) { value.name += "Changed"; });
+    add_variant("profile", [](auto& value) { value.profile += "_changed"; });
+    add_variant("arguments", [](auto& value) {
+        value.arguments.push_back("changed");
+    });
+    add_variant("timeout_ms", [](auto& value) { ++value.timeout_ms; });
+    add_variant("poll_interval_ms", [](auto& value) {
+        ++value.poll_interval_ms;
+    });
+
+    for (const auto& [field, variant] : variants) {
+        INFO("changed field: " << field);
+        Task changed = baseline;
+        changed.specifics = variant;
+        CHECK(Praktor::Execution::Internal::computeTaskActionHash(changed) !=
+              baseline_hash);
+    }
 }

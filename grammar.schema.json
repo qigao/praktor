@@ -203,7 +203,16 @@
         },
         "startup_timeout_ms": { "type": "integer", "minimum": 1 },
         "stop_timeout_ms": { "type": "integer", "minimum": 1 },
-        "force_terminate": { "type": "boolean" }
+        "force_terminate": {
+          "oneOf": [
+            { "type": "boolean" },
+            { "type": "integer", "enum": [0, 1] },
+            {
+              "type": "string",
+              "pattern": "^([Tt][Rr][Uu][Ee]|[Ff][Aa][Ll][Ss][Ee]|[Yy][Ee][Ss]|[Nn][Oo]|1|0)$"
+            }
+          ]
+        }
       },
       "required": ["identity"],
       "allOf": [
