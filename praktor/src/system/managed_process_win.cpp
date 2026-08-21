@@ -177,6 +177,26 @@ std::uint64_t processInstanceToken(const FILETIME &creation_time) {
   return value.QuadPart;
 }
 
+ManagedProcessResult<ManagedProcessSnapshot> evidenceFailureOrExited(
+    HANDLE process, std::uint32_t pid, DWORD evidence_error,
+    std::string message) {
+  const DWORD wait_result = WaitForSingleObject(process, 0);
+  if (wait_result == WAIT_OBJECT_0) {
+    return {true, {}, 0, {}};
+  }
+  if (wait_result == WAIT_FAILED) {
+    return failure<ManagedProcessSnapshot>(
+        static_cast<int>(GetLastError()),
+        "failed to observe managed process " + std::to_string(pid) +
+            " after evidence lookup failed");
+  }
+  return failure<ManagedProcessSnapshot>(static_cast<int>(evidence_error),
+                                         std::move(message) + " for pid " +
+                                             std::to_string(pid) +
+                                             "; wait_result=" +
+                                             std::to_string(wait_result));
+}
+
 ManagedProcessResult<ManagedProcessSnapshot> queryProcessEvidence(HANDLE process,
                                                                   std::uint32_t pid) {
   const DWORD wait_result = WaitForSingleObject(process, 0);
@@ -191,8 +211,9 @@ ManagedProcessResult<ManagedProcessSnapshot> queryProcessEvidence(HANDLE process
   std::wstring full_path(kMaximumProcessPathCharacters, L'\0');
   DWORD full_path_size = static_cast<DWORD>(full_path.size());
   if (!QueryFullProcessImageNameW(process, 0, full_path.data(), &full_path_size)) {
-    return failure<ManagedProcessSnapshot>(static_cast<int>(GetLastError()),
-                                           "failed to query managed process image identity");
+    const DWORD error = GetLastError();
+    return evidenceFailureOrExited(
+        process, pid, error, "failed to query managed process image identity");
   }
   full_path.resize(full_path_size);
   auto canonical_image = utf8FromWide(std::filesystem::path(full_path).filename().wstring());
@@ -203,8 +224,10 @@ ManagedProcessResult<ManagedProcessSnapshot> queryProcessEvidence(HANDLE process
 
   DWORD session_id = 0;
   if (!ProcessIdToSessionId(static_cast<DWORD>(pid), &session_id)) {
-    return failure<ManagedProcessSnapshot>(static_cast<int>(GetLastError()),
-                                           "failed to query managed process session identity");
+    const DWORD error = GetLastError();
+    return evidenceFailureOrExited(
+        process, pid, error,
+        "failed to query managed process session identity");
   }
 
   FILETIME creation_time{};
@@ -212,8 +235,10 @@ ManagedProcessResult<ManagedProcessSnapshot> queryProcessEvidence(HANDLE process
   FILETIME kernel_time{};
   FILETIME user_time{};
   if (!GetProcessTimes(process, &creation_time, &exit_time, &kernel_time, &user_time)) {
-    return failure<ManagedProcessSnapshot>(static_cast<int>(GetLastError()),
-                                           "failed to query managed process instance token");
+    const DWORD error = GetLastError();
+    return evidenceFailureOrExited(
+        process, pid, error,
+        "failed to query managed process instance token");
   }
 
   ManagedProcessSnapshot result;
@@ -387,8 +412,12 @@ public:
 
       DWORD candidate_session_id = 0;
       if (!ProcessIdToSessionId(entry.th32ProcessID, &candidate_session_id)) {
+        const DWORD error = GetLastError();
+        if (error == ERROR_INVALID_PARAMETER) {
+          continue;
+        }
         return failure<ManagedProcessSnapshot>(
-            static_cast<int>(GetLastError()),
+            static_cast<int>(error),
             "failed to query managed process candidate session");
       }
       if (candidate_session_id != current_session_id) {
@@ -399,8 +428,12 @@ public:
                                            SYNCHRONIZE,
                                        FALSE, entry.th32ProcessID));
       if (!process.valid()) {
+        const DWORD error = GetLastError();
+        if (error == ERROR_INVALID_PARAMETER) {
+          continue;
+        }
         return failure<ManagedProcessSnapshot>(
-            static_cast<int>(GetLastError()),
+            static_cast<int>(error),
             "failed to open managed process candidate");
       }
       auto evidence = queryProcessEvidence(
