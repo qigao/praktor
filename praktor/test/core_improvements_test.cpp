@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <stdexcept>
 
 namespace fs = std::filesystem;
 
@@ -36,6 +37,14 @@ TEST_CASE("TaskResult failure keeps legacy message and structured metadata") {
     CHECK(result.error_code == "timeout");
     CHECK(result.error_phase == "poll");
     CHECK(result.error_details["state"].as<std::string>() == "start_pending");
+}
+
+TEST_CASE("Task error code rejects unknown enum values") {
+    const auto unknown = static_cast<Praktor::Execution::TaskErrorCode>(999);
+
+    CHECK_THROWS_AS(Praktor::Execution::taskErrorCodeName(unknown), std::invalid_argument);
+    CHECK_THROWS_AS(TaskResult::fail(unknown, "poll", "invalid task error code"),
+                    std::invalid_argument);
 }
 
 TEST_CASE("TaskFailureContext keeps legacy failure data with structured metadata") {

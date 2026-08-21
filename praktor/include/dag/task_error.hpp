@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stdexcept>
 #include <string_view>
 
 namespace Praktor::Execution {
@@ -59,7 +60,7 @@ constexpr std::string_view taskErrorCodeName(TaskErrorCode code) {
         return "unsupported_platform";
     }
 
-    return "none";
+    throw std::invalid_argument("Unknown TaskErrorCode");
 }
 
 } // namespace Praktor::Execution
