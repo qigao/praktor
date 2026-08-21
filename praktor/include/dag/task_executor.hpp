@@ -1,5 +1,6 @@
 #pragma once
 
+#include "task_error.hpp"
 #include "workflow_context.hpp"
 #include "yml/task.hpp"
 
@@ -18,9 +19,23 @@ struct TaskResult {
   std::string stderr_data;
   bool output_streamed_live = false;
   std::optional<TaskFailureContext> nested_failure_context;
+  std::string error_code;
+  std::string error_phase;
+  WorkflowValue error_details{WorkflowValue::object()};
 
   TaskResult(bool s = true, std::string msg = "")
       : success(s), error_message(std::move(msg)), exit_code(s ? 0 : -1) {}
+
+  static TaskResult fail(Praktor::Execution::TaskErrorCode code,
+                         std::string phase,
+                         std::string message,
+                         WorkflowValue details = WorkflowValue::object()) {
+    TaskResult result(false, std::move(message));
+    result.error_code = Praktor::Execution::taskErrorCodeName(code);
+    result.error_phase = std::move(phase);
+    result.error_details = std::move(details);
+    return result;
+  }
 };
 
 /**

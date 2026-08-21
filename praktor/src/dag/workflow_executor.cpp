@@ -116,6 +116,9 @@ TaskFailureContext buildFailureContext(const Task& task,
   failure.stdout_data = result.stdout_data;
   failure.stderr_data = result.stderr_data;
   failure.error_message = result.error_message;
+  failure.error_code = result.error_code;
+  failure.error_phase = result.error_phase;
+  failure.error_details = result.error_details;
 
   WorkflowValue outputs = context.getValueByPath("tasks." + task.name + ".outputs");
   if (outputs.is_object()) {

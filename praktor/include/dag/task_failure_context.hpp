@@ -21,6 +21,9 @@ struct TaskFailureContext {
     std::string error_message;
     std::unordered_map<std::string, WorkflowValue> captured_outputs;
     std::shared_ptr<TaskFailureContext> inner_failure;
+    std::string error_code;
+    std::string error_phase;
+    WorkflowValue error_details{WorkflowValue::object()};
 
     bool hasInnerFailure() const {
         return static_cast<bool>(inner_failure);
@@ -36,6 +39,9 @@ struct TaskFailureContext {
         failure_vars["failed_task_stdout"] = stdout_data;
         failure_vars["failed_task_stderr"] = stderr_data;
         failure_vars["failed_task_error"] = error_message;
+        failure_vars["failed_task_error_code"] = error_code;
+        failure_vars["failed_task_error_phase"] = error_phase;
+        failure_vars["failed_task_error_details"] = error_details;
 
         for (const auto& [key, value] : captured_outputs) {
             failure_vars["failed_task_outputs." + key] = value;
@@ -54,6 +60,9 @@ struct TaskFailureContext {
             failure_vars["failed_inner_task_stdout"] = inner.stdout_data;
             failure_vars["failed_inner_task_stderr"] = inner.stderr_data;
             failure_vars["failed_inner_task_error"] = inner.error_message;
+            failure_vars["failed_inner_task_error_code"] = inner.error_code;
+            failure_vars["failed_inner_task_error_phase"] = inner.error_phase;
+            failure_vars["failed_inner_task_error_details"] = inner.error_details;
 
             for (const auto& [key, value] : inner.captured_outputs) {
                 failure_vars["failed_inner_task_outputs." + key] = value;
@@ -74,6 +83,9 @@ struct TaskFailureContext {
         failed_task["stdout"] = stdout_data;
         failed_task["stderr"] = stderr_data;
         failed_task["error"] = error_message;
+        failed_task["error_code"] = error_code;
+        failed_task["error_phase"] = error_phase;
+        failed_task["error_details"] = error_details;
         failed_task["outputs"] = buildOutputsJson(captured_outputs);
 
         if (inner_failure) {

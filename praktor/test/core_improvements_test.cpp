@@ -1,5 +1,7 @@
 #include <catch2/catch_all.hpp>
 #include "yml/task_parser.hpp"
+#include "dag/task_executor.hpp"
+#include "dag/task_failure_context.hpp"
 #include "dag/workflow_executor.hpp"
 #include "dag/dependency_graph.hpp"
 #include <filesystem>
@@ -19,6 +21,44 @@ std::string writeTextCommand(const fs::path& path, const std::string& text)
 #endif
 }
 
+}
+
+TEST_CASE("TaskResult failure keeps legacy message and structured metadata") {
+    auto details = WorkflowValue::object();
+    details["state"] = "start_pending";
+    auto result = TaskResult::fail(
+        Praktor::Execution::TaskErrorCode::Timeout,
+        "poll", "service did not reach running",
+        std::move(details));
+
+    CHECK_FALSE(result.success);
+    CHECK(result.error_message == "service did not reach running");
+    CHECK(result.error_code == "timeout");
+    CHECK(result.error_phase == "poll");
+    CHECK(result.error_details["state"].as<std::string>() == "start_pending");
+}
+
+TEST_CASE("TaskFailureContext keeps legacy failure data with structured metadata") {
+    TaskFailureContext failure;
+    failure.task_name = "start_service";
+    failure.task_type = "service";
+    failure.error_message = "service did not reach running";
+    failure.error_code = "timeout";
+    failure.error_phase = "poll";
+    failure.error_details = WorkflowValue::object();
+    failure.error_details["state"] = "start_pending";
+
+    const auto variables = failure.toFailureVariables();
+    const auto serialized = failure.toJson();
+
+    CHECK(variables.at("failed_task_error").as<std::string>() == "service did not reach running");
+    CHECK(variables.at("failed_task_error_code").as<std::string>() == "timeout");
+    CHECK(variables.at("failed_task_error_phase").as<std::string>() == "poll");
+    CHECK(variables.at("failed_task_error_details")["state"].as<std::string>() == "start_pending");
+    CHECK(serialized["error"].as<std::string>() == "service did not reach running");
+    CHECK(serialized["error_code"].as<std::string>() == "timeout");
+    CHECK(serialized["error_phase"].as<std::string>() == "poll");
+    CHECK(serialized["error_details"]["state"].as<std::string>() == "start_pending");
 }
 
 TEST_CASE("Parser Improvements - Line Numbers & Validation", "[parser][schema]") {
