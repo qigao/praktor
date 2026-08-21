@@ -49,17 +49,30 @@ target_compile_definitions(script_engine_test.${TARGET_NAME_LIB} PRIVATE
 
 if(WIN32)
     add_executable(managed_process_fixture helpers/managed_process_fixture.cpp)
+    add_executable(managed_process_fixture_alt helpers/managed_process_fixture.cpp)
+    set_target_properties(managed_process_fixture_alt PROPERTIES
+        OUTPUT_NAME "managed_process_fixture"
+        SUFFIX ".com"
+    )
     cmake_config_target(
         managed_process_fixture
         NO_INSTALL
         NO_VERSION
         FOLDER "${folder_name}/test/helpers"
     )
+    cmake_config_target(
+        managed_process_fixture_alt
+        NO_INSTALL
+        NO_VERSION
+        FOLDER "${folder_name}/test/helpers"
+    )
     add_dependencies(managed_process_executor_test.${TARGET_NAME_LIB}
-                     managed_process_fixture)
+                     managed_process_fixture
+                     managed_process_fixture_alt)
     target_compile_definitions(
         managed_process_executor_test.${TARGET_NAME_LIB}
         PRIVATE PRAKTOR_MANAGED_PROCESS_FIXTURE="$<TARGET_FILE:managed_process_fixture>"
+                PRAKTOR_MANAGED_PROCESS_FIXTURE_ALT="$<TARGET_FILE:managed_process_fixture_alt>"
     )
 endif()
 

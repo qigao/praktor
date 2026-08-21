@@ -15,6 +15,9 @@ enum class ManagedProcessState { NotRunning, Running };
 struct ManagedProcessSnapshot {
   ManagedProcessState state{ManagedProcessState::NotRunning};
   std::uint32_t pid{0};
+  std::uint32_t session_id{0};
+  std::uint64_t instance_token{0};
+  std::string canonical_image_name;
 };
 
 template <typename T>

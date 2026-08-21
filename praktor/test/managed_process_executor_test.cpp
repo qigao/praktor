@@ -3,15 +3,35 @@
 
 #include <catch2/catch_all.hpp>
 
+#include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <functional>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <utility>
 #include <vector>
 
+#ifdef _WIN32
+#include <windows.h>
+
+namespace Praktor::System::WinDetail {
+
+ManagedProcessResult<bool> matchesManagedProcessCandidate(
+    std::string_view configured_image_name,
+    std::string_view canonical_image_name,
+    std::uint32_t candidate_session_id,
+    std::uint32_t current_session_id);
+ManagedProcessResult<bool> matchesManagedProcessSnapshot(
+    const ManagedProcessSnapshot& expected,
+    const ManagedProcessSnapshot& observed,
+    std::uint32_t current_session_id);
+
+}  // namespace Praktor::System::WinDetail
+#endif
 namespace {
 
 using Praktor::System::IManagedProcessBackend;
@@ -350,39 +370,256 @@ TEST_CASE("managed process executor maps outputs and structured failures") {
 #ifdef _WIN32
 namespace {
 
+ManagedProcessCommandResult cleanupManagedProcessFixture(IManagedProcessBackend &backend,
+                                                         const ManagedProcessIdentity &identity,
+                                                         std::chrono::milliseconds timeout,
+                                                         std::chrono::milliseconds poll_interval) {
+  const auto deadline = std::chrono::steady_clock::now() + timeout;
+  bool termination_requested = false;
+  std::uint32_t terminated_pid = 0;
+  std::uint64_t terminated_token = 0;
+  do {
+    auto queried = backend.query(identity);
+    if (!queried.ok) {
+      return {false, queried.native_error, std::move(queried.message)};
+    }
+    if (queried.value.state == ManagedProcessState::NotRunning) {
+      return {true, 0, {}};
+    }
+
+    const bool new_instance = !termination_requested ||
+                              queried.value.pid != terminated_pid ||
+                              queried.value.instance_token != terminated_token;
+    if (new_instance) {
+      auto terminated = backend.terminate(queried.value);
+      if (!terminated.ok) {
+        return terminated;
+      }
+      termination_requested = true;
+      terminated_pid = queried.value.pid;
+      terminated_token = queried.value.instance_token;
+    }
+    std::this_thread::sleep_for(poll_interval);
+  } while (std::chrono::steady_clock::now() < deadline);
+
+  auto final_query = backend.query(identity);
+  if (!final_query.ok) {
+    return {false, final_query.native_error, std::move(final_query.message)};
+  }
+  if (final_query.value.state == ManagedProcessState::NotRunning) {
+    return {true, 0, {}};
+  }
+  return {false, ERROR_TIMEOUT, "timed out waiting for managed process fixture cleanup"};
+}
+
 class ManagedProcessFixtureCleanup {
 public:
-  ManagedProcessFixtureCleanup(IManagedProcessBackend& backend,
-                               ManagedProcessIdentity identity)
-      : backend_(backend), identity_(std::move(identity)) {
-    cleanup();
-  }
+  ManagedProcessFixtureCleanup(IManagedProcessBackend &backend, ManagedProcessIdentity identity)
+      : backend_(backend), identity_(std::move(identity)) {}
 
-  ~ManagedProcessFixtureCleanup() { cleanup(); }
-
-  ManagedProcessFixtureCleanup(const ManagedProcessFixtureCleanup&) = delete;
-  ManagedProcessFixtureCleanup& operator=(const ManagedProcessFixtureCleanup&) = delete;
-
-private:
-  void cleanup() noexcept {
-    constexpr auto cleanup_timeout = std::chrono::seconds(3);
-    constexpr auto cleanup_poll_interval = std::chrono::milliseconds(20);
-    const auto deadline = std::chrono::steady_clock::now() + cleanup_timeout;
-    while (std::chrono::steady_clock::now() < deadline) {
-      auto queried = backend_.query(identity_);
-      if (!queried.ok || queried.value.state == ManagedProcessState::NotRunning) {
-        return;
-      }
-      static_cast<void>(backend_.terminate(queried.value));
-      std::this_thread::sleep_for(cleanup_poll_interval);
+  ~ManagedProcessFixtureCleanup() noexcept {
+    try {
+      static_cast<void>(cleanup());
+    } catch (...) {
     }
   }
 
-  IManagedProcessBackend& backend_;
+  ManagedProcessFixtureCleanup(const ManagedProcessFixtureCleanup &) = delete;
+  ManagedProcessFixtureCleanup &operator=(const ManagedProcessFixtureCleanup &) = delete;
+
+  ManagedProcessCommandResult cleanup() {
+    return cleanupManagedProcessFixture(backend_, identity_, std::chrono::seconds(3),
+                                        std::chrono::milliseconds(20));
+  }
+
+private:
+  IManagedProcessBackend &backend_;
   ManagedProcessIdentity identity_;
 };
 
-}  // namespace
+} // namespace
+
+TEST_CASE("Windows managed process identity matching is current-session exact basename") {
+  using Praktor::System::WinDetail::matchesManagedProcessCandidate;
+
+  const auto case_insensitive =
+      matchesManagedProcessCandidate("C:/configured/WORKER.EXE", "C:/runtime/worker.exe", 7, 7);
+  REQUIRE(case_insensitive.ok);
+  CHECK(case_insensitive.value);
+
+  const auto different_extension =
+      matchesManagedProcessCandidate("worker.exe", "C:/runtime/worker.com", 7, 7);
+  REQUIRE(different_extension.ok);
+  CHECK_FALSE(different_extension.value);
+
+  const auto different_session =
+      matchesManagedProcessCandidate("worker.exe", "C:/runtime/WORKER.EXE", 8, 7);
+  REQUIRE(different_session.ok);
+  CHECK_FALSE(different_session.value);
+}
+
+TEST_CASE("Windows fixture cleanup reports backend failures") {
+  ManagedProcessIdentity identity;
+  identity.image_name = "managed_process_fixture.exe";
+
+  SECTION("query failure") {
+    FakeManagedProcessBackend backend;
+    backend.query_action = [] {
+      return ManagedProcessResult<ManagedProcessSnapshot>{
+          false, {}, 5, "fixture cleanup query failed"};
+    };
+
+    const auto cleaned = cleanupManagedProcessFixture(
+        backend, identity, std::chrono::milliseconds(10), std::chrono::milliseconds(1));
+
+    CHECK_FALSE(cleaned.ok);
+    CHECK(cleaned.native_error == 5);
+  }
+
+  SECTION("termination failure") {
+    FakeManagedProcessBackend backend;
+    backend.query_action = [] {
+      ManagedProcessSnapshot running;
+      running.state = ManagedProcessState::Running;
+      running.pid = kFixturePid;
+      return ManagedProcessResult<ManagedProcessSnapshot>{true, running, 0, {}};
+    };
+    backend.terminate_result = {false, 6, "fixture cleanup terminate failed"};
+
+    const auto cleaned = cleanupManagedProcessFixture(
+        backend, identity, std::chrono::milliseconds(10), std::chrono::milliseconds(1));
+
+    CHECK_FALSE(cleaned.ok);
+    CHECK(cleaned.native_error == 6);
+  }
+
+  SECTION("timeout") {
+    FakeManagedProcessBackend backend;
+    backend.query_action = [] {
+      ManagedProcessSnapshot running;
+      running.state = ManagedProcessState::Running;
+      running.pid = kFixturePid;
+      return ManagedProcessResult<ManagedProcessSnapshot>{true, running, 0, {}};
+    };
+
+    const auto cleaned = cleanupManagedProcessFixture(
+        backend, identity, std::chrono::milliseconds(0), std::chrono::milliseconds(0));
+
+    CHECK_FALSE(cleaned.ok);
+    CHECK(cleaned.native_error == ERROR_TIMEOUT);
+  }
+}
+
+TEST_CASE("Windows action validation rejects changed process evidence") {
+  using Praktor::System::WinDetail::matchesManagedProcessSnapshot;
+
+  ManagedProcessSnapshot expected;
+  expected.state = ManagedProcessState::Running;
+  expected.pid = kFixturePid;
+  expected.session_id = 7;
+  expected.instance_token = 101;
+  expected.canonical_image_name = "worker.exe";
+
+  auto changed_token = expected;
+  ++changed_token.instance_token;
+  const auto token_match = matchesManagedProcessSnapshot(expected, changed_token, 7);
+  REQUIRE(token_match.ok);
+  CHECK_FALSE(token_match.value);
+
+  auto changed_image = expected;
+  changed_image.canonical_image_name = "worker.com";
+  const auto image_match = matchesManagedProcessSnapshot(expected, changed_image, 7);
+  REQUIRE(image_match.ok);
+  CHECK_FALSE(image_match.value);
+
+  auto changed_session = expected;
+  ++changed_session.session_id;
+  const auto session_match = matchesManagedProcessSnapshot(expected, changed_session, 7);
+  REQUIRE(session_match.ok);
+  CHECK_FALSE(session_match.value);
+}
+
+TEST_CASE("Windows stop rejects a stale managed process instance token") {
+  auto backend = Praktor::System::createManagedProcessBackend();
+  REQUIRE(backend != nullptr);
+
+  ManagedProcessParams request = params(SystemOperation::Start);
+  request.executable = PRAKTOR_MANAGED_PROCESS_FIXTURE;
+  request.working_directory = std::filesystem::path(request.executable).parent_path().string();
+  request.identity.image_name = std::filesystem::path(request.executable).filename().string();
+  request.startup_timeout_ms = 3000;
+  request.stop_timeout_ms = 3000;
+  request.force_terminate = true;
+  const auto setup_cleanup = cleanupManagedProcessFixture(
+      *backend, request.identity, std::chrono::seconds(3), std::chrono::milliseconds(20));
+  INFO(setup_cleanup.message);
+  REQUIRE(setup_cleanup.ok);
+  ManagedProcessFixtureCleanup cleanup(*backend, request.identity);
+  ManagedProcessController controller(*backend, std::chrono::milliseconds(20));
+
+  const auto started = controller.execute(request);
+  INFO(started.phase << ":" << started.message);
+  REQUIRE(started.ok);
+  REQUIRE(started.changed);
+
+  auto stale = started.snapshot;
+  ++stale.instance_token;
+  const auto stopped = backend->requestStop(stale);
+  CHECK_FALSE(stopped.ok);
+
+  const auto after = backend->query(request.identity);
+  REQUIRE(after.ok);
+  CHECK(after.value.state == ManagedProcessState::Running);
+  CHECK(after.value.instance_token == started.snapshot.instance_token);
+
+  const auto final_cleanup = cleanup.cleanup();
+  INFO(final_cleanup.native_error << ":" << final_cleanup.message);
+  REQUIRE(final_cleanup.ok);
+  const auto cleaned = backend->query(request.identity);
+  REQUIRE(cleaned.ok);
+  CHECK(cleaned.value.state == ManagedProcessState::NotRunning);
+}
+
+TEST_CASE("Windows terminate rejects changed canonical process identity") {
+  auto backend = Praktor::System::createManagedProcessBackend();
+  REQUIRE(backend != nullptr);
+
+  ManagedProcessParams request = params(SystemOperation::Start);
+  request.executable = PRAKTOR_MANAGED_PROCESS_FIXTURE;
+  request.working_directory = std::filesystem::path(request.executable).parent_path().string();
+  request.identity.image_name = std::filesystem::path(request.executable).filename().string();
+  request.startup_timeout_ms = 3000;
+  request.stop_timeout_ms = 3000;
+  request.force_terminate = true;
+  const auto setup_cleanup = cleanupManagedProcessFixture(
+      *backend, request.identity, std::chrono::seconds(3), std::chrono::milliseconds(20));
+  INFO(setup_cleanup.message);
+  REQUIRE(setup_cleanup.ok);
+  ManagedProcessFixtureCleanup cleanup(*backend, request.identity);
+  ManagedProcessController controller(*backend, std::chrono::milliseconds(20));
+
+  const auto started = controller.execute(request);
+  INFO(started.phase << ":" << started.message);
+  REQUIRE(started.ok);
+  REQUIRE(started.changed);
+
+  auto changed_identity = started.snapshot;
+  changed_identity.canonical_image_name = "managed_process_fixture.com";
+  const auto terminated = backend->terminate(changed_identity);
+  CHECK_FALSE(terminated.ok);
+
+  const auto after = backend->query(request.identity);
+  REQUIRE(after.ok);
+  CHECK(after.value.state == ManagedProcessState::Running);
+  CHECK(after.value.instance_token == started.snapshot.instance_token);
+
+  const auto final_cleanup = cleanup.cleanup();
+  INFO(final_cleanup.native_error << ":" << final_cleanup.message);
+  REQUIRE(final_cleanup.ok);
+  const auto cleaned = backend->query(request.identity);
+  REQUIRE(cleaned.ok);
+  CHECK(cleaned.value.state == ManagedProcessState::NotRunning);
+}
 
 TEST_CASE("Windows managed process backend starts queries and gracefully stops fixture") {
   auto backend = Praktor::System::createManagedProcessBackend();
@@ -390,13 +627,15 @@ TEST_CASE("Windows managed process backend starts queries and gracefully stops f
 
   ManagedProcessParams request = params(SystemOperation::Start);
   request.executable = PRAKTOR_MANAGED_PROCESS_FIXTURE;
-  request.working_directory =
-      std::filesystem::path(request.executable).parent_path().string();
-  request.identity.image_name =
-      std::filesystem::path(request.executable).filename().string();
+  request.working_directory = std::filesystem::path(request.executable).parent_path().string();
+  request.identity.image_name = std::filesystem::path(request.executable).filename().string();
   request.startup_timeout_ms = 3000;
   request.stop_timeout_ms = 3000;
   request.force_terminate = false;
+  const auto setup_cleanup = cleanupManagedProcessFixture(
+      *backend, request.identity, std::chrono::seconds(3), std::chrono::milliseconds(20));
+  INFO(setup_cleanup.message);
+  REQUIRE(setup_cleanup.ok);
   ManagedProcessFixtureCleanup cleanup(*backend, request.identity);
   ManagedProcessController controller(*backend, std::chrono::milliseconds(20));
 
@@ -404,12 +643,25 @@ TEST_CASE("Windows managed process backend starts queries and gracefully stops f
   INFO(started.phase << ":" << started.message);
   REQUIRE(started.ok);
   REQUIRE(started.snapshot.state == ManagedProcessState::Running);
+  CHECK(started.changed);
+  DWORD current_session_id = 0;
+  REQUIRE(ProcessIdToSessionId(GetCurrentProcessId(), &current_session_id));
+  CHECK(started.snapshot.session_id == current_session_id);
+  CHECK(started.snapshot.instance_token != 0);
+  CHECK(started.snapshot.canonical_image_name == request.identity.image_name);
 
-  const auto queried = backend->query(request.identity);
+  ManagedProcessIdentity uppercase_identity = request.identity;
+  std::transform(uppercase_identity.image_name.begin(), uppercase_identity.image_name.end(),
+                 uppercase_identity.image_name.begin(),
+                 [](unsigned char ch) { return static_cast<char>(std::toupper(ch)); });
+  const auto queried = backend->query(uppercase_identity);
   INFO(queried.message);
   REQUIRE(queried.ok);
   CHECK(queried.value.state == ManagedProcessState::Running);
   CHECK(queried.value.pid == started.snapshot.pid);
+  CHECK(queried.value.session_id == started.snapshot.session_id);
+  CHECK(queried.value.instance_token == started.snapshot.instance_token);
+  CHECK(queried.value.canonical_image_name == started.snapshot.canonical_image_name);
 
   request.operation = SystemOperation::Stop;
   const auto stopped = controller.execute(request);
@@ -420,5 +672,83 @@ TEST_CASE("Windows managed process backend starts queries and gracefully stops f
   const auto after = backend->query(request.identity);
   REQUIRE(after.ok);
   CHECK(after.value.state == ManagedProcessState::NotRunning);
+
+  const auto final_cleanup = cleanup.cleanup();
+  INFO(final_cleanup.native_error << ":" << final_cleanup.message);
+  REQUIRE(final_cleanup.ok);
+  const auto cleaned = backend->query(request.identity);
+  REQUIRE(cleaned.ok);
+  CHECK(cleaned.value.state == ManagedProcessState::NotRunning);
+}
+
+TEST_CASE("Windows managed process query does not match a different extension") {
+  auto backend = Praktor::System::createManagedProcessBackend();
+  REQUIRE(backend != nullptr);
+
+  ManagedProcessParams alternate = params(SystemOperation::Start);
+  alternate.executable = PRAKTOR_MANAGED_PROCESS_FIXTURE_ALT;
+  alternate.working_directory = std::filesystem::path(alternate.executable).parent_path().string();
+  alternate.identity.image_name = std::filesystem::path(alternate.executable).filename().string();
+  alternate.startup_timeout_ms = 3000;
+  alternate.stop_timeout_ms = 3000;
+  alternate.force_terminate = true;
+  const auto setup_cleanup = cleanupManagedProcessFixture(
+      *backend, alternate.identity, std::chrono::seconds(3), std::chrono::milliseconds(20));
+  INFO(setup_cleanup.message);
+  REQUIRE(setup_cleanup.ok);
+  ManagedProcessFixtureCleanup cleanup(*backend, alternate.identity);
+  ManagedProcessController controller(*backend, std::chrono::milliseconds(20));
+
+  const auto started = controller.execute(alternate);
+  INFO(started.phase << ":" << started.message);
+  REQUIRE(started.ok);
+  REQUIRE(started.changed);
+
+  ManagedProcessIdentity exe_identity;
+  exe_identity.image_name = "managed_process_fixture.exe";
+  const auto wrong_extension = backend->query(exe_identity);
+  INFO(wrong_extension.message);
+  REQUIRE(wrong_extension.ok);
+  CHECK(wrong_extension.value.state == ManagedProcessState::NotRunning);
+
+  const auto final_cleanup = cleanup.cleanup();
+  INFO(final_cleanup.native_error << ":" << final_cleanup.message);
+  REQUIRE(final_cleanup.ok);
+  const auto cleaned = backend->query(alternate.identity);
+  REQUIRE(cleaned.ok);
+  CHECK(cleaned.value.state == ManagedProcessState::NotRunning);
+}
+
+TEST_CASE("Windows fixture guard cleans a started process on early scope exit") {
+  auto backend = Praktor::System::createManagedProcessBackend();
+  REQUIRE(backend != nullptr);
+
+  ManagedProcessParams request = params(SystemOperation::Start);
+  request.executable = PRAKTOR_MANAGED_PROCESS_FIXTURE;
+  request.working_directory = std::filesystem::path(request.executable).parent_path().string();
+  request.identity.image_name = std::filesystem::path(request.executable).filename().string();
+  request.startup_timeout_ms = 3000;
+  request.stop_timeout_ms = 3000;
+  request.force_terminate = true;
+
+  const auto setup_cleanup = cleanupManagedProcessFixture(
+      *backend, request.identity, std::chrono::seconds(3), std::chrono::milliseconds(20));
+  INFO(setup_cleanup.message);
+  REQUIRE(setup_cleanup.ok);
+
+  {
+    ManagedProcessFixtureCleanup cleanup(*backend, request.identity);
+    ManagedProcessController controller(*backend, std::chrono::milliseconds(20));
+    const auto started = controller.execute(request);
+    INFO(started.phase << ":" << started.message);
+    REQUIRE(started.ok);
+    REQUIRE(started.changed);
+    REQUIRE(started.snapshot.state == ManagedProcessState::Running);
+  }
+
+  const auto after_scope = backend->query(request.identity);
+  INFO(after_scope.message);
+  REQUIRE(after_scope.ok);
+  CHECK(after_scope.value.state == ManagedProcessState::NotRunning);
 }
 #endif
