@@ -614,6 +614,23 @@ TEST_CASE("parse rejects invalid silent values")
         Catch::Matchers::ContainsSubstring("line 4"));
 }
 
+TEST_CASE("silent rejects managed-process-only numeric boolean forms")
+{
+    for (const std::string scalar : {"01", "0x1"}) {
+        CAPTURE(scalar);
+        auto wf = writeTempWorkflow(
+            "invalid_numeric_silent_" + scalar + ".yml",
+            "tasks:\n"
+            "  - name: quiet\n"
+            "    command: echo quiet\n"
+            "    silent: " + scalar + "\n");
+
+        REQUIRE_THROWS_WITH(
+            TaskParser::parseFile(wf.string()),
+            Catch::Matchers::ContainsSubstring("'silent' must be a boolean"));
+    }
+}
+
 TEST_CASE("parse rejects removed continue_on_error field")
 {
     auto wf = writeTempWorkflow("removed_continue_on_error.yml",

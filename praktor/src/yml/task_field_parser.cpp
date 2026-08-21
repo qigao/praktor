@@ -536,8 +536,8 @@ ManagedProcessParams parse_managed_process_params(const TaskYamlDetail::YamlNode
                                  "managed_process.stop_timeout_ms");
     }
     if (process.has_child("force_terminate")) {
-        params.force_terminate = TaskYamlDetail::read_bool_or_throw(
-            process["force_terminate"], "force_terminate");
+        params.force_terminate = TaskYamlDetail::read_force_terminate_or_throw(
+            process["force_terminate"]);
     }
     return params;
 }

@@ -70,7 +70,7 @@ inline std::string read_scalar_or_throw(const YamlNodeRef& node,
     return value;
 }
 
-inline std::optional<bool> parse_bool_integer_compat(const std::string& value) {
+inline std::optional<bool> parse_force_terminate_integer_compat(const std::string& value) {
     if (value.empty()) {
         return std::nullopt;
     }
@@ -137,10 +137,23 @@ inline bool read_bool_or_throw(const YamlNodeRef& node, const char* field_name) 
     if (value == "false" || value == "no" || value == "0") {
         return false;
     }
+    throw_parse_error(node, message);
+}
+
+inline bool read_force_terminate_or_throw(const YamlNodeRef& node) {
+    constexpr const char* field_name = "force_terminate";
+    const std::string message = std::string("'") + field_name + "' must be a boolean";
+    const std::string value = to_lower_copy(read_scalar_or_throw(node, message));
+    if (value == "true" || value == "yes" || value == "on" || value == "1") {
+        return true;
+    }
+    if (value == "false" || value == "no" || value == "off" || value == "0") {
+        return false;
+    }
     if (const auto semantic_value = node.bool_integer_value(); semantic_value.has_value()) {
         return *semantic_value;
     }
-    if (const auto compatible_value = parse_bool_integer_compat(value);
+    if (const auto compatible_value = parse_force_terminate_integer_compat(value);
         compatible_value.has_value()) {
         return *compatible_value;
     }

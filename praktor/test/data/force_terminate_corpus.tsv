@@ -5,6 +5,14 @@ mixed_case_yes	"YeS"	str	pass	true
 mixed_case_no	"nO"	str	pass	false
 mixed_case_true	"TrUe"	str	pass	true
 mixed_case_false	"FaLsE"	str	pass	false
+unquoted_on	ON	bool	pass	true
+unquoted_off	OFF	bool	pass	false
+unquoted_mixed_on	oN	str	pass	true
+unquoted_mixed_off	OfF	str	pass	false
+quoted_on	"ON"	str	pass	true
+quoted_off	"OFF"	str	pass	false
+quoted_mixed_on	"oN"	str	pass	true
+quoted_mixed_off	"OfF"	str	pass	false
 quoted_one	"1"	str	pass	true
 quoted_zero	"0"	str	pass	false
 quoted_leading_zero_one	"01"	str	pass	true

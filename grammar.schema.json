@@ -209,7 +209,7 @@
             { "type": "integer", "enum": [0, 1] },
             {
               "type": "string",
-              "pattern": "^([Tt][Rr][Uu][Ee]|[Ff][Aa][Ll][Ss][Ee]|[Yy][Ee][Ss]|[Nn][Oo]|[+-]?0[0_]*|[+]?1[_]*|[+]?0[0_]*1[_]*|[+-]?0[BbOoXx][0_]*0[0_]*|[+]?0[BbOoXx][0_]*1[_]*)$"
+              "pattern": "^([Tt][Rr][Uu][Ee]|[Ff][Aa][Ll][Ss][Ee]|[Yy][Ee][Ss]|[Nn][Oo]|[Oo][Nn]|[Oo][Ff][Ff]|[+-]?0[0_]*|[+]?1[_]*|[+]?0[0_]*1[_]*|[+-]?0[BbOoXx][0_]*0[0_]*|[+]?0[BbOoXx][0_]*1[_]*)$"
             }
           ]
         }
