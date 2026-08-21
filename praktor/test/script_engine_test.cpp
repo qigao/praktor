@@ -4,6 +4,7 @@
 #include <catch2/catch_all.hpp>
 #include <atomic>
 #include <barrier>
+#include <charconv>
 #include <chrono>
 #include <cmath>
 #include <filesystem>
@@ -191,8 +192,17 @@ server.serve_forever()
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
         while (std::chrono::steady_clock::now() < deadline) {
             if (std::filesystem::exists(ready_path)) {
-                port = std::stoi(trim_newlines(readFile(ready_path)));
-                break;
+                const std::string ready_text = trim_newlines(readFile(ready_path));
+                int candidate = 0;
+                const auto [end, error] =
+                    std::from_chars(ready_text.data(),
+                                    ready_text.data() + ready_text.size(), candidate);
+                if (error == std::errc{} &&
+                    end == ready_text.data() + ready_text.size() &&
+                    candidate > 0) {
+                    port = candidate;
+                    break;
+                }
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(50));
         }
