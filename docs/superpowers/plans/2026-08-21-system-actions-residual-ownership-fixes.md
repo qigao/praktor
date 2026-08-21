@@ -84,7 +84,47 @@ cmake --build --preset win-dev-user --target managed_process_executor_test.prakt
 
 Expected: compilation fails because `IManagedProcessBackend::start()` still returns `ManagedProcessResult<std::uint32_t>`.
 
-- [ ] **Step 3: Add failing compensation behavior tests**
+- [ ] **Step 3: Change the backend interface and Windows start result**
+
+Update the interface exactly:
+
+```cpp
+virtual ManagedProcessResult<ManagedProcessSnapshot> start(
+    const ManagedProcessParams& params) = 0;
+```
+
+In the Windows backend, keep the process handle alive through the existing non-blocking immediate-exit probe, then obtain the full snapshot from the handle:
+
+```cpp
+auto evidence = queryProcessEvidence(process.get(), process_info.dwProcessId);
+if (!evidence.ok) {
+  static_cast<void>(TerminateProcess(process.get(), kStartupEvidenceFailureExitCode));
+  return failure<ManagedProcessSnapshot>(
+      evidence.native_error, std::move(evidence.message));
+}
+if (evidence.value.state != ManagedProcessState::Running ||
+    evidence.value.session_id != current_session) {
+  static_cast<void>(TerminateProcess(process.get(), kSessionMismatchExitCode));
+  return failure<ManagedProcessSnapshot>(
+      ERROR_INVALID_DATA, "managed process started with invalid identity evidence");
+}
+return evidence;
+```
+
+Use existing named exit constants or add one named `constexpr DWORD`; do not add a magic exit code. This step changes only the return contract and evidence capture; it does not add timeout compensation.
+
+- [ ] **Step 4: Run the focused build and verify the interface migration is GREEN**
+
+Run:
+
+```powershell
+cmake --build --preset win-dev-user --target managed_process_executor_test.praktor_lib
+ctest --preset win-dev-user -R "managed_process_executor" --output-on-failure
+```
+
+Expected: the focused target and existing managed-process tests pass with the full-snapshot start contract.
+
+- [ ] **Step 5: Add failing compensation behavior tests**
 
 Add three fake-backend tests. The success case must assert exact snapshot identity, not only call count:
 
@@ -138,7 +178,7 @@ CHECK(result.phase == "start_timeout_cleanup_poll");
 CHECK(result.snapshot.pid == started.pid);
 ```
 
-- [ ] **Step 4: Run focused tests and verify behavioral RED**
+- [ ] **Step 6: Run focused tests and verify behavioral RED**
 
 Run:
 
@@ -147,38 +187,9 @@ cmake --build --preset win-dev-user --target managed_process_executor_test.prakt
 build\Msvc\bin\managed_process_executor_test.praktor_lib.exe "startup timeout*"
 ```
 
-Expected: compilation succeeds after only adapting the test fake, but compensation assertions fail because the controller returns before reconciling or terminating the started instance.
+Expected: all three new compensation cases fail because the controller returns before reconciling or terminating the started instance.
 
-- [ ] **Step 5: Change the backend interface and Windows start result**
-
-Update the interface exactly:
-
-```cpp
-virtual ManagedProcessResult<ManagedProcessSnapshot> start(
-    const ManagedProcessParams& params) = 0;
-```
-
-In the Windows backend, keep the process handle alive through the existing non-blocking immediate-exit probe, then obtain the full snapshot from the handle:
-
-```cpp
-auto evidence = queryProcessEvidence(process.get(), process_info.dwProcessId);
-if (!evidence.ok) {
-  static_cast<void>(TerminateProcess(process.get(), kStartupEvidenceFailureExitCode));
-  return failure<ManagedProcessSnapshot>(
-      evidence.native_error, std::move(evidence.message));
-}
-if (evidence.value.state != ManagedProcessState::Running ||
-    evidence.value.session_id != current_session) {
-  static_cast<void>(TerminateProcess(process.get(), kSessionMismatchExitCode));
-  return failure<ManagedProcessSnapshot>(
-      ERROR_INVALID_DATA, "managed process started with invalid identity evidence");
-}
-return evidence;
-```
-
-Use existing named exit constants or add one named `constexpr DWORD`; do not add a magic exit code.
-
-- [ ] **Step 6: Implement one startup compensation path in the controller**
+- [ ] **Step 7: Implement one startup compensation path in the controller**
 
 After successful start, assign `execution.snapshot = result.value`. Replace the current immediate timeout return with a helper whose contract is:
 
@@ -219,7 +230,7 @@ The helper must never terminate `observed.value` merely because its image name m
 
 Make `pollFor()` support a timeout callback or split startup polling so deadline expiration routes through this helper exactly once. Do not recursively call `pollFor()` with startup compensation enabled.
 
-- [ ] **Step 7: Tighten the real Windows timeout test**
+- [ ] **Step 8: Tighten the real Windows timeout test**
 
 Replace the test-side best-effort implication with terminal ownership assertions:
 
@@ -236,7 +247,7 @@ CHECK(after.value.state == ManagedProcessState::NotRunning);
 
 The cleanup guard remains as an assertion-failure fallback, but the production result must already prove cleanup.
 
-- [ ] **Step 8: Run focused and affected regression tests**
+- [ ] **Step 9: Run focused and affected regression tests**
 
 Run:
 
@@ -247,7 +258,7 @@ ctest --preset win-dev-user -R "managed_process_executor|workflow_runner" --outp
 
 Expected: all selected tests pass and no fixture process remains.
 
-- [ ] **Step 9: Commit the managed-process ownership fix**
+- [ ] **Step 10: Commit the managed-process ownership fix**
 
 ```powershell
 git add praktor/include/system/managed_process.hpp praktor/src/system/managed_process.cpp praktor/src/system/managed_process_win.cpp praktor/test/managed_process_executor_test.cpp
