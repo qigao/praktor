@@ -1204,6 +1204,60 @@ TEST_CASE("system actions execute through WorkflowRunner and preserve failure me
 #endif
 }
 
+TEST_CASE("nested uses preserves the inner structured service failure snapshot")
+{
+    const auto dir = createTempDir();
+    const auto inner_path = dir / "inner.yml";
+    const auto outer_path = dir / "outer.yml";
+
+    writeFile(inner_path, R"(
+tasks:
+  - name: inner_failure_observer
+    script: |
+      ctx.output("observed", ctx.get("failed_task_error"));
+
+  - name: inner_service_failure
+    service:
+      operation: status
+      name: NestedContractService
+      profile: praktor_nested_missing_profile
+    triggers:
+      on_failure: [inner_failure_observer]
+)" );
+
+    writeFile(outer_path,
+              "tasks:\n"
+              "  - name: capture_nested_failure\n"
+              "    script: |\n"
+              "      ctx.output(\"error_code\", ctx.get(\"failed_inner_task_error_code\"));\n"
+              "      ctx.output(\"error_phase\", ctx.get(\"failed_inner_task_error_phase\"));\n"
+              "      ctx.output(\"error_details\", ctx.get(\"failed_inner_task_error_details\"));\n"
+              "      ctx.output(\"legacy_error\", ctx.get(\"failed_inner_task_error\"));\n"
+              "  - name: invoke_nested\n"
+              "    uses: \"" + inner_path.generic_string() + "\"\n"
+              "    triggers:\n"
+              "      on_failure: [capture_nested_failure]\n");
+
+    const auto result = WorkflowRunner(outer_path.string()).execute();
+
+    CHECK_FALSE(result.success);
+    const WorkflowValue tasks = result.value["tasks"];
+    CHECK(tasks["invoke_nested"]["status"].as<std::string>() == "failed");
+    REQUIRE(tasks["capture_nested_failure"]["status"].as<std::string>() == "success");
+    const WorkflowValue captured = tasks["capture_nested_failure"]["outputs"];
+    CHECK(captured["error_code"].as<std::string>() == "service_state_failed");
+    CHECK(captured["error_phase"].as<std::string>() == "profile");
+    CHECK(captured["error_details"]["name"].as<std::string>() ==
+          "NestedContractService");
+    CHECK(captured["error_details"]["profile"].as<std::string>() ==
+          "praktor_nested_missing_profile");
+    CHECK(captured["error_details"]["operation"].as<std::string>() == "status");
+    CHECK(captured["legacy_error"].as<std::string>() ==
+          "unknown service command profile: praktor_nested_missing_profile");
+
+    std::filesystem::remove_all(dir);
+}
+
 TEST_CASE("managed process cache invalidates when every action parameter changes")
 {
 #ifdef _WIN32

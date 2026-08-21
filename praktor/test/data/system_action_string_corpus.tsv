@@ -1,0 +1,26 @@
+# name	action	field	scalar	disposition	expected	error_fragment
+restart_without_executable	managed_process	restart_without_executable	-	reject	-	requires 'executable'
+service_name_bool	service	name	true	reject	-	must be a string
+service_name_int	service	name	7	reject	-	must be a string
+service_name_float	service	name	1.5	reject	-	must be a string
+service_profile_bool	service	profile	false	reject	-	must be a string
+service_profile_int	service	profile	7	reject	-	must be a string
+service_profile_float	service	profile	1.5	reject	-	must be a string
+managed_executable_bool	managed_process	executable	true	reject	-	must be a string
+managed_executable_int	managed_process	executable	7	reject	-	must be a string
+managed_executable_float	managed_process	executable	1.5	reject	-	must be a string
+managed_image_bool	managed_process	image_name	false	reject	-	must be a string
+managed_image_int	managed_process	image_name	7	reject	-	must be a string
+managed_image_float	managed_process	image_name	1.5	reject	-	must be a string
+service_argv_bool	service	arguments	true	reject	-	entries must be strings
+service_argv_int	service	arguments	7	reject	-	entries must be strings
+service_argv_float	service	arguments	1.5	reject	-	entries must be strings
+managed_argv_bool	managed_process	arguments	false	reject	-	entries must be strings
+managed_argv_int	managed_process	arguments	7	reject	-	entries must be strings
+managed_argv_float	managed_process	arguments	1.5	reject	-	entries must be strings
+quoted_service_name	service	name	"true"	pass	true	-
+quoted_service_profile	service	profile	"7"	pass	7	-
+quoted_managed_executable	managed_process	executable	"1.5"	pass	1.5	-
+quoted_managed_image	managed_process	image_name	"false"	pass	false	-
+quoted_service_argv	service	arguments	"7"	pass	7	-
+quoted_managed_argv	managed_process	arguments	"1.5"	pass	1.5	-

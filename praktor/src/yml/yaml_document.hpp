@@ -20,6 +20,7 @@ public:
     [[nodiscard]] bool is_map() const noexcept;
     [[nodiscard]] bool is_seq() const noexcept;
     [[nodiscard]] bool has_val() const noexcept;
+    [[nodiscard]] bool is_string_scalar() const noexcept;
     [[nodiscard]] bool has_child(const char* key) const;
     [[nodiscard]] std::size_t num_children() const noexcept;
     [[nodiscard]] YamlNodeRef first_child() const noexcept;

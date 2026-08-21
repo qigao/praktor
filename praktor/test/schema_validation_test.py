@@ -17,6 +17,9 @@ SCHEMA_PATH = REPO_ROOT / "grammar.schema.json"
 FORCE_TERMINATE_CORPUS_PATH = (
     REPO_ROOT / "praktor" / "test" / "data" / "force_terminate_corpus.tsv"
 )
+SYSTEM_ACTION_STRING_CORPUS_PATH = (
+    REPO_ROOT / "praktor" / "test" / "data" / "system_action_string_corpus.tsv"
+)
 
 
 def load_validator():
@@ -121,6 +124,54 @@ tasks:
         validate_text(validator, f"force_terminate_{name}", text, should_pass)
 
 
+def system_action_corpus_workflow(action, field, scalar):
+    if action == "service":
+        name = scalar if field == "name" else "FixtureService"
+        profile = scalar if field == "profile" else "windows_scm"
+        argument = scalar if field == "arguments" else "baseline"
+        return f"""
+tasks:
+  - name: corpus_task
+    service:
+      operation: status
+      name: {name}
+      profile: {profile}
+      arguments: [{argument}]
+"""
+
+    operation = "restart" if field == "restart_without_executable" else "status"
+    executable = "" if field == "restart_without_executable" else (
+        f"      executable: {scalar if field == 'executable' else 'worker.exe'}\n"
+    )
+    argument = scalar if field == "arguments" else "baseline"
+    image_name = scalar if field == "image_name" else "worker.exe"
+    return f"""
+tasks:
+  - name: corpus_task
+    managed_process:
+      operation: {operation}
+{executable}      arguments: [{argument}]
+      identity:
+        image_name: {image_name}
+"""
+
+
+def validate_system_action_string_forms(validator):
+    lines = SYSTEM_ACTION_STRING_CORPUS_PATH.read_text(encoding="utf-8").splitlines()
+    cases = [line.split("\t") for line in lines if line and not line.startswith("#")]
+    for fields in cases:
+        if len(fields) != 7:
+            print(f"invalid system action string corpus row: {fields!r}", file=sys.stderr)
+            sys.exit(1)
+        name, action, field, scalar, disposition, _, _ = fields
+        validate_text(
+            validator,
+            f"system_action_string_{name}",
+            system_action_corpus_workflow(action, field, scalar),
+            disposition == "pass",
+        )
+
+
 def main():
     validator = load_validator()
 
@@ -199,6 +250,7 @@ tasks:
     )
 
     validate_force_terminate_forms(validator)
+    validate_system_action_string_forms(validator)
 
     validate_text(
         validator,

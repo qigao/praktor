@@ -45,7 +45,8 @@ private:
     TaskExecutionOutcome executeTaskInternal(const Task& task, WorkflowContext& context, std::optional<std::string> alias = std::nullopt, bool ignore_when = false, bool report_terminal_status = true);
     void setTaskExecutionStatus(const Task& task, WorkflowContext& context,
                                 std::optional<std::string> alias, std::string_view status,
-                                const std::string& error_message = {}) const;
+                                const std::string& error_message = {},
+                                const TaskFailureContext* failure_snapshot = nullptr) const;
     void clearTaskExecutionOutputs(const Task& task, WorkflowContext& context,
                                    std::optional<std::string> alias) const;
     void mergeTaskExecutionOutputs(const Task& task, WorkflowContext& context,

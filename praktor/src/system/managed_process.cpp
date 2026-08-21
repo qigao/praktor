@@ -109,22 +109,28 @@ ManagedProcessExecutionResult ManagedProcessController::execute(
                      std::string phase)
       -> std::optional<ManagedProcessExecutionResult> {
     for (;;) {
-      const auto now = Clock::now();
-      if (now >= deadline) {
+      if (Clock::now() >= deadline) {
         return fail(ManagedProcessError::Timeout, std::move(phase),
                     "managed process did not reach " +
                         std::string(managedProcessStateName(target)) +
                         " before the deadline");
       }
-      std::this_thread::sleep_for(std::min(
-          poll_interval_,
-          std::chrono::duration_cast<Milliseconds>(deadline - now)));
       if (auto failure = query(phase)) {
         return failure;
+      }
+      if (Clock::now() >= deadline) {
+        return fail(ManagedProcessError::Timeout, std::move(phase),
+                    "managed process did not reach " +
+                        std::string(managedProcessStateName(target)) +
+                        " before the deadline");
       }
       if (execution.snapshot.state == target) {
         return std::nullopt;
       }
+      const auto now = Clock::now();
+      std::this_thread::sleep_for(std::min(
+          poll_interval_,
+          std::chrono::duration_cast<Milliseconds>(deadline - now)));
     }
   };
 
@@ -132,6 +138,8 @@ ManagedProcessExecutionResult ManagedProcessController::execute(
     if (execution.snapshot.state == ManagedProcessState::Running) {
       return std::nullopt;
     }
+    const auto startup_deadline =
+        Clock::now() + Milliseconds(params.startup_timeout_ms);
     auto result = backend_.start(params);
     if (!result.ok) {
       const ManagedProcessError error = backendError(result.message);
@@ -140,7 +148,7 @@ ManagedProcessExecutionResult ManagedProcessController::execute(
     }
     execution.changed = true;
     return pollFor(ManagedProcessState::Running,
-                   Clock::now() + Milliseconds(params.startup_timeout_ms),
+                   startup_deadline,
                    "start_poll");
   };
 

@@ -96,6 +96,13 @@ bool YamlNodeRef::has_val() const noexcept {
     return node && turbo_yaml_node_type(node) == TURBO_YAML_NODE_SCALAR;
 }
 
+bool YamlNodeRef::is_string_scalar() const noexcept {
+    turbo_yaml_node_t* node = resolved_node();
+    return document_ && node &&
+           turbo_yaml_node_type(node) == TURBO_YAML_NODE_SCALAR &&
+           turbo_yaml_scalar_kind(document_, node) == TURBO_YAML_SCALAR_STRING;
+}
+
 bool YamlNodeRef::has_child(const char* key) const {
     return is_map() && key && turbo_yaml_mapping_contains(document_, resolved_node(), key);
 }

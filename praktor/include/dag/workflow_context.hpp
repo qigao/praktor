@@ -316,6 +316,14 @@ public:
         task_registry_->markFailed(taskName, errorMessage);
     }
 
+    void addFailedTask(std::string const& taskName,
+                       const TaskFailureContext& failureContext) {
+        if (task_registry_->getState(taskName) == TaskState::Pending) {
+            task_registry_->startTask(taskName);
+        }
+        task_registry_->markFailed(taskName, failureContext);
+    }
+
     /**
      * @brief Gets the set of completed tasks.
      *
@@ -332,6 +340,11 @@ public:
      */
     std::unordered_map<std::string, std::string> getFailedTasks() const {
         return task_registry_->getFailedTasks();
+    }
+
+    std::optional<TaskFailureContext> getTaskFailureSnapshot(
+        const std::string& taskName) const {
+        return task_registry_->getFailureSnapshot(taskName);
     }
 
     /**

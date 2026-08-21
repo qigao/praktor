@@ -70,6 +70,15 @@ inline std::string read_scalar_or_throw(const YamlNodeRef& node,
     return value;
 }
 
+inline std::string read_system_action_string_or_throw(
+    const YamlNodeRef& node,
+    const std::string& message) {
+    if (!node.is_string_scalar()) {
+        throw_parse_error(node, message);
+    }
+    return read_scalar_or_throw(node, message);
+}
+
 inline std::optional<bool> parse_force_terminate_integer_compat(const std::string& value) {
     if (value.empty()) {
         return std::nullopt;

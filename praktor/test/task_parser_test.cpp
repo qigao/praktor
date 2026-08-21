@@ -28,6 +28,80 @@ struct ForceTerminateCase {
     bool expected_value{false};
 };
 
+struct SystemActionStringCase {
+    std::string name;
+    std::string action;
+    std::string field;
+    std::string scalar;
+    bool should_pass{false};
+    std::string expected;
+    std::string error_fragment;
+};
+
+std::vector<SystemActionStringCase> loadSystemActionStringCorpus()
+{
+    std::ifstream input(PRAKTOR_SYSTEM_ACTION_STRING_CORPUS);
+    if (!input) {
+        throw std::runtime_error("Cannot open system action string corpus");
+    }
+
+    std::vector<SystemActionStringCase> cases;
+    std::string line;
+    while (std::getline(input, line)) {
+        if (line.empty() || line.front() == '#') {
+            continue;
+        }
+
+        std::vector<std::string> fields;
+        std::istringstream row(line);
+        std::string field;
+        while (std::getline(row, field, '\t')) {
+            fields.push_back(field);
+        }
+        if (fields.size() != 7) {
+            throw std::runtime_error("Invalid system action string corpus row");
+        }
+
+        cases.push_back(SystemActionStringCase{
+            fields[0], fields[1], fields[2], fields[3], fields[4] == "pass",
+            fields[5], fields[6],
+        });
+    }
+    return cases;
+}
+
+std::string systemActionCorpusWorkflow(const SystemActionStringCase& test_case)
+{
+    std::ostringstream yaml;
+    yaml << "tasks:\n"
+         << "  - name: corpus_task\n";
+    if (test_case.action == "service") {
+        yaml << "    service:\n"
+             << "      operation: status\n"
+             << "      name: "
+             << (test_case.field == "name" ? test_case.scalar : "FixtureService") << "\n"
+             << "      profile: "
+             << (test_case.field == "profile" ? test_case.scalar : "windows_scm") << "\n"
+             << "      arguments: ["
+             << (test_case.field == "arguments" ? test_case.scalar : "baseline") << "]\n";
+        return yaml.str();
+    }
+
+    yaml << "    managed_process:\n"
+         << "      operation: "
+         << (test_case.field == "restart_without_executable" ? "restart" : "status") << "\n";
+    if (test_case.field != "restart_without_executable") {
+        yaml << "      executable: "
+             << (test_case.field == "executable" ? test_case.scalar : "worker.exe") << "\n";
+    }
+    yaml << "      arguments: ["
+         << (test_case.field == "arguments" ? test_case.scalar : "baseline") << "]\n"
+         << "      identity:\n"
+         << "        image_name: "
+         << (test_case.field == "image_name" ? test_case.scalar : "worker.exe") << "\n";
+    return yaml.str();
+}
+
 std::vector<ForceTerminateCase> loadForceTerminateCorpus()
 {
     std::ifstream input(PRAKTOR_FORCE_TERMINATE_CORPUS);
@@ -334,6 +408,47 @@ TEST_CASE("force_terminate corpus has identical TaskParser boolean semantics")
         REQUIRE(workflow.tasks.size() == 1);
         const auto& process = std::get<ManagedProcessParams>(workflow.tasks[0].specifics);
         CHECK(process.force_terminate == test_case.expected_value);
+    }
+}
+
+TEST_CASE("system action string corpus has strict TaskParser scalar semantics")
+{
+    for (const auto& test_case : loadSystemActionStringCorpus()) {
+        CAPTURE(test_case.name, test_case.action, test_case.field, test_case.scalar);
+        const auto wf = writeTempWorkflow(
+            "system_action_string_" + test_case.name + ".yml",
+            systemActionCorpusWorkflow(test_case));
+
+        if (!test_case.should_pass) {
+            REQUIRE_THROWS_WITH(
+                TaskParser::parseFile(wf.string()),
+                Catch::Matchers::ContainsSubstring(test_case.error_fragment));
+            continue;
+        }
+
+        const Workflow workflow = TaskParser::parseFile(wf.string());
+        REQUIRE(workflow.tasks.size() == 1);
+        if (test_case.action == "service") {
+            const auto& parsed = std::get<ServiceParams>(workflow.tasks[0].specifics);
+            if (test_case.field == "name") {
+                CHECK(parsed.name == test_case.expected);
+            } else if (test_case.field == "profile") {
+                CHECK(parsed.profile == test_case.expected);
+            } else {
+                REQUIRE(parsed.arguments.size() == 1);
+                CHECK(parsed.arguments.front() == test_case.expected);
+            }
+        } else {
+            const auto& parsed = std::get<ManagedProcessParams>(workflow.tasks[0].specifics);
+            if (test_case.field == "executable") {
+                CHECK(parsed.executable == test_case.expected);
+            } else if (test_case.field == "image_name") {
+                CHECK(parsed.identity.image_name == test_case.expected);
+            } else {
+                REQUIRE(parsed.arguments.size() == 1);
+                CHECK(parsed.arguments.front() == test_case.expected);
+            }
+        }
     }
 }
 

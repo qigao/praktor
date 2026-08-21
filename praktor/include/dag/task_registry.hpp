@@ -1,11 +1,13 @@
 #pragma once
 
-#include "data/workflow_value.hpp"
+#include "dag/task_failure_context.hpp"
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
 #include <mutex>
+#include <optional>
+#include <utility>
 
 /**
  * @enum TaskState
@@ -64,7 +66,7 @@ public:
         std::lock_guard<std::recursive_mutex> lock(mutex_);
         task_state_[task_name] = TaskState::Running;
         completed_tasks_.erase(task_name);
-        failed_tasks_.erase(task_name);
+        failure_snapshots_.erase(task_name);
         task_outputs_.erase(task_name);
     }
 
@@ -81,9 +83,19 @@ public:
      * @brief Record that a task failed (locks outputs)
      */
     void markFailed(const std::string& task_name, const std::string& error_message) {
+        TaskFailureContext failure;
+        failure.task_name = task_name;
+        failure.error_message = error_message;
+        markFailed(task_name, std::move(failure));
+    }
+
+    /**
+     * @brief Record one immutable failure snapshot for a finalized task.
+     */
+    void markFailed(const std::string& task_name, TaskFailureContext failure) {
         std::lock_guard<std::recursive_mutex> lock(mutex_);
         task_state_[task_name] = TaskState::Failed;
-        failed_tasks_[task_name] = error_message;
+        failure_snapshots_[task_name] = std::move(failure);
     }
 
     /**
@@ -213,7 +225,7 @@ public:
      */
     bool isFailed(const std::string& task_name) const {
         std::lock_guard<std::recursive_mutex> lock(mutex_);
-        return failed_tasks_.count(task_name) > 0;
+        return failure_snapshots_.count(task_name) > 0;
     }
 
     /**
@@ -238,7 +250,11 @@ public:
      */
     std::unordered_map<std::string, std::string> getFailedTasks() const {
         std::lock_guard<std::recursive_mutex> lock(mutex_);
-        return failed_tasks_;
+        std::unordered_map<std::string, std::string> failed_tasks;
+        for (const auto& [task_name, failure] : failure_snapshots_) {
+            failed_tasks.emplace(task_name, failure.error_message);
+        }
+        return failed_tasks;
     }
 
     /**
@@ -246,8 +262,21 @@ public:
      */
     std::string getFailureReason(const std::string& task_name) const {
         std::lock_guard<std::recursive_mutex> lock(mutex_);
-        auto it = failed_tasks_.find(task_name);
-        return (it != failed_tasks_.end()) ? it->second : "";
+        auto it = failure_snapshots_.find(task_name);
+        return (it != failure_snapshots_.end()) ? it->second.error_message : "";
+    }
+
+    /**
+     * @brief Get the immutable failure outcome recorded when a task finalized.
+     */
+    std::optional<TaskFailureContext> getFailureSnapshot(
+        const std::string& task_name) const {
+        std::lock_guard<std::recursive_mutex> lock(mutex_);
+        auto it = failure_snapshots_.find(task_name);
+        if (it == failure_snapshots_.end()) {
+            return std::nullopt;
+        }
+        return it->second;
     }
 
     /**
@@ -285,7 +314,6 @@ private:
     mutable std::recursive_mutex mutex_;  // Changed to recursive_mutex to allow setOutput calling from mergeOutputs
     std::unordered_map<std::string, TaskState> task_state_;
     std::unordered_set<std::string> completed_tasks_;
-    std::unordered_map<std::string, std::string> failed_tasks_;
+    std::unordered_map<std::string, TaskFailureContext> failure_snapshots_;
     std::unordered_map<std::string, std::unordered_map<std::string, WorkflowValue>> task_outputs_;
 };
-

@@ -1,6 +1,8 @@
 string(REPLACE "\\" "\\\\" PYTHON3_EXECUTABLE_ESCAPED "${Python3_EXECUTABLE}")
 string(REPLACE "\\" "\\\\" FORCE_TERMINATE_CORPUS_ESCAPED
        "${CMAKE_CURRENT_SOURCE_DIR}/data/force_terminate_corpus.tsv")
+string(REPLACE "\\" "\\\\" SYSTEM_ACTION_STRING_CORPUS_ESCAPED
+       "${CMAKE_CURRENT_SOURCE_DIR}/data/system_action_string_corpus.tsv")
 
 set(TEST_SOURCES
     dynamic_tasks_executor_test.cpp
@@ -51,6 +53,7 @@ target_compile_definitions(script_engine_test.${TARGET_NAME_LIB} PRIVATE
 
 target_compile_definitions(task_parser_test.${TARGET_NAME_LIB} PRIVATE
     PRAKTOR_FORCE_TERMINATE_CORPUS="${FORCE_TERMINATE_CORPUS_ESCAPED}"
+    PRAKTOR_SYSTEM_ACTION_STRING_CORPUS="${SYSTEM_ACTION_STRING_CORPUS_ESCAPED}"
 )
 
 target_include_directories(
@@ -90,6 +93,11 @@ if(WIN32)
     target_compile_definitions(
         workflow_runner_test.${TARGET_NAME_LIB}
         PRIVATE PRAKTOR_MANAGED_PROCESS_FIXTURE="$<TARGET_FILE:managed_process_fixture>"
+    )
+    set_tests_properties(
+        managed_process_executor_test.${TARGET_NAME_LIB}
+        workflow_runner_test.${TARGET_NAME_LIB}
+        PROPERTIES RESOURCE_LOCK praktor_managed_process_fixture
     )
 endif()
 

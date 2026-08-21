@@ -280,6 +280,36 @@ TEST_CASE("service failures distinguish profile state spawn and timeout") {
   }
 }
 
+TEST_CASE("service controller maps every terminal ShellResult state") {
+  const auto expected = GENERATE(table<ProcessState, int, std::string>({
+      {ProcessState::TimedOut, -1, "timeout"},
+      {ProcessState::Cancelled, -1, "cancelled"},
+      {ProcessState::WaitFailed, -1, "service_state_failed"},
+      {ProcessState::OutputLimitExceeded, -1, "service_state_failed"},
+      {ProcessState::Signaled, -1, "service_state_failed"},
+      {ProcessState::Exited, 17, "service_state_failed"},
+  }));
+  CAPTURE(Praktor::Shell::processStateName(std::get<0>(expected)));
+
+  ShellResult terminal;
+  terminal.state = std::get<0>(expected);
+  terminal.exit_code = std::get<1>(expected);
+  ScriptedProcessRunner runner({terminal});
+  ServiceController controller(runner, profiles());
+
+  const auto result = controller.execute(params(SystemOperation::Status));
+
+  CHECK_FALSE(result.task_result.success);
+  CHECK(result.task_result.error_code == std::get<2>(expected));
+  CHECK(result.task_result.error_phase == "query");
+  if (result.task_result.error_code == "service_state_failed") {
+    CHECK(result.task_result.error_details["process_state"].as<std::string>() ==
+          Praktor::Shell::processStateName(terminal.state));
+    CHECK(result.task_result.error_details["exit_code"].as<std::int64_t>() ==
+          terminal.exit_code);
+  }
+}
+
 TEST_CASE("service controller rejects unsupported operations before querying") {
   auto registry = profiles();
   ScriptedProcessRunner runner({serviceState(4)});

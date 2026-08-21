@@ -56,8 +56,8 @@ StrList parse_argument_list(const TaskYamlDetail::YamlNodeRef& node, const char*
 
     StrList arguments;
     for (const auto& argument : node) {
-        arguments.push_back(read_scalar_or_throw(
-            argument, std::string(field_name) + " entries must be scalars"));
+        arguments.push_back(read_system_action_string_or_throw(
+            argument, std::string(field_name) + " entries must be strings"));
     }
     return arguments;
 }
@@ -439,17 +439,19 @@ ServiceParams parse_service_params(const TaskYamlDetail::YamlNodeRef& node) {
     }
 
     ServiceParams params;
-    params.name = TaskYamlDetail::read_scalar_or_throw(service["name"], "service.name must be a scalar");
+    params.name = TaskYamlDetail::read_system_action_string_or_throw(
+        service["name"], "service.name must be a string");
     if (params.name.empty()) {
         TaskYamlDetail::throw_parse_error(service["name"], "service.name cannot be empty");
     }
     if (service.has_child("operation")) {
-        const std::string operation = TaskYamlDetail::read_scalar_or_throw(
-            service["operation"], "service.operation must be a scalar");
+        const std::string operation = TaskYamlDetail::read_system_action_string_or_throw(
+            service["operation"], "service.operation must be a string");
         params.operation = parse_system_operation(service["operation"], operation, "service.operation");
     }
     if (service.has_child("profile")) {
-        params.profile = TaskYamlDetail::read_scalar_or_throw(service["profile"], "service.profile must be a scalar");
+        params.profile = TaskYamlDetail::read_system_action_string_or_throw(
+            service["profile"], "service.profile must be a string");
         if (params.profile.empty()) {
             TaskYamlDetail::throw_parse_error(service["profile"], "service.profile cannot be empty");
         }
@@ -495,31 +497,35 @@ ManagedProcessParams parse_managed_process_params(const TaskYamlDetail::YamlNode
     }
 
     ManagedProcessParams params;
-    params.identity.image_name = TaskYamlDetail::read_scalar_or_throw(
-        identity["image_name"], "managed_process.identity.image_name must be a scalar");
+    params.identity.image_name = TaskYamlDetail::read_system_action_string_or_throw(
+        identity["image_name"], "managed_process.identity.image_name must be a string");
     if (params.identity.image_name.empty()) {
         TaskYamlDetail::throw_parse_error(identity["image_name"],
                                            "managed_process.identity.image_name cannot be empty");
     }
     if (process.has_child("operation")) {
-        const std::string operation = TaskYamlDetail::read_scalar_or_throw(
-            process["operation"], "managed_process.operation must be a scalar");
+        const std::string operation = TaskYamlDetail::read_system_action_string_or_throw(
+            process["operation"], "managed_process.operation must be a string");
         params.operation = parse_system_operation(process["operation"], operation,
                                                   "managed_process.operation");
     }
     if (process.has_child("executable")) {
-        params.executable = TaskYamlDetail::read_scalar_or_throw(
-            process["executable"], "managed_process.executable must be a scalar");
+        params.executable = TaskYamlDetail::read_system_action_string_or_throw(
+            process["executable"], "managed_process.executable must be a string");
     }
     if (params.operation == SystemOperation::Start && params.executable.empty()) {
         TaskYamlDetail::throw_parse_error(process, "managed_process.start requires 'executable'");
+    }
+    if (params.operation == SystemOperation::Restart && params.executable.empty()) {
+        TaskYamlDetail::throw_parse_error(process,
+                                          "managed_process.restart requires 'executable'");
     }
     if (process.has_child("arguments")) {
         params.arguments = parse_argument_list(process["arguments"], "managed_process.arguments");
     }
     if (process.has_child("working_directory")) {
-        params.working_directory = TaskYamlDetail::read_scalar_or_throw(
-            process["working_directory"], "managed_process.working_directory must be a scalar");
+        params.working_directory = TaskYamlDetail::read_system_action_string_or_throw(
+            process["working_directory"], "managed_process.working_directory must be a string");
         if (params.working_directory.empty()) {
             TaskYamlDetail::throw_parse_error(process["working_directory"],
                                                "managed_process.working_directory cannot be empty");

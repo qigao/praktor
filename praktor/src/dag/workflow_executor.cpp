@@ -755,16 +755,20 @@ bool WorkflowExecutor::executeTask(const Task &task, WorkflowContext &context,
 
   // `each` is one logical task: expose the aggregate status, then fire triggers once.
   const TaskExecutionOutcome failure = trigger_outcome.value_or(TaskExecutionOutcome{});
-  setTaskExecutionStatus(task, context, alias, final_status, failure.result.error_message);
-
-  bool has_failure_context = false;
+  std::optional<TaskFailureContext> failure_snapshot;
   if (!overall_success) {
-    context.setFailureContext(buildFailureContext(task, failure.result, context, executors_));
-    has_failure_context = true;
+    failure_snapshot = buildFailureContext(task, failure.result, context, executors_);
+  }
+  setTaskExecutionStatus(task, context, alias, final_status,
+                         failure.result.error_message,
+                         failure_snapshot ? &*failure_snapshot : nullptr);
+
+  if (failure_snapshot) {
+    context.setFailureContext(*failure_snapshot);
   }
 
   const bool triggers_success = executeTriggers(task, overall_success, context, trigger_depth);
-  if (has_failure_context) {
+  if (failure_snapshot) {
     context.clearFailureContext();
   }
 
@@ -774,12 +778,18 @@ bool WorkflowExecutor::executeTask(const Task &task, WorkflowContext &context,
 void WorkflowExecutor::setTaskExecutionStatus(const Task& task, WorkflowContext& context,
                                               std::optional<std::string> alias,
                                               std::string_view status,
-                                              const std::string& error_message) const {
+                                              const std::string& error_message,
+                                              const TaskFailureContext* failure_snapshot) const {
   const auto apply_status = [&](const std::string& task_name) {
     if (status == "success") {
       context.addCompletedTask(task_name);
     } else if (status == "failed") {
-      context.addFailedTask(task_name, error_message.empty() ? "Task failed" : error_message);
+      if (failure_snapshot != nullptr) {
+        context.addFailedTask(task_name, *failure_snapshot);
+      } else {
+        context.addFailedTask(task_name,
+                              error_message.empty() ? "Task failed" : error_message);
+      }
     } else {
       context.setTaskStatus(task_name, std::string(status));
     }

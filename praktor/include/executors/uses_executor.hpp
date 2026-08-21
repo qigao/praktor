@@ -5,6 +5,7 @@
 #include "yml/task_types.hpp"
 
 #include <memory>
+#include <optional>
 #include <unordered_map>
 #include <string>
 
@@ -31,8 +32,9 @@ public:
     std::string getTaskType() const override { return "uses"; }
 
 private:
-    TaskFailureContext buildNestedFailureContext(const Workflow& nested,
-                                                 const WorkflowContext& nested_context) const;
+    std::optional<TaskFailureContext> nestedFailureSnapshot(
+        const Workflow& nested,
+        const WorkflowContext& nested_context) const;
 
     std::unordered_map<std::string, std::string> base_environment_;
     size_t num_threads_;
@@ -60,4 +62,3 @@ std::unique_ptr<TaskExecutor> createUsesExecutor(
     size_t num_threads = 1);
 
 }  // namespace Praktor::Execution
-

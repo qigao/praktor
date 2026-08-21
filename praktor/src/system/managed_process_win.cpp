@@ -32,7 +32,7 @@ ManagedProcessResult<bool> matchesManagedProcessSnapshot(
 }  // namespace WinDetail
 namespace {
 
-constexpr DWORD kStartupProbeTimeoutMs = 500;
+constexpr DWORD kNonBlockingProbeTimeoutMs = 0;
 constexpr DWORD kSessionMismatchExitCode = 1;
 constexpr DWORD kMaximumProcessPathCharacters = 32768;
 
@@ -496,14 +496,14 @@ public:
       const DWORD error = session_observed ? ERROR_INVALID_DATA
                                            : observation_error;
       static_cast<void>(TerminateProcess(process.get(), kSessionMismatchExitCode));
-      static_cast<void>(WaitForSingleObject(process.get(), kStartupProbeTimeoutMs));
+      static_cast<void>(WaitForSingleObject(process.get(), kNonBlockingProbeTimeoutMs));
       return failure<std::uint32_t>(
           static_cast<int>(error),
           "managed process started in an unexpected session");
     }
 
     const DWORD wait_result =
-        WaitForSingleObject(process.get(), kStartupProbeTimeoutMs);
+        WaitForSingleObject(process.get(), kNonBlockingProbeTimeoutMs);
     if (wait_result == WAIT_OBJECT_0) {
       return failure<std::uint32_t>(ERROR_PROCESS_ABORTED,
                                     "managed process exited during startup");
