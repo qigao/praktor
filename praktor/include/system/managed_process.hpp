@@ -39,7 +39,7 @@ public:
   virtual ~IManagedProcessBackend() = default;
   virtual ManagedProcessResult<ManagedProcessSnapshot> query(
       const ManagedProcessIdentity& identity) = 0;
-  virtual ManagedProcessResult<std::uint32_t> start(
+  virtual ManagedProcessResult<ManagedProcessSnapshot> start(
       const ManagedProcessParams& params) = 0;
   virtual ManagedProcessCommandResult requestStop(
       const ManagedProcessSnapshot& snapshot) = 0;

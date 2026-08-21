@@ -45,7 +45,8 @@ using Praktor::System::ManagedProcessState;
 constexpr std::uint32_t kFixturePid = 4242;
 
 ManagedProcessSnapshot running(std::uint32_t pid = kFixturePid) {
-  return {ManagedProcessState::Running, pid};
+  return {ManagedProcessState::Running, pid, 7, 9001,
+          "managed_process_fixture.exe"};
 }
 
 ManagedProcessSnapshot notRunning() {
@@ -72,7 +73,7 @@ public:
     return success(notRunning());
   }
 
-  ManagedProcessResult<std::uint32_t> start(
+  ManagedProcessResult<ManagedProcessSnapshot> start(
       const ManagedProcessParams& params) override {
     started_params.push_back(params);
     if (start_action) {
@@ -90,14 +91,19 @@ public:
   ManagedProcessCommandResult terminate(
       const ManagedProcessSnapshot& snapshot) override {
     terminated_snapshots.push_back(snapshot);
+    if (terminate_action) {
+      return terminate_action(snapshot);
+    }
     return terminate_result;
   }
 
   std::function<ManagedProcessResult<ManagedProcessSnapshot>()> query_action;
-  std::function<ManagedProcessResult<std::uint32_t>()> start_action;
-  ManagedProcessResult<std::uint32_t> start_result = success(kFixturePid);
+  std::function<ManagedProcessResult<ManagedProcessSnapshot>()> start_action;
+  ManagedProcessResult<ManagedProcessSnapshot> start_result = success(running());
   ManagedProcessCommandResult stop_result = commandSuccess();
   ManagedProcessCommandResult terminate_result = commandSuccess();
+  std::function<ManagedProcessCommandResult(
+      const ManagedProcessSnapshot&)> terminate_action;
   std::vector<ManagedProcessIdentity> queried_identities;
   std::vector<ManagedProcessParams> started_params;
   std::vector<ManagedProcessSnapshot> stopped_snapshots;
@@ -251,13 +257,18 @@ TEST_CASE("managed process startup timeout is bounded by the startup deadline") 
 TEST_CASE("managed process backend start time consumes the startup budget") {
   FakeManagedProcessBackend backend;
   bool start_completed = false;
+  bool terminated = false;
   backend.query_action = [&] {
-    return success(start_completed ? running() : notRunning());
+    return success(start_completed && !terminated ? running() : notRunning());
   };
   backend.start_action = [&] {
     std::this_thread::sleep_for(std::chrono::milliseconds(20));
     start_completed = true;
-    return success(kFixturePid);
+    return success(running());
+  };
+  backend.terminate_action = [&](const ManagedProcessSnapshot&) {
+    terminated = true;
+    return commandSuccess();
   };
   ManagedProcessController controller(backend, std::chrono::milliseconds(1));
   auto request = params(SystemOperation::Start);
@@ -270,6 +281,108 @@ TEST_CASE("managed process backend start time consumes the startup budget") {
   CHECK(result.phase == "start_poll");
   CHECK(result.duration_ms >= 15);
   REQUIRE(backend.started_params.size() == 1);
+}
+
+TEST_CASE("startup timeout compensates the exact started instance") {
+  FakeManagedProcessBackend backend;
+  const ManagedProcessSnapshot started = running(5151);
+  bool spawned = false;
+  bool terminated = false;
+  backend.start_action = [&] {
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    spawned = true;
+    return success(started);
+  };
+  backend.query_action = [&] {
+    return success(spawned && !terminated ? started : notRunning());
+  };
+  backend.terminate_action = [&](const ManagedProcessSnapshot& snapshot) {
+    CHECK(snapshot.pid == started.pid);
+    CHECK(snapshot.session_id == started.session_id);
+    CHECK(snapshot.instance_token == started.instance_token);
+    CHECK(snapshot.canonical_image_name == started.canonical_image_name);
+    terminated = true;
+    return commandSuccess();
+  };
+
+  auto request = params(SystemOperation::Start);
+  request.startup_timeout_ms = 5;
+  request.stop_timeout_ms = 25;
+  ManagedProcessController controller(backend, std::chrono::milliseconds(1));
+
+  const auto result = controller.execute(request);
+
+  CHECK_FALSE(result.ok);
+  CHECK(result.error == ManagedProcessError::Timeout);
+  CHECK(result.phase == "start_poll");
+  CHECK(result.snapshot.state == ManagedProcessState::NotRunning);
+  CHECK(result.snapshot.pid == 0);
+  REQUIRE(backend.terminated_snapshots.size() == 1);
+}
+
+TEST_CASE("startup timeout reports compensation command failure") {
+  FakeManagedProcessBackend backend;
+  const ManagedProcessSnapshot started = running(5252);
+  bool spawned = false;
+  backend.start_action = [&] {
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    spawned = true;
+    return success(started);
+  };
+  backend.query_action = [&] {
+    return success(spawned ? started : notRunning());
+  };
+  backend.terminate_action = [](const ManagedProcessSnapshot&) {
+    return ManagedProcessCommandResult{false, 5, "cleanup denied"};
+  };
+
+  auto request = params(SystemOperation::Start);
+  request.startup_timeout_ms = 5;
+  request.stop_timeout_ms = 25;
+  ManagedProcessController controller(backend, std::chrono::milliseconds(1));
+
+  const auto result = controller.execute(request);
+
+  CHECK_FALSE(result.ok);
+  CHECK(result.error == ManagedProcessError::BackendFailure);
+  CHECK(result.phase == "start_timeout_terminate");
+  CHECK(result.native_error == 5);
+  CHECK(result.snapshot.state == ManagedProcessState::Running);
+  CHECK(result.snapshot.pid == started.pid);
+  CHECK(result.snapshot.instance_token == started.instance_token);
+  REQUIRE(backend.terminated_snapshots.size() == 1);
+}
+
+TEST_CASE("startup timeout reports compensation confirmation timeout") {
+  FakeManagedProcessBackend backend;
+  const ManagedProcessSnapshot started = running(5353);
+  bool spawned = false;
+  backend.start_action = [&] {
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    spawned = true;
+    return success(started);
+  };
+  backend.query_action = [&] {
+    return success(spawned ? started : notRunning());
+  };
+  backend.terminate_action = [](const ManagedProcessSnapshot&) {
+    return commandSuccess();
+  };
+
+  auto request = params(SystemOperation::Start);
+  request.startup_timeout_ms = 5;
+  request.stop_timeout_ms = 5;
+  ManagedProcessController controller(backend, std::chrono::milliseconds(1));
+
+  const auto result = controller.execute(request);
+
+  CHECK_FALSE(result.ok);
+  CHECK(result.error == ManagedProcessError::Timeout);
+  CHECK(result.phase == "start_timeout_cleanup_poll");
+  CHECK(result.snapshot.state == ManagedProcessState::Running);
+  CHECK(result.snapshot.pid == started.pid);
+  CHECK(result.snapshot.instance_token == started.instance_token);
+  REQUIRE(backend.terminated_snapshots.size() == 1);
 }
 
 TEST_CASE("managed process stop timeout does not terminate unless explicitly enabled") {
@@ -730,8 +843,15 @@ TEST_CASE("Windows managed process startup does not hide a fixed backend delay")
   const auto started = controller.execute(request);
 
   INFO(started.phase << ":" << started.message << ", duration_ms=" << started.duration_ms);
-  CHECK_FALSE((started.ok && started.duration_ms > request.startup_timeout_ms));
+  CHECK_FALSE(started.ok);
+  CHECK(started.error == ManagedProcessError::Timeout);
+  CHECK(started.phase == "start_poll");
+  CHECK(started.snapshot.state == ManagedProcessState::NotRunning);
   CHECK(started.duration_ms < 250);
+
+  const auto after = backend->query(request.identity);
+  REQUIRE(after.ok);
+  CHECK(after.value.state == ManagedProcessState::NotRunning);
 
   const auto final_cleanup = cleanup.cleanup();
   INFO(final_cleanup.native_error << ":" << final_cleanup.message);

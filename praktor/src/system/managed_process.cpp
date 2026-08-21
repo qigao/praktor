@@ -146,10 +146,51 @@ ManagedProcessExecutionResult ManagedProcessController::execute(
       return fail(error, "start",
                   std::move(result.message), result.native_error);
     }
+    const ManagedProcessSnapshot started = result.value;
+    execution.snapshot = started;
     execution.changed = true;
-    return pollFor(ManagedProcessState::Running,
-                   startup_deadline,
-                   "start_poll");
+
+    for (;;) {
+      if (auto failure = query("start_poll")) {
+        return failure;
+      }
+      const auto now = Clock::now();
+      if (execution.snapshot.state == ManagedProcessState::Running &&
+          now < startup_deadline) {
+        return std::nullopt;
+      }
+      if (now >= startup_deadline) {
+        break;
+      }
+      std::this_thread::sleep_for(std::min(
+          poll_interval_,
+          std::chrono::duration_cast<Milliseconds>(startup_deadline - now)));
+    }
+
+    if (auto failure = query("start_timeout_query")) {
+      execution.snapshot = started;
+      return failure;
+    }
+    if (execution.snapshot.state == ManagedProcessState::NotRunning) {
+      return fail(ManagedProcessError::Timeout, "start_poll",
+                  "managed process startup exceeded the deadline");
+    }
+
+    auto terminated = backend_.terminate(started);
+    if (!terminated.ok) {
+      const ManagedProcessError error = backendError(terminated.message);
+      return fail(error, "start_timeout_terminate",
+                  std::move(terminated.message), terminated.native_error);
+    }
+
+    if (auto cleanup_failure = pollFor(
+            ManagedProcessState::NotRunning,
+            Clock::now() + Milliseconds(params.stop_timeout_ms),
+            "start_timeout_cleanup_poll")) {
+      return cleanup_failure;
+    }
+    return fail(ManagedProcessError::Timeout, "start_poll",
+                "managed process startup exceeded the deadline");
   };
 
   auto stop = [&]() -> std::optional<ManagedProcessExecutionResult> {

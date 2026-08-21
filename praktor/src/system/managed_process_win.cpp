@@ -34,6 +34,7 @@ namespace {
 
 constexpr DWORD kNonBlockingProbeTimeoutMs = 0;
 constexpr DWORD kSessionMismatchExitCode = 1;
+constexpr DWORD kStartupEvidenceFailureExitCode = 2;
 constexpr DWORD kMaximumProcessPathCharacters = 32768;
 
 class UniqueHandle {
@@ -431,25 +432,25 @@ public:
     return {true, {}, 0, {}};
   }
 
-  ManagedProcessResult<std::uint32_t> start(
+  ManagedProcessResult<ManagedProcessSnapshot> start(
       const ManagedProcessParams& params) override {
     auto executable = wideFromUtf8(params.executable);
     if (!executable.ok) {
-      return failure<std::uint32_t>(executable.native_error,
-                                    std::move(executable.message));
+      return failure<ManagedProcessSnapshot>(executable.native_error,
+                                             std::move(executable.message));
     }
     auto working_directory = wideFromUtf8(params.working_directory);
     if (!working_directory.ok) {
-      return failure<std::uint32_t>(working_directory.native_error,
-                                    std::move(working_directory.message));
+      return failure<ManagedProcessSnapshot>(
+          working_directory.native_error, std::move(working_directory.message));
     }
 
     std::wstring command_line = quoteWindowsArgument(executable.value);
     for (const auto& argument : params.arguments) {
       auto wide_argument = wideFromUtf8(argument);
       if (!wide_argument.ok) {
-        return failure<std::uint32_t>(wide_argument.native_error,
-                                      std::move(wide_argument.message));
+        return failure<ManagedProcessSnapshot>(
+            wide_argument.native_error, std::move(wide_argument.message));
       }
       command_line.push_back(L' ');
       command_line += quoteWindowsArgument(wide_argument.value);
@@ -463,7 +464,7 @@ public:
     DWORD current_session = 0;
     if (!ProcessIdToSessionId(GetCurrentProcessId(), &current_session)) {
       const int error = static_cast<int>(GetLastError());
-      return failure<std::uint32_t>(
+      return failure<ManagedProcessSnapshot>(
           error, "failed to determine current process session");
     }
 
@@ -482,7 +483,8 @@ public:
                         nullptr, FALSE, CREATE_NO_WINDOW, nullptr,
                         current_directory, &startup, &process_info)) {
       const int error = static_cast<int>(GetLastError());
-      return failure<std::uint32_t>(error, "failed to start managed process");
+      return failure<ManagedProcessSnapshot>(
+          error, "failed to start managed process");
     }
 
     UniqueHandle process(process_info.hProcess);
@@ -497,7 +499,7 @@ public:
                                            : observation_error;
       static_cast<void>(TerminateProcess(process.get(), kSessionMismatchExitCode));
       static_cast<void>(WaitForSingleObject(process.get(), kNonBlockingProbeTimeoutMs));
-      return failure<std::uint32_t>(
+      return failure<ManagedProcessSnapshot>(
           static_cast<int>(error),
           "managed process started in an unexpected session");
     }
@@ -505,15 +507,35 @@ public:
     const DWORD wait_result =
         WaitForSingleObject(process.get(), kNonBlockingProbeTimeoutMs);
     if (wait_result == WAIT_OBJECT_0) {
-      return failure<std::uint32_t>(ERROR_PROCESS_ABORTED,
-                                    "managed process exited during startup");
+      return failure<ManagedProcessSnapshot>(
+          ERROR_PROCESS_ABORTED, "managed process exited during startup");
     }
     if (wait_result == WAIT_FAILED) {
       const int error = static_cast<int>(GetLastError());
-      return failure<std::uint32_t>(
+      return failure<ManagedProcessSnapshot>(
           error, "failed to observe managed process startup");
     }
-    return {true, static_cast<std::uint32_t>(process_info.dwProcessId), 0, {}};
+
+    auto evidence = queryProcessEvidence(process.get(), process_info.dwProcessId);
+    if (!evidence.ok) {
+      static_cast<void>(
+          TerminateProcess(process.get(), kStartupEvidenceFailureExitCode));
+      return failure<ManagedProcessSnapshot>(
+          evidence.native_error, std::move(evidence.message));
+    }
+    auto identity_match = WinDetail::matchesManagedProcessCandidate(
+        params.identity.image_name, evidence.value.canonical_image_name,
+        evidence.value.session_id, static_cast<std::uint32_t>(current_session));
+    if (!identity_match.ok || !identity_match.value) {
+      static_cast<void>(
+          TerminateProcess(process.get(), kStartupEvidenceFailureExitCode));
+      return failure<ManagedProcessSnapshot>(
+          identity_match.ok ? ERROR_INVALID_DATA : identity_match.native_error,
+          identity_match.ok
+              ? "managed process started with mismatched identity evidence"
+              : std::move(identity_match.message));
+    }
+    return evidence;
   }
 
   ManagedProcessCommandResult requestStop(const ManagedProcessSnapshot &snapshot) override {
@@ -615,9 +637,9 @@ public:
     return unsupportedResult<ManagedProcessSnapshot>();
   }
 
-  ManagedProcessResult<std::uint32_t> start(
+  ManagedProcessResult<ManagedProcessSnapshot> start(
       const ManagedProcessParams&) override {
-    return unsupportedResult<std::uint32_t>();
+    return unsupportedResult<ManagedProcessSnapshot>();
   }
 
   ManagedProcessCommandResult requestStop(
