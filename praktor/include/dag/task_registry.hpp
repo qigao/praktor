@@ -94,8 +94,23 @@ public:
      */
     void markFailed(const std::string& task_name, TaskFailureContext failure) {
         std::lock_guard<std::recursive_mutex> lock(mutex_);
-        task_state_[task_name] = TaskState::Failed;
-        failure_snapshots_[task_name] = std::move(failure);
+        auto state =
+            task_state_.try_emplace(task_name, TaskState::Pending).first;
+        const TaskState current = state->second;
+        if (current == TaskState::Completed || current == TaskState::Failed ||
+            current == TaskState::Skipped) {
+            throw std::logic_error(
+                "Task '" + task_name + "' is already finalized as " +
+                taskStateToString(current));
+        }
+
+        const bool snapshot_inserted =
+            failure_snapshots_.try_emplace(task_name, std::move(failure)).second;
+        if (!snapshot_inserted) {
+            throw std::logic_error(
+                "Task '" + task_name + "' already has a failure snapshot");
+        }
+        state->second = TaskState::Failed;
     }
 
     /**

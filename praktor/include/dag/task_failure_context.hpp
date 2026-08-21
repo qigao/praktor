@@ -20,7 +20,7 @@ struct TaskFailureContext {
     std::string stderr_data;
     std::string error_message;
     std::unordered_map<std::string, WorkflowValue> captured_outputs;
-    std::shared_ptr<TaskFailureContext> inner_failure;
+    std::shared_ptr<const TaskFailureContext> inner_failure;
     std::string error_code;
     std::string error_phase;
     WorkflowValue error_details{WorkflowValue::object()};

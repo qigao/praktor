@@ -132,7 +132,7 @@ TaskFailureContext buildFailureContext(const Task& task,
 
   if (result.nested_failure_context.has_value()) {
     const TaskFailureContext& nested = *result.nested_failure_context;
-    failure.inner_failure = std::make_shared<TaskFailureContext>(nested);
+    failure.inner_failure = std::make_shared<const TaskFailureContext>(nested);
   }
 
   return failure;

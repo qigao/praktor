@@ -1,7 +1,13 @@
 #include "dag/task_registry.hpp"
 
 #include <catch2/catch_all.hpp>
+#include <stdexcept>
 #include <string>
+#include <type_traits>
+
+using InnerFailureElement =
+    typename decltype(TaskFailureContext{}.inner_failure)::element_type;
+static_assert(std::is_const_v<InnerFailureElement>);
 
 TEST_CASE("TaskRegistry State Machine", "[registry]") {
     TaskRegistry registry;
@@ -229,5 +235,53 @@ TEST_CASE("TaskRegistry Query Methods", "[registry]") {
         REQUIRE(failed.size() == 2);
         REQUIRE(failed["c"] == "error c");
         REQUIRE(failed["d"] == "error d");
+    }
+}
+
+TEST_CASE("TaskRegistry failure snapshot is assigned once", "[registry]") {
+    TaskRegistry registry;
+    registry.startTask("task_a");
+
+    TaskFailureContext first;
+    first.task_name = "task_a";
+    first.error_code = "timeout";
+    first.error_message = "first";
+    registry.markFailed("task_a", first);
+
+    TaskFailureContext second;
+    second.task_name = "task_a";
+    second.error_code = "service_state_failed";
+    second.error_message = "second";
+    CHECK_THROWS_AS(registry.markFailed("task_a", second), std::logic_error);
+
+    const auto stored = registry.getFailureSnapshot("task_a");
+    REQUIRE(stored.has_value());
+    CHECK(stored->error_code == "timeout");
+    CHECK(stored->error_message == "first");
+}
+
+TEST_CASE("TaskRegistry rejects failure after another terminal state",
+          "[registry]") {
+    SECTION("completed") {
+        TaskRegistry registry;
+        registry.startTask("task_a");
+        registry.markCompleted("task_a");
+
+        CHECK_THROWS_AS(registry.markFailed("task_a", "late failure"),
+                        std::logic_error);
+        CHECK(registry.getState("task_a") == TaskState::Completed);
+        CHECK(registry.isCompleted("task_a"));
+        CHECK_FALSE(registry.getFailureSnapshot("task_a").has_value());
+    }
+
+    SECTION("skipped") {
+        TaskRegistry registry;
+        registry.setStatus("task_a", "skipped");
+
+        CHECK_THROWS_AS(registry.markFailed("task_a", "late failure"),
+                        std::logic_error);
+        CHECK(registry.getState("task_a") == TaskState::Skipped);
+        CHECK(registry.isCompleted("task_a"));
+        CHECK_FALSE(registry.getFailureSnapshot("task_a").has_value());
     }
 }
