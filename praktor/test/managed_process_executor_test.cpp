@@ -511,6 +511,40 @@ TEST_CASE("managed process executor maps outputs and structured failures") {
 #ifdef _WIN32
 namespace {
 
+constexpr auto kFixtureWindowReadyTimeout = std::chrono::seconds(3);
+constexpr auto kFixtureWindowPollInterval = std::chrono::milliseconds(10);
+
+struct FixtureWindowProbe {
+  DWORD pid{0};
+  bool found{false};
+};
+
+BOOL CALLBACK findFixtureTopLevelWindow(HWND window, LPARAM parameter) {
+  auto* probe = reinterpret_cast<FixtureWindowProbe*>(parameter);
+  DWORD window_pid = 0;
+  GetWindowThreadProcessId(window, &window_pid);
+  if (window_pid == probe->pid && GetWindow(window, GW_OWNER) == nullptr) {
+    probe->found = true;
+    return FALSE;
+  }
+  return TRUE;
+}
+
+bool waitForFixtureTopLevelWindow(std::uint32_t pid) {
+  const auto deadline =
+      std::chrono::steady_clock::now() + kFixtureWindowReadyTimeout;
+  do {
+    FixtureWindowProbe probe{static_cast<DWORD>(pid)};
+    static_cast<void>(
+        EnumWindows(findFixtureTopLevelWindow, reinterpret_cast<LPARAM>(&probe)));
+    if (probe.found) {
+      return true;
+    }
+    std::this_thread::sleep_for(kFixtureWindowPollInterval);
+  } while (std::chrono::steady_clock::now() < deadline);
+  return false;
+}
+
 ManagedProcessCommandResult cleanupManagedProcessFixture(IManagedProcessBackend &backend,
                                                          const ManagedProcessIdentity &identity,
                                                          std::chrono::milliseconds timeout,
@@ -803,6 +837,7 @@ TEST_CASE("Windows managed process backend starts queries and gracefully stops f
   CHECK(queried.value.session_id == started.snapshot.session_id);
   CHECK(queried.value.instance_token == started.snapshot.instance_token);
   CHECK(queried.value.canonical_image_name == started.snapshot.canonical_image_name);
+  REQUIRE(waitForFixtureTopLevelWindow(started.snapshot.pid));
 
   request.operation = SystemOperation::Stop;
   const auto stopped = controller.execute(request);
