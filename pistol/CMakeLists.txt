@@ -19,10 +19,9 @@ target_link_libraries(
     PRIVATE praktor_lib
 )
 
-# Keep the producer/consumer side of Praktor's shared ABI explicit.
+# Only the producer needs an explicit marker. Consumers import by default.
 target_compile_definitions(${TARGET_NAME_PISTOL}
     PRIVATE PRAKTOR_BUILD_SHARED
-    INTERFACE PRAKTOR_USE_SHARED
 )
 
 if(MSVC)

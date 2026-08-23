@@ -4,6 +4,14 @@
 #error "praktor.h must expose the Praktor-owned C ABI marker"
 #endif
 
+#ifdef PRAKTOR_BUILD_SHARED
+#error "Praktor consumers must not inherit the producer export marker"
+#endif
+
+#ifdef PRAKTOR_USE_SHARED
+#error "Praktor consumers import by default and must not require a consumer marker"
+#endif
+
 #include "data/workflow_value.hpp"
 
 #include <catch2/catch_all.hpp>

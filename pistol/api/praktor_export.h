@@ -7,10 +7,8 @@
 #  if defined(_WIN32) || defined(__CYGWIN__)
 #    if defined(PRAKTOR_BUILD_SHARED)
 #      define PRAKTOR_API __declspec(dllexport)
-#    elif defined(PRAKTOR_USE_SHARED)
-#      define PRAKTOR_API __declspec(dllimport)
 #    else
-#      define PRAKTOR_API
+#      define PRAKTOR_API __declspec(dllimport)
 #    endif
 #  elif !defined(_WIN32) && defined(__GNUC__) && __GNUC__ >= 4
 #    define PRAKTOR_API __attribute__((visibility("default")))
