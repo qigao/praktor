@@ -34,7 +34,7 @@ std::string SystemInfoProvider::getOSName() const {
     char value[TURBO_PLATFORM_INFO_MAX] = {0};
     int result = turbo_platform_os_name(value, sizeof(value));
     if (result != 0) {
-        TLOG_WARN("Failed to get OS name via platform API: {}", result);
+        TLOG_WARNF("Failed to get OS name via platform API: {}", result);
         return "unknown";
     }
     return std::string(value);
@@ -44,7 +44,7 @@ std::string SystemInfoProvider::getOSVersion() const {
     char value[TURBO_PLATFORM_INFO_MAX] = {0};
     int result = turbo_platform_os_version(value, sizeof(value));
     if (result != 0) {
-        TLOG_WARN("Failed to get OS version via platform API: {}", result);
+        TLOG_WARNF("Failed to get OS version via platform API: {}", result);
         return "unknown";
     }
     return std::string(value);
@@ -54,7 +54,7 @@ std::string SystemInfoProvider::getArchitecture() const {
     char value[TURBO_PLATFORM_INFO_MAX] = {0};
     int result = turbo_platform_arch(value, sizeof(value));
     if (result != 0) {
-        TLOG_WARN("Failed to get architecture via platform API: {}", result);
+        TLOG_WARNF("Failed to get architecture via platform API: {}", result);
         return "unknown";
     }
     return std::string(value);
@@ -88,7 +88,7 @@ std::string SystemInfoProvider::getUsername() const {
     char value[TURBO_PLATFORM_INFO_MAX] = {0};
     int result = turbo_platform_username(value, sizeof(value));
     if (result != 0) {
-        TLOG_WARN("Failed to get username via platform API: {}", result);
+        TLOG_WARNF("Failed to get username via platform API: {}", result);
         return "unknown";
     }
     return std::string(value);
@@ -98,7 +98,7 @@ std::string SystemInfoProvider::getHostname() const {
     char value[TURBO_PLATFORM_INFO_MAX] = {0};
     int result = turbo_platform_hostname(value, sizeof(value));
     if (result != 0) {
-        TLOG_WARN("Failed to get hostname via platform API: {}", result);
+        TLOG_WARNF("Failed to get hostname via platform API: {}", result);
         return "unknown";
     }
     return std::string(value);
@@ -109,7 +109,7 @@ SystemInfoProvider::CPUInfo SystemInfoProvider::getCPUInfo() const {
     turbo_platform_cpu_info_t native_info{};
     int result = turbo_platform_cpu_info(&native_info);
     if (result != 0) {
-        TLOG_WARN("Failed to get CPU info via platform API: {}", result);
+        TLOG_WARNF("Failed to get CPU info via platform API: {}", result);
         return info;
     }
     info.model = native_info.model;
@@ -123,7 +123,7 @@ SystemInfoProvider::MemoryInfo SystemInfoProvider::getMemoryInfo() const {
     turbo_platform_memory_info_t native_info{};
     int result = turbo_platform_memory_info(&native_info);
     if (result != 0) {
-        TLOG_WARN("Failed to get memory info via platform API: {}", result);
+        TLOG_WARNF("Failed to get memory info via platform API: {}", result);
         return info;
     }
     info.total_memory = native_info.total_memory;
@@ -138,7 +138,7 @@ std::vector<SystemInfoProvider::NetworkInterface> SystemInfoProvider::getNetwork
     size_t count = 0;
     int result = turbo_platform_network_interfaces(native_interfaces, 64, &count);
     if (result != 0) {
-        TLOG_WARN("Failed to get network interfaces via platform API: {}", result);
+        TLOG_WARNF("Failed to get network interfaces via platform API: {}", result);
         return interfaces;
     }
     interfaces.reserve(count);
@@ -158,7 +158,7 @@ SystemInfoProvider::LoadAverage SystemInfoProvider::getLoadAverage() const {
     turbo_platform_load_average_t native_info{};
     int result = turbo_platform_load_average(&native_info);
     if (result != 0) {
-        TLOG_WARN("Failed to get load average via platform API: {}", result);
+        TLOG_WARNF("Failed to get load average via platform API: {}", result);
         return load;
     }
     load.one_minute = native_info.one_minute;

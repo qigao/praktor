@@ -5,11 +5,16 @@
 #include <string>
 #include <string_view>
 
-// Direct mapping to tlog macros
-#define logd(...) TLOG_DEBUG(__VA_ARGS__)
-#define logi(...) TLOG_INFO(__VA_ARGS__)
-#define logw(...) TLOG_WARN(__VA_ARGS__)
-#define loge(...) TLOG_ERROR(__VA_ARGS__)
+// Keep raw-message and formatted-message calls distinct, matching TurboUtils' tlog API.
+#define logd(message) TLOG_DEBUG(message)
+#define logi(message) TLOG_INFO(message)
+#define logw(message) TLOG_WARN(message)
+#define loge(message) TLOG_ERROR(message)
+
+#define logdf(pattern, ...) TLOG_DEBUGF(pattern, __VA_ARGS__)
+#define logif(pattern, ...) TLOG_INFOF(pattern, __VA_ARGS__)
+#define logwf(pattern, ...) TLOG_WARNF(pattern, __VA_ARGS__)
+#define logef(pattern, ...) TLOG_ERRORF(pattern, __VA_ARGS__)
 
 namespace Praktor::Logging {
 
@@ -44,7 +49,8 @@ inline const char* reset() {
 }
 
 inline void emitConsoleEvent(std::string_view message) {
-    TLOG_INFO("{}", std::string(message));
+    const std::string owned_message(message);
+    TLOG_INFO(owned_message.c_str());
 }
 
 inline void printTaskStatus(std::string_view task_name, std::string_view status) {

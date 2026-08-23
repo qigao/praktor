@@ -387,7 +387,7 @@ int main(int argc, char* argv[]) {
                 success = runner.run(config.useConcurrent, config.maxConcurrency);
             }
         } catch (const std::exception& e) {
-            loge("Execution failed: {}", e.what());
+            logef("Execution failed: {}", e.what());
             tlog_flush(logger);
             tlog_destroy(logger);
             return 1;

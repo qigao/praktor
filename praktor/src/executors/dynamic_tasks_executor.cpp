@@ -74,7 +74,7 @@ void mergeTaskOutputs(TaskFailureContext& failure, const WorkflowContext& contex
 
 TaskResult DynamicTasksExecutor::execute(const Task& task, WorkflowContext& context)
 {
-    TLOG_DEBUG("Executing dynamic_tasks: {}", task.name);
+    TLOG_DEBUGF("Executing dynamic_tasks: {}", task.name);
 
     if (!subtask_callback_) {
         return TaskResult(false, "DynamicTasksExecutor requires subtask_callback to be set");
@@ -102,7 +102,7 @@ TaskResult DynamicTasksExecutor::execute(const Task& task, WorkflowContext& cont
         WorkflowValue items_json;
         try {
             items_json = context.getValueByPath(items_var);
-            TLOG_DEBUG("Retrieved items_variable '{}': is_null={}, is_array={}, type={}",
+            TLOG_DEBUGF("Retrieved items_variable '{}': is_null={}, is_array={}, type={}",
                  items_var, items_json.is_null(), items_json.is_array(), (int)items_json.type());
         } catch (const std::exception& e) {
             return TaskResult(false, "dynamic_tasks items_variable '" + items_var + "' not found in context: " + e.what());
@@ -116,7 +116,7 @@ TaskResult DynamicTasksExecutor::execute(const Task& task, WorkflowContext& cont
             return TaskResult(false, "dynamic_tasks items_variable '" + items_var + "' must be a JSON array, got: " + items_json.to_string());
         }
 
-        TLOG_DEBUG("Generating {} tasks from template", items_json.size());
+        TLOG_DEBUGF("Generating {} tasks from template", items_json.size());
         WorkflowValue generated_results = WorkflowValue::array();
         context.setCurrentTaskOutput("generated_tasks", generated_results);
         context.setCurrentTaskOutput("generated_count", static_cast<int64_t>(0));
@@ -148,7 +148,7 @@ TaskResult DynamicTasksExecutor::execute(const Task& task, WorkflowContext& cont
             if (!generated_names.insert(generated.name).second) {
                 return TaskResult(false, "Generated task name collision: '" + generated.name + "'");
             }
-            TLOG_DEBUG("Executing generated task: {}", generated.name);
+            TLOG_DEBUGF("Executing generated task: {}", generated.name);
 
             bool callback_success = subtask_callback_(generated, context);
             WorkflowValue generated_result =

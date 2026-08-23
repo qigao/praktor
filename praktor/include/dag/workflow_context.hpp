@@ -193,7 +193,7 @@ public:
                 result[key] = value.as<std::string>();
             }
         }
-        logd("getAllVariables: retrieved {} string variables", result.size());
+        logdf("getAllVariables: retrieved {} string variables", result.size());
         return result;
     }
 
@@ -233,34 +233,34 @@ public:
      * Fully delegates to TaskRegistry.
      */
     void setTaskStatus(const std::string& taskName, const std::string& status) {
-        logd("setTaskStatus: task='{}', status='{}'", taskName, status);
+        logdf("setTaskStatus: task='{}', status='{}'", taskName, status);
         task_registry_->setStatus(taskName, status);
     }
 
     std::string getTaskStatus(const std::string& taskName) const {
         std::string status = task_registry_->getStatus(taskName);
-        logd("getTaskStatus: task='{}', status='{}'", taskName, status);
+        logdf("getTaskStatus: task='{}', status='{}'", taskName, status);
         return status;
     }
 
     void setTaskOutput(const std::string& taskName, const std::string& key, const WorkflowValue& value) {
-        logd("setTaskOutput: task='{}', key='{}', type={}", taskName, key, static_cast<int>(value.type()));
+        logdf("setTaskOutput: task='{}', key='{}', type={}", taskName, key, static_cast<int>(value.type()));
         task_registry_->setOutput(taskName, key, value);
     }
 
     void mergeTaskOutputs(const std::string& taskName, const WorkflowValue& outputs) {
-        logd("mergeTaskOutputs: task='{}', outputs_type={}", taskName, static_cast<int>(outputs.type()));
+        logdf("mergeTaskOutputs: task='{}', outputs_type={}", taskName, static_cast<int>(outputs.type()));
         task_registry_->mergeOutputs(taskName, outputs);
     }
 
     void clearTaskOutputs(const std::string& taskName) {
-        logd("clearTaskOutputs: task='{}'", taskName);
+        logdf("clearTaskOutputs: task='{}'", taskName);
         task_registry_->clearOutputs(taskName);
     }
 
     void pushTaskScope(const std::string& taskName, std::optional<std::string> alias = std::nullopt) {
         std::string alias_str = alias.has_value() ? alias.value() : "nullopt";
-        logd("pushTaskScope: taskName='{}', alias='{}', stack_size={}", taskName, alias_str, task_scope_stack_.size() + 1);
+        logdf("pushTaskScope: taskName='{}', alias='{}', stack_size={}", taskName, alias_str, task_scope_stack_.size() + 1);
         task_scope_stack_.emplace_back(taskName, alias);
     }
 
@@ -268,7 +268,7 @@ public:
         if (!task_scope_stack_.empty()) {
             const auto& scope = task_scope_stack_.back();
             std::string alias_str = scope.second.has_value() ? scope.second.value() : "nullopt";
-            logd("popTaskScope: popping task='{}', alias='{}', stack_size={}", scope.first, alias_str, task_scope_stack_.size() - 1);
+            logdf("popTaskScope: popping task='{}', alias='{}', stack_size={}", scope.first, alias_str, task_scope_stack_.size() - 1);
             task_scope_stack_.pop_back();
         } else {
             logw("popTaskScope: attempt to pop from empty task_scope_stack_");
@@ -276,7 +276,7 @@ public:
     }
 
     void setCurrentTaskOutput(const std::string& key, const WorkflowValue& value) {
-        logd("setCurrentTaskOutput: key='{}', type={}, stack_size={}",
+        logdf("setCurrentTaskOutput: key='{}', type={}, stack_size={}",
              key, static_cast<int>(value.type()), task_scope_stack_.size());
         if (task_scope_stack_.empty()) {
             logd("setCurrentTaskOutput: empty stack, using __root__ task");
@@ -287,7 +287,7 @@ public:
 
         const auto& scope = task_scope_stack_.back();
         std::string scope_second_str = scope.second.value_or("nullopt");
-        logd("setCurrentTaskOutput: current task scope: task='{}', alias='{}'", scope.first, scope_second_str);
+        logdf("setCurrentTaskOutput: current task scope: task='{}', alias='{}'", scope.first, scope_second_str);
 
         // Set output for the actual task name
         setTaskOutput(scope.first, key, value);
@@ -295,7 +295,7 @@ public:
 
         // If there's an alias (e.g., for nested workflows), also set output for alias
         if (scope.second && scope.second.value() != scope.first) {
-            logd("setCurrentTaskOutput: also setting alias={} for task={}", scope.second.value(), scope.first);
+            logdf("setCurrentTaskOutput: also setting alias={} for task={}", scope.second.value(), scope.first);
             setTaskOutput(scope.second.value(), key, value);
             setValue("tasks." + scope.second.value() + ".outputs." + key, value);
         }

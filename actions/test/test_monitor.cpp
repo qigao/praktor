@@ -19,11 +19,11 @@ suite("ExecutionMonitor - Basic Recording") {
                 
                 NodeMetrics metrics = monitor.getMetrics("TaskA");
                 
-                check_str_eq(metrics.node_id.c_str(), "TaskA");
-                check_int_eq(metrics.execution_count, 3);
-                check_int_eq(metrics.success_count, 2);
-                check_int_eq(metrics.failure_count, 1);
-                check_int_eq(metrics.running_count, 0);
+                check(strcmp((metrics.node_id.c_str()), ("TaskA")) == 0);
+                check((metrics.execution_count) == (3));
+                check((metrics.success_count) == (2));
+                check((metrics.failure_count) == (1));
+                check((metrics.running_count) == (0));
             }
         }
         
@@ -37,10 +37,10 @@ suite("ExecutionMonitor - Basic Recording") {
                 
                 NodeMetrics metrics = monitor.getMetrics("TaskB");
                 
-                check_int_eq(metrics.min_duration.count(), 100);
-                check_int_eq(metrics.max_duration.count(), 300);
-                check_int_eq(metrics.avg_duration.count(), 200); // (100+200+300)/3
-                check_int_eq(metrics.total_duration.count(), 600);
+                check((metrics.min_duration.count()) == (100));
+                check((metrics.max_duration.count()) == (300));
+                check((metrics.avg_duration.count()) == (200)); // (100+200+300)/3
+                check((metrics.total_duration.count()) == (600));
             }
         }
         
@@ -58,8 +58,8 @@ suite("ExecutionMonitor - Basic Recording") {
                 
                 NodeMetrics metrics = monitor.getMetrics("TaskC");
                 
-                check_double_eq(metrics.success_rate(), 70.0, 0.01);
-                check_double_eq(metrics.failure_rate(), 30.0, 0.01);
+                check(fabs((metrics.success_rate()) - (70.0)) <= (0.01));
+                check(fabs((metrics.failure_rate()) - (30.0)) <= (0.01));
             }
         }
     }
@@ -79,11 +79,11 @@ suite("ExecutionMonitor - Multiple Nodes") {
                 NodeMetrics metrics1 = monitor.getMetrics("Node1");
                 NodeMetrics metrics2 = monitor.getMetrics("Node2");
                 
-                check_int_eq(metrics1.execution_count, 2);
-                check_int_eq(metrics1.success_count, 2);
+                check((metrics1.execution_count) == (2));
+                check((metrics1.success_count) == (2));
                 
-                check_int_eq(metrics2.execution_count, 1);
-                check_int_eq(metrics2.failure_count, 1);
+                check((metrics2.execution_count) == (1));
+                check((metrics2.failure_count) == (1));
             }
         }
         
@@ -97,7 +97,7 @@ suite("ExecutionMonitor - Multiple Nodes") {
                 
                 auto all_metrics = monitor.getAllMetrics();
                 
-                check_size_eq(all_metrics.size(), 3);
+                check((all_metrics.size()) == (3));
                 check_true(all_metrics.count("NodeA") > 0);
                 check_true(all_metrics.count("NodeB") > 0);
                 check_true(all_metrics.count("NodeC") > 0);
@@ -121,8 +121,8 @@ suite("ExecutionMonitor - Reset") {
                 NodeMetrics metrics1 = monitor.getMetrics("Node1");
                 NodeMetrics metrics2 = monitor.getMetrics("Node2");
                 
-                check_int_eq(metrics1.execution_count, 0); // Reset
-                check_int_eq(metrics2.execution_count, 1); // Still there
+                check((metrics1.execution_count) == (0)); // Reset
+                check((metrics2.execution_count) == (1)); // Still there
             }
         }
         
@@ -133,11 +133,11 @@ suite("ExecutionMonitor - Reset") {
                 monitor.recordExecution("Node1", NodeStatus::SUCCESS, std::chrono::milliseconds(100));
                 monitor.recordExecution("Node2", NodeStatus::SUCCESS, std::chrono::milliseconds(200));
                 
-                check_size_eq(monitor.getNodeCount(), 2);
+                check((monitor.getNodeCount()) == (2));
                 
                 monitor.resetAll();
                 
-                check_size_eq(monitor.getNodeCount(), 0);
+                check((monitor.getNodeCount()) == (0));
             }
         }
     }
@@ -160,12 +160,12 @@ suite("ExecutionMonitor - Summary") {
                 
                 auto summary = monitor.getSummary();
                 
-                check_int_eq(summary.total_executions, 4);
-                check_int_eq(summary.total_successes, 3);
-                check_int_eq(summary.total_failures, 1);
-                check_int_eq(summary.total_duration.count(), 600);
-                check_int_eq(summary.avg_duration.count(), 150); // 600/4
-                check_double_eq(summary.overall_success_rate, 75.0, 0.01); // 3/4
+                check((summary.total_executions) == (4));
+                check((summary.total_successes) == (3));
+                check((summary.total_failures) == (1));
+                check((summary.total_duration.count()) == (600));
+                check((summary.avg_duration.count()) == (150)); // 600/4
+                check(fabs((summary.overall_success_rate) - (75.0)) <= (0.01)); // 3/4
             }
         }
     }
@@ -199,8 +199,8 @@ suite("ExecutionMonitor - Integration with Executor") {
                 const auto& monitor = executor.getMonitor();
                 NodeMetrics metrics = monitor.getMetrics("TestTask");
                 
-                check_int_eq(metrics.execution_count, 5);
-                check_int_eq(metrics.success_count, 5);
+                check((metrics.execution_count) == (5));
+                check((metrics.success_count) == (5));
                 check_true(metrics.total_duration.count() >= 50); // At least 5*10ms
             }
         }
@@ -224,7 +224,7 @@ suite("ExecutionMonitor - Integration with Executor") {
                 
                 // No metrics should be recorded
                 const auto& monitor = executor.getMonitor();
-                check_size_eq(monitor.getNodeCount(), 0);
+                check((monitor.getNodeCount()) == (0));
             }
         }
         

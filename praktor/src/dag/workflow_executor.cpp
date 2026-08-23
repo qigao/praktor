@@ -304,15 +304,15 @@ void logTaskOutputs(const Task& task, const TaskResult& result) {
   }
 
   if (!result.stdout_data.empty()) {
-    logd("Task '{}' stdout:\n{}", task.name, summarizeTaskOutputForLog(result.stdout_data));
+    logdf("Task '{}' stdout:\n{}", task.name, summarizeTaskOutputForLog(result.stdout_data));
   }
 
   if (!result.stderr_data.empty()) {
     const std::string summarized = summarizeTaskOutputForLog(result.stderr_data);
     if (result.success) {
-      logw("Task '{}' stderr:\n{}", task.name, summarized);
+      logwf("Task '{}' stderr:\n{}", task.name, summarized);
     } else {
-      loge("Task '{}' stderr:\n{}", task.name, summarized);
+      logef("Task '{}' stderr:\n{}", task.name, summarized);
     }
   }
 }
@@ -655,7 +655,7 @@ bool WorkflowExecutor::checkSkipTask(const Task &task, WorkflowContext &context)
     }
   }
 
-  logd("Skipping task '{}' (already up to date)", task.name);
+  logdf("Skipping task '{}' (already up to date)", task.name);
   return true;
 }
 
@@ -687,7 +687,7 @@ bool WorkflowExecutor::executeTask(const Task &task, WorkflowContext &context,
 
   if (task.each && task.each->enabled()) {
     auto combinations = generateEachCombinations(*task.each);
-    logd("Executing task '{}' for {} combinations", task.name, combinations.size());
+    logdf("Executing task '{}' for {} combinations", task.name, combinations.size());
 
     bool all_success = true;
     bool any_executed = false;
@@ -844,7 +844,7 @@ WorkflowExecutor::TaskExecutionOutcome WorkflowExecutor::executeTaskInternal(
       Praktor::Logging::printTaskStatus(task.name, "RUNNING");
     }
   }
-  logd("Executing task: {} (action={}, ignore_when={})", task.name, static_cast<int>(task.action),
+  logdf("Executing task: {} (action={}, ignore_when={})", task.name, static_cast<int>(task.action),
        ignore_when);
   context.pushTaskScope(task.name, alias);
   ScopedVariables scoped_vars(context, task.vars);
@@ -881,9 +881,9 @@ WorkflowExecutor::TaskExecutionOutcome WorkflowExecutor::executeTaskInternal(
         if (!script_result.success) {
           result.success = false;
           result.error_message = script_result.error_message;
-          loge("Script failed for task '{}': {}", task.name, script_result.error_message);
+          logef("Script failed for task '{}': {}", task.name, script_result.error_message);
           for (const auto& err : script_result.errors) {
-            loge("  line {}: {}", err.line, err.message);
+            logef("  line {}: {}", err.line, err.message);
           }
         }
       }
@@ -906,7 +906,7 @@ WorkflowExecutor::TaskExecutionOutcome WorkflowExecutor::executeTaskInternal(
       }
     }
   } catch (const std::exception &e) {
-    loge("Task '{}' failed: {}", task.name, e.what());
+    logef("Task '{}' failed: {}", task.name, e.what());
     outcome.success = false;
     outcome.status = "failed";
     last_result.success = false;
@@ -949,7 +949,7 @@ std::unordered_map<std::string, std::string> WorkflowExecutor::buildTaskEnvironm
         env[key] = substituteVariables(value, context);
       }
     } catch (const std::exception &e) {
-      logw("Failed to load task dotEnv file '{}': {}", env_path.string(), e.what());
+      logwf("Failed to load task dotEnv file '{}': {}", env_path.string(), e.what());
     }
   }
 
@@ -966,7 +966,7 @@ bool WorkflowExecutor::executeTriggers(const Task &task, bool success, WorkflowC
     return true;
   }
 
-  logd("Executing triggers for task '{}' (success={})", task.name, success);
+  logdf("Executing triggers for task '{}' (success={})", task.name, success);
 
   return trigger_executor_.executeTriggers(
       task, success, context, all_tasks_,

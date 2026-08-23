@@ -42,7 +42,7 @@ bool TriggerExecutor::executeTriggers(const Task &task, bool success, WorkflowCo
         any_trigger_failed = true;
       }
     } catch (const std::exception &e) {
-      logw("Trigger execution failed: {}", e.what());
+      logwf("Trigger execution failed: {}", e.what());
       any_trigger_failed = true;
       // Continue executing remaining triggers but record the failure
     }
@@ -62,7 +62,7 @@ bool TriggerExecutor::executeTriggerAction(const TriggerAction &action, Workflow
 
   // Detect trigger cycles
   if (visited_triggers.count(task_name) > 0) {
-    loge("Circular trigger dependency detected: task '{}' is already in the trigger call chain", task_name);
+    logef("Circular trigger dependency detected: task '{}' is already in the trigger call chain", task_name);
     throw std::runtime_error("Circular trigger dependency detected for task: " + task_name);
   }
 
@@ -73,7 +73,7 @@ bool TriggerExecutor::executeTriggerAction(const TriggerAction &action, Workflow
   }
 
   visited_triggers.insert(task_name);
-  logd("Executing trigger action: {}", task_name);
+  logdf("Executing trigger action: {}", task_name);
 
   // Find the task by name
   const Task *trigger_task = nullptr;
@@ -85,15 +85,15 @@ bool TriggerExecutor::executeTriggerAction(const TriggerAction &action, Workflow
   }
 
   if (!trigger_task) {
-    loge("Trigger task not found: {}", task_name);
+    logef("Trigger task not found: {}", task_name);
     visited_triggers.erase(task_name);  // Clean up before throwing
     throw std::runtime_error("Trigger task not found: " + task_name);
   }
 
-  logd("Executing trigger task '{}'", task_name);
+  logdf("Executing trigger task '{}'", task_name);
   bool success = callback(*trigger_task, depth + 1);
   if (!success) {
-    logw("Trigger task '{}' failed", task_name);
+    logwf("Trigger task '{}' failed", task_name);
   }
   
   // Clean up visited set after execution

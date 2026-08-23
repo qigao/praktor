@@ -11,10 +11,10 @@ namespace Praktor::Execution
 TaskResult CreateDirectoryExecutor::execute(const Task& task, WorkflowContext& context)
 {
   try {
-    TLOG_DEBUG("Attempting to execute CreateDirectory task: {}", task.name);
+    TLOG_DEBUGF("Attempting to execute CreateDirectory task: {}", task.name);
     const auto& params = std::get<CreateDirectoryParams>(task.specifics);
 
-    TLOG_INFO("Creating directory: {}", params.path);
+    TLOG_INFOF("Creating directory: {}", params.path);
     std::string resolved_path = substituteVariables(params.path, context);
     std::filesystem::path dirPath(resolved_path);
 
@@ -45,7 +45,7 @@ TaskResult CopyFileExecutor::execute(const Task& task, WorkflowContext& context)
     std::string resolved_source = substituteVariables(params.source, context);
     std::string resolved_dest = substituteVariables(params.destination, context);
 
-    TLOG_INFO("Copying file from {} to {}", resolved_source, resolved_dest);
+    TLOG_INFOF("Copying file from {} to {}", resolved_source, resolved_dest);
 
     if (params.overwrite || !std::filesystem::exists(resolved_dest)) {
       std::filesystem::copy_file(
@@ -73,7 +73,7 @@ TaskResult MoveFileExecutor::execute(const Task& task, WorkflowContext& context)
     std::string resolved_source = substituteVariables(params.source, context);
     std::string resolved_dest = substituteVariables(params.destination, context);
 
-    TLOG_INFO("Moving file from {} to {}", resolved_source, resolved_dest);
+    TLOG_INFOF("Moving file from {} to {}", resolved_source, resolved_dest);
 
     if (params.overwrite && std::filesystem::exists(resolved_dest)) {
       std::filesystem::remove(resolved_dest);

@@ -50,7 +50,7 @@ suite("Parallel Node - Performance") {
                 NodeStatus status = executor.execute(parallel, bb);
                 auto end = std::chrono::steady_clock::now();
                 
-                check_int_eq(static_cast<int>(status), static_cast<int>(NodeStatus::SUCCESS));
+                check((static_cast<int>(status)) == (static_cast<int>(NodeStatus::SUCCESS)));
                 
                 // Max concurrent should be limited by thread pool size (not 20)
                 // Thread pool uses 2x cores, clamped to [4, 32]
@@ -105,8 +105,8 @@ suite("Parallel Node - Performance") {
                 NodeStatus status = executor.execute(parallel, bb);
                 auto end = std::chrono::steady_clock::now();
                 
-                check_int_eq(static_cast<int>(status), static_cast<int>(NodeStatus::SUCCESS));
-                check_int_eq(completed.load(), 10);
+                check((static_cast<int>(status)) == (static_cast<int>(NodeStatus::SUCCESS)));
+                check((completed.load()) == (10));
                 
                 auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
                 // Should complete in time dominated by slow tasks, not sum of all
@@ -138,7 +138,7 @@ suite("Parallel Node - Correctness") {
                 }
                 
                 NodeStatus status = executor.execute(parallel, bb);
-                check_int_eq(static_cast<int>(status), static_cast<int>(NodeStatus::SUCCESS));
+                check((static_cast<int>(status)) == (static_cast<int>(NodeStatus::SUCCESS)));
             }
         }
         
@@ -169,7 +169,7 @@ suite("Parallel Node - Correctness") {
                 parallel.children.push_back(fail_child);
                 
                 NodeStatus status = executor.execute(parallel, bb);
-                check_int_eq(static_cast<int>(status), static_cast<int>(NodeStatus::FAILURE));
+                check((static_cast<int>(status)) == (static_cast<int>(NodeStatus::FAILURE)));
             }
         }
         
@@ -200,7 +200,7 @@ suite("Parallel Node - Correctness") {
                 parallel.children.push_back(running_child);
                 
                 NodeStatus status = executor.execute(parallel, bb);
-                check_int_eq(static_cast<int>(status), static_cast<int>(NodeStatus::RUNNING));
+                check((static_cast<int>(status)) == (static_cast<int>(NodeStatus::RUNNING)));
             }
         }
     }
@@ -234,8 +234,8 @@ suite("Parallel Node - Thread Safety") {
                 
                 NodeStatus status = executor.execute(parallel, bb);
                 
-                check_int_eq(static_cast<int>(status), static_cast<int>(NodeStatus::SUCCESS));
-                check_int_eq(counter.load(), 10);
+                check((static_cast<int>(status)) == (static_cast<int>(NodeStatus::SUCCESS)));
+                check((counter.load()) == (10));
                 
                 // Verify all writes succeeded
                 for (int i = 0; i < 10; ++i) {
@@ -271,8 +271,8 @@ suite("Parallel Node - Thread Safety") {
                 NodeStatus status = executor.execute(parallel, bb);
                 ShellExecutor::setStreamCallback({});
 
-                check_int_eq(static_cast<int>(status), static_cast<int>(NodeStatus::SUCCESS));
-                check_int_eq(streamed_lines.load(std::memory_order_relaxed), 10);
+                check((static_cast<int>(status)) == (static_cast<int>(NodeStatus::SUCCESS)));
+                check((streamed_lines.load(std::memory_order_relaxed)) == (10));
             }
         }
     }

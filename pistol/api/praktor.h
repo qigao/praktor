@@ -1,26 +1,14 @@
 #pragma once
 
+#include "praktor_export.h"
+
 #include <stddef.h>
 #include <stdint.h>
-
-#ifdef _WIN32
-  #ifdef PRAKTOR_EXPORTS
-    #define PRAKTOR_API __declspec(dllexport)
-  #else
-    #define PRAKTOR_API __declspec(dllimport)
-  #endif
-#else
-  #define PRAKTOR_API __attribute__((visibility("default")))
-#endif
 
 #ifdef _WIN32
   #define PRAKTOR_CALL __cdecl
 #else
   #define PRAKTOR_CALL
-#endif
-
-#ifdef __cplusplus
-extern "C" {
 #endif
 
 typedef enum praktor_result {
@@ -93,7 +81,7 @@ typedef struct praktor_api {
 
 typedef const praktor_api* (PRAKTOR_CALL *praktor_get_api_fn)(void);
 
-PRAKTOR_API const praktor_api* PRAKTOR_CALL praktor_get_api(void);
+PRAKTOR_C_API const praktor_api* PRAKTOR_CALL praktor_get_api(void);
 /**
  * Execute a workflow and return its canonical JSON result.
  *
@@ -101,13 +89,9 @@ PRAKTOR_API const praktor_api* PRAKTOR_CALL praktor_get_api(void);
  * results leave output empty. The result contains workflow_status, task states, and explicit task
  * outputs; it never contains the complete input or environment snapshot.
  */
-PRAKTOR_API praktor_result PRAKTOR_CALL praktor_execute_workflow(
+PRAKTOR_C_API praktor_result PRAKTOR_CALL praktor_execute_workflow(
     const praktor_execute_request* request,
     praktor_owned_json* output,
     praktor_error* error);
 /** Release canonical JSON and reset data/size. Passing NULL is valid. */
-PRAKTOR_API void PRAKTOR_CALL praktor_release_json(praktor_owned_json* data);
-
-#ifdef __cplusplus
-}
-#endif
+PRAKTOR_C_API void PRAKTOR_CALL praktor_release_json(praktor_owned_json* data);

@@ -1,5 +1,9 @@
 #include "praktor.h"
 
+#ifndef PRAKTOR_C_API
+#error "praktor.h must expose the Praktor-owned C ABI marker"
+#endif
+
 #include "data/workflow_value.hpp"
 
 #include <catch2/catch_all.hpp>

@@ -223,9 +223,9 @@ void DeclarativeTreeExecutor::logContextAccess(const std::string& path, const st
 {
   (void)value;
   if (isSensitivePath(path)) {
-    TLOG_DEBUG("Context access: {} [REDACTED]", path);
+    TLOG_DEBUGF("Context access: {} [REDACTED]", path);
   } else {
-    TLOG_DEBUG("Context access: {}", path);
+    TLOG_DEBUGF("Context access: {}", path);
   }
 }
 
@@ -396,7 +396,7 @@ actions::Node DeclarativeTreeExecutor::convertNode(const OrchNode& praktor_node,
       // Shell commands keep their command text literal; only context-sourced values are quoted.
       if (praktor_node.type == "Shell" && key == "cmd") {
         substituted = resolveContextRef(substituted, context, [this, &key](const std::string& resolved) {
-          TLOG_WARN("Using context value in shell parameter '{}'. Value has been sanitized to prevent injection.", key);
+          TLOG_WARNF("Using context value in shell parameter '{}'. Value has been sanitized to prevent injection.", key);
           return sanitizeForShell(resolved);
         });
       } else {
@@ -426,7 +426,7 @@ void DeclarativeTreeExecutor::contextToBlackboard(const WorkflowContext& context
   for (const auto& [key, value] : allVars) {
     bb.set(key, value);
   }
-  TLOG_DEBUG("Copied {} string variables to actions Blackboard", allVars.size());
+  TLOG_DEBUGF("Copied {} string variables to actions Blackboard", allVars.size());
   
   // Copy all task outputs to blackboard
   auto allValues = context.getAllVisibleValues();
@@ -454,7 +454,7 @@ void DeclarativeTreeExecutor::blackboardToContext(const actions::Blackboard& bb,
                                                     WorkflowContext& context, 
                                                     const std::string& taskName)
 {
-  TLOG_DEBUG("Mapping actions Blackboard outputs to WorkflowContext for task: {}", taskName);
+  TLOG_DEBUGF("Mapping actions Blackboard outputs to WorkflowContext for task: {}", taskName);
   
   // Bridge action Shell node outputs to workflow context.
   // The Shell node stores:
@@ -468,39 +468,39 @@ void DeclarativeTreeExecutor::blackboardToContext(const actions::Blackboard& bb,
   if (bb.has("shell_exit_code")) {
     std::string value = bb.get("shell_exit_code");
     context.setCurrentTaskOutput("exit_code", value);
-    TLOG_DEBUG("  Output: exit_code = {}", value);
+    TLOG_DEBUGF("  Output: exit_code = {}", value);
   }
   
   // Stdout — Shell node default key is "shell_output", desugared commands use "stdout"
   if (bb.has("stdout")) {
     std::string value = bb.get("stdout");
     context.setCurrentTaskOutput("stdout", value);
-    TLOG_DEBUG("  Output: stdout = {} bytes", value.size());
+    TLOG_DEBUGF("  Output: stdout = {} bytes", value.size());
   } else if (bb.has("shell_output")) {
     std::string value = bb.get("shell_output");
     context.setCurrentTaskOutput("stdout", value);
-    TLOG_DEBUG("  Output: stdout (from shell_output) = {} bytes", value.size());
+    TLOG_DEBUGF("  Output: stdout (from shell_output) = {} bytes", value.size());
   }
   
   // Stderr
   if (bb.has("shell_stderr")) {
     std::string value = bb.get("shell_stderr");
     context.setCurrentTaskOutput("stderr", value);
-    TLOG_DEBUG("  Output: stderr = {} bytes", value.size());
+    TLOG_DEBUGF("  Output: stderr = {} bytes", value.size());
   }
   
   // Execution timing
   if (bb.has("execution_time_ms")) {
     std::string value = bb.get("execution_time_ms");
     context.setCurrentTaskOutput("execution_time_ms", value);
-    TLOG_DEBUG("  Output: execution_time_ms = {}", value);
+    TLOG_DEBUGF("  Output: execution_time_ms = {}", value);
   }
   
   // Node status
   if (bb.has("node_status")) {
     std::string value = bb.get("node_status");
     context.setCurrentTaskOutput("node_status", value);
-    TLOG_DEBUG("  Output: node_status = {}", value);
+    TLOG_DEBUGF("  Output: node_status = {}", value);
   }
 
   TLOG_DEBUG("Output mapping complete");
@@ -508,7 +508,7 @@ void DeclarativeTreeExecutor::blackboardToContext(const actions::Blackboard& bb,
 
 TaskResult DeclarativeTreeExecutor::execute(const Task& task, WorkflowContext& context)
 {
-  TLOG_DEBUG("Executing action_orchestration task: {}", task.name);
+  TLOG_DEBUGF("Executing action_orchestration task: {}", task.name);
 
   auto execution_context = context.fork();
   auto& local_context = *execution_context;
@@ -527,9 +527,9 @@ TaskResult DeclarativeTreeExecutor::execute(const Task& task, WorkflowContext& c
       for (const auto& [key, value] : parsed) {
         task_environment_overrides[key] = substituteVariables(value, local_context);
       }
-      TLOG_DEBUG("Loaded dotEnv file for orchestration: {}", env_file);
+      TLOG_DEBUGF("Loaded dotEnv file for orchestration: {}", env_file);
     } catch (const std::exception& e) {
-      TLOG_WARN("Failed to load dotEnv file '{}': {}", env_file, e.what());
+      TLOG_WARNF("Failed to load dotEnv file '{}': {}", env_file, e.what());
     }
   }
 
@@ -550,7 +550,7 @@ TaskResult DeclarativeTreeExecutor::execute(const Task& task, WorkflowContext& c
   actions::Tree tree;
   tree.name = task.name;
   tree.root = convertNode(params.root, local_context, task.name);
-  TLOG_DEBUG("Actions tree built from YAML: {} (root: {})", tree.name, tree.root.id);
+  TLOG_DEBUGF("Actions tree built from YAML: {} (root: {})", tree.name, tree.root.id);
   collectDeclaredOutputKeys(tree.root, output_keys, stderr_keys, exit_code_keys);
 
   applyTaskExecutionDefaults(tree.root, task);
@@ -559,7 +559,7 @@ TaskResult DeclarativeTreeExecutor::execute(const Task& task, WorkflowContext& c
   actions::ShellExecutor::setStreamCallback(emitShellConsoleLine);
 
   if (!shell_environment.empty()) {
-    TLOG_DEBUG("Set {} environment variables for action execution", shell_environment.size());
+    TLOG_DEBUGF("Set {} environment variables for action execution", shell_environment.size());
   }
 
   contextToBlackboard(local_context, blackboard);
@@ -630,7 +630,7 @@ TaskResult DeclarativeTreeExecutor::execute(const Task& task, WorkflowContext& c
 
   context.mergeLocalValuesFrom(local_context);
 
-  TLOG_DEBUG("Action orchestration task {} completed with status: {} ({}ms)",
+  TLOG_DEBUGF("Action orchestration task {} completed with status: {} ({}ms)",
             task.name,
             status_str,
             duration.count());

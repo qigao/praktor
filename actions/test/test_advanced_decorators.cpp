@@ -27,7 +27,7 @@ suite("Advanced Decorators - KeepRunningUntilFailure") {
                 decorator.children.push_back(child);
                 
                 NodeStatus status = executor.execute(decorator, bb);
-                check_int_eq(static_cast<int>(status), static_cast<int>(NodeStatus::FAILURE));
+                check((static_cast<int>(status)) == (static_cast<int>(NodeStatus::FAILURE)));
             }
         }
         
@@ -52,8 +52,8 @@ suite("Advanced Decorators - KeepRunningUntilFailure") {
                 decorator.children.push_back(child);
                 
                 NodeStatus status = executor.execute(decorator, bb);
-                check_int_eq(static_cast<int>(status), static_cast<int>(NodeStatus::SUCCESS));
-                check_int_eq(call_count, 3);
+                check((static_cast<int>(status)) == (static_cast<int>(NodeStatus::SUCCESS)));
+                check((call_count) == (3));
             }
         }
         
@@ -75,7 +75,7 @@ suite("Advanced Decorators - KeepRunningUntilFailure") {
                 decorator.children.push_back(child);
                 
                 NodeStatus status = executor.execute(decorator, bb);
-                check_int_eq(static_cast<int>(status), static_cast<int>(NodeStatus::RUNNING));
+                check((static_cast<int>(status)) == (static_cast<int>(NodeStatus::RUNNING)));
             }
         }
     }
@@ -105,18 +105,18 @@ suite("Advanced Decorators - RunOnce") {
                 
                 // First execution
                 NodeStatus status1 = executor.execute(decorator, bb, ctx);
-                check_int_eq(static_cast<int>(status1), static_cast<int>(NodeStatus::SUCCESS));
-                check_int_eq(execution_count, 1);
+                check((static_cast<int>(status1)) == (static_cast<int>(NodeStatus::SUCCESS)));
+                check((execution_count) == (1));
                 
                 // Second execution - should return cached result
                 NodeStatus status2 = executor.execute(decorator, bb, ctx);
-                check_int_eq(static_cast<int>(status2), static_cast<int>(NodeStatus::SUCCESS));
-                check_int_eq(execution_count, 1); // Still 1, not executed again
+                check((static_cast<int>(status2)) == (static_cast<int>(NodeStatus::SUCCESS)));
+                check((execution_count) == (1)); // Still 1, not executed again
                 
                 // Third execution - still cached
                 NodeStatus status3 = executor.execute(decorator, bb, ctx);
-                check_int_eq(static_cast<int>(status3), static_cast<int>(NodeStatus::SUCCESS));
-                check_int_eq(execution_count, 1);
+                check((static_cast<int>(status3)) == (static_cast<int>(NodeStatus::SUCCESS)));
+                check((execution_count) == (1));
             }
         }
 
@@ -141,9 +141,9 @@ suite("Advanced Decorators - RunOnce") {
                 NodeStatus status1 = executor.execute(decorator, bb);
                 NodeStatus status2 = executor.execute(decorator, bb);
 
-                check_int_eq(static_cast<int>(status1), static_cast<int>(NodeStatus::SUCCESS));
-                check_int_eq(static_cast<int>(status2), static_cast<int>(NodeStatus::SUCCESS));
-                check_int_eq(execution_count, 1);
+                check((static_cast<int>(status1)) == (static_cast<int>(NodeStatus::SUCCESS)));
+                check((static_cast<int>(status2)) == (static_cast<int>(NodeStatus::SUCCESS)));
+                check((execution_count) == (1));
             }
         }
 
@@ -172,9 +172,9 @@ suite("Advanced Decorators - RunOnce") {
                 NodeStatus status1 = executor.execute(force_success, bb);
                 NodeStatus status2 = executor.execute(force_success, bb);
 
-                check_int_eq(static_cast<int>(status1), static_cast<int>(NodeStatus::SUCCESS));
-                check_int_eq(static_cast<int>(status2), static_cast<int>(NodeStatus::SUCCESS));
-                check_int_eq(execution_count, 1);
+                check((static_cast<int>(status1)) == (static_cast<int>(NodeStatus::SUCCESS)));
+                check((static_cast<int>(status2)) == (static_cast<int>(NodeStatus::SUCCESS)));
+                check((execution_count) == (1));
             }
         }
         
@@ -199,23 +199,23 @@ suite("Advanced Decorators - RunOnce") {
                 
                 // First execution - RUNNING
                 NodeStatus status1 = executor.execute(decorator, bb, ctx);
-                check_int_eq(static_cast<int>(status1), static_cast<int>(NodeStatus::RUNNING));
-                check_int_eq(execution_count, 1);
+                check((static_cast<int>(status1)) == (static_cast<int>(NodeStatus::RUNNING)));
+                check((execution_count) == (1));
                 
                 // Second execution - still RUNNING, re-executed
                 NodeStatus status2 = executor.execute(decorator, bb, ctx);
-                check_int_eq(static_cast<int>(status2), static_cast<int>(NodeStatus::RUNNING));
-                check_int_eq(execution_count, 2);
+                check((static_cast<int>(status2)) == (static_cast<int>(NodeStatus::RUNNING)));
+                check((execution_count) == (2));
                 
                 // Third execution - SUCCESS, now cached
                 NodeStatus status3 = executor.execute(decorator, bb, ctx);
-                check_int_eq(static_cast<int>(status3), static_cast<int>(NodeStatus::SUCCESS));
-                check_int_eq(execution_count, 3);
+                check((static_cast<int>(status3)) == (static_cast<int>(NodeStatus::SUCCESS)));
+                check((execution_count) == (3));
                 
                 // Fourth execution - cached, not re-executed
                 NodeStatus status4 = executor.execute(decorator, bb, ctx);
-                check_int_eq(static_cast<int>(status4), static_cast<int>(NodeStatus::SUCCESS));
-                check_int_eq(execution_count, 3); // Still 3
+                check((static_cast<int>(status4)) == (static_cast<int>(NodeStatus::SUCCESS)));
+                check((execution_count) == (3)); // Still 3
             }
         }
         
@@ -240,13 +240,13 @@ suite("Advanced Decorators - RunOnce") {
                 
                 // First execution
                 NodeStatus status1 = executor.execute(decorator, bb, ctx);
-                check_int_eq(static_cast<int>(status1), static_cast<int>(NodeStatus::FAILURE));
-                check_int_eq(execution_count, 1);
+                check((static_cast<int>(status1)) == (static_cast<int>(NodeStatus::FAILURE)));
+                check((execution_count) == (1));
                 
                 // Second execution - cached FAILURE
                 NodeStatus status2 = executor.execute(decorator, bb, ctx);
-                check_int_eq(static_cast<int>(status2), static_cast<int>(NodeStatus::FAILURE));
-                check_int_eq(execution_count, 1);
+                check((static_cast<int>(status2)) == (static_cast<int>(NodeStatus::FAILURE)));
+                check((execution_count) == (1));
             }
         }
     }
@@ -283,18 +283,18 @@ suite("Advanced Decorators - ConsumeQueue") {
                 
                 // First execution - processes first item, returns RUNNING (more items)
                 NodeStatus status1 = executor.execute(decorator, bb);
-                check_int_eq(static_cast<int>(status1), static_cast<int>(NodeStatus::RUNNING));
-                check_int_eq(processed_count, 1);
+                check((static_cast<int>(status1)) == (static_cast<int>(NodeStatus::RUNNING)));
+                check((processed_count) == (1));
                 
                 // Second execution - processes second item
                 NodeStatus status2 = executor.execute(decorator, bb);
-                check_int_eq(static_cast<int>(status2), static_cast<int>(NodeStatus::RUNNING));
-                check_int_eq(processed_count, 2);
+                check((static_cast<int>(status2)) == (static_cast<int>(NodeStatus::RUNNING)));
+                check((processed_count) == (2));
                 
                 // Third execution - processes last item, returns SUCCESS (queue empty)
                 NodeStatus status3 = executor.execute(decorator, bb);
-                check_int_eq(static_cast<int>(status3), static_cast<int>(NodeStatus::SUCCESS));
-                check_int_eq(processed_count, 3);
+                check((static_cast<int>(status3)) == (static_cast<int>(NodeStatus::SUCCESS)));
+                check((processed_count) == (3));
             }
         }
         
@@ -318,7 +318,7 @@ suite("Advanced Decorators - ConsumeQueue") {
                 decorator.children.push_back(child);
                 
                 NodeStatus status = executor.execute(decorator, bb);
-                check_int_eq(static_cast<int>(status), static_cast<int>(NodeStatus::FAILURE));
+                check((static_cast<int>(status)) == (static_cast<int>(NodeStatus::FAILURE)));
             }
         }
         
@@ -340,7 +340,7 @@ suite("Advanced Decorators - ConsumeQueue") {
                 decorator.children.push_back(child);
                 
                 NodeStatus status = executor.execute(decorator, bb);
-                check_int_eq(static_cast<int>(status), static_cast<int>(NodeStatus::FAILURE));
+                check((static_cast<int>(status)) == (static_cast<int>(NodeStatus::FAILURE)));
             }
         }
         
@@ -366,8 +366,8 @@ suite("Advanced Decorators - ConsumeQueue") {
                 decorator.children.push_back(child);
                 
                 NodeStatus status = executor.execute(decorator, bb);
-                check_int_eq(static_cast<int>(status), static_cast<int>(NodeStatus::FAILURE));
-                check_int_eq(processed_count, 1); // Only processed first item
+                check((static_cast<int>(status)) == (static_cast<int>(NodeStatus::FAILURE)));
+                check((processed_count) == (1)); // Only processed first item
             }
         }
     }

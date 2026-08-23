@@ -30,8 +30,8 @@ suite("Extended Decorators - Precondition") {
                 decorator.children.push_back(child);
                 
                 NodeStatus status = executor.execute(decorator, bb);
-                check_int_eq(static_cast<int>(status), static_cast<int>(NodeStatus::SUCCESS));
-                check_int_eq(execution_count, 1);
+                check((static_cast<int>(status)) == (static_cast<int>(NodeStatus::SUCCESS)));
+                check((execution_count) == (1));
             }
         }
         
@@ -57,8 +57,8 @@ suite("Extended Decorators - Precondition") {
                 decorator.children.push_back(child);
                 
                 NodeStatus status = executor.execute(decorator, bb);
-                check_int_eq(static_cast<int>(status), static_cast<int>(NodeStatus::FAILURE));
-                check_int_eq(execution_count, 0); // Child not executed
+                check((static_cast<int>(status)) == (static_cast<int>(NodeStatus::FAILURE)));
+                check((execution_count) == (0)); // Child not executed
             }
         }
         
@@ -82,8 +82,8 @@ suite("Extended Decorators - Precondition") {
                 decorator1.children.push_back(child1);
                 
                 NodeStatus status1 = executor.execute(decorator1, bb);
-                check_int_eq(static_cast<int>(status1), static_cast<int>(NodeStatus::SUCCESS));
-                check_int_eq(execution_count, 1);
+                check((static_cast<int>(status1)) == (static_cast<int>(NodeStatus::SUCCESS)));
+                check((execution_count) == (1));
                 
                 // Test with false
                 Node decorator2;
@@ -94,8 +94,8 @@ suite("Extended Decorators - Precondition") {
                 decorator2.children.push_back(child2);
                 
                 NodeStatus status2 = executor.execute(decorator2, bb);
-                check_int_eq(static_cast<int>(status2), static_cast<int>(NodeStatus::FAILURE));
-                check_int_eq(execution_count, 1); // Still 1, not executed again
+                check((static_cast<int>(status2)) == (static_cast<int>(NodeStatus::FAILURE)));
+                check((execution_count) == (1)); // Still 1, not executed again
             }
         }
         
@@ -119,7 +119,7 @@ suite("Extended Decorators - Precondition") {
                 decorator.children.push_back(child);
                 
                 NodeStatus status = executor.execute(decorator, bb);
-                check_int_eq(static_cast<int>(status), static_cast<int>(NodeStatus::FAILURE));
+                check((static_cast<int>(status)) == (static_cast<int>(NodeStatus::FAILURE)));
             }
         }
     }
@@ -152,26 +152,26 @@ suite("Extended Decorators - EntryUpdated") {
                 
                 // First execution
                 NodeStatus status1 = executor.execute(decorator, bb, ctx);
-                check_int_eq(static_cast<int>(status1), static_cast<int>(NodeStatus::SUCCESS));
-                check_int_eq(execution_count, 1);
+                check((static_cast<int>(status1)) == (static_cast<int>(NodeStatus::SUCCESS)));
+                check((execution_count) == (1));
                 
                 // Second execution with same value - should not re-execute
                 NodeStatus status2 = executor.execute(decorator, bb, ctx);
-                check_int_eq(static_cast<int>(status2), static_cast<int>(NodeStatus::SUCCESS));
-                check_int_eq(execution_count, 1); // Still 1
+                check((static_cast<int>(status2)) == (static_cast<int>(NodeStatus::SUCCESS)));
+                check((execution_count) == (1)); // Still 1
                 
                 // Change value
                 bb.set("counter", "2");
                 
                 // Third execution with new value - should re-execute
                 NodeStatus status3 = executor.execute(decorator, bb, ctx);
-                check_int_eq(static_cast<int>(status3), static_cast<int>(NodeStatus::SUCCESS));
-                check_int_eq(execution_count, 2); // Now 2
+                check((static_cast<int>(status3)) == (static_cast<int>(NodeStatus::SUCCESS)));
+                check((execution_count) == (2)); // Now 2
                 
                 // Fourth execution with same value - should not re-execute
                 NodeStatus status4 = executor.execute(decorator, bb, ctx);
-                check_int_eq(static_cast<int>(status4), static_cast<int>(NodeStatus::SUCCESS));
-                check_int_eq(execution_count, 2); // Still 2
+                check((static_cast<int>(status4)) == (static_cast<int>(NodeStatus::SUCCESS)));
+                check((execution_count) == (2)); // Still 2
             }
         }
 
@@ -200,9 +200,9 @@ suite("Extended Decorators - EntryUpdated") {
                 NodeStatus status1 = executor.execute(decorator, bb, ctx);
                 NodeStatus status2 = executor.execute(decorator, bb, ctx);
 
-                check_int_eq(static_cast<int>(status1), static_cast<int>(NodeStatus::FAILURE));
-                check_int_eq(static_cast<int>(status2), static_cast<int>(NodeStatus::FAILURE));
-                check_int_eq(execution_count, 1);
+                check((static_cast<int>(status1)) == (static_cast<int>(NodeStatus::FAILURE)));
+                check((static_cast<int>(status2)) == (static_cast<int>(NodeStatus::FAILURE)));
+                check((execution_count) == (1));
             }
         }
          
@@ -230,18 +230,18 @@ suite("Extended Decorators - EntryUpdated") {
                 
                 // First execution
                 executor.execute(decorator, bb, ctx);
-                check_int_eq(execution_count, 1);
+                check((execution_count) == (1));
                 
                 // Value unchanged
                 executor.execute(decorator, bb, ctx);
-                check_int_eq(execution_count, 1);
+                check((execution_count) == (1));
                 
                 // Note: Blackboard doesn't have remove(), so we simulate by setting empty
                 bb.set("flag", "");
                 
                 // Value changed (to empty)
                 executor.execute(decorator, bb, ctx);
-                check_int_eq(execution_count, 2);
+                check((execution_count) == (2));
             }
         }
     }
@@ -292,12 +292,12 @@ suite("Extended Control Flow - PipelineSequence") {
                 pipeline.children.push_back(stage3);
                 
                 NodeStatus status = executor.execute(pipeline, bb);
-                check_int_eq(static_cast<int>(status), static_cast<int>(NodeStatus::SUCCESS));
+                check((static_cast<int>(status)) == (static_cast<int>(NodeStatus::SUCCESS)));
                 
                 // Check final result
                 check_true(bb.has("pipeline_result"));
                 const std::string pipeline_result = bb.get("pipeline_result");
-                check_str_eq(pipeline_result.c_str(), "ABC");
+                check(strcmp((pipeline_result.c_str()), ("ABC")) == 0);
             }
         }
         
@@ -322,10 +322,10 @@ suite("Extended Control Flow - PipelineSequence") {
                 pipeline.children.push_back(stage);
                 
                 NodeStatus status = executor.execute(pipeline, bb);
-                check_int_eq(static_cast<int>(status), static_cast<int>(NodeStatus::SUCCESS));
+                check((static_cast<int>(status)) == (static_cast<int>(NodeStatus::SUCCESS)));
                 
                 const std::string pipeline_result = bb.get("pipeline_result");
-                check_str_eq(pipeline_result.c_str(), "START:DATA");
+                check(strcmp((pipeline_result.c_str()), ("START:DATA")) == 0);
             }
         }
         
@@ -367,8 +367,8 @@ suite("Extended Control Flow - PipelineSequence") {
                 pipeline.children.push_back(stage3);
                 
                 NodeStatus status = executor.execute(pipeline, bb);
-                check_int_eq(static_cast<int>(status), static_cast<int>(NodeStatus::FAILURE));
-                check_int_eq(stage2_executed, 0); // Stage 3 not executed
+                check((static_cast<int>(status)) == (static_cast<int>(NodeStatus::FAILURE)));
+                check((stage2_executed) == (0)); // Stage 3 not executed
             }
         }
         
@@ -395,11 +395,11 @@ suite("Extended Control Flow - PipelineSequence") {
                 pipeline.children.push_back(stage);
                 
                 NodeStatus status = executor.execute(pipeline, bb);
-                check_int_eq(static_cast<int>(status), static_cast<int>(NodeStatus::SUCCESS));
+                check((static_cast<int>(status)) == (static_cast<int>(NodeStatus::SUCCESS)));
                 
                 check_true(bb.has("custom_output"));
                 const std::string custom_output = bb.get("custom_output");
-                check_str_eq(custom_output.c_str(), "INIT_TRANSFORMED");
+                check(strcmp((custom_output.c_str()), ("INIT_TRANSFORMED")) == 0);
             }
         }
     }

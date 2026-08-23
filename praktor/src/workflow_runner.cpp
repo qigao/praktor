@@ -24,7 +24,7 @@ std::unordered_map<std::string, std::string> collectWorkflowEnvironment(const Wo
     for (const auto& env_path_str : workflow.dot_env) {
         std::filesystem::path env_path = Praktor::util::resolveRelativePath(workflow.source_path, env_path_str);
         if (!std::filesystem::exists(env_path)) {
-            TLOG_WARN("dotEnv file not found: {}", env_path.string());
+            TLOG_WARNF("dotEnv file not found: {}", env_path.string());
             continue;
         }
 
@@ -33,9 +33,9 @@ std::unordered_map<std::string, std::string> collectWorkflowEnvironment(const Wo
             for (auto& [key, value] : parsed) {
                 env_values[key] = value;
             }
-            TLOG_DEBUG("Loaded dotEnv file: {}", env_path.string());
+            TLOG_DEBUGF("Loaded dotEnv file: {}", env_path.string());
         } catch (const std::exception& e) {
-            TLOG_WARN("Failed to load dotEnv file '{}': {}", env_path.string(), e.what());
+            TLOG_WARNF("Failed to load dotEnv file '{}': {}", env_path.string(), e.what());
         }
     }
 
@@ -90,15 +90,15 @@ void populateWorkflowVariables(WorkflowContext& context,
                                const WorkflowInputs& input_values) {
     for (const auto& [key, value] : input_values) {
         setWorkflowVariable(context, key, value);
-        TLOG_DEBUG("Set input variable: {}", key);
+        TLOG_DEBUGF("Set input variable: {}", key);
     }
 
     for (const auto& [key, value] : workflow.variables) {
         if (input_values.find(key) == input_values.end()) {
             setWorkflowVariable(context, key, value);
-            TLOG_DEBUG("Set workflow variable: {}", key);
+            TLOG_DEBUGF("Set workflow variable: {}", key);
         } else {
-            TLOG_DEBUG("Preserved input override for variable: {}", key);
+            TLOG_DEBUGF("Preserved input override for variable: {}", key);
         }
     }
 }
@@ -180,10 +180,10 @@ WorkflowRunner::~WorkflowRunner() = default;
 
 WorkflowExecutionResult WorkflowRunner::execute(bool useConcurrent, int maxConcurrency) {
     try {
-        TLOG_DEBUG("Loading workflow from: {}", yamlPath_);
+        TLOG_DEBUGF("Loading workflow from: {}", yamlPath_);
         auto prepared = prepareExecution(yamlPath_, base_directory_, inputValues_, baseEnvironment_);
 
-        TLOG_DEBUG("Loaded {} workflow environment variables",
+        TLOG_DEBUGF("Loaded {} workflow environment variables",
                    prepared.runtime_environment.size());
 
         TLOG_DEBUG("Starting workflow execution...");
@@ -212,7 +212,7 @@ WorkflowExecutionResult WorkflowRunner::execute(bool useConcurrent, int maxConcu
         return result;
 
     } catch (const std::exception& e) {
-        TLOG_ERROR("An error occurred during workflow execution: {}", e.what());
+        TLOG_ERRORF("An error occurred during workflow execution: {}", e.what());
         return makeFailedExecutionResult(e.what());
     }
 }
@@ -223,7 +223,7 @@ bool WorkflowRunner::run(bool useConcurrent, int maxConcurrency) {
 
 bool WorkflowRunner::runTask(std::string const& taskName, bool useConcurrent, int maxConcurrency) {
     try {
-        TLOG_DEBUG("Loading workflow to run single task: {}", taskName);
+        TLOG_DEBUGF("Loading workflow to run single task: {}", taskName);
         auto prepared = prepareExecution(yamlPath_, base_directory_, inputValues_, baseEnvironment_);
 
         auto targetTaskIt = std::find_if(prepared.workflow.tasks.begin(), prepared.workflow.tasks.end(),
@@ -233,10 +233,10 @@ bool WorkflowRunner::runTask(std::string const& taskName, bool useConcurrent, in
             throw std::runtime_error("Target task '" + taskName + "' not found in workflow.");
         }
 
-        TLOG_DEBUG("Creating subgraph for task: {}", taskName);
+        TLOG_DEBUGF("Creating subgraph for task: {}", taskName);
         DependencyGraph<Task> subgraph = prepared.graph.createSubgraphFor(*targetTaskIt);
 
-        TLOG_DEBUG("Executing subgraph for task: {}", taskName);
+        TLOG_DEBUGF("Executing subgraph for task: {}", taskName);
         WorkflowExecutor executor(
             subgraph,
             prepared.workflow.tasks,
@@ -254,7 +254,7 @@ bool WorkflowRunner::runTask(std::string const& taskName, bool useConcurrent, in
         return status != "failed";
 
     } catch (const std::exception& e) {
-        TLOG_ERROR("An error occurred during single task execution: {}", e.what());
+        TLOG_ERRORF("An error occurred during single task execution: {}", e.what());
         return false;
     }
 }

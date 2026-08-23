@@ -19,8 +19,11 @@ target_link_libraries(
     PRIVATE praktor_lib
 )
 
-# Export definition for PRAKTOR_API
-target_compile_definitions(${TARGET_NAME_PISTOL} PRIVATE PRAKTOR_EXPORTS)
+# Keep the producer/consumer side of Praktor's shared ABI explicit.
+target_compile_definitions(${TARGET_NAME_PISTOL}
+    PRIVATE PRAKTOR_BUILD_SHARED
+    INTERFACE PRAKTOR_USE_SHARED
+)
 
 if(MSVC)
     # praktor.exe and Praktor.dll otherwise contend for the same case-insensitive
@@ -46,7 +49,7 @@ install(
 )
 
 install(
-    FILES api/praktor.h
+    FILES api/praktor.h api/praktor_export.h
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
 )
 

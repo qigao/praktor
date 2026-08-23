@@ -13,8 +13,8 @@ suite("AST - Node") {
                 check_true(node.id.empty());
                 check_true(node.params.empty());
                 check_true(node.children.empty());
-                check_int_eq(node.line, 0);
-                check_int_eq(node.column, 0);
+                check((node.line) == (0));
+                check((node.column) == (0));
             }
         }
 
@@ -22,7 +22,7 @@ suite("AST - Node") {
             then("should store the id") {
                 Node node;
                 node.id = "Sequence";
-                check_str_eq(node.id.c_str(), "Sequence");
+                check(strcmp((node.id.c_str()), ("Sequence")) == 0);
             }
         }
 
@@ -31,14 +31,14 @@ suite("AST - Node") {
                 Node node;
                 node.params["name"] = std::string("test");
                 check_true(node.params.count("name") > 0);
-                check_str_eq(std::get<std::string>(node.params["name"]).c_str(), "test");
+                check(strcmp((std::get<std::string>(node.params["name"]).c_str()), ("test")) == 0);
             }
 
             then("should store double parameter") {
                 Node node;
                 node.params["timeout"] = 5.0;
                 check_true(node.params.count("timeout") > 0);
-                check_double_eq(std::get<double>(node.params["timeout"]), 5.0, 0.001);
+                check(fabs((std::get<double>(node.params["timeout"])) - (5.0)) <= (0.001));
             }
 
             then("should store bool parameter") {
@@ -62,9 +62,9 @@ suite("AST - Node") {
                 parent.children.push_back(child1);
                 parent.children.push_back(child2);
 
-                check_size_eq(parent.children.size(), 2);
-                check_str_eq(parent.children[0].id.c_str(), "TaskA");
-                check_str_eq(parent.children[1].id.c_str(), "TaskB");
+                check((parent.children.size()) == (2));
+                check(strcmp((parent.children[0].id.c_str()), ("TaskA")) == 0);
+                check(strcmp((parent.children[1].id.c_str()), ("TaskB")) == 0);
             }
         }
 
@@ -73,8 +73,8 @@ suite("AST - Node") {
                 Node node;
                 node.line = 10;
                 node.column = 5;
-                check_int_eq(node.line, 10);
-                check_int_eq(node.column, 5);
+                check((node.line) == (10));
+                check((node.column) == (5));
             }
         }
     }
@@ -89,8 +89,8 @@ suite("AST - Tree") {
                 tree.name = "MyTree";
                 tree.root.id = "Sequence";
 
-                check_str_eq(tree.name.c_str(), "MyTree");
-                check_str_eq(tree.root.id.c_str(), "Sequence");
+                check(strcmp((tree.name.c_str()), ("MyTree")) == 0);
+                check(strcmp((tree.root.id.c_str()), ("Sequence")) == 0);
             }
         }
 
@@ -109,15 +109,14 @@ suite("AST - Tree") {
                 tree.root.children.push_back(child1);
                 tree.root.children.push_back(child2);
 
-                check_str_eq(tree.name.c_str(), "Navigation");
-                check_str_eq(tree.root.id.c_str(), "Sequence");
-                check_size_eq(tree.root.children.size(), 2);
-                check_str_eq(tree.root.children[0].id.c_str(), "CheckBattery");
-                check_str_eq(tree.root.children[1].id.c_str(), "MoveTo");
-                check_str_eq(
-                    std::get<std::string>(tree.root.children[1].params["target"]).c_str(),
-                    "goal"
-                );
+                check(strcmp((tree.name.c_str()), ("Navigation")) == 0);
+                check(strcmp((tree.root.id.c_str()), ("Sequence")) == 0);
+                check((tree.root.children.size()) == (2));
+                check(strcmp((tree.root.children[0].id.c_str()), ("CheckBattery")) == 0);
+                check(strcmp((tree.root.children[1].id.c_str()), ("MoveTo")) == 0);
+                check(strcmp((
+                    std::get<std::string>(tree.root.children[1].params["target"]).c_str()), ("goal"
+                )) == 0);
             }
         }
     }
@@ -142,8 +141,8 @@ suite("AST - Program") {
 
                 program.trees.push_back(tree);
 
-                check_size_eq(program.trees.size(), 1);
-                check_str_eq(program.trees[0].name.c_str(), "MainTree");
+                check((program.trees.size()) == (1));
+                check(strcmp((program.trees[0].name.c_str()), ("MainTree")) == 0);
             }
         }
 
@@ -162,11 +161,11 @@ suite("AST - Program") {
                 program.trees.push_back(tree1);
                 program.trees.push_back(tree2);
 
-                check_size_eq(program.trees.size(), 2);
-                check_str_eq(program.trees[0].name.c_str(), "Tree1");
-                check_str_eq(program.trees[0].root.id.c_str(), "Sequence");
-                check_str_eq(program.trees[1].name.c_str(), "Tree2");
-                check_str_eq(program.trees[1].root.id.c_str(), "Fallback");
+                check((program.trees.size()) == (2));
+                check(strcmp((program.trees[0].name.c_str()), ("Tree1")) == 0);
+                check(strcmp((program.trees[0].root.id.c_str()), ("Sequence")) == 0);
+                check(strcmp((program.trees[1].name.c_str()), ("Tree2")) == 0);
+                check(strcmp((program.trees[1].root.id.c_str()), ("Fallback")) == 0);
             }
         }
     }
@@ -179,13 +178,13 @@ suite("AST - Value Variant") {
             then("should handle string values") {
                 Value v = std::string("hello");
                 check_true(std::holds_alternative<std::string>(v));
-                check_str_eq(std::get<std::string>(v).c_str(), "hello");
+                check(strcmp((std::get<std::string>(v).c_str()), ("hello")) == 0);
             }
 
             then("should handle double values") {
                 Value v = 3.14;
                 check_true(std::holds_alternative<double>(v));
-                check_double_eq(std::get<double>(v), 3.14, 0.001);
+                check(fabs((std::get<double>(v)) - (3.14)) <= (0.001));
             }
 
             then("should handle bool values") {
@@ -202,7 +201,7 @@ suite("AST - Value Variant") {
 
                 v = 42.0;
                 check_true(std::holds_alternative<double>(v));
-                check_double_eq(std::get<double>(v), 42.0, 0.001);
+                check(fabs((std::get<double>(v)) - (42.0)) <= (0.001));
 
                 v = false;
                 check_true(std::holds_alternative<bool>(v));
@@ -243,20 +242,20 @@ suite("AST - Complex Structures") {
                 tree.root.children.push_back(retry);
 
                 // Verify structure
-                check_str_eq(tree.root.id.c_str(), "Fallback");
-                check_size_eq(tree.root.children.size(), 2);
+                check(strcmp((tree.root.id.c_str()), ("Fallback")) == 0);
+                check((tree.root.children.size()) == (2));
 
                 // First child (Sequence)
-                check_str_eq(tree.root.children[0].id.c_str(), "Sequence");
-                check_size_eq(tree.root.children[0].children.size(), 2);
-                check_str_eq(tree.root.children[0].children[0].id.c_str(), "CheckCondition");
-                check_str_eq(tree.root.children[0].children[1].id.c_str(), "Execute");
+                check(strcmp((tree.root.children[0].id.c_str()), ("Sequence")) == 0);
+                check((tree.root.children[0].children.size()) == (2));
+                check(strcmp((tree.root.children[0].children[0].id.c_str()), ("CheckCondition")) == 0);
+                check(strcmp((tree.root.children[0].children[1].id.c_str()), ("Execute")) == 0);
 
                 // Second child (Retry)
-                check_str_eq(tree.root.children[1].id.c_str(), "Retry");
-                check_double_eq(std::get<double>(tree.root.children[1].params["num_attempts"]), 3.0, 0.001);
-                check_size_eq(tree.root.children[1].children.size(), 1);
-                check_str_eq(tree.root.children[1].children[0].id.c_str(), "FallbackTask");
+                check(strcmp((tree.root.children[1].id.c_str()), ("Retry")) == 0);
+                check(fabs((std::get<double>(tree.root.children[1].params["num_attempts"])) - (3.0)) <= (0.001));
+                check((tree.root.children[1].children.size()) == (1));
+                check(strcmp((tree.root.children[1].children[0].id.c_str()), ("FallbackTask")) == 0);
             }
         }
     }

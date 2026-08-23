@@ -31,7 +31,7 @@ UsesExecutor::UsesExecutor(std::unordered_map<std::string, std::string> base_env
     : base_environment_(std::move(base_environment)), num_threads_(num_threads) {}
 
 TaskResult UsesExecutor::execute(const Task &task, WorkflowContext &context) {
-  TLOG_DEBUG("Executing uses: {}", task.name);
+  TLOG_DEBUGF("Executing uses: {}", task.name);
 
   try {
     const auto &params = std::get<UsesParams>(task.specifics);
@@ -144,7 +144,7 @@ std::unordered_map<std::string, std::string> UsesExecutor::buildNestedEnvironmen
         env[key] = substituteVariables(value, nested_context);
       }
     } catch (const std::exception &e) {
-      TLOG_WARN("Failed to load nested dotEnv file '{}': {}", env_path.string(), e.what());
+      TLOG_WARNF("Failed to load nested dotEnv file '{}': {}", env_path.string(), e.what());
     }
   }
 

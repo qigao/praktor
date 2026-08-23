@@ -52,25 +52,25 @@ static void *bridge_get_child_by_name(void *node_ptr, const char *name, size_t s
     std::string key(name, size);
 
     std::string new_path = node->path.empty() ? key : node->path + "." + key;
-    logd("bridge_get_child_by_name: key='{}', node->path='{}' -> new_path='{}'", key, node->path, new_path);
+    logdf("bridge_get_child_by_name: key='{}', node->path='{}' -> new_path='{}'", key, node->path, new_path);
 
     WorkflowValue val = ctx->workflow_context.getValueByPath(new_path);
     if (!val.is_null()) {
-        // TLOG_INFO("mustache: found path='{}', val='{}'", new_path, val.to_string());
+        // TLOG_INFOF("mustache: found path='{}', val='{}'", new_path, val.to_string());
         return ctx->createNode(val, new_path);
     }
     
     // Mustache search behavior: if not found relative to current scope, try root
     if (!node->path.empty()) {
-        logd("bridge_get_child_by_name: path '{}' returned null, trying root-relative lookup for key '{}'", new_path, key);
+        logdf("bridge_get_child_by_name: path '{}' returned null, trying root-relative lookup for key '{}'", new_path, key);
         WorkflowValue root_val = ctx->workflow_context.getValueByPath(key);
         if (!root_val.is_null()) {
-            logd("bridge_get_child_by_name: found root-relative value for key '{}'", key);
+            logdf("bridge_get_child_by_name: found root-relative value for key '{}'", key);
             return ctx->createNode(root_val, key);
         }
     }
     
-    logd("bridge_get_child_by_name: FAILED to find value for key '{}' (tried paths: '{}' and '{}')", key, new_path, key);
+    logdf("bridge_get_child_by_name: FAILED to find value for key '{}' (tried paths: '{}' and '{}')", key, new_path, key);
     return nullptr;
 }
 
@@ -108,7 +108,7 @@ std::string substituteMustache(const std::string& templateStr, const WorkflowCon
 
     MUSTACHE_TEMPLATE* templ = mustache_compile(templateStr.c_str(), templateStr.length(), nullptr, nullptr, 0);
     if (!templ) {
-        loge("Failed to compile mustache template: {}", templateStr);
+        logef("Failed to compile mustache template: {}", templateStr);
         return templateStr;
     }
 
@@ -125,7 +125,7 @@ std::string substituteMustache(const std::string& templateStr, const WorkflowCon
     renderer.base.out_escaped = render_verbatim; // Don't escape for CLI/Shell
 
     if (mustache_process(templ, &renderer.base, &renderer, &provider, &ctx) != 0) {
-        loge("Failed to process mustache template: {}", templateStr);
+        logef("Failed to process mustache template: {}", templateStr);
         mustache_release(templ);
         return templateStr;
     }

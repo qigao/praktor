@@ -85,7 +85,7 @@ EnvMap buildTaskEnvironment(const Task& task,
         env[key] = substituteVariables(value, context);
       }
     } catch (const std::exception& e) {
-      TLOG_WARN("Failed to load task dotEnv file '{}': {}", env_file, e.what());
+      TLOG_WARNF("Failed to load task dotEnv file '{}': {}", env_file, e.what());
     }
   }
 

@@ -82,7 +82,7 @@ std::string joinTemplateNames(const std::vector<std::string>& names) {
 bool PraktorInit::initialize(const std::string &template_name) {
   std::string filename = "praktor.yml";
   if (std::filesystem::exists(filename)) {
-    loge("Error: {} already exists.", filename);
+    logef("Error: {} already exists.", filename);
     return false;
   }
 
@@ -103,18 +103,18 @@ bool PraktorInit::initialize(const std::string &template_name) {
   }
 
   if (templatePath.empty()) {
-    loge("Error: Template '{}' not found.", template_name);
-    loge("Available templates: {}", joinTemplateNames(availableTemplates(searchPaths)));
+    logef("Error: Template '{}' not found.", template_name);
+    logef("Available templates: {}", joinTemplateNames(availableTemplates(searchPaths)));
     return false;
   }
 
   try {
     std::filesystem::copy_file(templatePath, filename);
-    logi("Successfully initialized {} using '{}' template.", filename, template_name);
-    logi("Source: {}", templatePath.string());
+    logif("Successfully initialized {} using '{}' template.", filename, template_name);
+    logif("Source: {}", templatePath.string());
     return true;
   } catch (const std::exception &e) {
-    loge("Error copying template: {}", e.what());
+    logef("Error copying template: {}", e.what());
     return false;
   }
 }

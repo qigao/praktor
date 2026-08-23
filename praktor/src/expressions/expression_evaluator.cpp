@@ -389,7 +389,7 @@ bool ExpressionEvaluator::evaluateAsBool(const std::string& expression,
   try {
     return isTruthy(evaluateInternal(expression, context));
   } catch (const std::exception& e) {
-    TLOG_WARN("Expression evaluation failed for '{}': {}", expression, e.what());
+    TLOG_WARNF("Expression evaluation failed for '{}': {}", expression, e.what());
     return false;
   }
 }
@@ -406,7 +406,7 @@ Value ExpressionEvaluator::evaluate(const std::string& expression,
   try {
     return toPublicValue(evaluateInternal(expression, context));
   } catch (const std::exception& e) {
-    TLOG_WARN("Expression evaluation failed for '{}': {}", expression, e.what());
+    TLOG_WARNF("Expression evaluation failed for '{}': {}", expression, e.what());
     return std::monostate{};
   }
 }

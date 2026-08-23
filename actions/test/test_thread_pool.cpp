@@ -35,7 +35,7 @@ suite("ThreadPool - Basic Functionality") {
                 });
                 
                 int result = future.get();
-                check_int_eq(result, 42);
+                check((result) == (42));
                 check_true(executed.load());
             }
         }
@@ -57,10 +57,10 @@ suite("ThreadPool - Basic Functionality") {
                 // Wait for all tasks and verify results
                 for (int i = 0; i < 10; ++i) {
                     int result = futures[i].get();
-                    check_int_eq(result, i * 2);
+                    check((result) == (i * 2));
                 }
                 
-                check_int_eq(counter.load(), 10);
+                check((counter.load()) == (10));
             }
         }
         
@@ -99,7 +99,7 @@ suite("ThreadPool - Thread Count") {
         when("created with specific thread count") {
             then("should have correct number of threads") {
                 ThreadPool pool(8);
-                check_size_eq(pool.num_threads(), 8);
+                check((pool.num_threads()) == (8));
             }
         }
         
@@ -108,7 +108,7 @@ suite("ThreadPool - Thread Count") {
                 ThreadPool pool;
                 size_t expected = std::thread::hardware_concurrency();
                 if (expected == 0) expected = 1;
-                check_size_eq(pool.num_threads(), expected);
+                check((pool.num_threads()) == (expected));
             }
         }
     }
@@ -141,9 +141,9 @@ suite("ThreadPool - Shared Instance") {
                     return 2;
                 });
                 
-                check_int_eq(future1.get(), 1);
-                check_int_eq(future2.get(), 2);
-                check_int_eq(counter.load(), 2);
+                check((future1.get()) == (1));
+                check((future2.get()) == (2));
+                check((counter.load()) == (2));
             }
         }
     }
@@ -166,7 +166,7 @@ suite("ThreadPool - Exception Handling") {
                     future.get();
                 } catch (const std::runtime_error& e) {
                     caught = true;
-                    check_str_eq(e.what(), "Task failed");
+                    check(strcmp((e.what()), ("Task failed")) == 0);
                 }
                 
                 check_true(caught);
@@ -194,8 +194,8 @@ suite("ThreadPool - Exception Handling") {
                 });
                 
                 // First and third should succeed
-                check_int_eq(future1.get(), 1);
-                check_int_eq(future3.get(), 3);
+                check((future1.get()) == (1));
+                check((future3.get()) == (3));
                 
                 // Second should throw
                 bool caught = false;
@@ -206,7 +206,7 @@ suite("ThreadPool - Exception Handling") {
                 }
                 check_true(caught);
                 
-                check_int_eq(success_count.load(), 2);
+                check((success_count.load()) == (2));
             }
         }
     }
@@ -242,7 +242,7 @@ suite("ThreadPool - Stress Test") {
                     check_true(result >= i);
                 }
                 
-                check_int_eq(counter.load(), num_tasks);
+                check((counter.load()) == (num_tasks));
             }
         }
     }
@@ -267,7 +267,7 @@ suite("AsyncExecutor - Process Cancellation") {
                 const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
                     std::chrono::steady_clock::now() - start);
 
-                check_int_eq(static_cast<int>(status), static_cast<int>(NodeStatus::FAILURE));
+                check((static_cast<int>(status)) == (static_cast<int>(NodeStatus::FAILURE)));
                 check_true(elapsed.count() < 3000);
             }
         }

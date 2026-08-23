@@ -116,7 +116,7 @@ TaskResult ManagedProcessExecutor::execute(const Task& task,
   }
 
   if (result.native_error != 0) {
-    TLOG_ERROR(
+    TLOG_ERRORF(
         "Managed process operation failed: operation={}, image_name={}, phase={}, "
         "native_error={}, reason={}. Verify the executable identity and process permissions.",
         operationNameOrUnknown(params.operation), params.identity.image_name,
