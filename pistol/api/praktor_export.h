@@ -1,8 +1,8 @@
 #ifndef PRAKTOR_EXPORT_H
 #define PRAKTOR_EXPORT_H
 
-/* Praktor owns its ABI marker. TurboUtils' TURBO_API only describes
- * TurboUtils libraries and must not leak their producer/consumer state here. */
+/* Praktor owns its ABI marker. Salts' SALTS_API only describes
+ * Salts libraries and must not leak their producer/consumer state here. */
 #ifndef PRAKTOR_API
 #  if defined(_WIN32) || defined(__CYGWIN__)
 #    if defined(PRAKTOR_BUILD_SHARED)

@@ -53,13 +53,17 @@ set(folder_name "${TARGET_NAME_EXE}")
 target_link_libraries(
     ${TARGET_NAME_LIB}
     PUBLIC Threads::Threads
-           TurboUtils::Core
-           TurboParser::Parser
-           TurboParser::Mustache
+           Salts::Core
+           Salts::JsonParser
+           Salts::CYaml
+           Salts::XmlParser
+           Salts::Mustache
+           Salts::DataBind
            cxxopts::cxxopts
            TurboScript::TurboScript
-           TurboHttp::TurboHttp
-           TurboNet::Crypto
+           Salts::CHTTP
+           Salts::CNet
+           Salts::S3
            actions
 )
 if(UNIX AND NOT APPLE)
@@ -85,16 +89,6 @@ cmake_config_target(
 add_executable(${TARGET_NAME_EXE})
 target_sources(${TARGET_NAME_EXE} PRIVATE main.cpp)
 target_link_libraries(${TARGET_NAME_EXE} PRIVATE ${TARGET_NAME_LIB})
-if(WIN32)
-    add_custom_command(
-        TARGET ${TARGET_NAME_EXE} POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                $<TARGET_RUNTIME_DLLS:${TARGET_NAME_EXE}>
-                "$<TARGET_FILE_DIR:${TARGET_NAME_EXE}>"
-        COMMAND_EXPAND_LISTS
-        VERBATIM
-    )
-endif()
 
 # Copy template files next to the runtime output so `praktor init` works from
 # the built binary.
@@ -119,9 +113,6 @@ cmake_config_target(
 install(
     TARGETS ${TARGET_NAME_EXE}
     EXPORT PraktorTargets
-    RUNTIME_DEPENDENCIES
-        PRE_EXCLUDE_REGEXES "api-ms-.*" "ext-ms-.*"
-        POST_EXCLUDE_REGEXES ".*[Ww][Ii][Nn][Dd][Oo][Ww][Ss][/\\\\][Ss]ystem32[/\\\\].*"
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
 if(ENABLE_TESTS)

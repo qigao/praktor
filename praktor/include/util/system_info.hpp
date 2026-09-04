@@ -11,7 +11,7 @@ namespace system {
 /**
  * @brief Native platform-based system information provider
  *
- * This implementation uses platform-native APIs exposed through TurboNet's
+ * This implementation uses platform-native APIs exposed through Salts::Core's
  * platform layer for OS and hardware information, plus direct process
  * environment access for environment variables.
  */

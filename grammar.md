@@ -419,7 +419,7 @@ The script language provides 8 built-in modules available in every script:
 | :--- | :--- |
 | `ctx` | Read/write workflow context |
 | `json` | JSON parsing, serialization, and querying |
-| `http` | Async HTTP client (TurboNet) |
+| `http` | Async HTTP client (Salts::CHTTP) |
 | `fs` | File system operations via turbo_fs |
 | `shell` | Execute shell commands (limited) |
 | `base64` | Base64 encoding/decoding |
@@ -438,7 +438,7 @@ The script language provides 8 built-in modules available in every script:
 - `json.stringify(val)`: Serialize a value to a JSON string.
 - `json.query(val, expr)`: Query a value using a JSONPath expression.
 
-**`http` — Async HTTP Client (TurboNet):**
+**`http` — Async HTTP Client (Salts::CHTTP):**
 
 - `http.get(url [, options])`: Send a GET request.
 - `http.post(url, body [, options])`: Send a POST request.

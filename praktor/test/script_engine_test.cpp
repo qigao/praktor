@@ -403,6 +403,28 @@ TEST_CASE("Script engine: context integration", "[script]") {
         CHECK(context.getValue<std::string>("copied_target") == "all");
     }
 
+    SECTION("native strings compare by content in conditions") {
+        context.setValue("EMPTY_TARGET", "");
+
+        auto r = Praktor::Script::execute(R"(
+            if (trim(ctx.get("BUILD_TARGET")) == "") {
+                ctx.set("non_empty_branch", "empty");
+            } else {
+                ctx.set("non_empty_branch", "non-empty");
+            }
+
+            if (trim(ctx.get("EMPTY_TARGET")) != "") {
+                ctx.set("empty_branch", "non-empty");
+            } else {
+                ctx.set("empty_branch", "empty");
+            }
+        )", context);
+
+        REQUIRE(r.success);
+        CHECK(context.getValue<std::string>("non_empty_branch") == "non-empty");
+        CHECK(context.getValue<std::string>("empty_branch") == "empty");
+    }
+
     SECTION("ctx.set stores structured values") {
         auto r = Praktor::Script::execute(R"(
             ctx.set("payload", "{\"name\":\"demo\",\"code\":7,\"items\":[\"one\",\"two\"]}");
@@ -712,7 +734,6 @@ TEST_CASE("Script engine: http module", "[script][http]") {
     SECTION("http.post with options returns structured JSON data") {
         const std::string script = R"script(
             import("net");
-            import("parser");
             body = json.stringify(map{name: "demo"});
             headers = json.parse("{\"Authorization\":\"Bearer post\",\"Content-Type\":\"application/json\"}");
             resp = http.post("http://127.0.0.1:PORT/submit", body, map{

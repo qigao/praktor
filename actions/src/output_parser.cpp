@@ -5,20 +5,18 @@
 #include <memory>
 #include <sstream>
 
-#include <turbo_parser.h>
+#include <json_parser.h>
 
 namespace actions {
 
 namespace {
 
 struct JsonDocumentDeleter {
-    void operator()(turbo_json_doc_t* document) const noexcept {
-        turbo_free_json(&document);
-    }
+    void operator()(json_value_t* document) const noexcept { json_free(document); }
 };
 
 struct SerializedJsonDeleter {
-    void operator()(char* text) const noexcept { turbo_json_serialize_free(text); }
+    void operator()(char* text) const noexcept { json_serialize_free(text); }
 };
 
 std::string trimCopy(const std::string& input) {
@@ -78,26 +76,25 @@ bool OutputParser::parseJson(
     const std::string& path,
     std::string& output
 ) {
-    turbo_json_doc_t* parsed_document = nullptr;
-    if (turbo_parse_json(reinterpret_cast<const uint8_t*>(input.data()), input.size(),
-                         &parsed_document) != 0 || !parsed_document) {
+    json_value_t* parsed_document = json_parse(input.data(), input.size());
+    if (!parsed_document) {
         return false;
     }
-    std::unique_ptr<turbo_json_doc_t, JsonDocumentDeleter> document(parsed_document);
+    std::unique_ptr<json_value_t, JsonDocumentDeleter> document(parsed_document);
 
     const std::string expression = normalizeJsonPath(trimCopy(path));
-    const json_value_t* value = turbo_json_path_get(document.get(), expression.c_str());
+    const json_value_t* value = json_path_get(document.get(), expression.c_str());
     if (!value) {
         return false;
     }
 
-    if (turbo_json_type(value) == TURBO_JSON_STRING) {
-        const char* text = turbo_json_string(value);
-        output.assign(text ? text : "", turbo_json_string_len(value));
+    if (json_type(value) == JSON_STRING) {
+        const char* text = json_string(value);
+        output.assign(text ? text : "", json_string_len(value));
     } else {
         size_t length = 0;
         std::unique_ptr<char, SerializedJsonDeleter> serialized(
-            turbo_json_serialize(value, &length));
+            json_serialize(value, &length));
         if (!serialized) {
             return false;
         }

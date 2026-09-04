@@ -15,7 +15,7 @@ Retro 当前把一部分系统管理能力放在 Praktor 工作流之外：
 - `package-sync-apply.yml` 先把升级包完整下载到文件，再由 `retro_package_installer` 解压并覆盖目标目录。
 - `retro_package_installer` 同时负责 ZIP 解压、文件覆盖和 marker 生命周期，职责边界过宽。
 
-Praktor 已经具备 YAML 工作流、DAG 调度、`program`、`download`、TurboHTTP 和进程执行能力。本设计把系统动作与归档数据通道收敛到 Praktor，同时保留 Retro 对安装状态和业务流程的所有权。
+Praktor 已经具备 YAML 工作流、DAG 调度、`program`、`download`、Salts::CHTTP 和进程执行能力。本设计把系统动作与归档数据通道收敛到 Praktor，同时保留 Retro 对安装状态和业务流程的所有权。
 
 ## 2. 目标与非目标
 
@@ -87,7 +87,7 @@ YAML parser / schema validation
 - Parser/schema 只负责输入格式、类型、范围和引用校验。
 - Executor 把声明式动作翻译为领域操作，不直接散落平台命令拼接。
 - Manager 负责状态查询、幂等、等待、超时、取消和结构化结果。
-- Adapter 负责 TurboHTTP、libarchive 和平台进程类型的转换。
+- Adapter 负责 Salts::CHTTP、libarchive 和平台进程类型的转换。
 - `ResourceRegistry` 负责 execution-local 非序列化资源及其清理。
 
 ## 5. 状态和所有权
@@ -269,11 +269,11 @@ sink 在 archive writer 获取后开始请求。只有生产完成、请求 body
 
 ## 9. HTTP 与 archive 并发
 
-TurboHTTP stream callback 提供的 buffer 只在 callback 期间有效，因此不能把 borrowed 指针保存到后续任务。HTTP 与 libarchive 之间使用有界字节 bridge：
+Salts::CHTTP stream callback 提供的 buffer 只在 callback 期间有效，因此不能把 borrowed 指针保存到后续任务。HTTP 与 libarchive 之间使用有界字节 bridge：
 
 ```text
-download: TurboHTTP producer -> bounded SPSC bridge -> libarchive reader
-upload:   libarchive writer  -> bounded SPSC bridge -> TurboHTTP consumer
+download: Salts::CHTTP producer -> bounded SPSC bridge -> libarchive reader
+upload:   libarchive writer  -> bounded SPSC bridge -> Salts::CHTTP consumer
 ```
 
 规则：

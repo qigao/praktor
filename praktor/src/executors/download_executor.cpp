@@ -3,17 +3,17 @@
 #include "util/path_utils.hpp"
 #include "util/variable_substitution.hpp"
 
-#include <turbo_crypto.h>
-#include <turbo_http.h>
+#include <chttp/chttp.h>
+#include <s3/s3_signer.h>
 
 #include <algorithm>
-#include <array>
 #include <cctype>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <sstream>
 #include <string_view>
+#include <vector>
 
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
@@ -28,23 +28,11 @@
 namespace Praktor::Execution {
 namespace {
 
-struct DownloadSink {
-  std::ofstream output;
-  std::uint64_t bytes_written = 0;
-  bool failed = false;
+struct DownloadUrl {
+  std::string connection_uri;
+  std::string authority;
+  std::string target;
 };
-
-void writeDownloadChunk(const char* data, std::size_t size, void* user_data) {
-  auto* sink = static_cast<DownloadSink*>(user_data);
-  if (sink == nullptr || sink->failed || data == nullptr || size == 0) {
-    return;
-  }
-  sink->output.write(data, static_cast<std::streamsize>(size));
-  sink->failed = !sink->output.good();
-  if (!sink->failed) {
-    sink->bytes_written += static_cast<std::uint64_t>(size);
-  }
-}
 
 bool isAbsoluteHttpsUrl(std::string_view url) {
   constexpr std::string_view prefix = "https://";
@@ -54,6 +42,57 @@ bool isAbsoluteHttpsUrl(std::string_view url) {
   return std::none_of(url.begin(), url.end(), [](unsigned char ch) {
     return std::iscntrl(ch) != 0 || std::isspace(ch) != 0;
   });
+}
+
+bool parseDownloadUrl(std::string_view url, DownloadUrl* result) {
+  constexpr std::string_view prefix = "https://";
+  if (result == nullptr || !isAbsoluteHttpsUrl(url)) {
+    return false;
+  }
+  const std::string_view remainder = url.substr(prefix.size());
+  const std::size_t path_start = remainder.find('/');
+  result->authority = std::string(remainder.substr(0, path_start));
+  result->target = path_start == std::string_view::npos
+                       ? "/"
+                       : std::string(remainder.substr(path_start));
+  if (result->authority.empty() || result->authority.find('@') != std::string::npos) {
+    return false;
+  }
+  const bool bracketed_ipv6 = result->authority.front() == '[';
+  const bool has_port = bracketed_ipv6
+                            ? result->authority.find("]:" ) != std::string::npos
+                            : result->authority.find(':') != std::string::npos;
+  result->connection_uri = "tls://" + result->authority + (has_port ? "" : ":443");
+  return true;
+}
+
+chttp_client_config downloadClientConfig(std::uint32_t timeout_ms) {
+  chttp_client_config config{};
+#if defined(_WIN32)
+  config.network.backend = NATIVE_IO_BACKEND_IOCP;
+#elif defined(__linux__)
+  config.network.backend = NATIVE_IO_BACKEND_EPOLL;
+#else
+  config.network.backend = NATIVE_IO_BACKEND_KQUEUE;
+#endif
+  config.network.connection_capacity = 1u;
+  config.network.command_capacity = 8u;
+  config.network.request_capacity = 2u;
+  config.network.completion_batch_capacity = 8u;
+  config.network.event_capacity = 16u;
+  config.network.max_send_bytes = 64u * 1024u;
+  config.network.receive_buffer_bytes = 64u * 1024u;
+  config.network.connect_timeout_ms = timeout_ms;
+  config.network.read_timeout_ms = timeout_ms;
+  config.network.write_timeout_ms = timeout_ms;
+  config.request_capacity = 1u;
+  config.max_start_line_bytes = 8u * 1024u;
+  config.max_header_count = 100u;
+  config.max_header_bytes = 64u * 1024u;
+  config.max_response_body_bytes = 0u;
+  config.max_informational_responses = 4u;
+  config.stream_chunk_bytes = 64u * 1024u;
+  return config;
 }
 
 std::string lowerTrim(std::string value) {
@@ -80,38 +119,17 @@ std::string sha256File(const std::filesystem::path& path, std::string* error) {
     return {};
   }
 
-  turbo_crypto_sha256_ctx_t context{};
-  if (turbo_crypto_sha256_init(&context) != TURBO_CRYPTO_OK) {
-    *error = "failed to initialize SHA-256 verification";
-    return {};
-  }
-  std::array<char, 64 * 1024> buffer{};
-  while (input) {
-    input.read(buffer.data(), static_cast<std::streamsize>(buffer.size()));
-    const auto count = input.gcount();
-    if (count > 0 &&
-        turbo_crypto_sha256_update(&context, buffer.data(), static_cast<std::size_t>(count)) !=
-            TURBO_CRYPTO_OK) {
-      *error = "failed to update SHA-256 verification";
-      return {};
-    }
-  }
+  std::vector<char> bytes((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
   if (!input.eof()) {
     *error = "failed to read downloaded file for SHA-256 verification";
     return {};
   }
-
-  std::array<unsigned char, TURBO_CRYPTO_SHA256_SIZE> digest{};
-  if (turbo_crypto_sha256_final(&context, digest.data()) != TURBO_CRYPTO_OK) {
-    *error = "failed to finalize SHA-256 verification";
+  char digest[S3_SIGNER_SHA256_HEX_SIZE + 1]{};
+  if (s3_signer_sha256_hex(bytes.data(), bytes.size(), digest) != SALTS_OK) {
+    *error = "failed to calculate SHA-256 verification";
     return {};
   }
-  std::ostringstream output;
-  output << std::hex << std::setfill('0');
-  for (const auto byte : digest) {
-    output << std::setw(2) << static_cast<unsigned int>(byte);
-  }
-  return output.str();
+  return std::string(digest);
 }
 
 bool replaceFile(const std::filesystem::path& source,
@@ -176,48 +194,36 @@ TaskResult DownloadExecutor::execute(const Task& task, WorkflowContext& context)
   std::filesystem::remove(temporary, ec);
   ec.clear();
 
-  DownloadSink sink;
-  sink.output.open(temporary, std::ios::binary | std::ios::trunc);
-  if (!sink.output) {
-    return fail("failed to open temporary download file: " + temporary.string());
+  DownloadUrl parsed_url;
+  if (!parseDownloadUrl(url, &parsed_url)) {
+    return fail("download.url must contain a valid HTTPS authority");
   }
-
-  turbo_http_options_t options{};
-  if (turbo_http_options_init(&options, sizeof(options)) != TURBO_OK) {
-    sink.output.close();
-    std::filesystem::remove(temporary, ec);
-    return fail("failed to initialize HTTPS download options");
-  }
-  options.timeout_ms = params.timeout_ms;
-
-  turbo_http_t* http = nullptr;
-  if (turbo_http_create_sync(&options, &http) != TURBO_OK || http == nullptr) {
-    sink.output.close();
-    std::filesystem::remove(temporary, ec);
+  chttp_client client{};
+  const chttp_client_config client_config = downloadClientConfig(params.timeout_ms);
+  if (chttp_client_init(&client, &client_config) != SALTS_OK) {
     return fail("failed to initialize HTTPS download client");
   }
-
-  http_response_t* response = turbo_http_request_stream_sync(
-      http, HTTP_GET, url.c_str(), nullptr, 0, nullptr, 0, nullptr, writeDownloadChunk, &sink);
-  sink.output.close();
-
+  chttp_options options{};
+  options.connection_uri = parsed_url.connection_uri.c_str();
+  options.authority = parsed_url.authority.c_str();
+  options.target = parsed_url.target.c_str();
+  options.timeout_ms = params.timeout_ms;
+  chttp_response response{};
+  chttp_error response_error{};
+  const int request_status = chttp_download_file(
+      &client, &options, temporary.string().c_str(), nullptr, nullptr, &response, &response_error);
   std::string error;
-  if (response == nullptr) {
-    error = "HTTPS download returned no response";
-  } else if (response->error_code != HTTP_ERROR_NONE) {
-    error = response->error != nullptr && response->error[0] != '\0'
-                ? std::string("HTTPS download failed: ") + response->error
-                : std::string("HTTPS download failed: ") +
-                      http_error_to_str(response->error_code);
-  } else if (response->status_code != 200) {
-    error = "HTTPS download failed with status " + std::to_string(response->status_code);
-  } else if (sink.failed) {
-    error = "failed while writing the HTTPS response body";
+  if (request_status != SALTS_OK) {
+    error = response_error.stage != nullptr
+                ? std::string("HTTPS download failed at ") + response_error.stage
+                : "HTTPS download failed";
+  } else if (response.status_code != 200) {
+    error = "HTTPS download failed with status " + std::to_string(response.status_code);
   }
-  if (response != nullptr) {
-    http_response_free(response);
+  chttp_response_destroy(&response);
+  if (chttp_client_destroy(&client, params.timeout_ms) != SALTS_OK && error.empty()) {
+    error = "failed to shut down HTTPS download client";
   }
-  turbo_http_destroy(http);
 
   const std::string expected_sha256 = lowerTrim(substituteVariables(params.sha256, context));
   if (error.empty() && !expected_sha256.empty() &&
@@ -242,7 +248,7 @@ TaskResult DownloadExecutor::execute(const Task& task, WorkflowContext& context)
   }
 
   context.setCurrentTaskOutput("path", destination.string());
-  context.setCurrentTaskOutput("bytes", std::to_string(sink.bytes_written));
+  context.setCurrentTaskOutput("bytes", std::to_string(std::filesystem::file_size(destination, ec)));
   context.setCurrentTaskOutput("sha256_verified", expected_sha256.empty() ? "false" : "true");
   return TaskResult(true);
 }

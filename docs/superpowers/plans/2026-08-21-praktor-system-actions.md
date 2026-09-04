@@ -6,7 +6,7 @@
 
 **Architecture:** YAML is parsed into typed request structs. Thin executors delegate to a process-backed service controller and a platform managed-process backend; operating-system state remains authoritative and every transition is confirmed by querying that state.
 
-**Tech Stack:** C++20, TurboParser YAML, TurboUtils, Praktor Shell `ProcessExecutor`, Catch2, Windows process APIs.
+**Tech Stack:** C++20, SaltsUtils YAML, Salts, Praktor Shell `ProcessExecutor`, Catch2, Windows process APIs.
 
 **Spec:** `docs/superpowers/specs/2026-08-21-praktor-system-actions-streaming-archive-design.md`
 

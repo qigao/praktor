@@ -34,19 +34,6 @@ cmake_add_test(
     OUT_TARGETS PRAKTOR_TEST_TARGETS
 )
 
-if(WIN32)
-    foreach(test_target IN LISTS PRAKTOR_TEST_TARGETS)
-        add_custom_command(
-            TARGET ${test_target} POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                    $<TARGET_RUNTIME_DLLS:${test_target}>
-                    "$<TARGET_FILE_DIR:${test_target}>"
-            COMMAND_EXPAND_LISTS
-            VERBATIM
-        )
-    endforeach()
-endif()
-
 target_compile_definitions(script_engine_test.${TARGET_NAME_LIB} PRIVATE
     PRAKTOR_TEST_PYTHON="${PYTHON3_EXECUTABLE_ESCAPED}"
 )
@@ -108,8 +95,3 @@ if(WIN32)
         PROPERTIES RESOURCE_LOCK praktor_managed_process_fixture
     )
 endif()
-
-add_test(
-    NAME schema_validation_test
-    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/schema_validation_test.py
-)

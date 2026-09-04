@@ -132,7 +132,7 @@ namespace {
         };
     }
 
-    void writeCompactLog(const turbo_log_entry_t* entry, void* /*user_data*/) {
+    void writeCompactLog(const salts_log_entry_t* entry, void* /*user_data*/) {
         std::string_view message(entry->message, entry->message_len);
 
         if (message.rfind("__TASK__:", 0) == 0) {
@@ -187,19 +187,19 @@ namespace {
         }
 
         switch (entry->level) {
-            case TURBO_LOG_LEVEL_INFO:
+            case SALTS_LOG_LEVEL_INFO:
                 std::fprintf(stdout, "    %.*s\n",
                              static_cast<int>(entry->message_len), entry->message);
                 std::fflush(stdout);
                 break;
-            case TURBO_LOG_LEVEL_WARN:
+            case SALTS_LOG_LEVEL_WARN:
                 std::fprintf(stderr, "%s[warn]%s %.*s\n",
                              Praktor::Logging::color("warn"), Praktor::Logging::reset(),
                              static_cast<int>(entry->message_len), entry->message);
                 std::fflush(stderr);
                 break;
-            case TURBO_LOG_LEVEL_ERROR:
-            case TURBO_LOG_LEVEL_FATAL:
+            case SALTS_LOG_LEVEL_ERROR:
+            case SALTS_LOG_LEVEL_FATAL:
                 std::fprintf(stderr, "%s[error]%s %.*s\n",
                              Praktor::Logging::color("error"), Praktor::Logging::reset(),
                              static_cast<int>(entry->message_len), entry->message);
@@ -222,7 +222,7 @@ namespace {
 
         // Create default logger with console sink
         tlog_config_t config = {
-            .min_level = verbose ? TURBO_LOG_LEVEL_DEBUG : TURBO_LOG_LEVEL_INFO,
+            .min_level = verbose ? SALTS_LOG_LEVEL_DEBUG : SALTS_LOG_LEVEL_INFO,
             .buffer_size = 0,
             .pool_size = 0
         };
@@ -231,24 +231,24 @@ namespace {
             throw std::runtime_error("Failed to create logger");
         }
 
-        turbo_log_sink_t* sink = nullptr;
+        salts_log_sink_t* sink = nullptr;
         if (verbose) {
-            turbo_console_sink_opts_t console_opts = {
+            salts_console_sink_opts_t console_opts = {
                 .output = stdout,
                 .use_colors = use_color ? 1 : 0,
-                .pattern = TURBO_LOG_DEFAULT_PATTERN
+                .pattern = SALTS_LOG_DEFAULT_PATTERN
             };
-            sink = turbo_sink_console_create(&console_opts);
+            sink = salts_sink_console_create(&console_opts);
         } else {
-            sink = turbo_sink_callback_create(writeCompactLog, nullptr);
-            if (sink && turbo_sink_set_min_level(sink, TURBO_LOG_LEVEL_INFO) != 0) {
-                turbo_sink_destroy(sink);
+            sink = salts_sink_callback_create(writeCompactLog, nullptr);
+            if (sink && salts_sink_set_min_level(sink, SALTS_LOG_LEVEL_INFO) != 0) {
+                salts_sink_destroy(sink);
                 sink = nullptr;
             }
         }
 
         if (!sink || tlog_add_sink(logger, sink) != 0) {
-            turbo_sink_destroy(sink);
+            salts_sink_destroy(sink);
             tlog_destroy(logger);
             throw std::runtime_error("Failed to configure logger sink");
         }

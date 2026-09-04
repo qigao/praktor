@@ -6,7 +6,7 @@
 
 **Architecture:** `IManagedProcessBackend::start()` returns the stable snapshot observed from the created process handle, allowing `ManagedProcessController` to own and safely compensate the exact instance when startup times out. `TaskRegistry` remains the sole terminal failure owner; nested failure trees use shared immutable storage and a terminal latch rejects overwrite attempts.
 
-**Tech Stack:** C++20, Win32 process APIs, TurboParser `WorkflowValue`, Catch2, CMake/CTest.
+**Tech Stack:** C++20, Win32 process APIs, SaltsUtils `WorkflowValue`, Catch2, CMake/CTest.
 
 **Spec:** `docs/superpowers/specs/2026-08-21-system-actions-residual-ownership-fixes-design.md`
 

@@ -8,7 +8,7 @@ namespace Praktor::Util {
 /**
  * @brief Substitutes variables in a template string using the Mustache engine.
  * 
- * Uses the TurboNet Mustache library to provide full Mustache spec support,
+ * Uses Salts::Mustache to provide full Mustache spec support,
  * including sections, inverted sections, and loops, powered by the WorkflowContext.
  * 
  * @param templateStr The Mustache template string.

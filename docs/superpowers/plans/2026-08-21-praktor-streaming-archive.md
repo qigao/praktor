@@ -2,11 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add bounded execution-local byte streams and ZIP file/stream extraction and creation backed by TurboHTTP and libarchive.
+**Goal:** Add bounded execution-local byte streams and ZIP file/stream extraction and creation backed by Salts::CHTTP and libarchive.
 
 **Architecture:** A workflow-owned `ResourceRegistry` stores strongly typed, single-consumer source/sink resources outside JSON context. HTTP and archive callbacks exchange owned byte copies through a fixed-capacity, cancelable SPSC byte bridge; archive writes only to validated staging paths.
 
-**Tech Stack:** C++20, TurboUtils bounded byte buffer and synchronization, TurboHTTP streaming facade, libarchive, TurboParser YAML, Catch2.
+**Tech Stack:** C++20, Salts bounded byte buffer and synchronization, Salts CHTTP streaming facade, libarchive, SaltsUtils YAML, Catch2.
 
 **Spec:** `docs/superpowers/specs/2026-08-21-praktor-system-actions-streaming-archive-design.md`
 
@@ -241,7 +241,7 @@ git add praktor/include/resources/bounded_byte_pipe.hpp praktor/src/resources/bo
 git commit -m "feat: add bounded byte stream bridge"
 ```
 
-### Task 4: Lazy TurboHTTP source and sink resources
+### Task 4: Lazy Salts::CHTTP source and sink resources
 
 **Files:**
 - Create: `praktor/include/resources/http_stream_resource.hpp`
@@ -254,7 +254,7 @@ git commit -m "feat: add bounded byte stream bridge"
 - Modify: `praktor/test/CMakeLists.txt`
 
 **Interfaces:**
-- Consumes: `StreamParams`, `ResourceRegistry`, `BoundedBytePipe`, `turbo_http_request_stream_sync`.
+- Consumes: `StreamParams`, `ResourceRegistry`, `BoundedBytePipe`, and Salts::CHTTP streaming.
 - Produces: lazy `HttpByteSource`/`HttpByteSink`; `StreamExecutor` writes an opaque handle to the configured output key.
 
 - [ ] **Step 1: Add local-server tests for lazy open**
@@ -277,7 +277,7 @@ Expected: missing HTTP resource and stream executor.
 
 - [ ] **Step 5: Implement lazy source/sink and one transfer worker per consumed resource**
 
-Create the sync client with `turbo_http_create_sync`. Set `options.follow_redirects = 0`, `options.max_redirects = 0`, and `options.retry.max_retries = 0`. For download, pass a null request-body reader, copy response callbacks into the pipe, and update TurboNet Crypto SHA-256 before publishing each copied chunk. For upload, `http_data_read_cb` reads from the pipe; pass content length when known and `0` for TurboHTTP chunked streaming when unknown. Start no thread until acquire.
+Create the sync client with Salts::CHTTP. Disable redirects and retries. For download, copy response callbacks into the pipe and update the Salts::CNet SHA-256 state before publishing each copied chunk. For upload, read from the pipe, provide the content length when known, and use chunked streaming when unknown. Start no thread until acquire.
 
 - [ ] **Step 6: Enforce non-replayable semantics**
 
@@ -310,7 +310,7 @@ git commit -m "feat: add lazy HTTP stream resources"
 - Modify: `praktor/test/CMakeLists.txt`
 
 **Interfaces:**
-- Consumes: `ArchiveParams`, libarchive callback API, TurboUtils file APIs where applicable.
+- Consumes: `ArchiveParams`, libarchive callback API, Salts file APIs where applicable.
 - Produces: `ArchiveReader`, `ArchiveWriter`, `validateArchiveEntryPath`, file→directory and directory/file-list→file operations.
 
 - [ ] **Step 1: Create golden ZIP tests**

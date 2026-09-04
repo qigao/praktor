@@ -38,7 +38,7 @@ cmake_config_target(actions NO_INSTALL FOLDER "actions/" VERSION ${PROJECT_VERSI
 
 # ── DEPENDENCIES ──
 
-target_link_libraries(actions PUBLIC praktor_shell PRIVATE TurboParser::Parser)
+target_link_libraries(actions PUBLIC praktor_shell PRIVATE Salts::JsonParser)
 
 if(WIN32)
     target_link_libraries(actions PRIVATE psapi)

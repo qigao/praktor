@@ -5,7 +5,7 @@
 #include <string>
 #include <string_view>
 
-// Keep raw-message and formatted-message calls distinct, matching TurboUtils' tlog API.
+// Keep raw-message and formatted-message calls distinct, matching Salts' tlog API.
 #define logd(message) TLOG_DEBUG(message)
 #define logi(message) TLOG_INFO(message)
 #define logw(message) TLOG_WARN(message)

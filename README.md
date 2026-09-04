@@ -4,7 +4,7 @@ Praktor is a high-performance, concurrent workflow engine written in modern C++2
 
 ## Core Features
 
-- **High-Performance YAML Parsing**: Powered by TurboUtils Parser with owned documents, structured diagnostics, and YPATH queries
+- **High-Performance YAML Parsing**: Powered by SaltsUtils Parser with owned documents, structured diagnostics, and YPATH queries
 - **📝 Declarative YAML Syntax**: Define your workflows in a simple, human-readable YAML format
 - **⚡ Concurrent Execution**: DAG-based executor runs independent tasks in parallel to maximize performance
 - **📦 Reusable Workflows**: Compose complex pipelines using the `uses` keyword to execute external workflow files
@@ -110,7 +110,7 @@ In the example above:
 ## Technology Stack
 
 - **C++20**: Modern C++ features for performance and safety
-- **TurboUtils Parser**: Shared YAML parsing, structured diagnostics, node traversal, and YPATH support
+- **SaltsUtils Parser**: Shared YAML parsing, structured diagnostics, node traversal, and YPATH support
 - **Turbo Parser**: Owns JSON/YAML/XML/CSV parsing and JSONPath/YPATH/XPath/CSVPath queries
 - **re2c + lemon**: Lexer and parser generator for the built-in script engine
 - **exprtk**: Expression evaluation for `when` conditions
@@ -159,13 +159,12 @@ is required when tests are enabled: it runs the schema validation test and the
 temporary HTTP server used by the script engine tests. The default workflow
 also expects these installed SDK directories relative to the repository:
 
-- `../external/pkgs/turboutils/bin`
+- `../external/pkgs/salts/bin`
+- `../external/pkgs/salts-utils/bin`
 - `../external/pkgs/turbo_script/bin`
-- `../external/pkgs/turbonet/bin`
-- `../external/pkgs/turbohttp/bin`
 
-With `praktor` installed or available on `PATH`, configure, build, prepare the
-runtime DLLs, and run all tests with:
+With `praktor` installed or available on `PATH`, configure, build, and run all
+tests with:
 
 ```powershell
 praktor --file cmake_build.yml
@@ -174,33 +173,25 @@ praktor --file cmake_build.yml
 The workflow runs this dependency chain:
 
 ```text
-configure -> build -> setup_turboutils_runtime
-                   -> setup_turboscript_runtime
-                   -> setup_turbonet_runtime
-                   -> setup_http_runtime -> test -> finish_report
+configure -> build -> test -> finish_report
 ```
 
-Each setup task copies only `*.dll` from its SDK `bin` directory into
-`build/Msvc/bin`. The order is intentional: TurboHTTP is copied last so its
-current HTTP runtime replaces the older transitive copy shipped by TurboScript.
-A missing SDK directory or an SDK without DLLs fails the workflow immediately.
+The selected preset supplies runtime search paths directly from the installed
+Salts, SaltsUtils, and TurboScript package roots. The workflow never copies
+DLLs; a missing runtime dependency fails immediately.
 
-For a Release build, override both the preset and its matching runtime output
-directory:
+For a Release build, override the preset:
 
 ```powershell
 praktor --file cmake_build.yml `
-  --input CMAKE_PRESET=win-release-user `
-  --input CMAKE_RUNTIME_OUTPUT_DIRECTORY=build/Msvc-Release/bin
+  --input CMAKE_PRESET=win-release-user
 ```
 
-The four SDK roots and `BUILD_TARGET` are workflow variables and can also be
-overridden with `--input`. vcpkg runtime dependencies, including BoringSSL's
-`ssl.dll` and `crypto.dll`, are supplied through the selected preset's `PATH`;
-the workflow does not copy vcpkg DLLs.
+`BUILD_TARGET` is a workflow variable and can be overridden with `--input`.
+All runtime dependencies are supplied through the selected preset's `PATH`;
+none are copied into the build or install directory.
 
-To run the CMake stages directly after the external DLLs have already been
-staged, use the matching presets:
+To run the CMake stages directly, use the matching presets:
 
 ```powershell
 cmake --fresh --preset win-dev-user
@@ -208,9 +199,7 @@ cmake --build --preset win-dev-user
 ctest --preset win-dev-user
 ```
 
-Direct `ctest` invocation bypasses the workflow setup tasks. If the build tree
-does not already contain the external runtime DLLs, use `cmake_build.yml`
-instead.
+Direct `ctest` uses the same preset-defined runtime paths as the workflow.
 
 To install the developer package after a successful build:
 
@@ -375,7 +364,7 @@ Any task can include a `script:` block that runs after the task action completes
 |--------|-----------|---------|
 | `ctx` | `get(path)`, `output(key, val)`, `set(path, val)` | Read/write workflow context |
 | `json` | `parse(str)`, `stringify(val)`, `query(val, jsonpath)` | JSON operations via Turbo Parser |
-| `http` | `get(url)`, `post(url, body)`, `put/del/patch/head/options` | Async HTTP client (TurboNet) |
+| `http` | `get(url)`, `post(url, body)`, `put/del/patch/head/options` | Async HTTP client (Salts::CHTTP) |
 | `fs` | `read(path)`, `write(path, data)`, `append(path, data)`, `exists/stat/mkdir/remove` | File system via turbo_fs |
 | `base64` | `encode(str)`, `decode(str)` | Base64 encoding/decoding |
 | `math` | `abs`, `ceil`, `floor`, `round`, `sqrt`, `pow`, `sin`, `cos`, `tan`, `log`, `exp`, `min`, `max`, `clamp`, `random`, `eval(expr [, vars])` | Math functions + exprtk expressions |
@@ -565,9 +554,8 @@ Complete documentation is available in the [docs/](./docs/README.md) directory:
 ### Building from Source
 
 Use the [Quick Start build workflow](#2-build-the-project) for the complete
-Windows configure, build, runtime setup, and test sequence. Keep the selected
-CMake preset and `CMAKE_RUNTIME_OUTPUT_DIRECTORY` paired so Debug and Release
-artifacts are never mixed.
+Windows configure, build, and test sequence. Keep Debug and Release presets
+separate so their artifacts and runtime roots are never mixed.
 
 ### Project Structure
 ```
@@ -584,7 +572,7 @@ praktor/
 
 ## Performance Characteristics
 
-- **YAML Parsing**: Shared TurboUtils Parser implementation across workflows and structured queries
+- **YAML Parsing**: Shared SaltsUtils Parser implementation across workflows and structured queries
 - **Memory Usage**: Minimal allocations with object pools and move semantics
 - **Concurrency**: Deadlock-free parallel execution with custom thread pool
 - **Scalability**: Tested with workflows containing 100+ tasks and deep dependency chains

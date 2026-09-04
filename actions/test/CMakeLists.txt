@@ -6,7 +6,7 @@ cmake_add_test(
         test_parallel_performance.cpp
         test_extended_nodes.cpp
         test_monitor.cpp
-    LIBS actions TurboUtils::TinyTest
+    LIBS actions Salts::TinyTest
     FEATURES cxx_std_17
     FOLDER "actions/tests"
 )

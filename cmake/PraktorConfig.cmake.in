@@ -1,7 +1,9 @@
 @PACKAGE_INIT@
 
 include(CMakeFindDependencyMacro)
-find_dependency(TurboParser CONFIG)
+find_dependency(Salts CONFIG)
+find_dependency(SaltsUtils CONFIG)
+find_dependency(TurboScript CONFIG)
 
 include("${CMAKE_CURRENT_LIST_DIR}/PraktorTargets.cmake")
 

@@ -2,7 +2,7 @@
 #include "core/execution_context.hpp"
 #include "actions/shell_executor.hpp"
 #include "actions/output_parser.hpp"
-#include <turbo_parser.h>
+#include <json_parser.h>
 #include <cmath>
 #include <limits>
 #include <stdexcept>
@@ -18,13 +18,12 @@ namespace {
 
 struct JsonDeleter {
   void operator()(json_value_t* value) const noexcept {
-    auto* document = reinterpret_cast<turbo_json_doc_t*>(value);
-    turbo_free_json(&document);
+        json_free(value);
   }
 };
 
 struct SerializedJsonDeleter {
-  void operator()(char* text) const noexcept { turbo_json_serialize_free(text); }
+    void operator()(char* text) const noexcept { json_serialize_free(text); }
 };
 
 using OwnedJson = std::unique_ptr<json_value_t, JsonDeleter>;
@@ -32,7 +31,7 @@ using OwnedSerializedJson = std::unique_ptr<char, SerializedJsonDeleter>;
 
 std::string serializeJson(const json_value_t* value) {
   size_t size = 0;
-  OwnedSerializedJson text(turbo_json_serialize(value, &size));
+    OwnedSerializedJson text(json_serialize(value, &size));
   if (!text) {
     throw std::runtime_error("Failed to serialize JSON value");
   }
@@ -41,32 +40,29 @@ std::string serializeJson(const json_value_t* value) {
 
 bool consumeJsonArrayFront(std::string_view input, std::string& item, std::string& remaining,
                            bool& has_more) {
-  turbo_json_doc_t* parsed_document = nullptr;
-  if (turbo_parse_json(reinterpret_cast<const uint8_t*>(input.data()), input.size(), &parsed_document) !=
-          0 ||
-      !parsed_document) {
+    json_value_t* parsed_document = json_parse(input.data(), input.size());
+    if (!parsed_document) {
     return false;
   }
   OwnedJson document(reinterpret_cast<json_value_t*>(parsed_document));
-  if (turbo_json_type(document.get()) != TURBO_JSON_ARRAY ||
-      turbo_json_array_size(document.get()) == 0) {
+    if (json_type(document.get()) != JSON_ARRAY || json_array_size(document.get()) == 0) {
     return false;
   }
 
-  item = serializeJson(turbo_json_array_get(document.get(), 0));
-  OwnedJson tail(turbo_json_create_array());
+    item = serializeJson(json_array_get(document.get(), 0));
+    OwnedJson tail(json_create_array());
   if (!tail) {
     throw std::bad_alloc();
   }
-  for (size_t index = 1; index < turbo_json_array_size(document.get()); ++index) {
-    OwnedJson child(turbo_json_clone(turbo_json_array_get(document.get(), index)));
-    if (!child || !turbo_json_array_add_checked(tail.get(), child.get())) {
+    for (size_t index = 1; index < json_array_size(document.get()); ++index) {
+        OwnedJson child(json_clone(json_array_get(document.get(), index)));
+        if (!child || !json_array_add_checked(tail.get(), child.get())) {
       throw std::runtime_error("Failed to rebuild JSON queue");
     }
     child.release();
   }
   remaining = serializeJson(tail.get());
-  has_more = turbo_json_array_size(tail.get()) != 0;
+    has_more = json_array_size(tail.get()) != 0;
   return true;
 }
 
@@ -618,17 +614,16 @@ void Executor::registerBuiltins() {
     std::string input = bb.get(input_key);
     auto parsed = OutputParser::parseKeyValue(input, delimiter, line_separator);
 
-    json_value_t* result = turbo_json_create_object();
+    json_value_t* result = json_create_object();
     if (!result) {
       return NodeStatus::FAILURE;
     }
     for (const auto& [key, value] : parsed) {
-      turbo_json_object_set_string(result, key.c_str(), value.c_str());
+      json_object_set_string(result, key.c_str(), value.c_str());
     }
 
     bb.set(output_key, serializeJson(result));
-    auto* result_document = reinterpret_cast<turbo_json_doc_t*>(result);
-    turbo_free_json(&result_document);
+    json_free(result);
     return NodeStatus::SUCCESS;
   });
 
