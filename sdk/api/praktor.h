@@ -24,6 +24,7 @@ typedef enum praktor_result {
 #define PRAKTOR_ABI_MINOR 0u
 
 #define PRAKTOR_CAPABILITY_JSON_WORKFLOW (UINT64_C(1) << 0)
+#define PRAKTOR_CAPABILITY_SCRIPT_ENGINE (UINT64_C(1) << 1)
 
 typedef enum praktor_error_phase {
     PRAKTOR_ERROR_PHASE_NONE = 0,
