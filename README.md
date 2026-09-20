@@ -694,6 +694,10 @@ praktor/
 
 ## License & Status
 
+Praktor first-party code is licensed under the Apache License 2.0. See
+[LICENSE](LICENSE). Bundled third-party code retains its upstream terms; see
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
 Praktor is actively developed. The current core engine provides:
 - ✅ Full YAML workflow specification support
 - ✅ Cross-file includes and modular design
