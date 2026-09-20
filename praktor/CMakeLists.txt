@@ -37,9 +37,13 @@ set(SOURCE_FILES
     src/util/praktor_init.cpp
     src/util/file_hash.cpp
     src/util/mustache_substitutor.cpp
-    # Script engine (TurboScript)
-    src/script/script_engine.cpp
 )
+
+if(ENABLE_SCRIPT_ENGINE)
+    list(APPEND SOURCE_FILES src/script/script_engine.cpp)
+else()
+    list(APPEND SOURCE_FILES src/script/script_engine_disabled.cpp)
+endif()
 
 add_library(${TARGET_NAME_LIB} ${SOURCE_FILES})
 target_include_directories(
@@ -60,17 +64,20 @@ target_link_libraries(
            Salts::Mustache
            Salts::DataBind
            cxxopts::cxxopts
-           TurboScript::TurboScript
            Salts::CHTTP
            Salts::CNet
            Salts::S3
            actions
 )
+if(ENABLE_SCRIPT_ENGINE)
+    target_link_libraries(${TARGET_NAME_LIB} PUBLIC TurboScript::TurboScript)
+endif()
 if(UNIX AND NOT APPLE)
     target_link_libraries(${TARGET_NAME_LIB} PUBLIC ${CMAKE_DL_LIBS})
 endif()
 target_compile_definitions(
-    ${TARGET_NAME_LIB} PUBLIC $<$<BOOL:WIN32>:NOMINMAX>
+    ${TARGET_NAME_LIB} PUBLIC PRAKTOR_SCRIPT_ENGINE_ENABLED=$<BOOL:${ENABLE_SCRIPT_ENGINE}>
+                              $<$<BOOL:WIN32>:NOMINMAX>
                               $<$<BOOL:WIN32>:WIN32_LEAN_AND_MEAN>
 )
 # MSVC: exprtk_test.cpp is huge, needs /bigobj
