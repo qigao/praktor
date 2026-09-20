@@ -3,7 +3,9 @@
 include(CMakeFindDependencyMacro)
 find_dependency(Salts CONFIG)
 find_dependency(SaltsUtils CONFIG)
-find_dependency(TurboScript CONFIG)
+if("@ENABLE_SCRIPT_ENGINE@" STREQUAL "ON")
+    find_dependency(TurboScript CONFIG)
+endif()
 
 include("${CMAKE_CURRENT_LIST_DIR}/PraktorTargets.cmake")
 
