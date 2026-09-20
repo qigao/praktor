@@ -4,15 +4,15 @@ Praktor is a high-performance C++20 workflow runtime for describing deterministi
 
 Praktor can run as a standalone automation engine through the current `praktor` CLI, or it can be embedded through the stable C API and used as a workflow/tool runtime underneath an LLM agent harness such as TurboAgent.
 
-## Naming Direction
+## Project Identity
 
-This repository is moving toward one public product name: **Praktor**.
+The repository, product, CLI, library, and public API now share one name: **Praktor**.
 
-- **Repository target name:** `Praktor` instead of `weave`, so the repository, product, CLI, library, and public API share one name.
-- **Source layout:** `sdk/` contains the embedding/API boundary and examples. It is part of Praktor, not a separate product.
-- **Public names:** the current `praktor` CLI, `Praktor` shared library/CMake package, and `praktor.h` API already use the product name and remain the stable executable/API surface.
+- **Repository:** `qigao/praktor`
+- **Source layout:** `praktor/` contains the workflow engine and CLI; `sdk/` contains the stable embedding/API boundary and runnable examples.
+- **Public names:** `praktor` CLI, `Praktor` shared library/CMake package, and `praktor.h` C API.
 
-The source-layout cleanup does not change runtime semantics: existing YAML workflows and the current C ABI remain unchanged.
+The repository rename and source-layout cleanup do not change runtime semantics: existing YAML workflows and the current C ABI remain unchanged.
 
 ## What Can a YAML Workflow Do?
 
