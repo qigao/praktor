@@ -63,7 +63,7 @@ endif()
 add_subdirectory(shared)
 add_subdirectory(praktor)
 add_subdirectory(actions)
-add_subdirectory(pistol)
+add_subdirectory(sdk)
 
 set(PRAKTOR_INSTALL_CMAKEDIR "${CMAKE_INSTALL_LIBDIR}/cmake/Praktor")
 
