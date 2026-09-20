@@ -1,6 +1,121 @@
-# Praktor - A Modern C++ YAML Workflow Engine
+# Praktor — A YAML Workflow Runtime for Automation and AI Agents
 
-Praktor is a high-performance, concurrent workflow engine written in modern C++20. It allows you to define complex task dependencies and execution logic in a clean, simple YAML format. It's designed for orchestrating build pipelines, deployments, data processing jobs, and other multi-step automated processes.
+Praktor is a high-performance C++20 workflow runtime for describing deterministic automation in YAML. A workflow is parsed into a dependency graph and executed with explicit inputs, conditions, retries, concurrency, reusable sub-workflows, scripts, system actions, and structured outputs.
+
+Praktor can run as a standalone automation engine through the current `praktor` CLI, or it can be embedded through the stable C API and used as a workflow/tool runtime underneath an LLM agent harness such as TurboAgent.
+
+## Naming Direction
+
+This repository is moving toward one public product name: **Praktor**.
+
+- **Repository target name:** `Praktor` instead of `weave`, so the repository, product, CLI, library, and public API share one name.
+- **`pistol/` target name:** `sdk/`. The directory is an embedding/API boundary, not a separate product, so it should use a descriptive name rather than another brand.
+- **Public names:** the current `praktor` CLI, `Praktor` shared library/CMake package, and `praktor.h` API already use the product name and remain the stable executable/API surface.
+
+The naming cleanup is intentionally separate from runtime semantics: existing YAML workflows and the current C ABI do not change when the repository and source-directory names are clarified.
+
+## What Can a YAML Workflow Do?
+
+A Praktor YAML file is an executable orchestration contract. It can describe both the graph of work and the actions executed inside each task.
+
+| Use case | What the workflow can express |
+|---|---|
+| **Build & test automation** | Configure, compile, run tests, collect outputs, gate later tasks on earlier results, and fan independent work out concurrently. |
+| **CI/release pipelines** | Build artifacts, download verified packages, run validation stages, package releases, and trigger success/failure handling. |
+| **Deployment & operations** | Run deployment commands, restart or inspect services, manage long-lived processes, retry transient operations, and perform rollback/notification flows. |
+| **Data/API automation** | Call HTTP endpoints, parse JSON/YAML/XML/CSV data, transform values in scripts, and pass structured results between tasks. |
+| **Reusable automation modules** | Package common flows as reusable YAML workflows with `uses`, inherited inputs, isolated task names, and namespaced outputs. |
+| **Dynamic workflows** | Expand tasks from runtime data, loop with `each`, branch with `when`, and use task-internal sequence/fallback/parallel/retry/if/while/switch control flow. |
+| **AI-assisted workflows** | Invoke OpenAI, Claude, or Gemini through reusable LLM templates and feed their structured outputs into deterministic downstream tasks. |
+| **Agent tool execution** | Expose a bounded, pre-defined YAML workflow as one high-level tool to an agent harness instead of giving the model many low-level shell operations. |
+
+A workflow can therefore replace a collection of ad-hoc shell scripts with one explicit, inspectable execution graph:
+
+```text
+inputs
+  │
+  ▼
+YAML workflow
+  │
+  ├── depends_on / when / each / retries / triggers
+  │
+  ▼
+DAG scheduler
+  │
+  ├── command
+  ├── download
+  ├── actions
+  ├── service / managed_process
+  ├── uses / dynamic_tasks
+  └── script
+  │
+  ▼
+structured task outputs
+  │
+  ▼
+next tasks / caller / agent
+```
+
+### Example: build, test, and package
+
+```yaml
+variables:
+  PRESET: linux-release
+
+tasks:
+  - name: configure
+    command: "cmake --preset {{ PRESET }}"
+
+  - name: build
+    depends_on: [configure]
+    command: "cmake --build --preset {{ PRESET }}"
+
+  - name: test
+    depends_on: [build]
+    retries:
+      count: 2
+      delay: "2s"
+    command: "ctest --preset {{ PRESET }} --output-on-failure"
+
+  - name: package
+    depends_on: [test]
+    when: "{{ tasks.test.status }} == 'success'"
+    command: "cmake --build --preset {{ PRESET }} --target package"
+```
+
+The important property is that **the YAML defines execution policy, not just a list of commands**. Dependencies, branching, retries, parallelism, outputs, error handling, and composition are part of the workflow contract.
+
+## TurboAgent Integration
+
+Praktor and TurboAgent have complementary responsibilities:
+
+```text
+OpenAI / Codex / other model
+            │
+            ▼
+      TurboAgent Harness
+            │
+      policy / approval
+      tool registry
+      thread / turn
+      memory / checkpoint
+            │
+            ▼
+   Praktor workflow tool
+            │
+     stable C embedding API
+            │
+            ▼
+        YAML workflow
+            │
+            ▼
+ deterministic execution
+```
+
+TurboAgent decides **what capability to invoke**; Praktor defines **how that capability is executed**. The current embedding boundary in `pistol/api/praktor.h` already accepts a workflow path plus JSON inputs and returns canonical JSON containing workflow status and task results. This makes a registered Praktor workflow a natural high-level TurboAgent tool.
+
+For agent-facing use, prefer a trusted workflow registry such as `build`, `test`, or `deploy` over allowing the model to provide arbitrary filesystem paths.
+
 
 ## Core Features
 
@@ -227,7 +342,7 @@ build/Msvc/bin/praktor.exe --file my_workflow.yml
 
 ## CLI Usage
 
-Praktor provides a powerful command-line interface with subcommands for different stages of your workflow lifecycle.
+The current `praktor` CLI provides subcommands for different stages of the workflow lifecycle.
 
 | Command | Description | Example Usage |
 |:---|:---|:---|
@@ -579,7 +694,7 @@ praktor/
 
 ## License & Status
 
-Praktor is actively developed and production-ready. The core engine is feature-complete with:
+Praktor is actively developed. The current core engine provides:
 - ✅ Full YAML workflow specification support
 - ✅ Cross-file includes and modular design
 - ✅ Thread-safe concurrent execution
@@ -668,4 +783,4 @@ Praktor is actively developed and production-ready. The core engine is feature-c
 
 ---
 
-**Join the Journey!** Praktor is more than a tool - it's a community building the future of workflow orchestration. Every contribution, big or small, makes a difference.
+**Praktor** aims to keep workflow authoring declarative, execution deterministic, and embedding simple enough for both conventional automation and agent-driven systems.
