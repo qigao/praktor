@@ -268,6 +268,7 @@ jobs:
         run: |
           set -euxo pipefail
           cc -std=c11 -D_DEFAULT_SOURCE -Wall -Wextra -Werror \
+            -fvisibility=hidden \
             -DTURBO_PRAKTOR_CONTRACT_USE_REAL_PRAKTOR \
             -I/opt/praktor/debug/include \
             -Ideps/turboagent/praktor_tools/include \
