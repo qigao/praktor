@@ -269,6 +269,19 @@ tasks:
 
 Praktor uses CMake with vcpkg for dependency management:
 
+For deployments that deliberately do not allow inline workflow scripts, Praktor
+also supports a core-only build:
+
+```bash
+cmake -S . -B build/core -DENABLE_SCRIPT_ENGINE=OFF
+```
+
+Core-only mode removes the TurboScript package dependency while preserving the
+YAML parser, DAG scheduler, command/actions/uses/dynamic/system runners, CLI, and
+C embedding API. A workflow containing `script:` is rejected when its
+`WorkflowExecutor` is created, before any task is scheduled. The C ABI reports
+this build capability through `PRAKTOR_CAPABILITY_SCRIPT_ENGINE`.
+
 Windows builds must run in an x64 Visual Studio developer environment. Python 3
 is required when tests are enabled: it runs the schema validation test and the
 temporary HTTP server used by the script engine tests. The default workflow
