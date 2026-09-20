@@ -1,0 +1,79 @@
+name: Core-only Configure Contract
+
+on:
+  pull_request:
+    paths:
+      - "CMakeLists.txt"
+      - "ProjectOptions.cmake"
+      - "cmake/PraktorConfig.cmake.in"
+      - "praktor/**"
+      - "sdk/**"
+      - ".github/workflows/core-only-contract.yml"
+  push:
+    branches:
+      - "feat/core-only-runtime"
+    paths:
+      - "CMakeLists.txt"
+      - "ProjectOptions.cmake"
+      - "cmake/PraktorConfig.cmake.in"
+      - "praktor/**"
+      - "sdk/**"
+      - ".github/workflows/core-only-contract.yml"
+  workflow_dispatch:
+
+jobs:
+  configure:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create contract-only dependency packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/praktor-contract"
+          mkdir -p "$root/salts/lib/cmake/Salts"
+          mkdir -p "$root/salts-utils/lib/cmake/SaltsUtils"
+          mkdir -p "$root/cxxopts/lib/cmake/cxxopts"
+
+          cat > "$root/salts/lib/cmake/Salts/SaltsConfig.cmake" <<'EOF'
+          foreach(component
+              Core JsonParser CYaml XmlParser Mustache DataBind CHTTP CNet S3 TinyTest)
+            if(NOT TARGET Salts::${component})
+              add_library(Salts::${component} INTERFACE IMPORTED)
+            endif()
+          endforeach()
+          set(Salts_FOUND TRUE)
+          EOF
+
+          cat > "$root/salts-utils/lib/cmake/SaltsUtils/SaltsUtilsConfig.cmake" <<'EOF'
+          set(SaltsUtils_FOUND TRUE)
+          EOF
+
+          cat > "$root/cxxopts/lib/cmake/cxxopts/cxxoptsConfig.cmake" <<'EOF'
+          if(NOT TARGET cxxopts::cxxopts)
+            add_library(cxxopts::cxxopts INTERFACE IMPORTED)
+          endif()
+          set(cxxopts_FOUND TRUE)
+          EOF
+
+          echo "SALTS_ROOT=$root/salts" >> "$GITHUB_ENV"
+          echo "SALTS_UTILS_ROOT=$root/salts-utils" >> "$GITHUB_ENV"
+          echo "CONTRACT_PREFIX=$root/cxxopts" >> "$GITHUB_ENV"
+
+      - name: Configure core-only runtime
+        run: |
+          cmake -S . -B build/core-contract             -DENABLE_SCRIPT_ENGINE=OFF             -DENABLE_TESTS=OFF             -DCMAKE_PREFIX_PATH="$CONTRACT_PREFIX"             -DCMAKE_INSTALL_PREFIX="$RUNNER_TEMP/praktor-install"
+
+      - name: Verify TurboScript is absent from core-only package graph
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q '^ENABLE_SCRIPT_ENGINE:BOOL=OFF$' build/core-contract/CMakeCache.txt
+          if grep -q 'TurboScript_DIR' build/core-contract/CMakeCache.txt; then
+            echo "TurboScript was unexpectedly discovered in core-only configure"
+            exit 1
+          fi
+          grep -q 'if("OFF" STREQUAL "ON")' build/core-contract/PraktorConfig.cmake
+          grep -q 'find_dependency(TurboScript CONFIG)' build/core-contract/PraktorConfig.cmake
+          echo "PRAKTOR_CORE_ONLY_CONFIGURE_OK"
