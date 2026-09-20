@@ -9,7 +9,7 @@ on:
       - "praktor/**"
       - "sdk/**"
       - "vcpkg.json"
-      - ".github/workflows/core-only-sdk.yml"
+      - ".github/workflows/core-only-real-sdk.yml"
   push:
     branches: [master]
     paths:
@@ -19,7 +19,7 @@ on:
       - "praktor/**"
       - "sdk/**"
       - "vcpkg.json"
-      - ".github/workflows/core-only-sdk.yml"
+      - ".github/workflows/core-only-real-sdk.yml"
   workflow_dispatch:
 
 permissions:
@@ -134,7 +134,7 @@ jobs:
         run: |
           set -euxo pipefail
           rm -rf build/linux-gcc-debug
-          cmake --preset linux-dev-user             -DENABLE_SCRIPT_ENGINE=OFF             -DENABLE_TESTS=OFF
+          cmake --preset linux-dev-user             -DENABLE_SCRIPT_ENGINE=OFF             -DENABLE_TESTS=ON
           cache=build/linux-gcc-debug/CMakeCache.txt
           grep -F 'ENABLE_SCRIPT_ENGINE:BOOL=OFF' "$cache"
           if grep -F 'TurboScript_DIR' "$cache"; then
@@ -223,10 +223,14 @@ jobs:
           }
 
           int main(int argc, char **argv) {
+            const praktor_api *api = praktor_get_api();
             if (argc != 3) return 2;
-            if (run_one(argv[1], 1, "success") != 0) return 3;
-            if (run_one(argv[2], 0, "ENABLE_SCRIPT_ENGINE=OFF") != 0) return 4;
-            puts("PRAKTOR_SCRIPTLESS_REAL_ABI_OK");
+            if (!api) return 3;
+            if ((api->capabilities & PRAKTOR_CAPABILITY_JSON_WORKFLOW) == 0) return 4;
+            if ((api->capabilities & PRAKTOR_CAPABILITY_SCRIPT_ENGINE) != 0) return 5;
+            if (run_one(argv[1], 1, "success") != 0) return 6;
+            if (run_one(argv[2], 0, "ENABLE_SCRIPT_ENGINE=OFF") != 0) return 7;
+            puts("PRAKTOR_CORE_ONLY_REAL_ABI_OK");
             return 0;
           }
           C
