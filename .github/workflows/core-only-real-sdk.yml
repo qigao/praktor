@@ -38,6 +38,7 @@ jobs:
       SALTS_SHA: f1d8466244e6e0d74baed86e99ae6205e431557f
       SALTS_UTILS_SHA: 615851439b939dc0692a410192e3bc79e0cec413
       VCPKG_SHA: b1b19307e2d2ec1eefbdb7ea069de7d4bcd31f01
+      TURBOAGENT_SHA: ebf99fd0944b07065055b3db641bcfc7f070c984
       CMAKE_BUILD_PARALLEL_LEVEL: 2
 
     steps:
@@ -75,6 +76,14 @@ jobs:
           ref: ${{ env.VCPKG_SHA }}
           path: vcpkg
           fetch-depth: 0
+          persist-credentials: false
+
+      - name: Checkout exact TurboAgent Praktor adapter
+        uses: actions/checkout@v4
+        with:
+          repository: qigao/TurboAgent
+          ref: ${{ env.TURBOAGENT_SHA }}
+          path: deps/turboagent
           persist-credentials: false
 
       - name: Prepare public toolchain
@@ -253,6 +262,25 @@ jobs:
 
           export LD_LIBRARY_PATH="/opt/praktor/debug/lib:/opt/salts-utils/debug/lib:/opt/salts/debug/lib:$GITHUB_WORKSPACE/vcpkg_installed/linux/x64-linux/debug/lib:$GITHUB_WORKSPACE/vcpkg_installed/linux/x64-linux/lib:$GITHUB_WORKSPACE/deps/salts/vcpkg_installed/linux/x64-linux/debug/lib:$GITHUB_WORKSPACE/deps/salts/vcpkg_installed/linux/x64-linux/lib:$GITHUB_WORKSPACE/deps/salts-utils/vcpkg_installed/linux/x64-linux/debug/lib:$GITHUB_WORKSPACE/deps/salts-utils/vcpkg_installed/linux/x64-linux/lib:${LD_LIBRARY_PATH:-}"
           "$smoke/build/praktor_real_smoke" "$smoke/command.yml" "$smoke/script.yml"
+
+      - name: Link TurboAgent adapter against real Praktor
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cc -std=c11 -D_DEFAULT_SOURCE -Wall -Wextra -Werror \
+            -DTURBO_PRAKTOR_CONTRACT_USE_REAL_PRAKTOR \
+            -I/opt/praktor/debug/include \
+            -Ideps/turboagent/praktor_tools/include \
+            -Ideps/turboagent/praktor_tools/tests/contract/include \
+            deps/turboagent/praktor_tools/src/turbo_praktor_tool_pack.c \
+            deps/turboagent/praktor_tools/tests/contract/mock_runtime.c \
+            deps/turboagent/praktor_tools/tests/contract/real_praktor_smoke.c \
+            -L/opt/praktor/debug/lib -lPraktor \
+            -Wl,-rpath,/opt/praktor/debug/lib \
+            -o "$RUNNER_TEMP/turboagent-real-praktor"
+
+          export LD_LIBRARY_PATH="/opt/praktor/debug/lib:/opt/salts-utils/debug/lib:/opt/salts/debug/lib:$GITHUB_WORKSPACE/vcpkg_installed/linux/x64-linux/debug/lib:$GITHUB_WORKSPACE/vcpkg_installed/linux/x64-linux/lib:$GITHUB_WORKSPACE/deps/salts/vcpkg_installed/linux/x64-linux/debug/lib:$GITHUB_WORKSPACE/deps/salts/vcpkg_installed/linux/x64-linux/lib:$GITHUB_WORKSPACE/deps/salts-utils/vcpkg_installed/linux/x64-linux/debug/lib:$GITHUB_WORKSPACE/deps/salts-utils/vcpkg_installed/linux/x64-linux/lib:${LD_LIBRARY_PATH:-}"
+          "$RUNNER_TEMP/turboagent-real-praktor"
 
       - name: Upload core-only installed SDK
         uses: actions/upload-artifact@v4
