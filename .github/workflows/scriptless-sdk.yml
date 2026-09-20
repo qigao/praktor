@@ -1,0 +1,255 @@
+name: Scriptless SDK integration
+
+on:
+  pull_request:
+    paths:
+      - "CMakeLists.txt"
+      - "ProjectOptions.cmake"
+      - "cmake/PraktorConfig.cmake.in"
+      - "praktor/**"
+      - "sdk/**"
+      - "vcpkg.json"
+      - ".github/workflows/scriptless-sdk.yml"
+  push:
+    branches: [master]
+    paths:
+      - "CMakeLists.txt"
+      - "ProjectOptions.cmake"
+      - "cmake/PraktorConfig.cmake.in"
+      - "praktor/**"
+      - "sdk/**"
+      - "vcpkg.json"
+      - ".github/workflows/scriptless-sdk.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: praktor-scriptless-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      SALTS_SHA: f1d8466244e6e0d74baed86e99ae6205e431557f
+      SALTS_UTILS_SHA: 615851439b939dc0692a410192e3bc79e0cec413
+      VCPKG_SHA: b1b19307e2d2ec1eefbdb7ea069de7d4bcd31f01
+      CMAKE_BUILD_PARALLEL_LEVEL: 2
+
+    steps:
+      - name: Checkout exact Praktor head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Verify source identity
+        shell: bash
+        run: |
+          set -euxo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          git diff --exit-code
+
+      - name: Checkout pinned public dependencies
+        uses: actions/checkout@v4
+        with:
+          repository: qigao/salts
+          ref: ${{ env.SALTS_SHA }}
+          path: deps/salts
+          persist-credentials: false
+
+      - uses: actions/checkout@v4
+        with:
+          repository: qigao/salts-utils
+          ref: ${{ env.SALTS_UTILS_SHA }}
+          path: deps/salts-utils
+          persist-credentials: false
+
+      - uses: actions/checkout@v4
+        with:
+          repository: microsoft/vcpkg
+          ref: ${{ env.VCPKG_SHA }}
+          path: vcpkg
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Prepare public toolchain
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y ninja-build pkg-config nasm curl xz-utils
+          ./vcpkg/bootstrap-vcpkg.sh -disableMetrics
+          sudo mkdir -p /opt/salts /opt/salts-utils /opt/praktor
+          sudo chown -R "$USER":"$USER" /opt/salts /opt/salts-utils /opt/praktor
+          sudo ln -sfn "$GITHUB_WORKSPACE/vcpkg" /opt/vcpkg
+          bash deps/salts-utils/cmake/ci/install-re2c.sh
+
+      - name: Cache vcpkg binary archives
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/vcpkg/archives
+          key: praktor-scriptless-vcpkg-${{ runner.os }}-${{ runner.arch }}-${{ env.VCPKG_SHA }}-v1
+
+      - name: Build and install pinned Salts
+        working-directory: deps/salts
+        env:
+          PROJECT_ROOT: ${{ runner.temp }}/salts-project
+          VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cmake --preset linux-dev-user             -DENABLE_SANITIZER_ADDRESS=OFF             -DENABLE_SANITIZER_UNDEFINED=OFF
+          cmake --build build/linux-gcc-debug --target install -j2
+          package="$RUNNER_TEMP/salts-project/external/pkgs/salts/debug"
+          test -f "$package/lib/cmake/Salts/SaltsConfig.cmake"
+          ln -sfn "$package" /opt/salts/debug
+
+      - name: Build host Lemon for SaltsUtils
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cmake -S deps/salts-utils/tools/lemon                 -B deps/salts-utils/build/host-lemon                 -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build deps/salts-utils/build/host-lemon --target lemon -j2
+
+      - name: Build and install pinned SaltsUtils
+        working-directory: deps/salts-utils
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cmake --preset linux-dev-user             -DENABLE_SANITIZER_ADDRESS=OFF             -DENABLE_SANITIZER_UNDEFINED=OFF             -DSALTS_UTILS_HOST_LEMON_EXECUTABLE="$GITHUB_WORKSPACE/deps/salts-utils/build/host-lemon/lemon"             -DDATABIND_HOST_LEMON_EXECUTABLE="$GITHUB_WORKSPACE/deps/salts-utils/build/host-lemon/lemon"
+          cmake --build build/linux-gcc-debug --target install -j2
+          test -f /opt/salts-utils/debug/lib/cmake/SaltsUtils/SaltsUtilsConfig.cmake
+
+      - name: Configure real Praktor without TurboScript
+        shell: bash
+        env:
+          SALTS_ROOT: /opt/salts/debug
+          SALTS_UTILS_ROOT: /opt/salts-utils/debug
+          VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+        run: |
+          set -euxo pipefail
+          rm -rf build/linux-gcc-debug
+          cmake --preset linux-dev-user             -DPRAKTOR_ENABLE_SCRIPT=OFF             -DENABLE_TESTS=OFF
+          cache=build/linux-gcc-debug/CMakeCache.txt
+          grep -F 'PRAKTOR_ENABLE_SCRIPT:BOOL=OFF' "$cache"
+          if grep -F 'TurboScript_DIR' "$cache"; then
+            echo "scriptless configure unexpectedly resolved TurboScript" >&2
+            exit 1
+          fi
+
+      - name: Build and install real Praktor SDK
+        shell: bash
+        env:
+          SALTS_ROOT: /opt/salts/debug
+          SALTS_UTILS_ROOT: /opt/salts-utils/debug
+          VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+        run: |
+          set -euxo pipefail
+          cmake --build build/linux-gcc-debug --target install -j2
+          test -f /opt/praktor/debug/lib/cmake/Praktor/PraktorConfig.cmake
+          test -f /opt/praktor/debug/include/praktor.h
+          if grep -R -n 'TurboScript' /opt/praktor/debug/lib/cmake/Praktor; then
+            echo "scriptless installed package still requires TurboScript" >&2
+            exit 1
+          fi
+
+      - name: Build installed-package ABI smoke
+        shell: bash
+        run: |
+          set -euxo pipefail
+          smoke="$RUNNER_TEMP/praktor-real-smoke"
+          mkdir -p "$smoke"
+          cat > "$smoke/CMakeLists.txt" <<'CMAKE'
+          cmake_minimum_required(VERSION 3.20)
+          project(praktor_real_smoke LANGUAGES C)
+          find_package(Praktor CONFIG REQUIRED)
+          add_executable(praktor_real_smoke main.c)
+          target_link_libraries(praktor_real_smoke PRIVATE Praktor::Praktor)
+          CMAKE
+          cat > "$smoke/main.c" <<'C'
+          #include <praktor.h>
+          #include <stdio.h>
+          #include <stdlib.h>
+          #include <string.h>
+
+          static int run_one(const char *path, int expect_success, const char *needle) {
+            praktor_execute_request request = PRAKTOR_EXECUTE_REQUEST_INIT;
+            praktor_owned_json output = PRAKTOR_OWNED_JSON_INIT;
+            praktor_error error = PRAKTOR_ERROR_INIT;
+            praktor_result result;
+
+            request.workflow_path = path;
+            request.input_json = "{}";
+            request.input_json_size = 2;
+            result = praktor_execute_workflow(&request, &output, &error);
+
+            if (expect_success) {
+              if (result != PRAKTOR_RESULT_SUCCESS) {
+                fprintf(stderr, "expected success, got %d: %s\n", (int)result, error.message);
+                praktor_release_json(&output);
+                return 1;
+              }
+            } else if (result != PRAKTOR_RESULT_EXECUTION_FAILED) {
+              fprintf(stderr, "expected workflow failure, got %d: %s\n", (int)result, error.message);
+              praktor_release_json(&output);
+              return 1;
+            }
+
+            if (!output.data || !strstr(output.data, needle)) {
+              fprintf(stderr, "missing result evidence: %s\n", needle);
+              if (output.data) fprintf(stderr, "%s\n", output.data);
+              praktor_release_json(&output);
+              return 1;
+            }
+            praktor_release_json(&output);
+            return 0;
+          }
+
+          int main(int argc, char **argv) {
+            if (argc != 3) return 2;
+            if (run_one(argv[1], 1, "success") != 0) return 3;
+            if (run_one(argv[2], 0, "TurboScript support is disabled") != 0) return 4;
+            puts("PRAKTOR_SCRIPTLESS_REAL_ABI_OK");
+            return 0;
+          }
+          C
+          cat > "$smoke/command.yml" <<'YAML'
+          tasks:
+            - name: command_ok
+              command: "printf praktor-scriptless-ok"
+          YAML
+          cat > "$smoke/script.yml" <<'YAML'
+          tasks:
+            - name: script_rejected
+              script: |
+                ctx.output("unexpected", true);
+          YAML
+
+          export SALTS_ROOT=/opt/salts/debug
+          export CMAKE_PREFIX_PATH="/opt/praktor/debug;/opt/salts-utils/debug;/opt/salts/debug"
+          cmake -S "$smoke" -B "$smoke/build" -G Ninja
+          cmake --build "$smoke/build" -j2
+
+          export LD_LIBRARY_PATH="/opt/praktor/debug/lib:/opt/salts-utils/debug/lib:/opt/salts/debug/lib:$GITHUB_WORKSPACE/vcpkg_installed/linux/x64-linux/debug/lib:$GITHUB_WORKSPACE/vcpkg_installed/linux/x64-linux/lib:${LD_LIBRARY_PATH:-}"
+          "$smoke/build/praktor_real_smoke" "$smoke/command.yml" "$smoke/script.yml"
+
+      - name: Upload scriptless installed SDK
+        uses: actions/upload-artifact@v4
+        with:
+          name: praktor-scriptless-sdk-${{ github.sha }}
+          retention-days: 14
+          path: /opt/praktor/debug
+          if-no-files-found: error
+
+      - name: Verify tracked source remains clean
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test -z "$(git status --porcelain --untracked-files=no)"
