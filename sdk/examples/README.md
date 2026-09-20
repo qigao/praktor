@@ -1,4 +1,4 @@
-# Pistol Examples (BT-Native)
+# Praktor SDK Examples (BT-Native)
 
 This directory contains Behavior Tree (BT) powered operational workflows.
 
@@ -73,7 +73,7 @@ tasks:
 
 Validate workflow:
 ```powershell
-praktor validate -f pistol\examples\ops-event-handler-example.yml
+praktor validate -f sdk\examples\ops-event-handler-example.yml
 ```
 
 The reboot and shutdown examples call the native immediate power APIs. They can
