@@ -3,7 +3,7 @@
 #include "util/path_utils.hpp"
 #include "util/variable_substitution.hpp"
 
-#include <chttp/chttp.h>
+#include <http_client/http.h>
 #include <s3/s3_signer.h>
 
 #include <algorithm>
