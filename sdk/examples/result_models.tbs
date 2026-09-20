@@ -1,4 +1,4 @@
-// Shared class-first mapper schemas for the Pistol examples.
+// Shared class-first mapper schemas for the Praktor SDK examples.
 import("mapper");
 
 class ActionResult {
