@@ -29,7 +29,7 @@ std::filesystem::path createTempDir() {
     const auto now = std::chrono::system_clock::now().time_since_epoch().count();
     std::mt19937 rng(static_cast<unsigned>(now));
     const auto dir = std::filesystem::temp_directory_path() /
-        ("praktor_pistol_" + std::to_string(rng()));
+        ("praktor_sdk_" + std::to_string(rng()));
     std::filesystem::create_directories(dir);
     return dir;
 }
@@ -60,7 +60,7 @@ constexpr long long kSequentialMinMs = 900;
 
 } // namespace
 
-TEST_CASE("pistol API publishes JSON workflow execution and ownership", "[pistol][abi]") {
+TEST_CASE("Praktor C API publishes JSON workflow execution and ownership", "[sdk][abi]") {
     const praktor_api* api = praktor_get_api();
 
     REQUIRE(api != nullptr);
@@ -77,7 +77,7 @@ TEST_CASE("pistol API publishes JSON workflow execution and ownership", "[pistol
     CHECK(error.phase == PRAKTOR_ERROR_PHASE_REQUEST);
 }
 
-TEST_CASE("pistol API preserves sequential runner defaults", "[pistol]") {
+TEST_CASE("Praktor C API preserves sequential runner defaults", "[sdk]") {
     const auto dir = createTempDir();
     const auto workflow_path = dir / "workflow.yml";
     const std::string workflow =
@@ -115,7 +115,7 @@ TEST_CASE("pistol API preserves sequential runner defaults", "[pistol]") {
     std::filesystem::remove_all(dir);
 }
 
-TEST_CASE("pistol API preserves heterogeneous JSON inputs and outputs", "[pistol][json]") {
+TEST_CASE("Praktor C API preserves heterogeneous JSON inputs and outputs", "[sdk][json]") {
     const auto dir = createTempDir();
     const auto workflow_path = dir / "workflow.yml";
     writeFile(workflow_path, R"(
@@ -159,7 +159,7 @@ tasks:
     std::filesystem::remove_all(dir);
 }
 
-TEST_CASE("pistol API rejects malformed JSON and non-object roots", "[pistol][json]") {
+TEST_CASE("Praktor C API rejects malformed JSON and non-object roots", "[sdk][json]") {
     const auto dir = createTempDir();
     const auto workflow_path = dir / "workflow.yml";
     writeFile(workflow_path, "tasks: []\n");
@@ -182,7 +182,7 @@ TEST_CASE("pistol API rejects malformed JSON and non-object roots", "[pistol][js
     std::filesystem::remove_all(dir);
 }
 
-TEST_CASE("pistol API returns canonical JSON for workflow failure", "[pistol][json]") {
+TEST_CASE("Praktor C API returns canonical JSON for workflow failure", "[sdk][json]") {
     const auto dir = createTempDir();
     const auto workflow_path = dir / "workflow.yml";
     writeFile(workflow_path, R"(
