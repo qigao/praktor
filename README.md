@@ -9,10 +9,10 @@ Praktor can run as a standalone automation engine through the current `praktor` 
 This repository is moving toward one public product name: **Praktor**.
 
 - **Repository target name:** `Praktor` instead of `weave`, so the repository, product, CLI, library, and public API share one name.
-- **`pistol/` target name:** `sdk/`. The directory is an embedding/API boundary, not a separate product, so it should use a descriptive name rather than another brand.
+- **Source layout:** `sdk/` contains the embedding/API boundary and examples. It is part of Praktor, not a separate product.
 - **Public names:** the current `praktor` CLI, `Praktor` shared library/CMake package, and `praktor.h` API already use the product name and remain the stable executable/API surface.
 
-The naming cleanup is intentionally separate from runtime semantics: existing YAML workflows and the current C ABI do not change when the repository and source-directory names are clarified.
+The source-layout cleanup does not change runtime semantics: existing YAML workflows and the current C ABI remain unchanged.
 
 ## What Can a YAML Workflow Do?
 
@@ -112,7 +112,7 @@ OpenAI / Codex / other model
  deterministic execution
 ```
 
-TurboAgent decides **what capability to invoke**; Praktor defines **how that capability is executed**. The current embedding boundary in `pistol/api/praktor.h` already accepts a workflow path plus JSON inputs and returns canonical JSON containing workflow status and task results. This makes a registered Praktor workflow a natural high-level TurboAgent tool.
+TurboAgent decides **what capability to invoke**; Praktor defines **how that capability is executed**. The embedding boundary in `sdk/api/praktor.h` already accepts a workflow path plus JSON inputs and returns canonical JSON containing workflow status and task results. This makes a registered Praktor workflow a natural high-level TurboAgent tool.
 
 For agent-facing use, prefer a trusted workflow registry such as `build`, `test`, or `deploy` over allowing the model to provide arbitrary filesystem paths.
 
