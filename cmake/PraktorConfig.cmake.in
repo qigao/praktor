@@ -3,6 +3,7 @@
 include(CMakeFindDependencyMacro)
 find_dependency(Salts CONFIG)
 find_dependency(SaltsUtils CONFIG)
+find_dependency(Chttp CONFIG)
 if("@ENABLE_SCRIPT_ENGINE@" STREQUAL "ON")
     find_dependency(TurboScript CONFIG)
 endif()

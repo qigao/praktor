@@ -62,11 +62,10 @@ target_link_libraries(
            Salts::CYaml
            Salts::XmlParser
            Salts::Mustache
-           Salts::DataBind
            cxxopts::cxxopts
-           Salts::CHTTP
+           CHttp::Client
            Salts::CNet
-           Salts::S3
+           CHttp::S3
            actions
 )
 if(ENABLE_SCRIPT_ENGINE)
