@@ -53,6 +53,8 @@ find_package(Salts CONFIG REQUIRED
              PATHS "$ENV{SALTS_ROOT}" NO_DEFAULT_PATH)
 find_package(SaltsUtils CONFIG REQUIRED
              PATHS "$ENV{SALTS_UTILS_ROOT}" NO_DEFAULT_PATH)
+find_package(Chttp CONFIG REQUIRED
+             PATHS "$ENV{CHTTP_ROOT}" NO_DEFAULT_PATH)
 if(ENABLE_SCRIPT_ENGINE)
     find_package(TurboScript CONFIG REQUIRED
                  PATHS "$ENV{TURBOSCRIPT_ROOT}" NO_DEFAULT_PATH)
