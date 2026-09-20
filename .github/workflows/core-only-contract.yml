@@ -52,6 +52,9 @@ jobs:
           EOF
 
           cat > "$root/chttp/lib/cmake/Chttp/ChttpConfig.cmake" <<'EOF'
+          if(NOT TARGET CHttp::Client)
+            add_library(CHttp::Client INTERFACE IMPORTED)
+          endif()
           if(NOT TARGET CHttp::S3)
             add_library(CHttp::S3 INTERFACE IMPORTED)
           endif()
