@@ -19,8 +19,8 @@ set(PROJECT_VERSION
 )
 
 set(PROJECT_NAME "Praktor")
-set(PROJECT_DESCRIPTION "A task & workflow orchestrator")
-set(PROJECT_WEBSITE "http://github.com/qigao/project-cpp-template.git")
+set(PROJECT_DESCRIPTION "A YAML workflow runtime for automation and AI agents")
+set(PROJECT_WEBSITE "https://github.com/qigao/praktor")
 set(APPLICATION_LICENSE "Apache2 License")
 
 # Set the project name and language
