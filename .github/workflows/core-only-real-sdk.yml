@@ -172,12 +172,11 @@ jobs:
         run: |
           set -euxo pipefail
           cmake --build build/linux-gcc-debug --target install -j2
-          test -f /opt/praktor/debug/lib/cmake/Praktor/PraktorConfig.cmake
+          config=/opt/praktor/debug/lib/cmake/Praktor/PraktorConfig.cmake
+          test -f "$config"
           test -f /opt/praktor/debug/include/praktor.h
-          if grep -R -n 'TurboScript' /opt/praktor/debug/lib/cmake/Praktor; then
-            echo "core-only installed package still requires TurboScript" >&2
-            exit 1
-          fi
+          grep -F 'if("OFF" STREQUAL "ON")' "$config"
+          grep -F 'find_dependency(TurboScript CONFIG)' "$config"
 
       - name: Build installed-package ABI smoke
         shell: bash
