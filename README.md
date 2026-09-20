@@ -1,22 +1,22 @@
-# TurboWeave — A YAML Workflow Runtime for Automation and AI Agents
+# Praktor — A YAML Workflow Runtime for Automation and AI Agents
 
-TurboWeave is a high-performance C++20 workflow runtime for describing deterministic automation in YAML. A workflow is parsed into a dependency graph and executed with explicit inputs, conditions, retries, concurrency, reusable sub-workflows, scripts, system actions, and structured outputs.
+Praktor is a high-performance C++20 workflow runtime for describing deterministic automation in YAML. A workflow is parsed into a dependency graph and executed with explicit inputs, conditions, retries, concurrency, reusable sub-workflows, scripts, system actions, and structured outputs.
 
-TurboWeave can run as a standalone automation engine through the current `praktor` CLI, or it can be embedded through the stable C API and used as a workflow/tool runtime underneath an LLM agent harness such as TurboAgent.
+Praktor can run as a standalone automation engine through the current `praktor` CLI, or it can be embedded through the stable C API and used as a workflow/tool runtime underneath an LLM agent harness such as TurboAgent.
 
 ## Naming Direction
 
-This repository is moving toward one public product name: **TurboWeave**.
+This repository is moving toward one public product name: **Praktor**.
 
-- **Repository target name:** `TurboWeave` instead of the generic `weave`.
+- **Repository target name:** `Praktor` instead of `weave`, so the repository, product, CLI, library, and public API share one name.
 - **`pistol/` target name:** `sdk/`. The directory is an embedding/API boundary, not a separate product, so it should use a descriptive name rather than another brand.
-- **Compatibility names:** the current `praktor` CLI, `Praktor` shared library, CMake package, and `praktor.h` API remain the executable/API compatibility surface until a separate migration is performed.
+- **Public names:** the current `praktor` CLI, `Praktor` shared library/CMake package, and `praktor.h` API already use the product name and remain the stable executable/API surface.
 
-The naming cleanup is intentionally separate from runtime semantics: existing YAML workflows and the current C ABI do not need to change just because the repository and source-directory names are clarified.
+The naming cleanup is intentionally separate from runtime semantics: existing YAML workflows and the current C ABI do not change when the repository and source-directory names are clarified.
 
 ## What Can a YAML Workflow Do?
 
-A TurboWeave YAML file is an executable orchestration contract. It can describe both the graph of work and the actions executed inside each task.
+A Praktor YAML file is an executable orchestration contract. It can describe both the graph of work and the actions executed inside each task.
 
 | Use case | What the workflow can express |
 |---|---|
@@ -87,7 +87,7 @@ The important property is that **the YAML defines execution policy, not just a l
 
 ## TurboAgent Integration
 
-TurboWeave and TurboAgent have complementary responsibilities:
+Praktor and TurboAgent have complementary responsibilities:
 
 ```text
 OpenAI / Codex / other model
@@ -101,7 +101,7 @@ OpenAI / Codex / other model
       memory / checkpoint
             │
             ▼
-   TurboWeave workflow tool
+   Praktor workflow tool
             │
      stable C embedding API
             │
@@ -112,7 +112,7 @@ OpenAI / Codex / other model
  deterministic execution
 ```
 
-TurboAgent decides **what capability to invoke**; TurboWeave defines **how that capability is executed**. The current embedding boundary in `pistol/api/praktor.h` already accepts a workflow path plus JSON inputs and returns canonical JSON containing workflow status and task results. This makes a registered TurboWeave workflow a natural high-level TurboAgent tool.
+TurboAgent decides **what capability to invoke**; Praktor defines **how that capability is executed**. The current embedding boundary in `pistol/api/praktor.h` already accepts a workflow path plus JSON inputs and returns canonical JSON containing workflow status and task results. This makes a registered Praktor workflow a natural high-level TurboAgent tool.
 
 For agent-facing use, prefer a trusted workflow registry such as `build`, `test`, or `deploy` over allowing the model to provide arbitrary filesystem paths.
 
@@ -138,7 +138,7 @@ For agent-facing use, prefer a trusted workflow registry such as `build`, `test`
 
 ## Two-Level Orchestration Model
 
-TurboWeave has two distinct orchestration levels:
+Praktor has two distinct orchestration levels:
 
 1. **Workflow organization (DAG level)**:
    flow-level task properties such as `depends_on`, `when`, `each`, `retries`, `triggers`, and `script` organize how a task is scheduled and completed.
@@ -363,7 +363,7 @@ The current `praktor` CLI provides subcommands for different stages of the workf
 
 ## Reusable Workflows with `uses`
 
-TurboWeave promotes modularity by allowing you to execute external workflow files as single tasks.
+Praktor promotes modularity by allowing you to execute external workflow files as single tasks.
 
 ### Create a reusable module (`modules/docker-build.yml`):
 ```yaml
@@ -561,7 +561,7 @@ See `examples/ai-chat.yml`, `examples/ai-code-review.yml`, `examples/ai-translat
 
 ## Architecture Overview
 
-TurboWeave is designed with performance and modularity in mind:
+Praktor is designed with performance and modularity in mind:
 
 ```
 ┌─────────────────┐    ┌──────────────────┐    ┌─────────────────────┐
@@ -694,7 +694,7 @@ praktor/
 
 ## License & Status
 
-TurboWeave is actively developed. The current core engine provides:
+Praktor is actively developed. The current core engine provides:
 - ✅ Full YAML workflow specification support
 - ✅ Cross-file includes and modular design
 - ✅ Thread-safe concurrent execution
@@ -783,4 +783,4 @@ TurboWeave is actively developed. The current core engine provides:
 
 ---
 
-**TurboWeave** aims to keep workflow authoring declarative, execution deterministic, and embedding simple enough for both conventional automation and agent-driven systems.
+**Praktor** aims to keep workflow authoring declarative, execution deterministic, and embedding simple enough for both conventional automation and agent-driven systems.
