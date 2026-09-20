@@ -53,8 +53,10 @@ find_package(Salts CONFIG REQUIRED
              PATHS "$ENV{SALTS_ROOT}" NO_DEFAULT_PATH)
 find_package(SaltsUtils CONFIG REQUIRED
              PATHS "$ENV{SALTS_UTILS_ROOT}" NO_DEFAULT_PATH)
-find_package(TurboScript CONFIG REQUIRED
-             PATHS "$ENV{TURBOSCRIPT_ROOT}" NO_DEFAULT_PATH)
+if(PRAKTOR_ENABLE_SCRIPT)
+    find_package(TurboScript CONFIG REQUIRED
+                 PATHS "$ENV{TURBOSCRIPT_ROOT}" NO_DEFAULT_PATH)
+endif()
 find_package(cxxopts CONFIG REQUIRED)
 if(ENABLE_TESTS)
     find_package(Catch2 CONFIG REQUIRED)
