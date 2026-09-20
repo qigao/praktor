@@ -33,7 +33,7 @@ std::filesystem::path createTempDir()
     auto now = std::chrono::system_clock::now().time_since_epoch().count();
     std::mt19937 rng(static_cast<unsigned>(now));
     std::filesystem::path dir = std::filesystem::temp_directory_path()
-        / ("praktor_pistol_examples_" + std::to_string(rng()));
+        / ("praktor_sdk_examples_" + std::to_string(rng()));
     std::filesystem::create_directories(dir);
     return dir;
 }
@@ -66,7 +66,7 @@ bool isTruthy(const WorkflowValue& value)
     return !value.is_null();
 }
 
-std::filesystem::path pistolDir()
+std::filesystem::path sdkDir()
 {
     return std::filesystem::path(__FILE__).parent_path().parent_path();
 }
@@ -284,9 +284,9 @@ bool waitForProcessExit(ManagedSleepProcess& process, std::chrono::milliseconds 
 
 } // namespace
 
-TEST_CASE("all pistol examples validate and build DAG", "[pistol][examples]")
+TEST_CASE("all SDK examples validate and build DAG", "[sdk][examples]")
 {
-    const auto examples_dir = pistolDir() / "examples";
+    const auto examples_dir = sdkDir() / "examples";
     const auto result_models_path = examples_dir / "result_models.tbs";
     const auto result_models = readTextFile(result_models_path);
 
@@ -318,9 +318,9 @@ TEST_CASE("all pistol examples validate and build DAG", "[pistol][examples]")
     }
 }
 
-TEST_CASE("process status BT workflow queries current process", "[pistol][examples]")
+TEST_CASE("process status BT workflow queries current process", "[sdk][examples]")
 {
-    const auto example_path = pistolDir() / "examples" / "process-status-example.yml";
+    const auto example_path = sdkDir() / "examples" / "process-status-example.yml";
 
     auto execution = executeWorkflow(example_path, {
         {"PROCESS_NAME", "ping"}
@@ -335,9 +335,9 @@ TEST_CASE("process status BT workflow queries current process", "[pistol][exampl
     CHECK(parsed_result.at("output").is_string());
 }
 
-TEST_CASE("ops event handler BT workflow parses JSON event and executes branch", "[pistol][examples]")
+TEST_CASE("ops event handler BT workflow parses JSON event and executes branch", "[sdk][examples]")
 {
-    const auto example_path = pistolDir() / "examples" / "ops-event-handler-example.yml";
+    const auto example_path = sdkDir() / "examples" / "ops-event-handler-example.yml";
 
     auto workflow = TaskParser::parseFile(example_path.string());
     WorkflowContext context;
