@@ -37,6 +37,7 @@ jobs:
       EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
       SALTS_SHA: f1d8466244e6e0d74baed86e99ae6205e431557f
       SALTS_UTILS_SHA: 615851439b939dc0692a410192e3bc79e0cec413
+      CHTTP_SHA: d0f6d524ce36fc10fe1ac6798069a26bf6b1eba8
       VCPKG_SHA: b1b19307e2d2ec1eefbdb7ea069de7d4bcd31f01
       TURBOAGENT_SHA: b88e3ed75cda027032374c5e5ccff585f4a7b480
       CMAKE_BUILD_PARALLEL_LEVEL: 2
@@ -72,6 +73,13 @@ jobs:
 
       - uses: actions/checkout@v4
         with:
+          repository: qigao/chttp
+          ref: ${{ env.CHTTP_SHA }}
+          path: deps/chttp
+          persist-credentials: false
+
+      - uses: actions/checkout@v4
+        with:
           repository: microsoft/vcpkg
           ref: ${{ env.VCPKG_SHA }}
           path: vcpkg
@@ -93,8 +101,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ninja-build pkg-config nasm curl xz-utils
           ./vcpkg/bootstrap-vcpkg.sh -disableMetrics
-          sudo mkdir -p /opt/salts /opt/salts-utils /opt/praktor
-          sudo chown -R "$USER":"$USER" /opt/salts /opt/salts-utils /opt/praktor
+          sudo mkdir -p /opt/salts /opt/salts-utils /opt/chttp /opt/praktor
+          sudo chown -R "$USER":"$USER" /opt/salts /opt/salts-utils /opt/chttp /opt/praktor
           sudo ln -sfn "$GITHUB_WORKSPACE/vcpkg" /opt/vcpkg
           bash deps/salts-utils/cmake/ci/install-re2c.sh
 
@@ -134,11 +142,34 @@ jobs:
           cmake --build build/linux-gcc-debug --target install -j2
           test -f /opt/salts-utils/debug/lib/cmake/SaltsUtils/SaltsUtilsConfig.cmake
 
+      - name: Build and install pinned CHTTP
+        shell: bash
+        env:
+          SALTS_ROOT: /opt/salts/debug
+          SALTS_UTILS_ROOT: /opt/salts-utils/debug
+        run: |
+          set -euxo pipefail
+          cmake -S deps/chttp -B deps/chttp/build/praktor-ci -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/vcpkg/scripts/buildsystems/vcpkg.cmake" \
+            -DVCPKG_TARGET_TRIPLET=x64-linux \
+            -DVCPKG_MANIFEST_MODE=ON \
+            -DVCPKG_INSTALLED_DIR="$GITHUB_WORKSPACE/vcpkg_installed/chttp" \
+            -DCMAKE_INSTALL_PREFIX=/opt/chttp/debug \
+            -DBUILD_TESTS=OFF \
+            -DBUILD_EXAMPLES=OFF \
+            -DBUILD_BENCHMARKS=OFF
+          cmake --build deps/chttp/build/praktor-ci --target install -j2
+          test -f /opt/chttp/debug/lib/cmake/Chttp/ChttpConfig.cmake
+          test -f /opt/chttp/debug/include/http_client/http.h
+          test -f /opt/chttp/debug/include/s3/s3_signer.h
+
       - name: Configure real Praktor without TurboScript
         shell: bash
         env:
           SALTS_ROOT: /opt/salts/debug
           SALTS_UTILS_ROOT: /opt/salts-utils/debug
+          CHTTP_ROOT: /opt/chttp/debug
           VCPKG_ROOT: ${{ github.workspace }}/vcpkg
         run: |
           set -euxo pipefail
@@ -156,8 +187,9 @@ jobs:
         env:
           SALTS_ROOT: /opt/salts/debug
           SALTS_UTILS_ROOT: /opt/salts-utils/debug
+          CHTTP_ROOT: /opt/chttp/debug
           VCPKG_ROOT: ${{ github.workspace }}/vcpkg
-          LD_LIBRARY_PATH: /opt/salts-utils/debug/lib:/opt/salts/debug/lib
+          LD_LIBRARY_PATH: /opt/chttp/debug/lib:/opt/salts-utils/debug/lib:/opt/salts/debug/lib
         run: |
           set -euxo pipefail
           cmake --build build/linux-gcc-debug -j2
@@ -168,6 +200,7 @@ jobs:
         env:
           SALTS_ROOT: /opt/salts/debug
           SALTS_UTILS_ROOT: /opt/salts-utils/debug
+          CHTTP_ROOT: /opt/chttp/debug
           VCPKG_ROOT: ${{ github.workspace }}/vcpkg
         run: |
           set -euxo pipefail
@@ -255,11 +288,11 @@ jobs:
           YAML
 
           export SALTS_ROOT=/opt/salts/debug
-          export CMAKE_PREFIX_PATH="/opt/praktor/debug;/opt/salts-utils/debug;/opt/salts/debug"
+          export CMAKE_PREFIX_PATH="/opt/praktor/debug;/opt/chttp/debug;/opt/salts-utils/debug;/opt/salts/debug"
           cmake -S "$smoke" -B "$smoke/build" -G Ninja
           cmake --build "$smoke/build" -j2
 
-          export LD_LIBRARY_PATH="/opt/praktor/debug/lib:/opt/salts-utils/debug/lib:/opt/salts/debug/lib:$GITHUB_WORKSPACE/vcpkg_installed/linux/x64-linux/debug/lib:$GITHUB_WORKSPACE/vcpkg_installed/linux/x64-linux/lib:$GITHUB_WORKSPACE/deps/salts/vcpkg_installed/linux/x64-linux/debug/lib:$GITHUB_WORKSPACE/deps/salts/vcpkg_installed/linux/x64-linux/lib:$GITHUB_WORKSPACE/deps/salts-utils/vcpkg_installed/linux/x64-linux/debug/lib:$GITHUB_WORKSPACE/deps/salts-utils/vcpkg_installed/linux/x64-linux/lib:${LD_LIBRARY_PATH:-}"
+          export LD_LIBRARY_PATH="/opt/praktor/debug/lib:/opt/chttp/debug/lib:/opt/salts-utils/debug/lib:/opt/salts/debug/lib:$GITHUB_WORKSPACE/vcpkg_installed/linux/x64-linux/debug/lib:$GITHUB_WORKSPACE/vcpkg_installed/linux/x64-linux/lib:$GITHUB_WORKSPACE/deps/salts/vcpkg_installed/linux/x64-linux/debug/lib:$GITHUB_WORKSPACE/deps/salts/vcpkg_installed/linux/x64-linux/lib:$GITHUB_WORKSPACE/deps/salts-utils/vcpkg_installed/linux/x64-linux/debug/lib:$GITHUB_WORKSPACE/deps/salts-utils/vcpkg_installed/linux/x64-linux/lib:${LD_LIBRARY_PATH:-}"
           "$smoke/build/praktor_real_smoke" "$smoke/command.yml" "$smoke/script.yml"
 
       - name: Link TurboAgent adapter against real Praktor
@@ -279,7 +312,7 @@ jobs:
             -Wl,-rpath,/opt/praktor/debug/lib \
             -o "$RUNNER_TEMP/turboagent-real-praktor"
 
-          export LD_LIBRARY_PATH="/opt/praktor/debug/lib:/opt/salts-utils/debug/lib:/opt/salts/debug/lib:$GITHUB_WORKSPACE/vcpkg_installed/linux/x64-linux/debug/lib:$GITHUB_WORKSPACE/vcpkg_installed/linux/x64-linux/lib:$GITHUB_WORKSPACE/deps/salts/vcpkg_installed/linux/x64-linux/debug/lib:$GITHUB_WORKSPACE/deps/salts/vcpkg_installed/linux/x64-linux/lib:$GITHUB_WORKSPACE/deps/salts-utils/vcpkg_installed/linux/x64-linux/debug/lib:$GITHUB_WORKSPACE/deps/salts-utils/vcpkg_installed/linux/x64-linux/lib:${LD_LIBRARY_PATH:-}"
+          export LD_LIBRARY_PATH="/opt/praktor/debug/lib:/opt/chttp/debug/lib:/opt/salts-utils/debug/lib:/opt/salts/debug/lib:$GITHUB_WORKSPACE/vcpkg_installed/linux/x64-linux/debug/lib:$GITHUB_WORKSPACE/vcpkg_installed/linux/x64-linux/lib:$GITHUB_WORKSPACE/deps/salts/vcpkg_installed/linux/x64-linux/debug/lib:$GITHUB_WORKSPACE/deps/salts/vcpkg_installed/linux/x64-linux/lib:$GITHUB_WORKSPACE/deps/salts-utils/vcpkg_installed/linux/x64-linux/debug/lib:$GITHUB_WORKSPACE/deps/salts-utils/vcpkg_installed/linux/x64-linux/lib:${LD_LIBRARY_PATH:-}"
           "$RUNNER_TEMP/turboagent-real-praktor"
 
       - name: Upload core-only installed SDK
