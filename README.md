@@ -231,6 +231,25 @@ In the example above:
 - **exprtk**: Expression evaluation for `when` conditions
 - **vcpkg**: Modern C++ package management for easy dependency resolution
 
+## Optional scriptless embedding build
+
+Praktor enables TurboScript workflow `script:` support by default. Hosts that only need
+the YAML/DAG/C embedding runtime can build without the TurboScript package:
+
+```bash
+cmake -S . -B build/embed \
+  -DPRAKTOR_ENABLE_SCRIPT=OFF \
+  -DENABLE_TESTS=OFF
+cmake --build build/embed
+cmake --install build/embed --prefix /opt/praktor
+```
+
+This profile is intended for embedding and integration verification. Command, download,
+actions, service/process, `uses`, and other non-script workflow runners remain available.
+If a workflow contains `script:`, execution fails explicitly with
+`TurboScript support is disabled in this Praktor build`; script execution is never
+silently skipped. The default remains `PRAKTOR_ENABLE_SCRIPT=ON`.
+
 ## Quick Start
 
 ### 1. Write your workflow file
