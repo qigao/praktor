@@ -34,6 +34,7 @@ jobs:
           root="$RUNNER_TEMP/praktor-contract"
           mkdir -p "$root/salts/lib/cmake/Salts"
           mkdir -p "$root/salts-utils/lib/cmake/SaltsUtils"
+          mkdir -p "$root/chttp/lib/cmake/Chttp"
           mkdir -p "$root/cxxopts/lib/cmake/cxxopts"
 
           cat > "$root/salts/lib/cmake/Salts/SaltsConfig.cmake" <<'EOF'
@@ -50,6 +51,16 @@ jobs:
           set(SaltsUtils_FOUND TRUE)
           EOF
 
+          cat > "$root/chttp/lib/cmake/Chttp/ChttpConfig.cmake" <<'EOF'
+          if(NOT TARGET CHttp::Client)
+            add_library(CHttp::Client INTERFACE IMPORTED)
+          endif()
+          if(NOT TARGET CHttp::S3)
+            add_library(CHttp::S3 INTERFACE IMPORTED)
+          endif()
+          set(Chttp_FOUND TRUE)
+          EOF
+
           cat > "$root/cxxopts/lib/cmake/cxxopts/cxxoptsConfig.cmake" <<'EOF'
           if(NOT TARGET cxxopts::cxxopts)
             add_library(cxxopts::cxxopts INTERFACE IMPORTED)
@@ -59,6 +70,7 @@ jobs:
 
           echo "SALTS_ROOT=$root/salts" >> "$GITHUB_ENV"
           echo "SALTS_UTILS_ROOT=$root/salts-utils" >> "$GITHUB_ENV"
+          echo "CHTTP_ROOT=$root/chttp" >> "$GITHUB_ENV"
           echo "CONTRACT_PREFIX=$root/cxxopts" >> "$GITHUB_ENV"
 
       - name: Configure core-only runtime
