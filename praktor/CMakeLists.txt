@@ -62,7 +62,6 @@ target_link_libraries(
            Salts::CYaml
            Salts::XmlParser
            Salts::Mustache
-           Salts::DataBind
            cxxopts::cxxopts
            Salts::CHTTP
            Salts::CNet
