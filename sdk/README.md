@@ -1,6 +1,6 @@
-# Pistol
+# Praktor SDK
 
-`pistol/` is the reusable workflow and API bundle for Praktor, powered natively by Behavior Tree (BT) orchestration.
+`sdk/` contains Praktor's stable embedding API plus runnable workflow examples. It is part of Praktor, not a separate product.
 
 Use it for:
 
@@ -46,6 +46,6 @@ Use it for:
 From the repository root:
 
 ```powershell
-.\build\Msvc-ASan\bin\praktor.exe validate -f pistol\examples\service-status-example.yml
-.\build\Msvc-ASan\bin\praktor.exe validate -f pistol\examples\ops-event-handler-example.yml
+.\build\Msvc-ASan\bin\praktor.exe validate -f sdk\examples\service-status-example.yml
+.\build\Msvc-ASan\bin\praktor.exe validate -f sdk\examples\ops-event-handler-example.yml
 ```
