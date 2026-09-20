@@ -376,6 +376,16 @@ WorkflowExecutor::WorkflowExecutor(DependencyGraph<Task> &graph,
     all_tasks_ = graph_.getNodes();
   }
 
+#if !PRAKTOR_SCRIPT_ENGINE_ENABLED
+  for (const auto& task : all_tasks_) {
+    if (task.script.has_value()) {
+      throw std::runtime_error(
+          "Task '" + task.name +
+          "' requires script support, but this Praktor build was configured with ENABLE_SCRIPT_ENGINE=OFF");
+    }
+  }
+#endif
+
   for (const auto& task : all_tasks_) {
     all_task_lookup_[task.name] = task;
   }
