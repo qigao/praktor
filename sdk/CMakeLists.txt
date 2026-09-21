@@ -17,7 +17,31 @@ target_include_directories(
 target_link_libraries(
     ${TARGET_NAME_SDK}
     PRIVATE praktor_lib
+    INTERFACE
+        $<LINK_ONLY:Threads::Threads>
+        $<LINK_ONLY:Salts::Core>
+        $<LINK_ONLY:Salts::JsonParser>
+        $<LINK_ONLY:Salts::CYaml>
+        $<LINK_ONLY:Salts::CYamlJsonAdapter>
+        $<LINK_ONLY:Salts::XmlParser>
+        $<LINK_ONLY:Salts::CsvParser>
+        $<LINK_ONLY:Salts::Mustache>
+        $<LINK_ONLY:CHttp::Client>
+        $<LINK_ONLY:Salts::CNet>
+        $<LINK_ONLY:CHttp::S3>
 )
+if(ENABLE_SCRIPT_ENGINE)
+    target_link_libraries(
+        ${TARGET_NAME_SDK}
+        INTERFACE $<LINK_ONLY:TurboScript::TurboScript>
+    )
+endif()
+if(UNIX AND NOT APPLE)
+    target_link_libraries(
+        ${TARGET_NAME_SDK}
+        INTERFACE $<LINK_ONLY:${CMAKE_DL_LIBS}>
+    )
+endif()
 
 # Only the producer needs an explicit marker. Consumers import by default.
 target_compile_definitions(${TARGET_NAME_SDK}
