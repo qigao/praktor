@@ -60,7 +60,9 @@ target_link_libraries(
            Salts::Core
            Salts::JsonParser
            Salts::CYaml
+           Salts::CYamlJsonAdapter
            Salts::XmlParser
+           Salts::CsvParser
            Salts::Mustache
            cxxopts::cxxopts
            CHttp::Client
