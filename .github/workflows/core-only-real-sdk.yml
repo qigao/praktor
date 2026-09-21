@@ -282,25 +282,46 @@ jobs:
           export LD_LIBRARY_PATH="/opt/praktor/debug/lib:/opt/chttp/debug/lib:/opt/salts-utils/debug/lib:/opt/salts/debug/lib:$GITHUB_WORKSPACE/vcpkg_installed/linux/x64-linux/debug/lib:$GITHUB_WORKSPACE/vcpkg_installed/linux/x64-linux/lib:$GITHUB_WORKSPACE/deps/salts/vcpkg_installed/linux/x64-linux/debug/lib:$GITHUB_WORKSPACE/deps/salts/vcpkg_installed/linux/x64-linux/lib:$GITHUB_WORKSPACE/deps/salts-utils/vcpkg_installed/linux/x64-linux/debug/lib:$GITHUB_WORKSPACE/deps/salts-utils/vcpkg_installed/linux/x64-linux/lib:${LD_LIBRARY_PATH:-}"
           "$smoke/build/praktor_real_smoke" "$smoke/command.yml" "$smoke/script.yml"
 
-      - name: Link TurboAgent adapter against real Praktor
+      - name: Build and run TurboAgent adapter against installed Praktor
         shell: bash
         run: |
           set -euxo pipefail
-          cc -std=c11 -D_DEFAULT_SOURCE -Wall -Wextra -Werror \
-            -fvisibility=hidden \
-            -DTURBO_PRAKTOR_CONTRACT_USE_REAL_PRAKTOR \
-            -I/opt/praktor/debug/include \
-            -Ideps/turboagent/praktor_tools/include \
-            -Ideps/turboagent/praktor_tools/tests/contract/include \
-            deps/turboagent/praktor_tools/src/turbo_praktor_tool_pack.c \
-            deps/turboagent/praktor_tools/tests/contract/mock_runtime.c \
-            deps/turboagent/praktor_tools/tests/contract/real_praktor_smoke.c \
-            -L/opt/praktor/debug/lib -lPraktor \
-            -Wl,-rpath,/opt/praktor/debug/lib \
-            -o "$RUNNER_TEMP/turboagent-real-praktor"
+          consumer="$RUNNER_TEMP/turboagent-real-praktor"
+          mkdir -p "$consumer"
+          cat > "$consumer/CMakeLists.txt" <<'CMAKE'
+          cmake_minimum_required(VERSION 3.20)
+          project(turboagent_real_praktor LANGUAGES C)
+
+          find_package(Praktor CONFIG REQUIRED)
+
+          add_executable(turboagent_real_praktor
+            "$ENV{GITHUB_WORKSPACE}/deps/turboagent/praktor_tools/src/turbo_praktor_tool_pack.c"
+            "$ENV{GITHUB_WORKSPACE}/deps/turboagent/praktor_tools/tests/contract/mock_runtime.c"
+            "$ENV{GITHUB_WORKSPACE}/deps/turboagent/praktor_tools/tests/contract/real_praktor_smoke.c"
+          )
+          target_compile_features(turboagent_real_praktor PRIVATE c_std_11)
+          target_compile_definitions(turboagent_real_praktor PRIVATE
+            _DEFAULT_SOURCE
+            TURBO_PRAKTOR_CONTRACT_USE_REAL_PRAKTOR
+          )
+          target_compile_options(turboagent_real_praktor PRIVATE
+            -Wall -Wextra -Werror -fvisibility=hidden
+          )
+          target_include_directories(turboagent_real_praktor PRIVATE
+            "$ENV{GITHUB_WORKSPACE}/deps/turboagent/praktor_tools/include"
+            "$ENV{GITHUB_WORKSPACE}/deps/turboagent/praktor_tools/tests/contract/include"
+          )
+          target_link_libraries(turboagent_real_praktor PRIVATE Praktor::Praktor)
+          CMAKE
+
+          export SALTS_ROOT=/opt/salts/debug
+          export SALTS_UTILS_ROOT=/opt/salts-utils/debug
+          export CMAKE_PREFIX_PATH="/opt/praktor/debug:/opt/chttp/debug:/opt/salts-utils/debug:/opt/salts/debug"
+          cmake -S "$consumer" -B "$consumer/build" -G Ninja
+          cmake --build "$consumer/build" -j2
 
           export LD_LIBRARY_PATH="/opt/praktor/debug/lib:/opt/chttp/debug/lib:/opt/salts-utils/debug/lib:/opt/salts/debug/lib:$GITHUB_WORKSPACE/vcpkg_installed/linux/x64-linux/debug/lib:$GITHUB_WORKSPACE/vcpkg_installed/linux/x64-linux/lib:$GITHUB_WORKSPACE/deps/salts/vcpkg_installed/linux/x64-linux/debug/lib:$GITHUB_WORKSPACE/deps/salts/vcpkg_installed/linux/x64-linux/lib:$GITHUB_WORKSPACE/deps/salts-utils/vcpkg_installed/linux/x64-linux/debug/lib:$GITHUB_WORKSPACE/deps/salts-utils/vcpkg_installed/linux/x64-linux/lib:${LD_LIBRARY_PATH:-}"
-          "$RUNNER_TEMP/turboagent-real-praktor"
+          "$consumer/build/turboagent_real_praktor"
 
       - name: Upload core-only installed SDK
         uses: actions/upload-artifact@v4
