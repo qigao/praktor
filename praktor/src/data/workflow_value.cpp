@@ -7,7 +7,7 @@
 namespace {
 
 json_value_t* cloneOrThrow(const json_value_t* value) {
-    json_value_t* clone = turbo_json_clone(value);
+    json_value_t* clone = json_clone(value);
     if (!clone) {
         throw std::bad_alloc();
     }
@@ -15,16 +15,12 @@ json_value_t* cloneOrThrow(const json_value_t* value) {
 }
 
 void freeJson(json_value_t*& value) noexcept {
-    if (!value) {
-        return;
-    }
-    auto* document = reinterpret_cast<turbo_json_doc_t*>(value);
-    turbo_free_json(&document);
+    json_free(value);
     value = nullptr;
 }
 
 struct SerializedJsonDeleter {
-    void operator()(char* text) const noexcept { turbo_json_serialize_free(text); }
+    void operator()(char* text) const noexcept { json_serialize_free(text); }
 };
 
 } // namespace
@@ -36,17 +32,17 @@ WorkflowValue::WorkflowValue()
     : WorkflowValue(nullptr) {}
 
 WorkflowValue::WorkflowValue(std::nullptr_t)
-    : value_(turbo_json_create_null()) {
+    : value_(json_create_null()) {
     requireValue(value_, "create null");
 }
 
 WorkflowValue::WorkflowValue(bool value)
-    : value_(turbo_json_create_bool(value)) {
+    : value_(json_create_bool(value)) {
     requireValue(value_, "create boolean");
 }
 
 WorkflowValue::WorkflowValue(const char* value)
-    : value_(turbo_json_create_string(value ? value : "")) {
+    : value_(json_create_string(value ? value : "")) {
     requireValue(value_, "create string");
 }
 
@@ -54,12 +50,12 @@ WorkflowValue::WorkflowValue(std::string value)
     : WorkflowValue(std::string_view(value)) {}
 
 WorkflowValue::WorkflowValue(std::string_view value)
-    : value_(turbo_json_create_string_n(value.data(), value.size())) {
+    : value_(json_create_string_n(value.data(), value.size())) {
     requireValue(value_, "create string");
 }
 
 WorkflowValue::WorkflowValue(double value)
-    : value_(turbo_json_create_number(value)) {
+    : value_(json_create_number(value)) {
     requireValue(value_, "create number");
 }
 
@@ -94,16 +90,15 @@ WorkflowValue::WorkflowValue(json_value_t* value, AdoptTag)
 }
 
 WorkflowValue WorkflowValue::parse(std::string_view input) {
-    turbo_json_doc_t* document = nullptr;
-    if (turbo_parse_json(reinterpret_cast<const uint8_t*>(input.data()), input.size(),
-                         &document) != 0 || !document) {
+    json_value_t* document = json_parse(input.data(), input.size());
+    if (!document) {
         throw std::invalid_argument("Invalid JSON input");
     }
-    return WorkflowValue(reinterpret_cast<json_value_t*>(document), AdoptTag{});
+    return WorkflowValue(document, AdoptTag{});
 }
 
 WorkflowValue WorkflowValue::object() {
-    return WorkflowValue(turbo_json_create_object(), AdoptTag{});
+    return WorkflowValue(json_create_object(), AdoptTag{});
 }
 
 WorkflowValue WorkflowValue::object(
@@ -116,7 +111,7 @@ WorkflowValue WorkflowValue::object(
 }
 
 WorkflowValue WorkflowValue::array() {
-    return WorkflowValue(turbo_json_create_array(), AdoptTag{});
+    return WorkflowValue(json_create_array(), AdoptTag{});
 }
 
 WorkflowValue WorkflowValue::array(std::initializer_list<WorkflowValue> values) {
@@ -143,15 +138,15 @@ WorkflowValue WorkflowValue::copyJson(const json_value_t* value) {
 }
 
 bool WorkflowValue::is_null() const noexcept {
-    return !value_ || turbo_json_is_null(value_);
+    return !value_ || json_is_null(value_);
 }
 
 bool WorkflowValue::is_bool() const noexcept {
-    return value_ && turbo_json_type(value_) == TURBO_JSON_BOOL;
+    return value_ && json_type(value_) == JSON_BOOL;
 }
 
 bool WorkflowValue::is_number() const noexcept {
-    return value_ && turbo_json_type(value_) == TURBO_JSON_NUMBER;
+    return value_ && json_type(value_) == JSON_NUMBER;
 }
 
 bool WorkflowValue::is_int64() const noexcept {
@@ -159,7 +154,7 @@ bool WorkflowValue::is_int64() const noexcept {
         return false;
     }
     size_t length = 0;
-    const char* token = turbo_json_number_text(value_, &length);
+    const char* token = json_number_text(value_, &length);
     if (!token || length == 0 || std::string_view(token, length).find_first_of(".eE") !=
                                     std::string_view::npos) {
         return false;
@@ -174,7 +169,7 @@ bool WorkflowValue::is_uint64() const noexcept {
         return false;
     }
     size_t length = 0;
-    const char* token = turbo_json_number_text(value_, &length);
+    const char* token = json_number_text(value_, &length);
     if (!token || length == 0 || token[0] == '-' ||
         std::string_view(token, length).find_first_of(".eE") != std::string_view::npos) {
         return false;
@@ -189,30 +184,30 @@ bool WorkflowValue::is_double() const noexcept {
 }
 
 bool WorkflowValue::is_string() const noexcept {
-    return value_ && turbo_json_type(value_) == TURBO_JSON_STRING;
+    return value_ && json_type(value_) == JSON_STRING;
 }
 
 bool WorkflowValue::is_array() const noexcept {
-    return value_ && turbo_json_type(value_) == TURBO_JSON_ARRAY;
+    return value_ && json_type(value_) == JSON_ARRAY;
 }
 
 bool WorkflowValue::is_object() const noexcept {
-    return value_ && turbo_json_type(value_) == TURBO_JSON_OBJECT;
+    return value_ && json_type(value_) == JSON_OBJECT;
 }
 
-turbo_json_type_t WorkflowValue::type() const noexcept {
-    return value_ ? turbo_json_type(value_) : TURBO_JSON_NULL;
+json_type_t WorkflowValue::type() const noexcept {
+    return value_ ? json_type(value_) : JSON_NULL;
 }
 
 size_t WorkflowValue::size() const noexcept {
     if (is_object()) {
-        return turbo_json_object_size(value_);
+        return json_object_size(value_);
     }
     if (is_array()) {
-        return turbo_json_array_size(value_);
+        return json_array_size(value_);
     }
     if (is_string()) {
-        return turbo_json_string_len(value_);
+        return json_string_len(value_);
     }
     return 0;
 }
@@ -222,7 +217,7 @@ bool WorkflowValue::contains(std::string_view key) const {
         return false;
     }
     const std::string owned_key(key);
-    return turbo_json_object_get(value_, owned_key.c_str()) != nullptr;
+    return json_object_get(value_, owned_key.c_str()) != nullptr;
 }
 
 WorkflowValue WorkflowValue::at(std::string_view key) const {
@@ -230,7 +225,7 @@ WorkflowValue WorkflowValue::at(std::string_view key) const {
         throw std::runtime_error("WorkflowValue is not an object");
     }
     const std::string owned_key(key);
-    const json_value_t* child = turbo_json_object_get(value_, owned_key.c_str());
+    const json_value_t* child = json_object_get(value_, owned_key.c_str());
     if (!child) {
         throw std::out_of_range("WorkflowValue object key not found: " + owned_key);
     }
@@ -241,7 +236,7 @@ WorkflowValue WorkflowValue::at(size_t index) const {
     if (!is_array()) {
         throw std::runtime_error("WorkflowValue is not an array");
     }
-    const json_value_t* child = turbo_json_array_get(value_, index);
+    const json_value_t* child = json_array_get(value_, index);
     if (!child) {
         throw std::out_of_range("WorkflowValue array index out of range");
     }
@@ -258,7 +253,7 @@ void WorkflowValue::set(std::string_view key, const WorkflowValue& value) {
     }
     json_value_t* clone = cloneOrThrow(value.value_);
     const std::string owned_key(key);
-    if (!turbo_json_object_add_checked(value_, owned_key.c_str(), clone)) {
+    if (!json_object_add_checked(value_, owned_key.c_str(), clone)) {
         freeJson(clone);
         throw std::runtime_error("Failed to set WorkflowValue object member");
     }
@@ -273,7 +268,7 @@ void WorkflowValue::set(std::string_view key, WorkflowValue&& value) {
         throw std::runtime_error("WorkflowValue is not an object");
     }
     const std::string owned_key(key);
-    if (!turbo_json_object_add_checked(value_, owned_key.c_str(), value.value_)) {
+    if (!json_object_add_checked(value_, owned_key.c_str(), value.value_)) {
         throw std::runtime_error("Failed to set WorkflowValue object member");
     }
     value.value_ = nullptr;
@@ -284,7 +279,7 @@ void WorkflowValue::push_back(const WorkflowValue& value) {
         throw std::runtime_error("WorkflowValue is not an array");
     }
     json_value_t* clone = cloneOrThrow(value.value_);
-    if (!turbo_json_array_add_checked(value_, clone)) {
+    if (!json_array_add_checked(value_, clone)) {
         freeJson(clone);
         throw std::runtime_error("Failed to append WorkflowValue array member");
     }
@@ -298,7 +293,7 @@ void WorkflowValue::push_back(WorkflowValue&& value) {
     if (!is_array()) {
         throw std::runtime_error("WorkflowValue is not an array");
     }
-    if (!turbo_json_array_add_checked(value_, value.value_)) {
+    if (!json_array_add_checked(value_, value.value_)) {
         throw std::runtime_error("Failed to append WorkflowValue array member");
     }
     value.value_ = nullptr;
@@ -324,8 +319,8 @@ std::vector<WorkflowValueMember> WorkflowValue::object_range() const {
     std::vector<WorkflowValueMember> result;
     result.reserve(size());
     for (size_t index = 0; index < size(); ++index) {
-        const char* key = turbo_json_object_key(value_, index);
-        result.emplace_back(key ? key : "", cloneBorrowed(turbo_json_object_value(value_, index)));
+        const char* key = json_object_key(value_, index);
+        result.emplace_back(key ? key : "", cloneBorrowed(json_object_value(value_, index)));
     }
     return result;
 }
@@ -337,14 +332,14 @@ std::vector<WorkflowValue> WorkflowValue::array_range() const {
     std::vector<WorkflowValue> result;
     result.reserve(size());
     for (size_t index = 0; index < size(); ++index) {
-        result.push_back(cloneBorrowed(turbo_json_array_get(value_, index)));
+        result.push_back(cloneBorrowed(json_array_get(value_, index)));
     }
     return result;
 }
 
 std::string WorkflowValue::to_string() const {
     size_t length = 0;
-    std::unique_ptr<char, SerializedJsonDeleter> text(turbo_json_serialize(value_, &length));
+    std::unique_ptr<char, SerializedJsonDeleter> text(json_serialize(value_, &length));
     if (!text) {
         throw std::runtime_error("Failed to serialize WorkflowValue");
     }
@@ -354,7 +349,7 @@ std::string WorkflowValue::to_string() const {
 std::string WorkflowValue::pretty_string() const {
     size_t length = 0;
     std::unique_ptr<char, SerializedJsonDeleter> text(
-        turbo_json_serialize_pretty(value_, &length));
+        json_serialize_pretty(value_, &length));
     if (!text) {
         throw std::runtime_error("Failed to pretty-print WorkflowValue");
     }
@@ -374,35 +369,35 @@ void WorkflowValue::requireValue(const json_value_t* value, std::string_view ope
 json_value_t* WorkflowValue::findPath(const std::vector<std::string>& keys) const {
     json_value_t* current = value_;
     for (const auto& key : keys) {
-        if (!current || turbo_json_type(current) != TURBO_JSON_OBJECT) {
+        if (!current || json_type(current) != JSON_OBJECT) {
             return nullptr;
         }
-        current = turbo_json_object_get(current, key.c_str());
+        current = json_object_get(current, key.c_str());
     }
     return current;
 }
 
 json_value_t* WorkflowValue::ensureObjectPath(const std::vector<std::string>& keys, size_t count) {
     if (is_null()) {
-        json_value_t* object = turbo_json_create_object();
+        json_value_t* object = json_create_object();
         requireValue(object, "create root object");
         reset(object);
     }
     json_value_t* current = value_;
     for (size_t index = 0; index < count; ++index) {
         const std::string& key = keys[index];
-        if (!current || turbo_json_type(current) != TURBO_JSON_OBJECT) {
+        if (!current || json_type(current) != JSON_OBJECT) {
             throw std::runtime_error("WorkflowValue path traverses a non-object value");
         }
-        json_value_t* child = turbo_json_object_get(current, key.c_str());
+        json_value_t* child = json_object_get(current, key.c_str());
         if (!child) {
-            json_value_t* created = turbo_json_create_object();
+            json_value_t* created = json_create_object();
             requireValue(created, "create nested object");
-            if (!turbo_json_object_add_checked(current, key.c_str(), created)) {
+            if (!json_object_add_checked(current, key.c_str(), created)) {
                 freeJson(created);
                 throw std::runtime_error("Failed to create nested WorkflowValue object");
             }
-            child = turbo_json_object_get(current, key.c_str());
+            child = json_object_get(current, key.c_str());
         }
         current = child;
     }
@@ -417,7 +412,7 @@ void WorkflowValue::setPath(const std::vector<std::string>& keys, const Workflow
     json_value_t* parent = ensureObjectPath(keys, keys.size() - 1);
     const std::string& key = keys.back();
     json_value_t* clone = cloneOrThrow(value.value_);
-    if (!turbo_json_object_add_checked(parent, key.c_str(), clone)) {
+    if (!json_object_add_checked(parent, key.c_str(), clone)) {
         freeJson(clone);
         throw std::runtime_error("Failed to assign WorkflowValue path");
     }
@@ -433,7 +428,7 @@ void WorkflowValue::setPath(const std::vector<std::string>& keys, WorkflowValue&
         return;
     }
     json_value_t* parent = ensureObjectPath(keys, keys.size() - 1);
-    if (!turbo_json_object_add_checked(parent, keys.back().c_str(), value.value_)) {
+    if (!json_object_add_checked(parent, keys.back().c_str(), value.value_)) {
         throw std::runtime_error("Failed to assign WorkflowValue path");
     }
     value.value_ = nullptr;
@@ -441,11 +436,11 @@ void WorkflowValue::setPath(const std::vector<std::string>& keys, WorkflowValue&
 
 void WorkflowValue::appendPath(const std::vector<std::string>& keys, const WorkflowValue& value) {
     json_value_t* array = findPath(keys);
-    if (!array || turbo_json_type(array) != TURBO_JSON_ARRAY) {
+    if (!array || json_type(array) != JSON_ARRAY) {
         throw std::runtime_error("WorkflowValue path is not an array");
     }
     json_value_t* clone = cloneOrThrow(value.value_);
-    if (!turbo_json_array_add_checked(array, clone)) {
+    if (!json_array_add_checked(array, clone)) {
         freeJson(clone);
         throw std::runtime_error("Failed to append WorkflowValue path");
     }
@@ -457,10 +452,10 @@ void WorkflowValue::appendPath(const std::vector<std::string>& keys, WorkflowVal
         return;
     }
     json_value_t* array = findPath(keys);
-    if (!array || turbo_json_type(array) != TURBO_JSON_ARRAY) {
+    if (!array || json_type(array) != JSON_ARRAY) {
         throw std::runtime_error("WorkflowValue path is not an array");
     }
-    if (!turbo_json_array_add_checked(array, value.value_)) {
+    if (!json_array_add_checked(array, value.value_)) {
         throw std::runtime_error("Failed to append WorkflowValue path");
     }
     value.value_ = nullptr;
