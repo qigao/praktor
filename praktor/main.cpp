@@ -18,6 +18,7 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <unordered_map>
 #include <vector>
@@ -133,7 +134,9 @@ namespace {
     }
 
     void writeCompactLog(const salts_log_entry_t* entry, void* /*user_data*/) {
-        std::string_view message(entry->message, entry->message_len);
+        const char* message_data = entry->message.data ? entry->message.data : "";
+        const std::size_t message_len = entry->message.len;
+        std::string_view message(message_data, message_len);
 
         if (message.rfind("__TASK__:", 0) == 0) {
             const std::string_view payload = message.substr(9);
@@ -189,20 +192,20 @@ namespace {
         switch (entry->level) {
             case SALTS_LOG_LEVEL_INFO:
                 std::fprintf(stdout, "    %.*s\n",
-                             static_cast<int>(entry->message_len), entry->message);
+                             static_cast<int>(message_len), message_data);
                 std::fflush(stdout);
                 break;
             case SALTS_LOG_LEVEL_WARN:
                 std::fprintf(stderr, "%s[warn]%s %.*s\n",
                              Praktor::Logging::color("warn"), Praktor::Logging::reset(),
-                             static_cast<int>(entry->message_len), entry->message);
+                             static_cast<int>(message_len), message_data);
                 std::fflush(stderr);
                 break;
             case SALTS_LOG_LEVEL_ERROR:
             case SALTS_LOG_LEVEL_FATAL:
                 std::fprintf(stderr, "%s[error]%s %.*s\n",
                              Praktor::Logging::color("error"), Praktor::Logging::reset(),
-                             static_cast<int>(entry->message_len), entry->message);
+                             static_cast<int>(message_len), message_data);
                 std::fflush(stderr);
                 break;
             default:
