@@ -56,24 +56,24 @@ WorkflowValue StructuredDocumentQuery::queryJson(std::string_view document,
 WorkflowValue StructuredDocumentQuery::queryJson(const WorkflowValue& root,
                                                  std::string_view path) {
     const std::string expression = normalizeJsonPath(path);
-    turbo_json_path_result_t* result = turbo_json_path_query(root.raw(), expression.c_str());
+    json_path_result_t* result = json_path_query(root.raw(), expression.c_str());
     if (!result) {
-        const char* error = turbo_json_path_error();
+        const char* error = json_path_get_error();
         throw std::invalid_argument(error ? error : "Invalid JSONPath expression");
     }
 
     WorkflowValue matches = WorkflowValue::array();
-    const size_t count = turbo_json_path_result_size(result);
+    const size_t count = json_path_result_size(result);
     try {
         for (size_t index = 0; index < count; ++index) {
             matches.push_back(WorkflowValue::copyJson(
-                turbo_json_path_result_get(result, index)));
+                json_path_result_get(result, index)));
         }
     } catch (...) {
-        turbo_json_path_result_free(result);
+        json_path_result_free(result);
         throw;
     }
-    turbo_json_path_result_free(result);
+    json_path_result_free(result);
     return collapseMatches(std::move(matches));
 }
 
