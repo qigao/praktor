@@ -1,6 +1,8 @@
 #include "yaml_document.hpp"
 
 #include <charconv>
+#include <cstdint>
+#include <cstdlib>
 #include <memory>
 #include <stdexcept>
 #include <system_error>
@@ -10,16 +12,9 @@ namespace TaskYamlDetail {
 
 namespace {
 
-struct JsonValueDeleter {
-    void operator()(json_value_t* value) const noexcept {
-        auto* document = reinterpret_cast<turbo_json_doc_t*>(value);
-        turbo_free_json(&document);
-    }
-};
-
-turbo_yaml_node_t* resolve_alias(turbo_yaml_node_t* node) noexcept {
-    while (node && turbo_yaml_node_type(node) == TURBO_YAML_NODE_ALIAS) {
-        turbo_yaml_node_t* target = turbo_yaml_alias_target(node);
+cyaml_node_t* resolve_alias(cyaml_node_t* node) noexcept {
+    while (node && cyaml_is_alias(node)) {
+        cyaml_node_t* target = node->alias.target;
         if (!target || target == node) {
             break;
         }
@@ -28,21 +23,21 @@ turbo_yaml_node_t* resolve_alias(turbo_yaml_node_t* node) noexcept {
     return node;
 }
 
-std::string scalar_text(const turbo_yaml_doc_t* document, turbo_yaml_node_t* node) {
+std::string scalar_text(const cyaml_doc_t* document, cyaml_node_t* node) {
     node = resolve_alias(node);
-    if (!document || !node || turbo_yaml_node_type(node) != TURBO_YAML_NODE_SCALAR) {
+    if (!document || !node || !cyaml_is_scalar(node)) {
         throw std::runtime_error("Expected YAML scalar");
     }
 
-    std::unique_ptr<char, decltype(&turbo_yaml_string_free)> value(
-        turbo_yaml_scalar_dup(document, node), &turbo_yaml_string_free);
+    std::unique_ptr<char, decltype(&std::free)> value(
+        cyaml_scalar_str(document, node), &std::free);
     if (!value) {
         throw std::runtime_error("Failed to decode YAML scalar");
     }
     return std::string(value.get());
 }
 
-bool find_location(turbo_yaml_node_t* node, turbo_yaml_location_t& location,
+bool find_location(cyaml_node_t* node, cyaml_span_t& location,
                    std::size_t depth = 0) noexcept {
     constexpr std::size_t max_location_search_depth = 32;
     node = resolve_alias(node);
@@ -50,30 +45,28 @@ bool find_location(turbo_yaml_node_t* node, turbo_yaml_location_t& location,
         return false;
     }
 
-    turbo_yaml_location_t candidate{};
-    if (turbo_yaml_node_location(node, &candidate) && candidate.start_line > 0) {
-        location = candidate;
+    if (node->span.start_line > 0) {
+        location = node->span;
         return true;
     }
 
-    if (turbo_yaml_node_type(node) == TURBO_YAML_NODE_MAPPING &&
-        turbo_yaml_mapping_size(node) > 0) {
-        return find_location(turbo_yaml_mapping_key(node, 0), location, depth + 1);
+    if (cyaml_is_map(node) && cyaml_map_len(node) > 0) {
+        const cyaml_pair_t* pair = cyaml_map_at(node, 0);
+        return pair && find_location(pair->key, location, depth + 1);
     }
-    if (turbo_yaml_node_type(node) == TURBO_YAML_NODE_SEQUENCE &&
-        turbo_yaml_sequence_size(node) > 0) {
-        return find_location(turbo_yaml_sequence_get(node, 0), location, depth + 1);
+    if (cyaml_is_seq(node) && cyaml_seq_len(node) > 0) {
+        return find_location(cyaml_seq_get(node, 0), location, depth + 1);
     }
     return false;
 }
 
 } // namespace
 
-YamlNodeRef::YamlNodeRef(const turbo_yaml_doc_t* document, turbo_yaml_node_t* node,
-                         turbo_yaml_node_t* key_node) noexcept
+YamlNodeRef::YamlNodeRef(const cyaml_doc_t* document, cyaml_node_t* node,
+                         cyaml_node_t* key_node) noexcept
     : document_(document), node_(node), key_node_(key_node) {}
 
-turbo_yaml_node_t* YamlNodeRef::resolved_node() const noexcept {
+cyaml_node_t* YamlNodeRef::resolved_node() const noexcept {
     return resolve_alias(node_);
 }
 
@@ -82,41 +75,37 @@ bool YamlNodeRef::valid() const noexcept {
 }
 
 bool YamlNodeRef::is_map() const noexcept {
-    turbo_yaml_node_t* node = resolved_node();
-    return node && turbo_yaml_node_type(node) == TURBO_YAML_NODE_MAPPING;
+    return cyaml_is_map(resolved_node());
 }
 
 bool YamlNodeRef::is_seq() const noexcept {
-    turbo_yaml_node_t* node = resolved_node();
-    return node && turbo_yaml_node_type(node) == TURBO_YAML_NODE_SEQUENCE;
+    return cyaml_is_seq(resolved_node());
 }
 
 bool YamlNodeRef::has_val() const noexcept {
-    turbo_yaml_node_t* node = resolved_node();
-    return node && turbo_yaml_node_type(node) == TURBO_YAML_NODE_SCALAR;
+    return cyaml_is_scalar(resolved_node());
 }
 
 bool YamlNodeRef::is_string_scalar() const noexcept {
-    turbo_yaml_node_t* node = resolved_node();
-    return document_ && node &&
-           turbo_yaml_node_type(node) == TURBO_YAML_NODE_SCALAR &&
-           turbo_yaml_scalar_kind(document_, node) == TURBO_YAML_SCALAR_STRING;
+    cyaml_node_t* node = resolved_node();
+    return document_ && node && cyaml_is_scalar(node) &&
+           cyaml_scalar_kind(document_, node) == CYAML_KIND_STRING;
 }
 
 bool YamlNodeRef::has_child(const char* key) const {
-    return is_map() && key && turbo_yaml_mapping_contains(document_, resolved_node(), key);
+    return is_map() && key && cyaml_has(document_, resolved_node(), key);
 }
 
 std::size_t YamlNodeRef::num_children() const noexcept {
-    turbo_yaml_node_t* node = resolved_node();
+    cyaml_node_t* node = resolved_node();
     if (!node) {
         return 0;
     }
-    if (is_map()) {
-        return turbo_yaml_mapping_size(node);
+    if (cyaml_is_map(node)) {
+        return cyaml_map_len(node);
     }
-    if (is_seq()) {
-        return turbo_yaml_sequence_size(node);
+    if (cyaml_is_seq(node)) {
+        return cyaml_seq_len(node);
     }
     return 0;
 }
@@ -129,19 +118,19 @@ YamlNodeRef YamlNodeRef::operator[](const char* key) const {
     if (!is_map() || !key) {
         return {};
     }
-    turbo_yaml_node_t* mapping = resolved_node();
-    turbo_yaml_node_t* value = turbo_yaml_mapping_get(document_, mapping, key);
+    cyaml_node_t* mapping = resolved_node();
+    cyaml_node_t* value = cyaml_get(document_, mapping, key);
     if (!value) {
         return {};
     }
 
-    turbo_yaml_node_t* matched_key = nullptr;
-    const std::size_t size = turbo_yaml_mapping_size(mapping);
+    cyaml_node_t* matched_key = nullptr;
+    const std::size_t size = cyaml_map_len(mapping);
     for (std::size_t index = 0; index < size; ++index) {
-        turbo_yaml_node_t* candidate = turbo_yaml_mapping_key(mapping, index);
-        if (turbo_yaml_node_type(resolve_alias(candidate)) == TURBO_YAML_NODE_SCALAR &&
-            scalar_text(document_, candidate) == key) {
-            matched_key = candidate;
+        cyaml_pair_t* pair = cyaml_map_at(mapping, static_cast<std::uint32_t>(index));
+        if (pair && cyaml_is_scalar(resolve_alias(pair->key)) &&
+            scalar_text(document_, pair->key) == key) {
+            matched_key = pair->key;
             break;
         }
     }
@@ -157,32 +146,29 @@ std::string YamlNodeRef::scalar() const {
 }
 
 std::string YamlNodeRef::location() const {
-    turbo_yaml_location_t location{};
+    cyaml_span_t location{};
     if (!find_location(key_node_, location) && !find_location(resolved_node(), location)) {
         return {};
     }
     return " at line " + std::to_string(location.start_line) + ", column " +
-           std::to_string(location.start_column);
+           std::to_string(location.start_col);
 }
 
 std::optional<bool> YamlNodeRef::bool_integer_value() const {
-    turbo_yaml_node_t* node = resolved_node();
+    cyaml_node_t* node = resolved_node();
     if (!document_ || !node ||
-        turbo_yaml_scalar_kind(document_, node) != TURBO_YAML_SCALAR_INT) {
+        cyaml_scalar_kind(document_, node) != CYAML_KIND_INT) {
         return std::nullopt;
     }
 
-    std::unique_ptr<json_value_t, JsonValueDeleter> value(
-        turbo_yaml_node_to_json(document_, node));
-    if (!value || turbo_json_type(value.get()) != TURBO_JSON_NUMBER) {
+    std::int64_t number = 0;
+    if (!cyaml_as_int(document_, node, &number)) {
         return std::nullopt;
     }
-
-    const double number = turbo_json_number(value.get());
-    if (number == 0.0) {
+    if (number == 0) {
         return false;
     }
-    if (number == 1.0) {
+    if (number == 1) {
         return true;
     }
     return std::nullopt;
@@ -205,16 +191,16 @@ const YamlNodeRef& YamlNodeRef::operator>>(int& value) const {
 }
 
 YamlNodeRef YamlNodeRef::child_at(std::size_t index) const noexcept {
-    turbo_yaml_node_t* node = resolved_node();
+    cyaml_node_t* node = resolved_node();
     if (!node) {
         return {};
     }
-    if (is_map() && index < turbo_yaml_mapping_size(node)) {
-        return YamlNodeRef(document_, turbo_yaml_mapping_value(node, index),
-                           turbo_yaml_mapping_key(node, index));
+    if (cyaml_is_map(node) && index < cyaml_map_len(node)) {
+        cyaml_pair_t* pair = cyaml_map_at(node, static_cast<std::uint32_t>(index));
+        return pair ? YamlNodeRef(document_, pair->val, pair->key) : YamlNodeRef{};
     }
-    if (is_seq() && index < turbo_yaml_sequence_size(node)) {
-        return YamlNodeRef(document_, turbo_yaml_sequence_get(node, index));
+    if (cyaml_is_seq(node) && index < cyaml_seq_len(node)) {
+        return YamlNodeRef(document_, cyaml_seq_get(node, static_cast<std::uint32_t>(index)));
     }
     return {};
 }
@@ -248,37 +234,39 @@ bool YamlNodeRef::Iterator::operator!=(const Iterator& other) const noexcept {
     return !(*this == other);
 }
 
-YamlDocument::YamlDocument(std::string_view source) {
-    turbo_yaml_error_t error{};
-    const int status = turbo_parse_yaml_ex(
-        reinterpret_cast<const uint8_t*>(source.data()), source.size(), &document_, &error);
-    if (status != 0 || !document_) {
-        std::string message = error.message[0] ? error.message : "Invalid YAML input";
-        if (error.location.start_line > 0) {
-            message += " at line " + std::to_string(error.location.start_line) +
-                       ", column " + std::to_string(error.location.start_column);
+YamlDocument::YamlDocument(std::string_view source)
+    : source_(std::make_unique<std::string>(source)) {
+    cyaml_error_t error{};
+    document_ = cyaml_parse(source_->data(), source_->size(), nullptr, &error);
+    if (!document_) {
+        std::string message = error.msg[0] ? error.msg : "Invalid YAML input";
+        if (error.span.start_line > 0) {
+            message += " at line " + std::to_string(error.span.start_line) +
+                       ", column " + std::to_string(error.span.start_col);
         }
         throw std::runtime_error(message);
     }
 }
 
 YamlDocument::~YamlDocument() {
-    turbo_free_yaml(&document_);
+    cyaml_free(document_);
 }
 
 YamlDocument::YamlDocument(YamlDocument&& other) noexcept
-    : document_(std::exchange(other.document_, nullptr)) {}
+    : source_(std::move(other.source_)),
+      document_(std::exchange(other.document_, nullptr)) {}
 
 YamlDocument& YamlDocument::operator=(YamlDocument&& other) noexcept {
     if (this != &other) {
-        turbo_free_yaml(&document_);
+        cyaml_free(document_);
+        source_ = std::move(other.source_);
         document_ = std::exchange(other.document_, nullptr);
     }
     return *this;
 }
 
 YamlNodeRef YamlDocument::root() const noexcept {
-    return YamlNodeRef(document_, turbo_yaml_root(document_));
+    return YamlNodeRef(document_, cyaml_root(document_));
 }
 
 } // namespace TaskYamlDetail
