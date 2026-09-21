@@ -68,6 +68,7 @@ TEST_CASE("Praktor C API publishes JSON workflow execution and ownership", "[sdk
     CHECK(api->abi_major == PRAKTOR_ABI_MAJOR);
     CHECK(api->abi_minor >= PRAKTOR_ABI_MINOR);
     CHECK((api->capabilities & PRAKTOR_CAPABILITY_JSON_WORKFLOW) != 0);
+    CHECK((api->capabilities & PRAKTOR_CAPABILITY_SCRIPT_ENGINE) != 0);
     REQUIRE(api->execute_workflow != nullptr);
     REQUIRE(api->release_json != nullptr);
 

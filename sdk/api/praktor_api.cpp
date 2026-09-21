@@ -14,6 +14,14 @@
 
 namespace {
 
+constexpr uint64_t buildCapabilities() {
+    uint64_t capabilities = PRAKTOR_CAPABILITY_JSON_WORKFLOW;
+#if PRAKTOR_SCRIPT_ENGINE_ENABLED
+    capabilities |= PRAKTOR_CAPABILITY_SCRIPT_ENGINE;
+#endif
+    return capabilities;
+}
+
 bool isPresent(const char* value) {
     return value && value[0] != '\0';
 }
@@ -180,7 +188,7 @@ const praktor_api* PRAKTOR_CALL praktor_get_api(void) {
         sizeof(praktor_api),
         PRAKTOR_ABI_MAJOR,
         PRAKTOR_ABI_MINOR,
-        PRAKTOR_CAPABILITY_JSON_WORKFLOW,
+        buildCapabilities(),
         &executeWorkflow,
         &praktor_release_json,
     };

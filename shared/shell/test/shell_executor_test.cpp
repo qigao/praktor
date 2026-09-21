@@ -648,7 +648,9 @@ TEST_CASE("shell executor runs async commands without blocking the caller", "[sh
 
     CHECK(elapsed_ms < 250);
     CHECK_FALSE(std::filesystem::exists(output_file));
-    REQUIRE(waitUntil([&]() { return std::filesystem::exists(output_file); }, 5000));
+    REQUIRE(waitUntil([&]() {
+        return std::filesystem::exists(output_file) && readTextFile(output_file) == input;
+    }, 5000));
     CHECK(readTextFile(output_file) == input);
 
     std::filesystem::remove_all(dir);

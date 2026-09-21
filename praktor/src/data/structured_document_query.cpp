@@ -1,5 +1,11 @@
 #include "data/structured_document_query.hpp"
 
+#include <csv_parser.h>
+#include <cyaml.h>
+#include <cyaml_json_adapter.h>
+#include <dsv_filter.h>
+#include <xml_parser/xml_parser.h>
+
 #include <stdexcept>
 #include <string>
 
@@ -56,146 +62,155 @@ WorkflowValue StructuredDocumentQuery::queryJson(std::string_view document,
 WorkflowValue StructuredDocumentQuery::queryJson(const WorkflowValue& root,
                                                  std::string_view path) {
     const std::string expression = normalizeJsonPath(path);
-    turbo_json_path_result_t* result = turbo_json_path_query(root.raw(), expression.c_str());
+    json_path_result_t* result = json_path_query(root.raw(), expression.c_str());
     if (!result) {
-        const char* error = turbo_json_path_error();
+        const char* error = json_path_get_error();
         throw std::invalid_argument(error ? error : "Invalid JSONPath expression");
     }
 
     WorkflowValue matches = WorkflowValue::array();
-    const size_t count = turbo_json_path_result_size(result);
+    const size_t count = json_path_result_size(result);
     try {
         for (size_t index = 0; index < count; ++index) {
             matches.push_back(WorkflowValue::copyJson(
-                turbo_json_path_result_get(result, index)));
+                json_path_result_get(result, index)));
         }
     } catch (...) {
-        turbo_json_path_result_free(result);
+        json_path_result_free(result);
         throw;
     }
-    turbo_json_path_result_free(result);
+    json_path_result_free(result);
     return collapseMatches(std::move(matches));
 }
 
 WorkflowValue StructuredDocumentQuery::queryYaml(std::string_view document,
                                                  std::string_view path) {
-    turbo_yaml_doc_t* yaml = nullptr;
-    if (turbo_parse_yaml(reinterpret_cast<const uint8_t*>(document.data()), document.size(),
-                         &yaml) != 0 || !yaml) {
-        throw std::invalid_argument("Invalid YAML input");
+    cyaml_error_t parse_error{};
+    cyaml_doc_t* yaml = cyaml_parse(document.data(), document.size(), nullptr, &parse_error);
+    if (!yaml) {
+        throw std::invalid_argument(
+            parse_error.msg[0] != '\0' ? parse_error.msg : "Invalid YAML input");
     }
 
     const std::string expression(path.empty() ? "/" : path);
-    turbo_yaml_path_result_t* result =
-        turbo_yaml_path_query(yaml, nullptr, expression.c_str());
-    if (!result) {
-        turbo_free_yaml(&yaml);
-        throw std::invalid_argument("Invalid YPATH expression");
-    }
-    if (const char* error = turbo_yaml_path_result_error(result); error && error[0] != '\0') {
-        const std::string message(error);
-        turbo_yaml_path_result_free(result);
-        turbo_free_yaml(&yaml);
+    cyaml_path_result_t result = cyaml_path_query(yaml, nullptr, expression.c_str());
+    if (result.error) {
+        const std::string message(result.error);
+        cyaml_path_result_free(&result);
+        cyaml_free(yaml);
         throw std::invalid_argument(message);
     }
 
     WorkflowValue matches = WorkflowValue::array();
     try {
-        const size_t count = turbo_yaml_path_result_size(result);
-        for (size_t index = 0; index < count; ++index) {
-            json_value_t* json = turbo_yaml_node_to_json(
-                yaml, turbo_yaml_path_result_get(result, index));
+        const uint32_t count = cyaml_path_count(&result);
+        for (uint32_t index = 0; index < count; ++index) {
+            json_value_t* json = json_value_from_cyaml_node(
+                yaml, cyaml_path_get(&result, index));
             if (!json) {
                 throw std::runtime_error("Failed to convert YPATH result to JSON");
             }
             matches.push_back(WorkflowValue::adoptJson(json));
         }
     } catch (...) {
-        turbo_yaml_path_result_free(result);
-        turbo_free_yaml(&yaml);
+        cyaml_path_result_free(&result);
+        cyaml_free(yaml);
         throw;
     }
-    turbo_yaml_path_result_free(result);
-    turbo_free_yaml(&yaml);
+    cyaml_path_result_free(&result);
+    cyaml_free(yaml);
     return collapseMatches(std::move(matches));
 }
 
 WorkflowValue StructuredDocumentQuery::queryXml(std::string_view document,
                                                 std::string_view path) {
-    turbo_xml_doc_t* xml = nullptr;
-    if (turbo_parse_xml(reinterpret_cast<const uint8_t*>(document.data()), document.size(),
-                        &xml) != 0 || !xml) {
-        throw std::invalid_argument("Invalid XML input");
+    salts_xml_document xml{};
+    salts_xml_diagnostic parse_diagnostic{};
+    if (salts_xml_parse(&xml, document.data(), document.size(), nullptr,
+                        &parse_diagnostic) != SALTS_XML_OK) {
+        throw std::invalid_argument(
+            parse_diagnostic.message[0] != '\0' ? parse_diagnostic.message
+                                                  : "Invalid XML input");
     }
 
     const std::string expression(path);
     if (expression.empty()) {
-        turbo_free_xml(&xml);
+        salts_xml_document_destroy(&xml);
         throw std::invalid_argument("XPath expression must not be empty");
     }
 
-    turbo_xml_list_t result;
-    turbo_xml_list_init(&result);
-    turbo_xml_xpath_query(xml, expression.c_str(), &result);
+    salts_xml_node_list result{};
+    qvm_diagnostic_t query_diagnostic{};
+    if (salts_xml_document_xpath_query(&xml, expression.c_str(), &result, nullptr,
+                                       &query_diagnostic) != QVM_STATUS_OK) {
+        const std::string message =
+            query_diagnostic.message ? query_diagnostic.message : "XPath evaluation failed";
+        salts_xml_node_list_destroy(&result);
+        salts_xml_document_destroy(&xml);
+        throw std::invalid_argument(message);
+    }
 
     WorkflowValue matches = WorkflowValue::array();
     try {
-        for (turbo_xml_list_node_t* entry = result.head; entry; entry = entry->next) {
-            const auto* node = static_cast<const turbo_xml_xpath_node_t*>(entry->item);
-            const char* text = turbo_xml_xpath_node_text(node);
-            if (text) {
-                matches.push_back(text);
+        const size_t count = salts_xml_node_list_size(&result);
+        for (size_t index = 0; index < count; ++index) {
+            const salts_xml_node node = salts_xml_node_list_at(&result, index);
+            const salts_xml_string_view text = salts_xml_node_text_view(node);
+            if (text.data) {
+                matches.push_back(std::string(text.data, text.size));
                 continue;
             }
-            char* serialized = turbo_xml_xpath_node_xml_dup(node);
+
+            size_t serialized_size = 0;
+            char* serialized = salts_xml_node_serialize(node, &serialized_size);
             if (!serialized) {
                 throw std::runtime_error("Failed to serialize XPath result");
             }
-            matches.push_back(serialized);
-            turbo_xml_string_free(serialized);
+            matches.push_back(std::string(serialized, serialized_size));
+            salts_xml_owned_string_free(serialized);
         }
     } catch (...) {
-        turbo_xml_list_free(&result);
-        turbo_free_xml(&xml);
+        salts_xml_node_list_destroy(&result);
+        salts_xml_document_destroy(&xml);
         throw;
     }
-    turbo_xml_list_free(&result);
-    turbo_free_xml(&xml);
+    salts_xml_node_list_destroy(&result);
+    salts_xml_document_destroy(&xml);
     return collapseMatches(std::move(matches));
 }
 
 WorkflowValue StructuredDocumentQuery::queryCsv(std::string_view document,
                                                 std::string_view path) {
-    turbo_csv_doc_t* csv = nullptr;
-    if (turbo_parse_csv(reinterpret_cast<const uint8_t*>(document.data()), document.size(),
-                        &csv) != 0 || !csv) {
-        throw std::invalid_argument("Invalid CSV input");
+    csv_doc_t* csv = csv_parse(document.data(), document.size());
+    if (!csv) {
+        const char* error = csv_get_error();
+        throw std::invalid_argument(error ? error : "Invalid CSV input");
     }
 
-    turbo_dsv_filter_t* filter = turbo_dsv_filter_create(csv, 0);
+    dsv_filter_t* filter = dsv_filter_create(csv, 0);
     if (!filter) {
-        turbo_free_csv(&csv);
+        csv_free(csv);
         throw std::runtime_error("Failed to create CSVPath filter");
     }
     const std::string expression(path);
-    if (expression.empty() || !turbo_dsv_filter_compile(filter, expression.c_str())) {
-        const char* error = turbo_dsv_filter_error(filter);
+    if (expression.empty() || !dsv_filter_compile(filter, expression.c_str())) {
+        const char* error = dsv_filter_error(filter);
         const std::string message = expression.empty()
                                         ? "CSVPath expression must not be empty"
                                         : (error ? error : "Invalid CSVPath expression");
-        turbo_dsv_filter_destroy(filter);
-        turbo_free_csv(&csv);
+        dsv_filter_destroy(filter);
+        csv_free(csv);
         throw std::invalid_argument(message);
     }
 
     WorkflowValue rows = WorkflowValue::array();
     try {
-        const size_t row_count = turbo_csv_row_count(csv);
-        const size_t column_count = turbo_csv_column_count(csv);
+        const size_t row_count = csv_row_count(csv);
+        const size_t column_count = csv_column_count(csv);
         for (size_t row = 1; row < row_count; ++row) {
-            const int match = turbo_dsv_filter_check_row(filter, row);
+            const int match = dsv_filter_check_row(filter, row);
             if (match < 0) {
-                const char* error = turbo_dsv_filter_error(filter);
+                const char* error = dsv_filter_error(filter);
                 throw std::runtime_error(error ? error : "CSVPath evaluation failed");
             }
             if (match == 0) {
@@ -203,19 +218,19 @@ WorkflowValue StructuredDocumentQuery::queryCsv(std::string_view document,
             }
             WorkflowValue record = WorkflowValue::object();
             for (size_t column = 0; column < column_count; ++column) {
-                const char* name = turbo_csv_get(csv, 0, column);
-                const char* value = turbo_csv_get(csv, row, column);
+                const char* name = csv_get(csv, 0, column);
+                const char* value = csv_get(csv, row, column);
                 record.set(name ? name : "", value ? value : "");
             }
             rows.push_back(std::move(record));
         }
     } catch (...) {
-        turbo_dsv_filter_destroy(filter);
-        turbo_free_csv(&csv);
+        dsv_filter_destroy(filter);
+        csv_free(csv);
         throw;
     }
-    turbo_dsv_filter_destroy(filter);
-    turbo_free_csv(&csv);
+    dsv_filter_destroy(filter);
+    csv_free(csv);
     return rows;
 }
 

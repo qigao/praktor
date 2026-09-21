@@ -1,9 +1,10 @@
 #pragma once
 
-#include <turbo_parser.h>
+#include <cyaml.h>
 
 #include <cstddef>
 #include <iterator>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -40,14 +41,14 @@ private:
     friend class YamlDocument;
     friend class Iterator;
 
-    YamlNodeRef(const turbo_yaml_doc_t* document, turbo_yaml_node_t* node,
-                turbo_yaml_node_t* key_node = nullptr) noexcept;
-    [[nodiscard]] turbo_yaml_node_t* resolved_node() const noexcept;
+    YamlNodeRef(const cyaml_doc_t* document, cyaml_node_t* node,
+                cyaml_node_t* key_node = nullptr) noexcept;
+    [[nodiscard]] cyaml_node_t* resolved_node() const noexcept;
     [[nodiscard]] YamlNodeRef child_at(std::size_t index) const noexcept;
 
-    const turbo_yaml_doc_t* document_ = nullptr;
-    turbo_yaml_node_t* node_ = nullptr;
-    turbo_yaml_node_t* key_node_ = nullptr;
+    const cyaml_doc_t* document_ = nullptr;
+    cyaml_node_t* node_ = nullptr;
+    cyaml_node_t* key_node_ = nullptr;
 };
 
 class YamlNodeRef::Iterator {
@@ -84,7 +85,8 @@ public:
     [[nodiscard]] YamlNodeRef root() const noexcept;
 
 private:
-    turbo_yaml_doc_t* document_ = nullptr;
+    std::unique_ptr<std::string> source_;
+    cyaml_doc_t* document_ = nullptr;
 };
 
 } // namespace TaskYamlDetail

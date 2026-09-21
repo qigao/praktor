@@ -1,6 +1,6 @@
 #pragma once
 
-#include <turbo_parser.h>
+#include <json_parser.h>
 
 #include <charconv>
 #include <cmath>
@@ -72,7 +72,7 @@ public:
     bool is_string() const noexcept;
     bool is_array() const noexcept;
     bool is_object() const noexcept;
-    turbo_json_type_t type() const noexcept;
+    json_type_t type() const noexcept;
 
     bool empty() const noexcept { return size() == 0; }
     size_t size() const noexcept;
@@ -106,18 +106,18 @@ public:
             if (!is_string()) {
                 throw std::runtime_error("WorkflowValue is not a string");
             }
-            const char* text = turbo_json_string(value_);
-            return std::string(text ? text : "", turbo_json_string_len(value_));
+            const char* text = json_string(value_);
+            return std::string(text ? text : "", json_string_len(value_));
         } else if constexpr (std::is_same_v<T, bool>) {
             if (!is_bool()) {
                 throw std::runtime_error("WorkflowValue is not a boolean");
             }
-            return turbo_json_bool(value_);
+            return json_bool(value_);
         } else if constexpr (std::is_floating_point_v<T>) {
             if (!is_number()) {
                 throw std::runtime_error("WorkflowValue is not a number");
             }
-            return static_cast<T>(turbo_json_number(value_));
+            return static_cast<T>(json_number(value_));
         } else if constexpr (std::is_integral_v<T>) {
             return parseInteger<T>();
         } else {
@@ -183,9 +183,9 @@ private:
     template <typename Integer>
     static json_value_t* createInteger(Integer value) {
         if constexpr (std::is_signed_v<Integer>) {
-            return turbo_json_create_int64(static_cast<int64_t>(value));
+            return json_create_int64(static_cast<int64_t>(value));
         } else {
-            return turbo_json_create_uint64(static_cast<uint64_t>(value));
+            return json_create_uint64(static_cast<uint64_t>(value));
         }
     }
 
@@ -196,7 +196,7 @@ private:
         }
 
         size_t length = 0;
-        const char* token = turbo_json_number_text(value_, &length);
+        const char* token = json_number_text(value_, &length);
         if (token && length > 0 &&
             std::string_view(token, length).find_first_of(".eE") == std::string_view::npos) {
             Integer result{};
@@ -207,13 +207,18 @@ private:
             throw std::out_of_range("WorkflowValue integer is out of range");
         }
 
-        const double number = turbo_json_number(value_);
-        if (!std::isfinite(number) || std::trunc(number) != number ||
-            number < static_cast<double>(std::numeric_limits<Integer>::lowest()) ||
-            number > static_cast<double>(std::numeric_limits<Integer>::max())) {
+        const double number = json_number(value_);
+        if (!std::isfinite(number)) {
             throw std::out_of_range("WorkflowValue number cannot be represented as an integer");
         }
-        return static_cast<Integer>(number);
+        double integral_part = 0.0;
+        const double fractional_part = std::modf(number, &integral_part);
+        if (std::fpclassify(fractional_part) != FP_ZERO ||
+            integral_part < static_cast<double>(std::numeric_limits<Integer>::lowest()) ||
+            integral_part > static_cast<double>(std::numeric_limits<Integer>::max())) {
+            throw std::out_of_range("WorkflowValue number cannot be represented as an integer");
+        }
+        return static_cast<Integer>(integral_part);
     }
 
     json_value_t* findPath(const std::vector<std::string>& keys) const;
