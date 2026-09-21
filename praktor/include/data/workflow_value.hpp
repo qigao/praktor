@@ -208,12 +208,17 @@ private:
         }
 
         const double number = json_number(value_);
-        if (!std::isfinite(number) || std::trunc(number) != number ||
-            number < static_cast<double>(std::numeric_limits<Integer>::lowest()) ||
-            number > static_cast<double>(std::numeric_limits<Integer>::max())) {
+        if (!std::isfinite(number)) {
             throw std::out_of_range("WorkflowValue number cannot be represented as an integer");
         }
-        return static_cast<Integer>(number);
+        double integral_part = 0.0;
+        const double fractional_part = std::modf(number, &integral_part);
+        if (std::fpclassify(fractional_part) != FP_ZERO ||
+            integral_part < static_cast<double>(std::numeric_limits<Integer>::lowest()) ||
+            integral_part > static_cast<double>(std::numeric_limits<Integer>::max())) {
+            throw std::out_of_range("WorkflowValue number cannot be represented as an integer");
+        }
+        return static_cast<Integer>(integral_part);
     }
 
     json_value_t* findPath(const std::vector<std::string>& keys) const;
