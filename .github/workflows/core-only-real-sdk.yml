@@ -274,6 +274,7 @@ jobs:
           YAML
 
           export SALTS_ROOT=/opt/salts/debug
+          export SALTS_UTILS_ROOT=/opt/salts-utils/debug
           export CMAKE_PREFIX_PATH="/opt/praktor/debug:/opt/chttp/debug:/opt/salts-utils/debug:/opt/salts/debug"
           cmake -S "$smoke" -B "$smoke/build" -G Ninja
           cmake --build "$smoke/build" -j2
