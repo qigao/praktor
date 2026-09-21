@@ -2,24 +2,8 @@ name: Core-only real SDK integration
 
 on:
   pull_request:
-    paths:
-      - "CMakeLists.txt"
-      - "ProjectOptions.cmake"
-      - "cmake/PraktorConfig.cmake.in"
-      - "praktor/**"
-      - "sdk/**"
-      - "vcpkg.json"
-      - ".github/workflows/core-only-real-sdk.yml"
   push:
     branches: [master]
-    paths:
-      - "CMakeLists.txt"
-      - "ProjectOptions.cmake"
-      - "cmake/PraktorConfig.cmake.in"
-      - "praktor/**"
-      - "sdk/**"
-      - "vcpkg.json"
-      - ".github/workflows/core-only-real-sdk.yml"
   workflow_dispatch:
 
 permissions:
