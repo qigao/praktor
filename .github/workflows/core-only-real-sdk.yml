@@ -277,7 +277,7 @@ jobs:
           export SALTS_UTILS_ROOT=/opt/salts-utils/debug
           export CMAKE_PREFIX_PATH="/opt/praktor/debug:/opt/chttp/debug:/opt/salts-utils/debug:/opt/salts/debug"
           cmake -S "$smoke" -B "$smoke/build" -G Ninja
-          cmake --build "$smoke/build" -j2
+          cmake --build "$smoke/build" --verbose -j2
 
           export LD_LIBRARY_PATH="/opt/praktor/debug/lib:/opt/chttp/debug/lib:/opt/salts-utils/debug/lib:/opt/salts/debug/lib:$GITHUB_WORKSPACE/vcpkg_installed/linux/x64-linux/debug/lib:$GITHUB_WORKSPACE/vcpkg_installed/linux/x64-linux/lib:$GITHUB_WORKSPACE/deps/salts/vcpkg_installed/linux/x64-linux/debug/lib:$GITHUB_WORKSPACE/deps/salts/vcpkg_installed/linux/x64-linux/lib:$GITHUB_WORKSPACE/deps/salts-utils/vcpkg_installed/linux/x64-linux/debug/lib:$GITHUB_WORKSPACE/deps/salts-utils/vcpkg_installed/linux/x64-linux/lib:${LD_LIBRARY_PATH:-}"
           "$smoke/build/praktor_real_smoke" "$smoke/command.yml" "$smoke/script.yml"
@@ -318,7 +318,7 @@ jobs:
           export SALTS_UTILS_ROOT=/opt/salts-utils/debug
           export CMAKE_PREFIX_PATH="/opt/praktor/debug:/opt/chttp/debug:/opt/salts-utils/debug:/opt/salts/debug"
           cmake -S "$consumer" -B "$consumer/build" -G Ninja
-          cmake --build "$consumer/build" -j2
+          cmake --build "$consumer/build" --verbose -j2
 
           export LD_LIBRARY_PATH="/opt/praktor/debug/lib:/opt/chttp/debug/lib:/opt/salts-utils/debug/lib:/opt/salts/debug/lib:$GITHUB_WORKSPACE/vcpkg_installed/linux/x64-linux/debug/lib:$GITHUB_WORKSPACE/vcpkg_installed/linux/x64-linux/lib:$GITHUB_WORKSPACE/deps/salts/vcpkg_installed/linux/x64-linux/debug/lib:$GITHUB_WORKSPACE/deps/salts/vcpkg_installed/linux/x64-linux/lib:$GITHUB_WORKSPACE/deps/salts-utils/vcpkg_installed/linux/x64-linux/debug/lib:$GITHUB_WORKSPACE/deps/salts-utils/vcpkg_installed/linux/x64-linux/lib:${LD_LIBRARY_PATH:-}"
           "$consumer/build/turboagent_real_praktor"
