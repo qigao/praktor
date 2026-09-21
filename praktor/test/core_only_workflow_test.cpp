@@ -69,7 +69,8 @@ TEST_CASE("core-only build rejects script workflows before scheduling") {
     writeText(workflow,
               "tasks:\n"
               "  - name: first\n"
-              "    command: \"" + first_command + "\"\n"
+              "    command: |-\n"
+              "      " + first_command + "\n"
               "\n"
               "  - name: script_later\n"
               "    depends_on: [first]\n"
