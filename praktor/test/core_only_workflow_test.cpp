@@ -29,6 +29,11 @@ void writeText(const std::filesystem::path& path, const std::string& text) {
 static_assert(PRAKTOR_SCRIPT_ENGINE_ENABLED == 0,
               "core_only_workflow_test must only build with scripts disabled");
 
+TEST_CASE("workflow value converts integral decimal JSON numbers") {
+    const auto value = WorkflowValue::parse(R"({"count":7.0})");
+    CHECK(value["count"].as<int>() == 7);
+}
+
 TEST_CASE("core-only build executes workflows without script tasks") {
     const auto dir = createCoreOnlyTempDir();
     const auto workflow = dir / "command.yml";
