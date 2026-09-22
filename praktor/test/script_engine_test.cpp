@@ -193,7 +193,10 @@ server.serve_forever()
         REQUIRE(spawn_error == 0);
 #endif
 
-        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        // Cold interpreter startup on macOS CI can exceed five seconds.
+        // This bounds fixture readiness; HTTP behavior is still asserted below.
+        INFO("HTTP fixture interpreter: " << pythonExecutable());
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
         while (std::chrono::steady_clock::now() < deadline) {
             if (std::filesystem::exists(ready_path)) {
                 const std::string ready_text = trim_newlines(readFile(ready_path));
@@ -208,6 +211,18 @@ server.serve_forever()
                     break;
                 }
             }
+#ifdef _WIN32
+            DWORD exit_code = STILL_ACTIVE;
+            REQUIRE(::GetExitCodeProcess(process_handle, &exit_code));
+            INFO("HTTP fixture process exit code: " << exit_code);
+            REQUIRE(exit_code == STILL_ACTIVE);
+#else
+            int status = 0;
+            const auto exited = ::waitpid(child_pid, &status, WNOHANG);
+            if (exited == child_pid) child_pid = -1;
+            INFO("HTTP fixture waitpid result: " << exited << ", status: " << status);
+            REQUIRE(exited == 0);
+#endif
             std::this_thread::sleep_for(std::chrono::milliseconds(50));
         }
 
