@@ -23,7 +23,6 @@ jobs:
       SALTS_SHA: f1d8466244e6e0d74baed86e99ae6205e431557f
       SALTS_UTILS_SHA: 62576265ac66b0000127a04936f108a3dbb3f004
       CHTTP_SHA: 9d2e64ee46d15541a24b61ae979df0cca8615d3b
-      VCPKG_SHA: b1b19307e2d2ec1eefbdb7ea069de7d4bcd31f01
       TURBOAGENT_SHA: ebf99fd0944b07065055b3db641bcfc7f070c984
       CMAKE_BUILD_PARALLEL_LEVEL: 2
 
@@ -71,13 +70,6 @@ jobs:
           path: deps/chttp
           persist-credentials: false
 
-      - uses: actions/checkout@v4
-        with:
-          repository: microsoft/vcpkg
-          ref: ${{ env.VCPKG_SHA }}
-          path: vcpkg
-          fetch-depth: 0
-          persist-credentials: false
 
       - name: Checkout exact TurboAgent Praktor adapter
         uses: actions/checkout@v4
@@ -93,17 +85,16 @@ jobs:
           set -euxo pipefail
           sudo apt-get update
           sudo apt-get install -y ninja-build pkg-config nasm
-          ./vcpkg/bootstrap-vcpkg.sh -disableMetrics
+          test -x "$VCPKG_ROOT/vcpkg"
           sudo mkdir -p /opt/salts /opt/salts-utils /opt/chttp /opt/praktor
           sudo chown -R "$USER":"$USER" /opt/salts /opt/salts-utils /opt/chttp /opt/praktor
-          sudo ln -sfn "$GITHUB_WORKSPACE/vcpkg" /opt/vcpkg
+          sudo ln -sfn "$VCPKG_ROOT" /opt/vcpkg
 
 
       - name: Build and install pinned Salts
         working-directory: deps/salts
         env:
           PROJECT_ROOT: ${{ runner.temp }}/salts-project
-          VCPKG_ROOT: ${{ github.workspace }}/vcpkg
         shell: bash
         run: |
           set -euxo pipefail
@@ -138,7 +129,7 @@ jobs:
           set -euxo pipefail
           cmake -S deps/chttp -B deps/chttp/build/praktor-ci -G Ninja \
             -DCMAKE_BUILD_TYPE=Debug \
-            -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/vcpkg/scripts/buildsystems/vcpkg.cmake" \
+            -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
             -DVCPKG_TARGET_TRIPLET=x64-linux \
             -DVCPKG_MANIFEST_MODE=ON \
             -DVCPKG_INSTALLED_DIR="$GITHUB_WORKSPACE/vcpkg_installed/chttp" \
@@ -159,7 +150,6 @@ jobs:
           SALTS_ROOT: /opt/salts/debug
           SALTS_UTILS_ROOT: /opt/salts-utils/debug
           CHTTP_ROOT: /opt/chttp/debug
-          VCPKG_ROOT: ${{ github.workspace }}/vcpkg
         run: |
           set -euxo pipefail
           rm -rf build/linux-gcc-debug
@@ -177,7 +167,6 @@ jobs:
           SALTS_ROOT: /opt/salts/debug
           SALTS_UTILS_ROOT: /opt/salts-utils/debug
           CHTTP_ROOT: /opt/chttp/debug
-          VCPKG_ROOT: ${{ github.workspace }}/vcpkg
           LD_LIBRARY_PATH: /opt/chttp/debug/lib:/opt/salts-utils/debug/lib:/opt/salts/debug/lib
         run: |
           set -euxo pipefail
@@ -190,7 +179,6 @@ jobs:
           SALTS_ROOT: /opt/salts/debug
           SALTS_UTILS_ROOT: /opt/salts-utils/debug
           CHTTP_ROOT: /opt/chttp/debug
-          VCPKG_ROOT: ${{ github.workspace }}/vcpkg
         run: |
           set -euxo pipefail
           cmake --build build/linux-gcc-debug --target install -j2
