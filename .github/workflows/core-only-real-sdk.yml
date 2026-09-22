@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: read
+  packages: read
 
 concurrency:
   group: praktor-core-only-${{ github.head_ref || github.ref_name }}
@@ -32,6 +33,14 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
+
+      - name: Configure shared vcpkg binary cache
+        uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-cache@master
+        with:
+          mode: read
+
+      - name: Restore shared re2c binary
+        uses: qigao/vcpkg-cache/.github/actions/setup-re2c-tools@master
 
       - name: Verify source identity
         shell: bash
@@ -83,18 +92,12 @@ jobs:
         run: |
           set -euxo pipefail
           sudo apt-get update
-          sudo apt-get install -y ninja-build pkg-config nasm curl xz-utils
+          sudo apt-get install -y ninja-build pkg-config nasm
           ./vcpkg/bootstrap-vcpkg.sh -disableMetrics
           sudo mkdir -p /opt/salts /opt/salts-utils /opt/chttp /opt/praktor
           sudo chown -R "$USER":"$USER" /opt/salts /opt/salts-utils /opt/chttp /opt/praktor
           sudo ln -sfn "$GITHUB_WORKSPACE/vcpkg" /opt/vcpkg
-          bash deps/salts-utils/cmake/ci/install-re2c.sh
 
-      - name: Cache vcpkg binary archives
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/vcpkg/archives
-          key: praktor-core-only-vcpkg-${{ runner.os }}-${{ runner.arch }}-${{ env.VCPKG_SHA }}-v1
 
       - name: Build and install pinned Salts
         working-directory: deps/salts
