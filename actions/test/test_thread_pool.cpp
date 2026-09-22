@@ -3,6 +3,7 @@
 #include "actions/shell_executor.hpp"
 #include "core/executor.hpp"
 #include "tinytest.h"
+#include "concurrency_gate.hpp"
 #include <atomic>
 #include <chrono>
 #include <thread>
@@ -68,26 +69,19 @@ suite("ThreadPool - Basic Functionality") {
             then("should handle them concurrently") {
                 ThreadPool pool(4);
                 
-                auto start = std::chrono::steady_clock::now();
-                
+                ConcurrencyGate gate(5); // Four workers plus the submitting thread.
+                std::atomic<bool> all_arrived{true};
                 std::vector<std::future<int>> futures;
                 for (int i = 0; i < 4; ++i) {
-                    futures.push_back(pool.submit([i]() {
-                        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                    futures.push_back(pool.submit([&gate, &all_arrived, i]() {
+                        if (!gate.arriveAndWait()) all_arrived = false;
                         return i;
                     }));
                 }
-                
-                // Wait for all
-                for (auto& f : futures) {
-                    f.get();
-                }
-                
-                auto end = std::chrono::steady_clock::now();
-                auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
-                
-                // With 4 threads, 4 tasks of 100ms should complete in ~100ms, not 400ms
-                check_true(duration.count() < 200); // Allow some overhead
+                const bool overlapped = gate.arriveAndWait();
+                for (int i = 0; i < 4; ++i) check(futures[i].get() == i);
+                check_true(overlapped);
+                check_true(all_arrived.load());
             }
         }
     }

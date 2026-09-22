@@ -16,8 +16,10 @@
 #include <windows.h>
 #else
 #include <signal.h>
+#include <spawn.h>
 #include <sys/wait.h>
 #include <unistd.h>
+extern char **environ;
 #endif
 
 namespace {
@@ -180,13 +182,15 @@ server.serve_forever()
         process_handle = process_info.hProcess;
         thread_handle = process_info.hThread;
 #else
-        child_pid = ::fork();
-        REQUIRE(child_pid >= 0);
-        if (child_pid == 0) {
-            const auto exe = pythonExecutable();
-            execlp(exe.c_str(), exe.c_str(), script_path.c_str(), ready_path.c_str(), static_cast<char*>(nullptr));
-            _exit(127);
-        }
+        // Other test cases may already have created threads; spawning avoids
+        // allocating C++ state between fork and exec in a multithreaded process.
+        auto exe = pythonExecutable();
+        auto script = script_path.string();
+        auto ready = ready_path.string();
+        char *argv[] = {exe.data(), script.data(), ready.data(), nullptr};
+        const int spawn_error = ::posix_spawnp(&child_pid, exe.c_str(), nullptr,
+                                               nullptr, argv, environ);
+        REQUIRE(spawn_error == 0);
 #endif
 
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
@@ -672,7 +676,7 @@ TEST_CASE("Script engine: shell module", "[script][shell]") {
         auto result = context.getValueByPath("shell_result");
         REQUIRE(result.is_object());
         CHECK(result["working_dir"].as<std::string>() == working_dir.lexically_normal().string());
-        CHECK(trim_newlines(result["stdout"].as<std::string>()) == working_dir.lexically_normal().string());
+        CHECK(std::filesystem::equivalent(trim_newlines(result["stdout"].as<std::string>()), working_dir));
 
         std::filesystem::remove_all(dir);
     }

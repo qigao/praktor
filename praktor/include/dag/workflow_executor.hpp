@@ -8,6 +8,8 @@
 #include "yml/task_types.hpp"
 
 #include <memory>
+#include <future>
+#include <thread>
 #include <map>
 #include <mutex>
 #include <optional>
@@ -41,6 +43,9 @@ private:
         bool has_task_result = false;
     };
 
+    bool executeScheduledTaskOnce(const Task& task, WorkflowContext& context,
+                                  std::optional<std::string> alias, bool ignore_when = false,
+                                  size_t trigger_depth = 0);
     bool executeTask(const Task& task, WorkflowContext& context, std::optional<std::string> alias = std::nullopt, bool ignore_when = false, size_t trigger_depth = 0);
     TaskExecutionOutcome executeTaskInternal(const Task& task, WorkflowContext& context, std::optional<std::string> alias = std::nullopt, bool ignore_when = false, bool report_terminal_status = true);
     void setTaskExecutionStatus(const Task& task, WorkflowContext& context,
@@ -79,6 +84,12 @@ private:
     // Concurrency control for execute()
     std::mutex execution_mutex_;
     std::condition_variable execution_cv_;
+    struct ScheduledTaskRun {
+        std::shared_future<bool> completion;
+        std::thread::id owner;
+    };
+    // Shared by DAG scheduling and inline trigger dependencies for this run.
+    std::unordered_map<std::string, ScheduledTaskRun> scheduled_task_runs_;
 
     // Caching
     struct TaskCacheState {
