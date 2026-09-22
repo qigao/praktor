@@ -92,5 +92,5 @@ jobs:
             exit 1
           fi
           grep -q 'if("OFF" STREQUAL "ON")' build/core-contract/PraktorConfig.cmake
-          grep -q 'find_dependency(TurboScript CONFIG)' build/core-contract/PraktorConfig.cmake
+          grep -q 'find_dependency(TurboScript CONFIG' build/core-contract/PraktorConfig.cmake
           echo "PRAKTOR_CORE_ONLY_CONFIGURE_OK"

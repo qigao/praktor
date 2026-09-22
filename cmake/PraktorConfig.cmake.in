@@ -1,11 +1,11 @@
 @PACKAGE_INIT@
 
 include(CMakeFindDependencyMacro)
-find_dependency(Salts CONFIG)
-find_dependency(SaltsUtils CONFIG)
-find_dependency(Chttp CONFIG)
+find_dependency(Salts CONFIG PATHS "$ENV{SALTS_ROOT}" NO_CMAKE_FIND_ROOT_PATH)
+find_dependency(SaltsUtils CONFIG PATHS "$ENV{SALTS_UTILS_ROOT}" NO_CMAKE_FIND_ROOT_PATH)
+find_dependency(Chttp CONFIG PATHS "$ENV{CHTTP_ROOT}" NO_CMAKE_FIND_ROOT_PATH)
 if("@ENABLE_SCRIPT_ENGINE@" STREQUAL "ON")
-    find_dependency(TurboScript CONFIG)
+    find_dependency(TurboScript CONFIG PATHS "$ENV{TURBOSCRIPT_ROOT}" NO_CMAKE_FIND_ROOT_PATH)
 endif()
 
 include("${CMAKE_CURRENT_LIST_DIR}/PraktorTargets.cmake")
