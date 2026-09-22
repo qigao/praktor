@@ -30,6 +30,8 @@ else()
     set(TEST_SOURCES core_only_workflow_test.cpp)
 endif()
 
+list(APPEND TEST_SOURCES trigger_dependency_once_test.cpp)
+
 cmake_add_test(
     SOURCES ${TEST_SOURCES}
     LIBS Catch2::Catch2WithMain ${TARGET_NAME_LIB}

@@ -2,13 +2,16 @@
 #include "core/ast.hpp"
 #include "core/executor.hpp"
 #include "tinytest.h"
+#include "concurrency_gate.hpp"
+#include "actions/thread_pool.hpp"
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <thread>
 
 using namespace actions;
 
-suite("Parallel Node - Performance") {
+suite("Parallel Node - Scheduling") {
 
     given("a Parallel node with many children") {
         when("executing with thread pool") {
@@ -18,9 +21,11 @@ suite("Parallel Node - Performance") {
                 
                 std::atomic<int> concurrent_count{0};
                 std::atomic<int> max_concurrent{0};
+                ConcurrencyGate gate(std::min(std::size_t(20), ThreadPool::instance().num_threads()));
+                std::atomic<bool> all_arrived{true};
                 
                 // Register a task that tracks concurrency
-                executor.registerTask("ConcurrentTask", [&concurrent_count, &max_concurrent](const auto&, Blackboard&) {
+                executor.registerTask("ConcurrentTask", [&concurrent_count, &max_concurrent, &gate, &all_arrived](const auto&, Blackboard&) {
                     int current = ++concurrent_count;
                     
                     // Update max if needed
@@ -29,8 +34,7 @@ suite("Parallel Node - Performance") {
                         // Retry if another thread updated it
                     }
                     
-                    // Simulate work
-                    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+                    if (!gate.arriveAndWait()) all_arrived = false;
                     
                     --concurrent_count;
                     return NodeStatus::SUCCESS;
@@ -46,42 +50,36 @@ suite("Parallel Node - Performance") {
                     parallel.children.push_back(child);
                 }
                 
-                auto start = std::chrono::steady_clock::now();
                 NodeStatus status = executor.execute(parallel, bb);
-                auto end = std::chrono::steady_clock::now();
                 
                 check((static_cast<int>(status)) == (static_cast<int>(NodeStatus::SUCCESS)));
                 
-                // Max concurrent should be limited by thread pool size (not 20)
-                // Thread pool uses 2x cores, clamped to [4, 32]
-                size_t cores = std::thread::hardware_concurrency();
-                if (cores == 0) cores = 2;
-                size_t expected_max = std::min(cores * 2, size_t(32));
-                
-                check_true(max_concurrent.load() <= static_cast<int>(expected_max) + 2); // Allow small overhead
-                
-                auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
-                // With proper parallelism, should complete much faster than sequential (20 * 50ms = 1000ms)
-                check_true(duration.count() < 500); // Should be ~100-200ms with good parallelism
+                check_true(max_concurrent.load() > 1);
+                check_true(max_concurrent.load() <= static_cast<int>(ThreadPool::instance().num_threads()));
+                check_true(all_arrived.load());
             }
         }
         
         when("children have varying execution times") {
-            then("should complete efficiently") {
+            then("should overlap fast and slow tasks") {
                 Executor executor;
                 Blackboard bb;
                 
                 std::atomic<int> completed{0};
+                ConcurrencyGate gate(2);
+                std::atomic<bool> all_arrived{true};
                 
                 // Fast task
-                executor.registerTask("FastTask", [&completed](const auto&, Blackboard&) {
+                executor.registerTask("FastTask", [&completed, &gate, &all_arrived](const auto&, Blackboard&) {
+                    if (!gate.arriveAndWait()) all_arrived = false;
                     std::this_thread::sleep_for(std::chrono::milliseconds(10));
                     completed++;
                     return NodeStatus::SUCCESS;
                 });
                 
                 // Slow task
-                executor.registerTask("SlowTask", [&completed](const auto&, Blackboard&) {
+                executor.registerTask("SlowTask", [&completed, &gate, &all_arrived](const auto&, Blackboard&) {
+                    if (!gate.arriveAndWait()) all_arrived = false;
                     std::this_thread::sleep_for(std::chrono::milliseconds(100));
                     completed++;
                     return NodeStatus::SUCCESS;
@@ -101,16 +99,12 @@ suite("Parallel Node - Performance") {
                     parallel.children.push_back(slow);
                 }
                 
-                auto start = std::chrono::steady_clock::now();
                 NodeStatus status = executor.execute(parallel, bb);
-                auto end = std::chrono::steady_clock::now();
                 
                 check((static_cast<int>(status)) == (static_cast<int>(NodeStatus::SUCCESS)));
                 check((completed.load()) == (10));
                 
-                auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
-                // Should complete in time dominated by slow tasks, not sum of all
-                check_true(duration.count() < 300); // Much less than sequential (5*10 + 5*100 = 550ms)
+                check_true(all_arrived.load());
             }
         }
     }

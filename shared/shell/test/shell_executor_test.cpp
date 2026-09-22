@@ -442,7 +442,7 @@ TEST_CASE("shell executor respects working directory", "[shell]") {
         printWorkingDirCommand(), "", dir.string(), 30000, {}, false);
 
     REQUIRE(result.success());
-    CHECK(trim_newlines(result.stdout_output) == dir.lexically_normal().string());
+    CHECK(std::filesystem::equivalent(trim_newlines(result.stdout_output), dir));
 
     std::filesystem::remove_all(dir);
 }

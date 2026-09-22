@@ -433,6 +433,10 @@ void WorkflowExecutor::execute(WorkflowContext &context, std::optional<std::stri
   auto nodes = graph_.getNodes();
   if (nodes.empty()) return;
 
+  {
+    std::lock_guard<std::mutex> lock(execution_mutex_);
+    scheduled_task_runs_.clear();
+  }
   loadCache(nodes.front().source_path);
 
   ExecutionState state;
@@ -556,6 +560,46 @@ void WorkflowExecutor::mergeForkedContext(WorkflowContext& target, const Workflo
   target.mergeLocalValuesFrom(child);
 }
 
+bool WorkflowExecutor::executeScheduledTaskOnce(
+    const Task& task, WorkflowContext& context, std::optional<std::string> alias,
+    bool ignore_when, size_t trigger_depth) {
+  std::promise<bool> promise;
+  std::shared_future<bool> completion;
+  bool owner = false;
+  {
+    std::lock_guard<std::mutex> lock(execution_mutex_);
+    auto it = scheduled_task_runs_.find(task.name);
+    if (it == scheduled_task_runs_.end()) {
+      completion = promise.get_future().share();
+      scheduled_task_runs_.emplace(task.name,
+          ScheduledTaskRun{completion, std::this_thread::get_id()});
+      owner = true;
+    } else {
+      completion = it->second.completion;
+      if (it->second.owner == std::this_thread::get_id() &&
+          completion.wait_for(std::chrono::seconds(0)) != std::future_status::ready) {
+        throw std::runtime_error("Trigger dependency re-enters running task '" + task.name + "'");
+      }
+    }
+  }
+  if (!owner) {
+    const bool success = completion.get();
+    if (alias) {
+      mergeTaskExecutionOutputs(task, context, alias, getTaskOutputsSnapshot(task, context));
+      setTaskExecutionStatus(task, context, alias, context.getTaskStatus(task.name));
+    }
+    return success;
+  }
+  try {
+    const bool success = executeTask(task, context, alias, ignore_when, trigger_depth);
+    promise.set_value(success);
+    return success;
+  } catch (...) {
+    promise.set_exception(std::current_exception());
+    throw;
+  }
+}
+
 void WorkflowExecutor::scheduleTask(const Task &task, WorkflowContext &context,
                                      ExecutionState &state, std::optional<std::string> alias) {
   auto runTask = [this, task, &context, &state, alias]() {
@@ -567,7 +611,7 @@ void WorkflowExecutor::scheduleTask(const Task &task, WorkflowContext &context,
       ctx_ptr = task_context.get();
     }
 
-    bool success = executeTask(task, *ctx_ptr, alias);
+    bool success = executeScheduledTaskOnce(task, *ctx_ptr, alias);
     if (task_context) {
       mergeForkedContext(context, *task_context);
     }
@@ -997,7 +1041,8 @@ bool WorkflowExecutor::executeTriggeredTask(const Task& task, WorkflowContext& c
                                            bool dependency_only, size_t trigger_depth) {
   const std::string status = context.getTaskStatus(task.name);
   if (dependency_only &&
-      (status == "success" || status == "skipped" || status == "failed" || status == "running")) {
+      (status == "success" || status == "skipped" || status == "failed" ||
+       (status == "running" && !isRegularlySchedulable(task)))) {
     return true;
   }
 
@@ -1024,5 +1069,8 @@ bool WorkflowExecutor::executeTriggeredTask(const Task& task, WorkflowContext& c
   }
 
   active_stack.erase(task.name);
+  if (dependency_only && isRegularlySchedulable(task)) {
+    return executeScheduledTaskOnce(task, context, std::nullopt, true, trigger_depth);
+  }
   return executeTask(task, context, std::nullopt, true, trigger_depth);
 }
