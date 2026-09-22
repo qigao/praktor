@@ -1,5 +1,6 @@
 #include "workflow_runner.hpp"
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -7,6 +8,7 @@
 #include <string>
 
 TEST_CASE("inline trigger dependency is not repeated by the regular DAG") {
+    const bool concurrent = GENERATE(false, true);
     const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
     const auto dir = std::filesystem::temp_directory_path() /
         ("praktor-trigger-once-" + std::to_string(stamp));
@@ -31,7 +33,7 @@ TEST_CASE("inline trigger dependency is not repeated by the regular DAG") {
             << "      on_success: [notify]\n";
     }
     WorkflowRunner runner(workflow.string());
-    REQUIRE(runner.run());
+    REQUIRE(runner.run(concurrent));
     std::ifstream in(output);
     const std::string result((std::istreambuf_iterator<char>(in)), {});
     const auto first_prepare = result.find("prepare");
