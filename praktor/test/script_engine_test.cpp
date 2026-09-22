@@ -117,6 +117,7 @@ import json
 import pathlib
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from socketserver import TCPServer
 
 ready_path = pathlib.Path(sys.argv[1])
 
@@ -153,7 +154,15 @@ class Handler(BaseHTTPRequestHandler):
             "body": parsed,
         })
 
-server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+class LoopbackHttpServer(ThreadingHTTPServer):
+    def server_bind(self):
+        # HTTPServer.server_bind performs reverse DNS, which can stall macOS CI.
+        # The fixture uses a numeric loopback address and needs no DNS identity.
+        TCPServer.server_bind(self)
+        self.server_name = "localhost"
+        self.server_port = self.server_address[1]
+
+server = LoopbackHttpServer(("127.0.0.1", 0), Handler)
 ready_path.write_text(str(server.server_port), encoding="utf-8")
 server.serve_forever()
 )py");
@@ -193,7 +202,7 @@ server.serve_forever()
         REQUIRE(spawn_error == 0);
 #endif
 
-        // Cold interpreter startup on macOS CI can exceed five seconds.
+        // Bound fixture startup independently of HTTP request assertions.
         // This bounds fixture readiness; HTTP behavior is still asserted below.
         INFO("HTTP fixture interpreter: " << pythonExecutable());
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
