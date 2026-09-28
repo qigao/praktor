@@ -6,6 +6,7 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+#include "exprtk_module.h"
 #include "exprtk_types.h"
 #ifdef __cplusplus
 }
@@ -15,6 +16,7 @@ extern "C" {
 #include "util/system_info.hpp"
 #include "util/turbo_script_runtime.hpp"
 #include "data/structured_document_query.hpp"
+#include <array>
 #include <cctype>
 #include <deque>
 #include <filesystem>
@@ -254,6 +256,249 @@ WorkflowValue build_shell_options(const exprtk_value_t &value) {
   }
 
   return WorkflowValue::object();
+}
+
+struct LegacyHostBinding {
+  const char *name;
+  uint32_t min_arity;
+  uint32_t max_arity;
+  turbo_script_func_t callback;
+  void *legacy_user_data;
+  ScriptEvalContext *eval_ctx;
+};
+
+struct HostValueStorage {
+  std::deque<std::string> strings;
+  std::deque<std::vector<turbo_script_value_view_t>> arrays;
+  std::deque<std::vector<turbo_script_record_entry_view_t>> records;
+};
+
+exprtk_value_t exprtk_from_host_value(const turbo_script_value_view_t &value,
+                                      ScriptEvalContext &eval_ctx) {
+  switch (value.kind) {
+  case TURBO_SCRIPT_VALUE_NULL:
+    return exprtk_value_t{.type = EXPRTK_VAL_NULL};
+  case TURBO_SCRIPT_VALUE_BOOL: {
+    exprtk_value_t result{};
+    result.type = EXPRTK_VAL_BOOL;
+    result.data.boolean = value.as.boolean != 0;
+    return result;
+  }
+  case TURBO_SCRIPT_VALUE_INT64: {
+    exprtk_value_t result{};
+    result.type = EXPRTK_VAL_INTEGER;
+    result.data.integer = value.as.integer;
+    return result;
+  }
+  case TURBO_SCRIPT_VALUE_NUMBER: {
+    exprtk_value_t result{};
+    result.type = EXPRTK_VAL_NUMBER;
+    result.data.number = value.as.number;
+    return result;
+  }
+  case TURBO_SCRIPT_VALUE_STRING:
+    return eval_ctx.keep(std::string(value.as.string.data ? value.as.string.data : "",
+                                     value.as.string.size));
+  case TURBO_SCRIPT_VALUE_ARRAY: {
+    std::vector<exprtk_value_t> items;
+    items.reserve(value.as.array.count);
+    for (size_t i = 0; i < value.as.array.count; ++i) {
+      items.push_back(exprtk_from_host_value(value.as.array.items[i], eval_ctx));
+    }
+    return eval_ctx.keepList(std::move(items));
+  }
+  case TURBO_SCRIPT_VALUE_RECORD: {
+    exprtk_value_t map = turbo_script_value_map();
+    for (size_t i = 0; i < value.as.record.count; ++i) {
+      const auto &entry = value.as.record.entries[i];
+      const std::string key(entry.key.data ? entry.key.data : "", entry.key.size);
+      exprtk_value_t child = exprtk_from_host_value(entry.value, eval_ctx);
+      turbo_script_value_map_set(&map, key.c_str(), child);
+      exprtk_value_destroy(&child);
+    }
+    return map;
+  }
+  default:
+    return exprtk_value_t{.type = EXPRTK_VAL_NULL};
+  }
+}
+
+turbo_script_value_view_t host_value_from_exprtk(const exprtk_value_t &value,
+                                                 HostValueStorage &storage) {
+  turbo_script_value_view_t result{};
+  switch (value.type) {
+  case EXPRTK_VAL_NULL:
+    result.kind = TURBO_SCRIPT_VALUE_NULL;
+    break;
+  case EXPRTK_VAL_BOOL:
+    result.kind = TURBO_SCRIPT_VALUE_BOOL;
+    result.as.boolean = value.data.boolean != 0;
+    break;
+  case EXPRTK_VAL_INTEGER:
+    result.kind = TURBO_SCRIPT_VALUE_INT64;
+    result.as.integer = value.data.integer;
+    break;
+  case EXPRTK_VAL_NUMBER:
+    result.kind = TURBO_SCRIPT_VALUE_NUMBER;
+    result.as.number = value.data.number;
+    break;
+  case EXPRTK_VAL_STRING: {
+    result.kind = TURBO_SCRIPT_VALUE_STRING;
+    storage.strings.emplace_back(value.data.string.data ? value.data.string.data : "",
+                                 value.data.string.len);
+    const auto &text = storage.strings.back();
+    result.as.string = {text.data(), text.size()};
+    break;
+  }
+  case EXPRTK_VAL_VECTOR: {
+    result.kind = TURBO_SCRIPT_VALUE_ARRAY;
+    std::vector<turbo_script_value_view_t> items;
+    items.reserve(value.data.vector.size);
+    for (size_t i = 0; i < value.data.vector.size; ++i) {
+      turbo_script_value_view_t item{};
+      item.kind = TURBO_SCRIPT_VALUE_NUMBER;
+      item.as.number = value.data.vector.data[i];
+      items.push_back(item);
+    }
+    storage.arrays.push_back(std::move(items));
+    const auto &stored = storage.arrays.back();
+    result.as.array = {stored.empty() ? nullptr : stored.data(), stored.size()};
+    break;
+  }
+  case EXPRTK_VAL_LIST:
+  case EXPRTK_VAL_SET: {
+    result.kind = TURBO_SCRIPT_VALUE_ARRAY;
+    std::vector<turbo_script_value_view_t> items;
+    items.reserve(value.data.list.count);
+    for (size_t i = 0; i < value.data.list.count; ++i) {
+      items.push_back(host_value_from_exprtk(value.data.list.items[i], storage));
+    }
+    storage.arrays.push_back(std::move(items));
+    const auto &stored = storage.arrays.back();
+    result.as.array = {stored.empty() ? nullptr : stored.data(), stored.size()};
+    break;
+  }
+  case EXPRTK_VAL_MAP:
+  case EXPRTK_VAL_OBJECT: {
+    result.kind = TURBO_SCRIPT_VALUE_RECORD;
+    std::vector<turbo_script_record_entry_view_t> entries;
+    turbo_script_value_map_iterator_t it = turbo_script_value_map_iter_begin(&value);
+    const char *key = nullptr;
+    exprtk_value_t entry{};
+    while (turbo_script_value_map_iter_next(&it, &key, &entry)) {
+      storage.strings.emplace_back(key ? key : "");
+      const auto &stored_key = storage.strings.back();
+      turbo_script_record_entry_view_t converted{};
+      converted.key = {stored_key.data(), stored_key.size()};
+      converted.value = host_value_from_exprtk(entry, storage);
+      entries.push_back(converted);
+    }
+    storage.records.push_back(std::move(entries));
+    const auto &stored = storage.records.back();
+    result.as.record = {stored.empty() ? nullptr : stored.data(), stored.size()};
+    break;
+  }
+  case EXPRTK_VAL_FUNCTION:
+    result.kind = TURBO_SCRIPT_VALUE_NULL;
+    break;
+  }
+  return result;
+}
+
+turbo_script_status_t legacy_host_callback(
+    void *user_data, const turbo_script_value_view_t *args, size_t arg_count,
+    turbo_script_host_result_builder_t *builder) {
+  auto *binding = static_cast<LegacyHostBinding *>(user_data);
+  if (!binding || !binding->callback || !binding->eval_ctx || (!args && arg_count != 0)) {
+    return TURBO_SCRIPT_STATUS_INVALID_ARGUMENT;
+  }
+
+  std::vector<exprtk_value_t> converted_args;
+  converted_args.reserve(arg_count);
+  try {
+    for (size_t i = 0; i < arg_count; ++i) {
+      converted_args.push_back(exprtk_from_host_value(args[i], *binding->eval_ctx));
+    }
+
+    exprtk_value_t output =
+        binding->callback(arg_count,
+                          converted_args.empty() ? nullptr : converted_args.data(),
+                          nullptr,
+                          binding->legacy_user_data);
+    HostValueStorage storage;
+    const turbo_script_value_view_t host_output = host_value_from_exprtk(output, storage);
+    const auto status = turbo_script_host_result_set_value(builder, &host_output);
+    exprtk_value_destroy(&output);
+    for (auto &value : converted_args) {
+      exprtk_value_destroy(&value);
+    }
+    return status;
+  } catch (const std::exception &e) {
+    for (auto &value : converted_args) {
+      exprtk_value_destroy(&value);
+    }
+    const std::string message = e.what();
+    return turbo_script_host_result_set_error(
+        builder, -1, {message.data(), message.size()});
+  } catch (...) {
+    for (auto &value : converted_args) {
+      exprtk_value_destroy(&value);
+    }
+    static constexpr std::string_view message = "Praktor host callback failed";
+    return turbo_script_host_result_set_error(
+        builder, -1, {message.data(), message.size()});
+  }
+}
+
+bool register_legacy_host_binding(turbo_script_ctx_t *ctx,
+                                  turbo_script_result_t *host_result,
+                                  LegacyHostBinding &binding) {
+  turbo_script_host_function_descriptor_t descriptor{};
+  descriptor.struct_size = sizeof(descriptor);
+  descriptor.min_arity = binding.min_arity;
+  descriptor.max_arity = binding.max_arity;
+  descriptor.name = {binding.name, std::char_traits<char>::length(binding.name)};
+  return turbo_script_context_register_host_function(
+             ctx, &descriptor, legacy_host_callback, &binding, host_result) ==
+         TURBO_SCRIPT_STATUS_OK;
+}
+
+std::string build_host_module_source(std::string_view source) {
+  std::string wrapped;
+  wrapped.reserve(source.size() + 96);
+  wrapped += "func __praktor_entry(){\n";
+  wrapped.append(source.data(), source.size());
+  wrapped += "\nreturn 0;\n};\nexport(\"__praktor_entry\");\n";
+  return wrapped;
+}
+
+int execution_control_interrupt(void *user_data) {
+  const auto *control =
+      static_cast<const Praktor::Execution::ExecutionControl *>(user_data);
+  return control && control->stopRequested() ? 1 : 0;
+}
+
+std::string host_result_error_message(turbo_script_result_t *host_result,
+                                      std::string_view fallback,
+                                      ScriptError *out_error = nullptr) {
+  turbo_script_error_info_t error{};
+  error.struct_size = sizeof(error);
+  if (host_result &&
+      turbo_script_result_get_error(host_result, &error) == TURBO_SCRIPT_STATUS_OK) {
+    if (out_error) {
+      out_error->line = static_cast<int>(error.line);
+    }
+    if (error.message.data && error.message.size) {
+      if (out_error) {
+        out_error->message.assign(error.message.data, error.message.size);
+      }
+      return std::string(error.message.data, error.message.size);
+    }
+  }
+  if (out_error) {
+    out_error->message = std::string(fallback);
+  }
+  return std::string(fallback);
 }
 
 } // namespace
@@ -658,6 +903,7 @@ ScriptResult execute(const std::string &source, WorkflowContext &context,
   ScriptResult result;
   const std::string normalized_source =
       normalize_script_source(resolve_script_import_paths(source, context, script_source_path));
+  const std::string host_source = build_host_module_source(normalized_source);
   const Praktor::util::TurboScriptRuntimeGuard runtime_guard;
 
   turbo_script_ctx_t *ctx = turbo_script_init(TURBO_SCRIPT_INIT_DEFAULT);
@@ -667,46 +913,150 @@ ScriptResult execute(const std::string &source, WorkflowContext &context,
     return result;
   }
 
-  ScriptEvalContext eval_ctx{context, {}};
+  turbo_script_result_t *host_result = nullptr;
+  turbo_script_module_t *module = nullptr;
+  turbo_script_instance_t *instance = nullptr;
 
-  // Bind praktor-specific functions
-  ts_bind_func(ctx, "ctx_get", ctx_get_fn, &eval_ctx);
-  ts_bind_func(ctx, "ctx_set", ctx_set_fn, &eval_ctx);
-  ts_bind_func(ctx, "ctx_output", ctx_output_fn, &eval_ctx);
-  ts_bind_func(ctx, "ctx_output_text", ctx_output_text_fn, &eval_ctx);
-  ts_bind_func(ctx, "log_info", log_info_fn, nullptr);
-  ts_bind_func(ctx, "log_warn", log_warn_fn, nullptr);
-  ts_bind_func(ctx, "log_error", log_error_fn, nullptr);
-  ts_bind_func(ctx, "json_stringify", json_stringify_fn, &eval_ctx);
-  ts_bind_func(ctx, "json_parse", json_parse_fn, &eval_ctx);
-  ts_bind_func(ctx, "json_query", json_query_fn, &eval_ctx);
-  ts_bind_func(ctx, "shell_exec", shell_exec_fn, &eval_ctx);
-  ts_bind_func(ctx, "trim_fn", trim_fn_call, &eval_ctx);
-  ts_bind_func(ctx, "fail", fail_fn, &eval_ctx);
+  auto cleanup = [&]() {
+    if (instance && host_result) {
+      (void)turbo_script_instance_destroy(instance, host_result);
+      instance = nullptr;
+    }
+    if (module && host_result) {
+      (void)turbo_script_module_destroy(module, host_result);
+      module = nullptr;
+    }
+    if (host_result) {
+      turbo_script_result_destroy(host_result);
+      host_result = nullptr;
+    }
+    turbo_script_free(ctx);
+    ctx = nullptr;
+  };
 
-  if (turbo_script_run_jit(ctx, normalized_source.c_str()) != 0) {
+  if (turbo_script_result_create(ctx, &host_result) != TURBO_SCRIPT_STATUS_OK ||
+      !host_result) {
     result.success = false;
-    result.error_message = turbo_script_get_error(ctx);
-
-    ScriptError err;
-    err.line = 0;
-    err.message = result.error_message;
-    result.errors.push_back(err);
+    result.error_message = "Failed to create TurboScript Host result";
+    cleanup();
+    return result;
   }
+
+  ScriptEvalContext eval_ctx{context, {}};
+  std::array<LegacyHostBinding, 13> bindings{{
+      {"ctx_get", 1, 1, ctx_get_fn, &eval_ctx, &eval_ctx},
+      {"ctx_set", 2, 16, ctx_set_fn, &eval_ctx, &eval_ctx},
+      {"ctx_output", 2, 16, ctx_output_fn, &eval_ctx, &eval_ctx},
+      {"ctx_output_text", 2, 16, ctx_output_text_fn, &eval_ctx, &eval_ctx},
+      {"log_info", 1, 16, log_info_fn, nullptr, &eval_ctx},
+      {"log_warn", 1, 16, log_warn_fn, nullptr, &eval_ctx},
+      {"log_error", 1, 16, log_error_fn, nullptr, &eval_ctx},
+      {"json_stringify", 1, 16, json_stringify_fn, &eval_ctx, &eval_ctx},
+      {"json_parse", 1, 16, json_parse_fn, &eval_ctx, &eval_ctx},
+      {"json_query", 2, 16, json_query_fn, &eval_ctx, &eval_ctx},
+      {"shell_exec", 1, 16, shell_exec_fn, &eval_ctx, &eval_ctx},
+      {"trim_fn", 1, 16, trim_fn_call, &eval_ctx, &eval_ctx},
+      {"fail", 0, 16, fail_fn, &eval_ctx, &eval_ctx},
+  }};
+
+  for (auto &binding : bindings) {
+    if (!register_legacy_host_binding(ctx, host_result, binding)) {
+      result.success = false;
+      ScriptError error{};
+      result.error_message =
+          host_result_error_message(host_result, "Failed to register TurboScript host callback",
+                                    &error);
+      result.errors.push_back(std::move(error));
+      cleanup();
+      return result;
+    }
+  }
+
+  turbo_script_module_options_t module_options{};
+  turbo_script_module_options_init(&module_options);
+  static constexpr std::string_view module_name = "praktor-script";
+  module_options.module_name = {module_name.data(), module_name.size()};
+
+  auto status = turbo_script_module_compile(
+      ctx, {host_source.data(), host_source.size()}, &module_options, host_result, &module);
+  if (status != TURBO_SCRIPT_STATUS_OK) {
+    result.success = false;
+    ScriptError error{};
+    result.error_message =
+        host_result_error_message(host_result, "TurboScript module compile failed", &error);
+    result.errors.push_back(std::move(error));
+    cleanup();
+    return result;
+  }
+
+  turbo_script_instance_options_t instance_options{};
+  turbo_script_instance_options_init(&instance_options);
+  instance_options.mode = TURBO_SCRIPT_EXEC_JIT;
+  status = turbo_script_instance_create(module, &instance_options, host_result, &instance);
+  if (status != TURBO_SCRIPT_STATUS_OK) {
+    result.success = false;
+    ScriptError error{};
+    result.error_message =
+        host_result_error_message(host_result, "TurboScript instance creation failed", &error);
+    result.errors.push_back(std::move(error));
+    cleanup();
+    return result;
+  }
+
+  turbo_script_export_handle_t entry = 0;
+  static constexpr std::string_view entry_name = "__praktor_entry";
+  status = turbo_script_instance_resolve_export(
+      instance, {entry_name.data(), entry_name.size()}, host_result, &entry);
+  if (status != TURBO_SCRIPT_STATUS_OK) {
+    result.success = false;
+    ScriptError error{};
+    result.error_message =
+        host_result_error_message(host_result, "TurboScript entry resolution failed", &error);
+    result.errors.push_back(std::move(error));
+    cleanup();
+    return result;
+  }
+
+  turbo_script_call_options_t call_options{};
+  turbo_script_call_options_init(&call_options);
+  if (const auto control = context.getExecutionControl()) {
+    call_options.interrupt = execution_control_interrupt;
+    call_options.interrupt_user_data = control.get();
+  }
+
+  status =
+      turbo_script_instance_call(instance, entry, nullptr, 0, &call_options, host_result);
+  if (status != TURBO_SCRIPT_STATUS_OK) {
+    result.success = false;
+    ScriptError error{};
+    if (status == TURBO_SCRIPT_STATUS_INTERRUPTED) {
+      const auto control = context.getExecutionControl();
+      if (control && control->stopReason() ==
+                         Praktor::Execution::ExecutionControl::StopReason::DeadlineExceeded) {
+        result.error_message = "Script execution timed out";
+      } else {
+        result.error_message = "Script execution cancelled";
+      }
+      error.message = result.error_message;
+    } else {
+      result.error_message =
+          host_result_error_message(host_result, "TurboScript execution failed", &error);
+    }
+    result.errors.push_back(std::move(error));
+  }
+
   if (result.success && eval_ctx.failed) {
     result.success = false;
     result.error_message =
         eval_ctx.failure_message.empty() ? std::string("Script failed") : eval_ctx.failure_message;
 
-    ScriptError err;
-    err.line = 0;
-    err.message = result.error_message;
-    result.errors.push_back(err);
+    ScriptError error{};
+    error.line = 0;
+    error.message = result.error_message;
+    result.errors.push_back(std::move(error));
   }
 
-  // Cleanup
-  turbo_script_free(ctx);
-
+  cleanup();
   return result;
 }
 
