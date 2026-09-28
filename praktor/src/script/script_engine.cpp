@@ -276,8 +276,11 @@ struct HostValueStorage {
 exprtk_value_t exprtk_from_host_value(const turbo_script_value_view_t &value,
                                       ScriptEvalContext &eval_ctx) {
   switch (value.kind) {
-  case TURBO_SCRIPT_VALUE_NULL:
-    return exprtk_value_t{.type = EXPRTK_VAL_NULL};
+  case TURBO_SCRIPT_VALUE_NULL: {
+    exprtk_value_t result{};
+    result.type = EXPRTK_VAL_NULL;
+    return result;
+  }
   case TURBO_SCRIPT_VALUE_BOOL: {
     exprtk_value_t result{};
     result.type = EXPRTK_VAL_BOOL;
@@ -318,8 +321,11 @@ exprtk_value_t exprtk_from_host_value(const turbo_script_value_view_t &value,
     }
     return map;
   }
-  default:
-    return exprtk_value_t{.type = EXPRTK_VAL_NULL};
+  default: {
+    exprtk_value_t result{};
+    result.type = EXPRTK_VAL_NULL;
+    return result;
+  }
   }
 }
 
@@ -415,35 +421,41 @@ turbo_script_status_t legacy_host_callback(
 
   std::vector<exprtk_value_t> converted_args;
   converted_args.reserve(arg_count);
+  exprtk_value_t output{};
+  bool has_output = false;
+
+  const auto cleanup_values = [&]() {
+    if (has_output) {
+      exprtk_value_destroy(&output);
+      has_output = false;
+    }
+    for (auto &value : converted_args) {
+      exprtk_value_destroy(&value);
+    }
+  };
+
   try {
     for (size_t i = 0; i < arg_count; ++i) {
       converted_args.push_back(exprtk_from_host_value(args[i], *binding->eval_ctx));
     }
 
-    exprtk_value_t output =
-        binding->callback(arg_count,
-                          converted_args.empty() ? nullptr : converted_args.data(),
-                          nullptr,
-                          binding->legacy_user_data);
+    output = binding->callback(arg_count,
+                               converted_args.empty() ? nullptr : converted_args.data(),
+                               nullptr,
+                               binding->legacy_user_data);
+    has_output = true;
     HostValueStorage storage;
     const turbo_script_value_view_t host_output = host_value_from_exprtk(output, storage);
     const auto status = turbo_script_host_result_set_value(builder, &host_output);
-    exprtk_value_destroy(&output);
-    for (auto &value : converted_args) {
-      exprtk_value_destroy(&value);
-    }
+    cleanup_values();
     return status;
   } catch (const std::exception &e) {
-    for (auto &value : converted_args) {
-      exprtk_value_destroy(&value);
-    }
+    cleanup_values();
     const std::string message = e.what();
     return turbo_script_host_result_set_error(
         builder, -1, {message.data(), message.size()});
   } catch (...) {
-    for (auto &value : converted_args) {
-      exprtk_value_destroy(&value);
-    }
+    cleanup_values();
     static constexpr std::string_view message = "Praktor host callback failed";
     return turbo_script_host_result_set_error(
         builder, -1, {message.data(), message.size()});
