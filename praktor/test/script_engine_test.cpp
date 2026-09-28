@@ -1,5 +1,6 @@
 #include "script/script_engine.hpp"
 #include "dag/workflow_context.hpp"
+#include "turbo_script.h"
 
 #include <catch2/catch_all.hpp>
 #include <atomic>
@@ -301,7 +302,144 @@ std::string shell_env_echo_command(const std::string& name)
 
 #endif
 
+struct HostAbiInterruptProbe {
+    std::atomic<unsigned> checks{0};
+    unsigned request_after = 2;
+};
+
+int hostAbiInterrupt(void* user_data)
+{
+    auto* probe = static_cast<HostAbiInterruptProbe*>(user_data);
+    const auto checks = probe->checks.fetch_add(1, std::memory_order_relaxed) + 1;
+    return checks >= probe->request_after ? 1 : 0;
+}
+
+turbo_script_status_t hostAbiDouble(
+    void* /*user_data*/,
+    const turbo_script_value_view_t* args,
+    size_t arg_count,
+    turbo_script_host_result_builder_t* builder)
+{
+    if (!args || arg_count != 1) {
+        return TURBO_SCRIPT_STATUS_INVALID_ARGUMENT;
+    }
+
+    turbo_script_value_view_t output{};
+    if (args[0].kind == TURBO_SCRIPT_VALUE_INT64) {
+        output.kind = TURBO_SCRIPT_VALUE_INT64;
+        output.as.integer = args[0].as.integer * 2;
+    } else if (args[0].kind == TURBO_SCRIPT_VALUE_NUMBER) {
+        output.kind = TURBO_SCRIPT_VALUE_NUMBER;
+        output.as.number = args[0].as.number * 2.0;
+    } else {
+        return TURBO_SCRIPT_STATUS_INVALID_ARGUMENT;
+    }
+    return turbo_script_host_result_set_value(builder, &output);
+}
+
 } // namespace
+
+TEST_CASE("TurboScript public Host ABI supports JIT callbacks and interruption",
+          "[script][host-abi]") {
+    turbo_script_ctx_t* ctx = turbo_script_init(TURBO_SCRIPT_INIT_DEFAULT);
+    REQUIRE(ctx != nullptr);
+
+    turbo_script_result_t* result = nullptr;
+    REQUIRE(turbo_script_result_create(ctx, &result) == TURBO_SCRIPT_STATUS_OK);
+    REQUIRE(result != nullptr);
+
+    turbo_script_host_function_descriptor_t descriptor{};
+    descriptor.struct_size = sizeof(descriptor);
+    descriptor.name = {"host_double", sizeof("host_double") - 1};
+    descriptor.min_arity = 1;
+    descriptor.max_arity = 1;
+    REQUIRE(turbo_script_context_register_host_function(
+                ctx, &descriptor, hostAbiDouble, nullptr, result) == TURBO_SCRIPT_STATUS_OK);
+
+    constexpr char kSource[] =
+        "func host_entry(){return host_double(21);};"
+        "func loop(n){i=0;while(i<n){i=i+1;};return i;};"
+        "export(\"host_entry\");export(\"loop\");";
+
+    turbo_script_module_options_t module_options{};
+    turbo_script_module_options_init(&module_options);
+    module_options.module_name = {"praktor-host-abi-contract",
+                                  sizeof("praktor-host-abi-contract") - 1};
+
+    turbo_script_module_t* module = nullptr;
+    REQUIRE(turbo_script_module_compile(
+                ctx,
+                {kSource, sizeof(kSource) - 1},
+                &module_options,
+                result,
+                &module) == TURBO_SCRIPT_STATUS_OK);
+    REQUIRE(module != nullptr);
+
+    turbo_script_instance_options_t instance_options{};
+    turbo_script_instance_options_init(&instance_options);
+    instance_options.mode = TURBO_SCRIPT_EXEC_JIT;
+
+    turbo_script_instance_t* instance = nullptr;
+    REQUIRE(turbo_script_instance_create(
+                module, &instance_options, result, &instance) == TURBO_SCRIPT_STATUS_OK);
+    REQUIRE(instance != nullptr);
+
+    turbo_script_export_handle_t host_handle = 0;
+    REQUIRE(turbo_script_instance_resolve_export(
+                instance,
+                {"host_entry", sizeof("host_entry") - 1},
+                result,
+                &host_handle) == TURBO_SCRIPT_STATUS_OK);
+
+    turbo_script_call_options_t call_options{};
+    turbo_script_call_options_init(&call_options);
+    REQUIRE(turbo_script_instance_call(
+                instance, host_handle, nullptr, 0, &call_options, result) ==
+            TURBO_SCRIPT_STATUS_OK);
+
+    turbo_script_value_view_t value{};
+    REQUIRE(turbo_script_result_get_value(result, &value) == TURBO_SCRIPT_STATUS_OK);
+    REQUIRE((value.kind == TURBO_SCRIPT_VALUE_INT64 ||
+             value.kind == TURBO_SCRIPT_VALUE_NUMBER));
+    if (value.kind == TURBO_SCRIPT_VALUE_INT64) {
+        CHECK(value.as.integer == 42);
+    } else {
+        CHECK(value.as.number == Catch::Approx(42.0));
+    }
+
+    turbo_script_export_handle_t loop_handle = 0;
+    REQUIRE(turbo_script_instance_resolve_export(
+                instance,
+                {"loop", sizeof("loop") - 1},
+                result,
+                &loop_handle) == TURBO_SCRIPT_STATUS_OK);
+
+    HostAbiInterruptProbe probe;
+    turbo_script_call_options_init(&call_options);
+    call_options.max_steps = UINT32_MAX;
+    call_options.max_loop_iterations = UINT32_MAX;
+    call_options.interrupt = hostAbiInterrupt;
+    call_options.interrupt_user_data = &probe;
+
+    turbo_script_value_view_t loop_count{};
+    loop_count.kind = TURBO_SCRIPT_VALUE_INT64;
+    loop_count.as.integer = 100000;
+    REQUIRE(turbo_script_instance_call(
+                instance, loop_handle, &loop_count, 1, &call_options, result) ==
+            TURBO_SCRIPT_STATUS_INTERRUPTED);
+    CHECK(probe.checks.load(std::memory_order_relaxed) >= probe.request_after);
+
+    turbo_script_error_info_t error{};
+    error.struct_size = sizeof(error);
+    REQUIRE(turbo_script_result_get_error(result, &error) == TURBO_SCRIPT_STATUS_OK);
+    CHECK(error.status == TURBO_SCRIPT_STATUS_INTERRUPTED);
+    CHECK(error.phase == TURBO_SCRIPT_ERROR_PHASE_INTERRUPT);
+
+    REQUIRE(turbo_script_instance_destroy(instance, result) == TURBO_SCRIPT_STATUS_OK);
+    REQUIRE(turbo_script_module_destroy(module, result) == TURBO_SCRIPT_STATUS_OK);
+    turbo_script_result_destroy(result);
+    turbo_script_free(ctx);
+}
 
 TEST_CASE("Script engine: basics", "[script]") {
     WorkflowContext context;
