@@ -317,6 +317,7 @@ jobs:
             "-DPraktor_DIR=$prefix/lib/cmake/Praktor" \
             "-DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
             -DVCPKG_TARGET_TRIPLET=x64-linux -DVCPKG_MANIFEST_MODE=ON \
+            "-DVCPKG_MANIFEST_DIR=$GITHUB_WORKSPACE" \
             "-DVCPKG_INSTALLED_DIR=$GITHUB_WORKSPACE/vcpkg_installed"
           cmake --build build/packed-smoke --parallel 2
           export LD_LIBRARY_PATH="$prefix/lib:$TURBOSCRIPT_ROOT/lib:$CHTTP_ROOT/lib:$SALTS_UTILS_ROOT/lib:$SALTS_ROOT/lib:$GITHUB_WORKSPACE/vcpkg_installed/x64-linux/lib"
