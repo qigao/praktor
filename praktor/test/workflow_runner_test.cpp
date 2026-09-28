@@ -1,6 +1,8 @@
 #include "workflow_runner.hpp"
 #include "dag/workflow_executor.hpp"
 #include "execution/execution_control.hpp"
+#include "execution/controlled_process.hpp"
+#include "executors/program_executor.hpp"
 #include "yml/task_parser.hpp"
 #include "dag/workflow_executor_internal.hpp"
 #include "system/managed_process.hpp"
@@ -967,6 +969,47 @@ TEST_CASE("dynamic_tasks reject generated names that collide with static tasks")
     REQUIRE_FALSE(runner.run());
     CHECK_FALSE(std::filesystem::exists(output_path));
     std::filesystem::remove_all(dir);
+}
+
+TEST_CASE("controlled process deadline clamps configured timeout",
+          "[workflow][execution-control][process]") {
+    using Control = Praktor::Execution::ExecutionControl;
+    using namespace std::chrono_literals;
+
+    CHECK(Praktor::Execution::clampProcessTimeoutMs(5000, {}) == 5000);
+
+    auto future = std::make_shared<Control>(Control::Clock::now() + 10s);
+    const int future_timeout =
+        Praktor::Execution::clampProcessTimeoutMs(30000, future);
+    CHECK(future_timeout > 0);
+    CHECK(future_timeout <= 10000);
+
+    auto expired = std::make_shared<Control>(Control::Clock::now() - 1ms);
+    CHECK(Praktor::Execution::clampProcessTimeoutMs(30000, expired) == 1);
+}
+
+TEST_CASE("ProgramExecutor rejects controlled execution before process spawn",
+          "[workflow][execution-control][program]") {
+    using Control = Praktor::Execution::ExecutionControl;
+
+    Task task;
+    task.name = "controlled_program";
+    task.action = TaskAction::Program;
+    ProgramParams params;
+    params.program = "praktor-program-that-must-not-spawn";
+    task.specifics = params;
+
+    WorkflowContext context;
+    auto control = std::make_shared<Control>();
+    control->requestCancel();
+    context.setExecutionControl(control);
+
+    Praktor::Execution::ProgramExecutor executor;
+    const auto result = executor.execute(task, context);
+
+    CHECK_FALSE(result.success);
+    CHECK(result.error_code == "cancelled");
+    CHECK(result.error_phase == "execution_control");
 }
 
 TEST_CASE("workflow executor honors pre-start execution control",
