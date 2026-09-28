@@ -39,10 +39,10 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  SALTS_SDK_VERSION: "1.7.12"
-  SALTS_UTILS_SDK_VERSION: "4.0.3"
-  CHTTP_SDK_VERSION: "1.1.1"
-  TURBOSCRIPT_SDK_VERSION: "3.0.0"
+  SALTS_SDK_VERSION: "1.8.3"
+  SALTS_UTILS_SDK_VERSION: "4.1.3"
+  CHTTP_SDK_VERSION: "1.1.4"
+  TURBOSCRIPT_SDK_VERSION: "3.0.2"
 
 jobs:
   metadata:

@@ -20,9 +20,9 @@ jobs:
     timeout-minutes: 90
     env:
       EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-      SALTS_SDK_VERSION: "1.7.12"
-      SALTS_UTILS_SDK_VERSION: "4.0.3"
-      CHTTP_SDK_VERSION: "1.1.1"
+      SALTS_SDK_VERSION: "1.8.3"
+      SALTS_UTILS_SDK_VERSION: "4.1.3"
+      CHTTP_SDK_VERSION: "1.1.4"
       TURBOAGENT_SHA: ebf99fd0944b07065055b3db641bcfc7f070c984
       CMAKE_BUILD_PARALLEL_LEVEL: 2
 
@@ -160,7 +160,7 @@ jobs:
           test -f "$config"
           test -f /opt/praktor/debug/include/praktor.h
           grep -F 'if("OFF" STREQUAL "ON")' "$config"
-          grep -F 'find_dependency(TurboScript 3.0.0 EXACT CONFIG' "$config"
+          grep -F 'find_dependency(TurboScript 3.0.2 EXACT CONFIG' "$config"
 
       - name: Build installed-package ABI smoke
         shell: bash

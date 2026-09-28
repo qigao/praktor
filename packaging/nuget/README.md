@@ -4,10 +4,10 @@ Praktor 的 script-enabled native SDK，由 `qigao/praktor` 自己构建、验�
 
 正式依赖固定为：
 
-- `Salts.Native 1.7.12`
-- `SaltsUtils.Native 4.0.3`
-- `CHttp.Native 1.1.1`
-- `TurboScript.Native 3.0.0`
+- `Salts.Native 1.8.3`
+- `SaltsUtils.Native 4.1.3`
+- `CHttp.Native 1.1.4`
+- `TurboScript.Native 3.0.2`
 
 其中 TurboScript 负责 Praktor 的脚本执行能力（MIR interpreter/JIT 和 native modules）。
 `ENABLE_SCRIPT_ENGINE=OFF` 的 core-only Praktor 不依赖 TurboScript。
