@@ -1,0 +1,357 @@
+name: Praktor native SDK release
+
+on:
+  pull_request:
+    paths:
+      - "CMakeLists.txt"
+      - "cmake/**"
+      - "praktor/**"
+      - "actions/**"
+      - "sdk/**"
+      - "shared/**"
+      - "tools/**"
+      - "vcpkg.json"
+      - "packaging/nuget/**"
+      - ".github/workflows/native-sdk-release.yml"
+  push:
+    branches: [master]
+    tags:
+      - "v*"
+    paths:
+      - "CMakeLists.txt"
+      - "cmake/**"
+      - "praktor/**"
+      - "actions/**"
+      - "sdk/**"
+      - "shared/**"
+      - "tools/**"
+      - "vcpkg.json"
+      - "packaging/nuget/**"
+      - ".github/workflows/native-sdk-release.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: praktor-native-sdk-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  SALTS_SDK_VERSION: "1.7.12"
+  SALTS_UTILS_SDK_VERSION: "4.0.3"
+  CHTTP_SDK_VERSION: "1.1.1"
+  TURBOSCRIPT_SDK_VERSION: "3.0.0"
+
+jobs:
+  metadata:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      release: ${{ steps.version.outputs.release }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(python3 - <<'PY'
+          import re
+          from pathlib import Path
+          s = Path("CMakeLists.txt").read_text()
+          print(".".join(re.search(r"set\(CMAKE_PROJECT_VERSION_" + part + r"\s+(\d+)\)", s).group(1)
+                         for part in ("MAJOR", "MINOR", "PATCH")))
+          PY
+          )"
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          vcpkg_version="$(python3 -c 'import json; print(json.load(open("vcpkg.json", encoding="utf-8"))["version-semver"])')"
+          test "$vcpkg_version" = "$version"
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            test "$GITHUB_REF_NAME" = "v$version"
+            echo "version=$version" >> "$GITHUB_OUTPUT"
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=$version-ci.$GITHUB_RUN_NUMBER.$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    needs: metadata
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {runner: ubuntu-24.04, rid: linux-x64, triplet: x64-linux}
+          - {runner: macos-15, rid: macos-arm64, triplet: arm64-osx}
+          - {runner: ubuntu-24.04, rid: android-arm64-v8a, triplet: arm64-android}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    env:
+      RID: ${{ matrix.rid }}
+      TRIPLET: ${{ matrix.triplet }}
+      SDK_VERSION: ${{ needs.metadata.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-cache@master
+        with:
+          mode: read
+
+      - uses: qigao/vcpkg-cache/.github/actions/setup-re2c-tools@master
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - uses: actions/setup-python@v5
+        if: matrix.rid != 'android-arm64-v8a'
+        with:
+          python-version: "3.12"
+
+      - name: Prepare tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$RUNNER_OS" == Linux ]]; then
+            sudo apt-get update
+            sudo apt-get install -y ninja-build pkg-config nasm
+          else
+            brew install ninja nasm
+          fi
+          if [[ "$RID" == macos-arm64 ]]; then test "$(uname -m)" = arm64; fi
+
+      - name: Restore released native SDK dependencies
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          config="$RUNNER_TEMP/praktor-sdk-nuget.config"
+          printf '<configuration><packageSources><clear /></packageSources></configuration>\n' > "$config"
+          dotnet nuget add source https://nuget.pkg.github.com/qigao/index.json --name github \
+            --username qigao --password "$GITHUB_TOKEN" --store-password-in-clear-text --configfile "$config"
+          packages="$RUNNER_TEMP/native-dependencies"
+          dotnet restore packaging/nuget/Praktor.Native.csproj \
+            --configfile "$config" --packages "$packages" --no-cache
+          echo "SALTS_ROOT=$packages/salts.native/$SALTS_SDK_VERSION/sdk/$RID" >> "$GITHUB_ENV"
+          echo "SALTS_UTILS_ROOT=$packages/saltsutils.native/$SALTS_UTILS_SDK_VERSION/sdk/$RID" >> "$GITHUB_ENV"
+          echo "CHTTP_ROOT=$packages/chttp.native/$CHTTP_SDK_VERSION/sdk/$RID" >> "$GITHUB_ENV"
+          echo "TURBOSCRIPT_ROOT=$packages/turboscript.native/$TURBOSCRIPT_SDK_VERSION/sdk/$RID" >> "$GITHUB_ENV"
+
+      - name: Verify HTTP fixture interpreter startup
+        if: matrix.rid != 'android-arm64-v8a'
+        shell: bash
+        run: |
+          set -euo pipefail
+          export LD_LIBRARY_PATH="$TURBOSCRIPT_ROOT/lib:$CHTTP_ROOT/lib:$SALTS_UTILS_ROOT/lib:$SALTS_ROOT/lib:$GITHUB_WORKSPACE/vcpkg_installed/$TRIPLET/lib"
+          export DYLD_LIBRARY_PATH="$LD_LIBRARY_PATH"
+          python - <<'PY'
+          import pathlib, subprocess, sys, tempfile, time
+          source = pathlib.Path("praktor/test/script_engine_test.cpp").read_text()
+          fixture = source.split('writeFile(script_path, R"py(', 1)[1].split(')py");', 1)[0]
+          with tempfile.TemporaryDirectory() as directory:
+              root = pathlib.Path(directory)
+              script, ready = root / "server.py", root / "ready.txt"
+              script.write_text(
+                  "import faulthandler, socket\n"
+                  "faulthandler.dump_traceback_later(10, repeat=True)\n"
+                  "def reject_reverse_dns(*args):\n"
+                  "    raise RuntimeError('Loopback fixture must not depend on reverse DNS')\n"
+                  "socket.getfqdn = reject_reverse_dns\n" + fixture)
+              process = subprocess.Popen([sys.executable, str(script), str(ready)])
+              try:
+                  deadline = time.monotonic() + 35
+                  while not ready.exists():
+                      if process.poll() is not None:
+                          raise RuntimeError(f"HTTP fixture exited: {process.returncode}")
+                      if time.monotonic() >= deadline:
+                          raise TimeoutError("HTTP fixture startup timed out")
+                      time.sleep(0.05)
+              finally:
+                  process.terminate()
+                  process.wait(timeout=5)
+          PY
+
+      - name: Build script-enabled Praktor SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          args=(-DCMAKE_BUILD_TYPE=Release)
+          tests=ON
+          if [[ "$RID" == android-arm64-v8a ]]; then
+            tests=OFF
+            mkdir -p build/host
+            cc tools/lemon/lemon.c -o build/host/lemon
+            args+=( -DCMAKE_SYSTEM_NAME=Android
+              "-DVCPKG_CHAINLOAD_TOOLCHAIN_FILE=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake"
+              -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-26 -DANDROID_STL=c++_shared
+              "-DPRAKTOR_HOST_LEMON_EXECUTABLE=$GITHUB_WORKSPACE/build/host/lemon" )
+          fi
+          if [[ "$tests" == ON ]]; then args+=( "-DPython3_EXECUTABLE=$(command -v python)" ); fi
+          cmake -S . -B build/sdk -G Ninja \
+            "-DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
+            "-DVCPKG_TARGET_TRIPLET=$TRIPLET" \
+            "-DVCPKG_INSTALLED_DIR=$GITHUB_WORKSPACE/vcpkg_installed" \
+            "-DCMAKE_INSTALL_PREFIX=$GITHUB_WORKSPACE/stage/$RID" \
+            "-DENABLE_TESTS=$tests" -DENABLE_SCRIPT_ENGINE=ON "${args[@]}"
+          export LD_LIBRARY_PATH="$TURBOSCRIPT_ROOT/lib:$CHTTP_ROOT/lib:$SALTS_UTILS_ROOT/lib:$SALTS_ROOT/lib:$GITHUB_WORKSPACE/vcpkg_installed/$TRIPLET/lib"
+          export DYLD_LIBRARY_PATH="$LD_LIBRARY_PATH"
+          cmake --build build/sdk --parallel 2
+          if [[ "$tests" == ON ]]; then ctest --test-dir build/sdk --no-tests=error --output-on-failure; fi
+          cmake --install build/sdk
+          cat > "stage/$RID/praktor-sdk-manifest.txt" <<EOF
+          version=$SDK_VERSION
+          commit=$(git rev-parse HEAD)
+          rid=$RID
+          profile=Release
+          script_engine=ON
+          turboscript=$TURBOSCRIPT_SDK_VERSION
+          chttp=$CHTTP_SDK_VERSION
+          salts=$SALTS_SDK_VERSION
+          salts_utils=$SALTS_UTILS_SDK_VERSION
+          EOF
+          mkdir -p dist
+          tar -chzf "dist/praktor-$RID.tar.gz" -C stage "$RID"
+
+      - name: Verify relocated SDK consumer
+        shell: bash
+        run: |
+          set -euo pipefail
+          relocated="$RUNNER_TEMP/praktor-sdk"
+          mkdir -p "$relocated"
+          tar -xzf "dist/praktor-$RID.tar.gz" -C "$relocated"
+          mv stage stage-hidden
+          prefix="$relocated/$RID"
+          export PRAKTOR_ROOT="$prefix"
+          export LD_LIBRARY_PATH="$prefix/lib:$TURBOSCRIPT_ROOT/lib:$CHTTP_ROOT/lib:$SALTS_UTILS_ROOT/lib:$SALTS_ROOT/lib:$GITHUB_WORKSPACE/vcpkg_installed/$TRIPLET/lib"
+          export DYLD_LIBRARY_PATH="$LD_LIBRARY_PATH"
+          args=(-DCMAKE_BUILD_TYPE=Release)
+          if [[ "$RID" == android-arm64-v8a ]]; then
+            args+=( -DCMAKE_SYSTEM_NAME=Android
+              "-DVCPKG_CHAINLOAD_TOOLCHAIN_FILE=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake"
+              -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-26 -DANDROID_STL=c++_shared )
+          fi
+          cmake -S packaging/nuget/smoke -B build/sdk-smoke -G Ninja \
+            "-DCMAKE_PREFIX_PATH=$prefix;$TURBOSCRIPT_ROOT;$CHTTP_ROOT;$SALTS_UTILS_ROOT;$SALTS_ROOT" \
+            "-DPraktor_DIR=$prefix/lib/cmake/Praktor" \
+            "-DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
+            "-DVCPKG_TARGET_TRIPLET=$TRIPLET" -DVCPKG_MANIFEST_MODE=OFF \
+            "-DVCPKG_INSTALLED_DIR=$GITHUB_WORKSPACE/vcpkg_installed" "${args[@]}"
+          cmake --build build/sdk-smoke --parallel 2
+          if [[ "$RID" == android-arm64-v8a ]]; then
+            readelf -h "$prefix/lib/libPraktor.so" | tee "$RUNNER_TEMP/elf-header.txt"
+            grep -q 'AArch64' "$RUNNER_TEMP/elf-header.txt"
+          else
+            ctest --test-dir build/sdk-smoke --no-tests=error --output-on-failure
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: praktor-sdk-${{ matrix.rid }}
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  pack:
+    needs: [metadata, build]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: praktor-sdk-*
+          merge-multiple: true
+          path: dist
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+      - uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-cache@master
+        with:
+          mode: read
+
+      - name: Pack and qualify final NuGet
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SDK_VERSION: ${{ needs.metadata.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p package/sdk
+          for rid in linux-x64 macos-arm64 android-arm64-v8a; do
+            tar -xzf "dist/praktor-$rid.tar.gz" -C package/sdk
+            test -f "package/sdk/$rid/lib/cmake/Praktor/PraktorConfig.cmake"
+          done
+          test "$(sed -n 's/^commit=//p' package/sdk/*/praktor-sdk-manifest.txt | sort -u | wc -l)" -eq 1
+
+          config="$RUNNER_TEMP/praktor-pack.config"
+          printf '<configuration><packageSources><clear /></packageSources></configuration>\n' > "$config"
+          dotnet nuget add source https://nuget.pkg.github.com/qigao/index.json --name github \
+            --username qigao --password "$GITHUB_TOKEN" --store-password-in-clear-text --configfile "$config"
+          dotnet restore packaging/nuget/Praktor.Native.csproj --configfile "$config" --packages "$RUNNER_TEMP/pack-deps"
+          dotnet pack packaging/nuget/Praktor.Native.csproj --no-restore --configuration Release --output dist \
+            "-p:PackageVersion=$SDK_VERSION" "-p:PackageRoot=$GITHUB_WORKSPACE/package" \
+            "-p:RestorePackagesPath=$RUNNER_TEMP/pack-deps"
+
+          dotnet nuget add source "$GITHUB_WORKSPACE/dist" --name local-praktor --configfile "$config"
+          project="$RUNNER_TEMP/praktor-packed-restore.csproj"
+          cat > "$project" <<EOF
+          <Project Sdk="Microsoft.NET.Sdk">
+            <PropertyGroup><TargetFramework>net8.0</TargetFramework></PropertyGroup>
+            <ItemGroup><PackageReference Include="Praktor.Native" Version="[$SDK_VERSION]" /></ItemGroup>
+          </Project>
+          EOF
+          restored="$RUNNER_TEMP/praktor-packed-restore"
+          dotnet restore "$project" --packages "$restored" --configfile "$config" --no-cache
+
+          export SALTS_ROOT="$restored/salts.native/$SALTS_SDK_VERSION/sdk/linux-x64"
+          export SALTS_UTILS_ROOT="$restored/saltsutils.native/$SALTS_UTILS_SDK_VERSION/sdk/linux-x64"
+          export CHTTP_ROOT="$restored/chttp.native/$CHTTP_SDK_VERSION/sdk/linux-x64"
+          export TURBOSCRIPT_ROOT="$restored/turboscript.native/$TURBOSCRIPT_SDK_VERSION/sdk/linux-x64"
+          prefix="$restored/praktor.native/$SDK_VERSION/sdk/linux-x64"
+          sudo apt-get update
+          sudo apt-get install -y ninja-build pkg-config nasm
+          cmake -S packaging/nuget/smoke -B build/packed-smoke -G Ninja \
+            "-DCMAKE_PREFIX_PATH=$prefix;$TURBOSCRIPT_ROOT;$CHTTP_ROOT;$SALTS_UTILS_ROOT;$SALTS_ROOT" \
+            "-DPraktor_DIR=$prefix/lib/cmake/Praktor" \
+            "-DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
+            -DVCPKG_TARGET_TRIPLET=x64-linux -DVCPKG_MANIFEST_MODE=ON \
+            "-DVCPKG_MANIFEST_DIR=$GITHUB_WORKSPACE" \
+            "-DVCPKG_INSTALLED_DIR=$GITHUB_WORKSPACE/vcpkg_installed"
+          cmake --build build/packed-smoke --parallel 2
+          export LD_LIBRARY_PATH="$prefix/lib:$TURBOSCRIPT_ROOT/lib:$CHTTP_ROOT/lib:$SALTS_UTILS_ROOT/lib:$SALTS_ROOT/lib:$GITHUB_WORKSPACE/vcpkg_installed/x64-linux/lib"
+          ctest --test-dir build/packed-smoke --no-tests=error --output-on-failure
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: praktor-native-nuget
+          path: dist/*.nupkg
+          if-no-files-found: error
+
+  publish:
+    needs: [metadata, pack]
+    if: startsWith(github.ref, 'refs/tags/v') && github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: praktor-native-nuget
+          path: dist
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+      - name: Publish qualified package
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SDK_VERSION: ${{ needs.metadata.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          dotnet nuget add source https://nuget.pkg.github.com/qigao/index.json --name github \
+            --username qigao --password "$GITHUB_TOKEN" --store-password-in-clear-text
+          dotnet nuget push "dist/Praktor.Native.$SDK_VERSION.nupkg" \
+            --source github --api-key "$GITHUB_TOKEN"

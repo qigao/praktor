@@ -1,6 +1,6 @@
 {
     "name": "vcpkg-example",
-    "version-semver": "0.1.0",
+    "version-semver": "0.3.0",
     "dependencies": [
         {
             "name": "catch2",
@@ -12,7 +12,9 @@
         },
         {
             "name": "cxxopts"
-        }
+        },
+        "boringssl",
+        "llhttp"
     ],
     "builtin-baseline": "b1b19307e2d2ec1eefbdb7ea069de7d4bcd31f01"
 }
