@@ -1,6 +1,8 @@
 #include "dag/workflow_context.hpp"
 
 #include <catch2/catch_all.hpp>
+#include <chrono>
+#include <memory>
 #include <string>
 
 TEST_CASE("WorkflowContext::getVariable default value", "[context]") {
@@ -125,5 +127,65 @@ TEST_CASE("WorkflowContext Core Functionality", "[context]") {
         auto child = context.fork();
 
         CHECK(child->getSourcePath() == "/tmp/praktor/workflow.yml");
+    }
+
+    SECTION("Execution control is shared across forked contexts") {
+        auto control = std::make_shared<Praktor::Execution::ExecutionControl>();
+        context.setExecutionControl(control);
+
+        auto child = context.fork();
+
+        REQUIRE(child->getExecutionControl() == control);
+        child->getExecutionControl()->requestCancel();
+        CHECK(context.getExecutionControl()->stopReason() ==
+              Praktor::Execution::ExecutionControl::StopReason::Cancelled);
+    }
+}
+
+TEST_CASE("ExecutionControl resolves cancellation and deadline deterministically",
+          "[context][execution-control]") {
+    using Control = Praktor::Execution::ExecutionControl;
+    using namespace std::chrono_literals;
+
+    SECTION("No signal leaves execution active") {
+        Control control;
+        CHECK_FALSE(control.stopRequested());
+        CHECK(control.stopReason() == Control::StopReason::None);
+        CHECK_FALSE(control.deadline().has_value());
+        CHECK_FALSE(control.remainingDeadline().has_value());
+    }
+
+    SECTION("Cancellation is visible without a polling thread") {
+        Control control;
+        control.requestCancel();
+
+        CHECK(control.cancellationRequested());
+        CHECK(control.stopRequested());
+        CHECK(control.stopReason() == Control::StopReason::Cancelled);
+    }
+
+    SECTION("Expired deadline is distinguished from cancellation") {
+        Control control(Control::Clock::now() - 1ms);
+
+        CHECK(control.stopRequested());
+        CHECK(control.stopReason() == Control::StopReason::DeadlineExceeded);
+        REQUIRE(control.remainingDeadline().has_value());
+        CHECK(*control.remainingDeadline() == Control::Clock::duration::zero());
+    }
+
+    SECTION("Earlier cancellation wins over a later deadline") {
+        Control control(Control::Clock::now() + 1h);
+        control.requestCancel();
+
+        CHECK(control.stopReason() == Control::StopReason::Cancelled);
+        REQUIRE(control.remainingDeadline().has_value());
+        CHECK(*control.remainingDeadline() > Control::Clock::duration::zero());
+    }
+
+    SECTION("An already-expired deadline remains terminal after cancellation") {
+        Control control(Control::Clock::now() - 1ms);
+        control.requestCancel();
+
+        CHECK(control.stopReason() == Control::StopReason::DeadlineExceeded);
     }
 }
