@@ -1,9 +1,18 @@
 #include "dag/workflow_context.hpp"
 
 #include <catch2/catch_all.hpp>
+#include <atomic>
 #include <chrono>
 #include <memory>
 #include <string>
+
+namespace {
+
+bool testCancellationProbe(void* user_data) noexcept {
+    return static_cast<std::atomic<bool>*>(user_data)->load(std::memory_order_acquire);
+}
+
+} // namespace
 
 TEST_CASE("WorkflowContext::getVariable default value", "[context]") {
     WorkflowContext context;
@@ -161,6 +170,20 @@ TEST_CASE("ExecutionControl resolves cancellation and deadline deterministically
 
         CHECK(control.cancellationRequested());
         CHECK(control.stopRequested());
+        CHECK(control.stopReason() == Control::StopReason::Cancelled);
+    }
+
+    SECTION("Host cancellation probe is observed lazily and latched") {
+        std::atomic<bool> requested{false};
+        Control control(std::nullopt, testCancellationProbe, &requested);
+
+        CHECK_FALSE(control.stopRequested());
+
+        requested.store(true, std::memory_order_release);
+        CHECK(control.cancellationRequested());
+        CHECK(control.stopReason() == Control::StopReason::Cancelled);
+
+        requested.store(false, std::memory_order_release);
         CHECK(control.stopReason() == Control::StopReason::Cancelled);
     }
 
