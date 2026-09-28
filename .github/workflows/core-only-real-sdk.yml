@@ -20,9 +20,9 @@ jobs:
     timeout-minutes: 90
     env:
       EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-      SALTS_SHA: 91a64dc9e197e4df756f8dc99e10e34a2b236cff
-      SALTS_UTILS_SHA: 1ecca3eaa86544cf8be45fbf7a0e5a6636ffebf4
-      CHTTP_SHA: 78dbb67ebb556e333c9078bee2b8268fafabffc9
+      SALTS_SDK_VERSION: "1.7.12"
+      SALTS_UTILS_SDK_VERSION: "4.0.3"
+      CHTTP_SDK_VERSION: "1.1.1"
       TURBOAGENT_SHA: ebf99fd0944b07065055b3db641bcfc7f070c984
       CMAKE_BUILD_PARALLEL_LEVEL: 2
 
@@ -41,35 +41,16 @@ jobs:
       - name: Restore shared re2c binary
         uses: qigao/vcpkg-cache/.github/actions/setup-re2c-tools@master
 
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
       - name: Verify source identity
         shell: bash
         run: |
           set -euxo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
           git diff --exit-code
-
-      - name: Checkout pinned public dependencies
-        uses: actions/checkout@v4
-        with:
-          repository: qigao/salts
-          ref: ${{ env.SALTS_SHA }}
-          path: deps/salts
-          persist-credentials: false
-
-      - uses: actions/checkout@v4
-        with:
-          repository: qigao/salts-utils
-          ref: ${{ env.SALTS_UTILS_SHA }}
-          path: deps/salts-utils
-          persist-credentials: false
-
-      - uses: actions/checkout@v4
-        with:
-          repository: qigao/chttp
-          ref: ${{ env.CHTTP_SHA }}
-          path: deps/chttp
-          persist-credentials: false
-
 
       - name: Checkout exact TurboAgent Praktor adapter
         uses: actions/checkout@v4
@@ -91,58 +72,51 @@ jobs:
           sudo ln -sfn "$VCPKG_ROOT" /opt/vcpkg
 
 
-      - name: Build and install pinned Salts
-        working-directory: deps/salts
-        env:
-          PROJECT_ROOT: ${{ runner.temp }}/salts-project
-        shell: bash
-        run: |
-          set -euxo pipefail
-          cmake --preset linux-dev-user             -DENABLE_SANITIZER_ADDRESS=OFF             -DENABLE_SANITIZER_UNDEFINED=OFF
-          cmake --build build/linux-gcc-debug --target install -j2
-          package="$RUNNER_TEMP/salts-project/external/pkgs/salts/debug"
-          test -f "$package/lib/cmake/Salts/SaltsConfig.cmake"
-          ln -sfn "$package" /opt/salts/debug
-
-      - name: Build host Lemon for SaltsUtils
-        shell: bash
-        run: |
-          set -euxo pipefail
-          cmake -S deps/salts-utils/tools/lemon                 -B deps/salts-utils/build/host-lemon                 -G Ninja -DCMAKE_BUILD_TYPE=Release
-          cmake --build deps/salts-utils/build/host-lemon --target lemon -j2
-
-      - name: Build and install pinned SaltsUtils
-        working-directory: deps/salts-utils
-        shell: bash
-        run: |
-          set -euxo pipefail
-          cmake --preset linux-dev-user             -DENABLE_SANITIZER_ADDRESS=OFF             -DENABLE_SANITIZER_UNDEFINED=OFF             -DSALTS_UTILS_HOST_LEMON_EXECUTABLE="$GITHUB_WORKSPACE/deps/salts-utils/build/host-lemon/lemon"             -DDATABIND_HOST_LEMON_EXECUTABLE="$GITHUB_WORKSPACE/deps/salts-utils/build/host-lemon/lemon"
-          cmake --build build/linux-gcc-debug --target install -j2
-          test -f /opt/salts-utils/debug/lib/cmake/SaltsUtils/SaltsUtilsConfig.cmake
-
-      - name: Build and install pinned CHTTP
+      - name: Restore released native SDK graph
         shell: bash
         env:
-          SALTS_ROOT: /opt/salts/debug
-          SALTS_UTILS_ROOT: /opt/salts-utils/debug
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euxo pipefail
-          cmake -S deps/chttp -B deps/chttp/build/praktor-ci -G Ninja \
-            -DCMAKE_BUILD_TYPE=Debug \
-            -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
-            -DVCPKG_TARGET_TRIPLET=x64-linux \
-            -DVCPKG_MANIFEST_MODE=ON \
-            -DVCPKG_INSTALLED_DIR="$GITHUB_WORKSPACE/vcpkg_installed/chttp" \
-            -DCMAKE_INSTALL_PREFIX=/opt/chttp/debug \
-            -DSALTS_ROOT=/opt/salts/debug \
-            -DSALTS_UTILS_ROOT=/opt/salts-utils/debug \
-            -DBUILD_TESTS=OFF \
-            -DBUILD_EXAMPLES=OFF \
-            -DBUILD_BENCHMARKS=OFF
-          cmake --build deps/chttp/build/praktor-ci --target install -j2
-          test -f /opt/chttp/debug/lib/cmake/Chttp/ChttpConfig.cmake
-          test -f /opt/chttp/debug/include/http_client/http.h
-          test -f /opt/chttp/debug/include/s3/s3_signer.h
+          packages="$RUNNER_TEMP/praktor-core-native-sdks"
+          config="$RUNNER_TEMP/praktor-core-native-sdks.config"
+          project="$RUNNER_TEMP/praktor-core-native-sdks.csproj"
+
+          printf '<configuration><packageSources><clear /></packageSources></configuration>\n' > "$config"
+          dotnet nuget add source https://nuget.pkg.github.com/qigao/index.json \
+            --name github --username qigao --password "$GITHUB_TOKEN" \
+            --store-password-in-clear-text --configfile "$config"
+
+          cat > "$project" <<EOF
+          <Project Sdk="Microsoft.NET.Sdk">
+            <PropertyGroup><TargetFramework>net8.0</TargetFramework></PropertyGroup>
+            <ItemGroup>
+              <PackageReference Include="Salts.Native" Version="[$SALTS_SDK_VERSION]" />
+              <PackageReference Include="SaltsUtils.Native" Version="[$SALTS_UTILS_SDK_VERSION]" />
+              <PackageReference Include="CHttp.Native" Version="[$CHTTP_SDK_VERSION]" />
+            </ItemGroup>
+          </Project>
+          EOF
+
+          dotnet restore "$project" --packages "$packages" --configfile "$config" --no-cache
+
+          salts_root="$packages/salts.native/$SALTS_SDK_VERSION/sdk/linux-x64"
+          utils_root="$packages/saltsutils.native/$SALTS_UTILS_SDK_VERSION/sdk/linux-x64"
+          chttp_root="$packages/chttp.native/$CHTTP_SDK_VERSION/sdk/linux-x64"
+
+          test -f "$salts_root/lib/cmake/Salts/SaltsConfig.cmake"
+          test -f "$utils_root/lib/cmake/SaltsUtils/SaltsUtilsConfig.cmake"
+          test -f "$chttp_root/lib/cmake/Chttp/ChttpConfig.cmake"
+
+          ln -sfn "$salts_root" /opt/salts/debug
+          ln -sfn "$utils_root" /opt/salts-utils/debug
+          ln -sfn "$chttp_root" /opt/chttp/debug
+
+          {
+            echo "SALTS_ROOT=/opt/salts/debug"
+            echo "SALTS_UTILS_ROOT=/opt/salts-utils/debug"
+            echo "CHTTP_ROOT=/opt/chttp/debug"
+          } >> "$GITHUB_ENV"
 
       - name: Configure real Praktor without TurboScript
         shell: bash
@@ -270,7 +244,7 @@ jobs:
           cmake -S "$smoke" -B "$smoke/build" -G Ninja
           cmake --build "$smoke/build" --verbose -j2
 
-          export LD_LIBRARY_PATH="/opt/praktor/debug/lib:/opt/chttp/debug/lib:/opt/salts-utils/debug/lib:/opt/salts/debug/lib:$GITHUB_WORKSPACE/vcpkg_installed/linux/x64-linux/debug/lib:$GITHUB_WORKSPACE/vcpkg_installed/linux/x64-linux/lib:$GITHUB_WORKSPACE/deps/salts/vcpkg_installed/linux/x64-linux/debug/lib:$GITHUB_WORKSPACE/deps/salts/vcpkg_installed/linux/x64-linux/lib:$GITHUB_WORKSPACE/deps/salts-utils/vcpkg_installed/linux/x64-linux/debug/lib:$GITHUB_WORKSPACE/deps/salts-utils/vcpkg_installed/linux/x64-linux/lib:${LD_LIBRARY_PATH:-}"
+          export LD_LIBRARY_PATH="/opt/praktor/debug/lib:/opt/chttp/debug/lib:/opt/salts-utils/debug/lib:/opt/salts/debug/lib:$GITHUB_WORKSPACE/vcpkg_installed/linux/x64-linux/debug/lib:$GITHUB_WORKSPACE/vcpkg_installed/linux/x64-linux/lib:${LD_LIBRARY_PATH:-}"
           "$smoke/build/praktor_real_smoke" "$smoke/command.yml" "$smoke/script.yml"
 
       - name: Build and run TurboAgent adapter against installed Praktor
@@ -311,7 +285,7 @@ jobs:
           cmake -S "$consumer" -B "$consumer/build" -G Ninja
           cmake --build "$consumer/build" --verbose -j2
 
-          export LD_LIBRARY_PATH="/opt/praktor/debug/lib:/opt/chttp/debug/lib:/opt/salts-utils/debug/lib:/opt/salts/debug/lib:$GITHUB_WORKSPACE/vcpkg_installed/linux/x64-linux/debug/lib:$GITHUB_WORKSPACE/vcpkg_installed/linux/x64-linux/lib:$GITHUB_WORKSPACE/deps/salts/vcpkg_installed/linux/x64-linux/debug/lib:$GITHUB_WORKSPACE/deps/salts/vcpkg_installed/linux/x64-linux/lib:$GITHUB_WORKSPACE/deps/salts-utils/vcpkg_installed/linux/x64-linux/debug/lib:$GITHUB_WORKSPACE/deps/salts-utils/vcpkg_installed/linux/x64-linux/lib:${LD_LIBRARY_PATH:-}"
+          export LD_LIBRARY_PATH="/opt/praktor/debug/lib:/opt/chttp/debug/lib:/opt/salts-utils/debug/lib:/opt/salts/debug/lib:$GITHUB_WORKSPACE/vcpkg_installed/linux/x64-linux/debug/lib:$GITHUB_WORKSPACE/vcpkg_installed/linux/x64-linux/lib:${LD_LIBRARY_PATH:-}"
           "$consumer/build/turboagent_real_praktor"
 
       - name: Upload core-only installed SDK
