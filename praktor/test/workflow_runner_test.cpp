@@ -1,4 +1,7 @@
 #include "workflow_runner.hpp"
+#include "dag/workflow_executor.hpp"
+#include "execution/execution_control.hpp"
+#include "yml/task_parser.hpp"
 #include "dag/workflow_executor_internal.hpp"
 #include "system/managed_process.hpp"
 #include "util/file_utils.hpp"
@@ -7,6 +10,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <random>
 #include <chrono>
 #include <cstdint>
@@ -962,6 +966,50 @@ TEST_CASE("dynamic_tasks reject generated names that collide with static tasks")
     WorkflowRunner runner(workflow_path.string());
     REQUIRE_FALSE(runner.run());
     CHECK_FALSE(std::filesystem::exists(output_path));
+    std::filesystem::remove_all(dir);
+}
+
+TEST_CASE("workflow executor honors pre-start execution control",
+          "[workflow][execution-control]")
+{
+    using Control = Praktor::Execution::ExecutionControl;
+    using namespace std::chrono_literals;
+
+    const auto dir = createTempDir();
+    const auto workflow_path = dir / "controlled.yml";
+    writeFile(workflow_path, R"(
+tasks:
+  - name: should_not_run
+    script: |
+      ctx.set("executed", true);
+)");
+
+    const auto run_controlled = [&](std::shared_ptr<Control> control) {
+        auto workflow = TaskParser::parseFile(workflow_path.string());
+        auto graph = TaskParser::buildGraph(workflow);
+        WorkflowContext context;
+        context.setSourcePath(workflow.source_path);
+        context.setExecutionControl(std::move(control));
+
+        WorkflowExecutor executor(graph, workflow.tasks, {}, 1, false);
+        executor.execute(context);
+        CHECK_FALSE(context.hasKey("executed"));
+        return context.getValueOrDefault<std::string>("workflow_status", "unknown");
+    };
+
+    SECTION("cancellation prevents initial task scheduling") {
+        auto control = std::make_shared<Control>();
+        control->requestCancel();
+
+        CHECK(run_controlled(control) == "cancelled");
+    }
+
+    SECTION("expired deadline prevents initial task scheduling") {
+        auto control = std::make_shared<Control>(Control::Clock::now() - 1ms);
+
+        CHECK(run_controlled(control) == "timed_out");
+    }
+
     std::filesystem::remove_all(dir);
 }
 

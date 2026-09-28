@@ -105,6 +105,13 @@ private:
     bool checkSkipTask(const Task& task, WorkflowContext& context);
     void updateTaskCache(const Task& task, WorkflowContext& context);
 
+    enum class WorkflowTerminalReason {
+        None,
+        Failed,
+        Cancelled,
+        DeadlineExceeded,
+    };
+
     // Execution state for DAG traversal
     struct ExecutionState {
         std::unordered_map<Task, int> in_degree;
@@ -112,7 +119,7 @@ private:
         size_t total_tasks = 0;
         size_t completed = 0;
         size_t active = 0;
-        bool workflow_failed = false;
+        WorkflowTerminalReason terminal_reason = WorkflowTerminalReason::None;
         bool should_stop = false;
 
         bool isFinished() const { return (should_stop && active == 0) || (completed == total_tasks); }
@@ -122,7 +129,10 @@ private:
     bool isRegularlySchedulable(const Task& task) const;
     void initializeExecutionState(ExecutionState& state, const std::vector<Task>& nodes);
     std::vector<Task> getReadyTasks(ExecutionState& state);
-    std::vector<Task> onTaskCompleted(ExecutionState& state, const Task& task, bool success);
+    std::vector<Task> onTaskCompleted(ExecutionState& state, const Task& task, bool success,
+                                      const WorkflowContext& context);
+    WorkflowTerminalReason requestedTerminalReason(const WorkflowContext& context) const;
+    static std::string_view workflowStatusFor(WorkflowTerminalReason reason);
     void scheduleTask(const Task& task, WorkflowContext& context,
                       ExecutionState& state, std::optional<std::string> alias);
     void mergeForkedContext(WorkflowContext& target, const WorkflowContext& child);

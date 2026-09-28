@@ -140,9 +140,17 @@ WorkflowExecutionResult makeExecutionResult(const WorkflowContext& context) {
     result.value["workflow_status"] =
         context.getValueOrDefault<std::string>("workflow_status", "unknown");
     result.value["tasks"] = context.getTasksSnapshot();
-    result.success = result.value["workflow_status"].as<std::string>() != "failed";
+
+    const std::string status = result.value["workflow_status"].as<std::string>();
+    result.success = status == "success";
     if (!result.success) {
-        result.error_message = "Workflow execution failed";
+        if (status == "cancelled") {
+            result.error_message = "Workflow execution cancelled";
+        } else if (status == "timed_out") {
+            result.error_message = "Workflow execution timed out";
+        } else {
+            result.error_message = "Workflow execution failed";
+        }
         result.value["error"] = result.error_message;
     }
     return result;
@@ -251,7 +259,7 @@ bool WorkflowRunner::runTask(std::string const& taskName, bool useConcurrent, in
         if (!Praktor::Logging::isVerboseEnabled()) {
             Praktor::Logging::printWorkflowStatus(status == "failed" ? "FAILED" : "SUCCESS");
         }
-        return status != "failed";
+        return status == "success";
 
     } catch (const std::exception& e) {
         TLOG_ERRORF("An error occurred during single task execution: {}", e.what());

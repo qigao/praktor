@@ -442,25 +442,68 @@ void WorkflowExecutor::execute(WorkflowContext &context, std::optional<std::stri
   ExecutionState state;
   initializeExecutionState(state, nodes);
 
-  // Schedule initial ready tasks
-  for (const auto &task : getReadyTasks(state)) {
-    scheduleTask(task, context, state, alias);
+  const auto initial_stop = requestedTerminalReason(context);
+  if (initial_stop != WorkflowTerminalReason::None) {
+    state.terminal_reason = initial_stop;
+    state.should_stop = true;
+  } else {
+    // Schedule initial ready tasks.
+    for (const auto &task : getReadyTasks(state)) {
+      scheduleTask(task, context, state, alias);
+    }
   }
 
-  // Wait for completion
-  std::unique_lock<std::mutex> lock(execution_mutex_);
-  execution_cv_.wait(lock, [&]() { return state.isFinished(); });
+  // Wait for active work to observe the stop at a task boundary and drain.
+  if (!state.isFinished()) {
+    std::unique_lock<std::mutex> lock(execution_mutex_);
+    execution_cv_.wait(lock, [&]() { return state.isFinished(); });
 
-  if (state.hasPendingWork()) {
-    execution_cv_.wait(lock, [&]() { return !state.hasPendingWork(); });
+    if (state.hasPendingWork()) {
+      execution_cv_.wait(lock, [&]() { return !state.hasPendingWork(); });
+    }
   }
 
   if (state.completed != state.total_tasks && !state.should_stop) {
     throw std::runtime_error("Workflow graph contains cycles or unreachable tasks");
   }
 
-  context.setValue("workflow_status", state.workflow_failed ? "failed" : "success");
-  saveCache();
+  context.setValue("workflow_status", std::string(workflowStatusFor(state.terminal_reason)));
+  if (state.terminal_reason != WorkflowTerminalReason::Cancelled &&
+      state.terminal_reason != WorkflowTerminalReason::DeadlineExceeded) {
+    saveCache();
+  }
+}
+
+WorkflowExecutor::WorkflowTerminalReason
+WorkflowExecutor::requestedTerminalReason(const WorkflowContext& context) const {
+  const auto control = context.getExecutionControl();
+  if (!control) {
+    return WorkflowTerminalReason::None;
+  }
+
+  switch (control->stopReason()) {
+  case Praktor::Execution::ExecutionControl::StopReason::Cancelled:
+    return WorkflowTerminalReason::Cancelled;
+  case Praktor::Execution::ExecutionControl::StopReason::DeadlineExceeded:
+    return WorkflowTerminalReason::DeadlineExceeded;
+  case Praktor::Execution::ExecutionControl::StopReason::None:
+    return WorkflowTerminalReason::None;
+  }
+  return WorkflowTerminalReason::None;
+}
+
+std::string_view WorkflowExecutor::workflowStatusFor(WorkflowTerminalReason reason) {
+  switch (reason) {
+  case WorkflowTerminalReason::Failed:
+    return "failed";
+  case WorkflowTerminalReason::Cancelled:
+    return "cancelled";
+  case WorkflowTerminalReason::DeadlineExceeded:
+    return "timed_out";
+  case WorkflowTerminalReason::None:
+    return "success";
+  }
+  return "failed";
 }
 
 bool WorkflowExecutor::isRegularlySchedulable(const Task& task) const {
@@ -517,15 +560,23 @@ std::vector<Task> WorkflowExecutor::getReadyTasks(ExecutionState &state) {
   return ready;
 }
 
-std::vector<Task> WorkflowExecutor::onTaskCompleted(ExecutionState &state, const Task &task, bool success) {
+std::vector<Task> WorkflowExecutor::onTaskCompleted(
+    ExecutionState &state, const Task &task, bool success, const WorkflowContext &context) {
   std::vector<Task> ready;
   std::lock_guard<std::mutex> lock(execution_mutex_);
 
   state.active--;
   state.completed++;
 
-  if (!success) {
-    state.workflow_failed = true;
+  // External execution control wins at the boundary where the scheduler first
+  // observes it. Otherwise the first ordinary task failure is terminal.
+  const auto requested_stop = requestedTerminalReason(context);
+  if (state.terminal_reason == WorkflowTerminalReason::None &&
+      requested_stop != WorkflowTerminalReason::None) {
+    state.terminal_reason = requested_stop;
+    state.should_stop = true;
+  } else if (state.terminal_reason == WorkflowTerminalReason::None && !success) {
+    state.terminal_reason = WorkflowTerminalReason::Failed;
     state.should_stop = true;
   }
 
@@ -611,11 +662,14 @@ void WorkflowExecutor::scheduleTask(const Task &task, WorkflowContext &context,
       ctx_ptr = task_context.get();
     }
 
-    bool success = executeScheduledTaskOnce(task, *ctx_ptr, alias);
+    bool success = true;
+    if (requestedTerminalReason(*ctx_ptr) == WorkflowTerminalReason::None) {
+      success = executeScheduledTaskOnce(task, *ctx_ptr, alias);
+    }
     if (task_context) {
       mergeForkedContext(context, *task_context);
     }
-    auto ready = onTaskCompleted(state, task, success);
+    auto ready = onTaskCompleted(state, task, success, *ctx_ptr);
 
     for (const auto &next : ready) {
       scheduleTask(next, context, state, alias);
