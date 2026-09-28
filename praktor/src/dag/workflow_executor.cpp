@@ -468,7 +468,8 @@ void WorkflowExecutor::execute(WorkflowContext &context, std::optional<std::stri
   }
 
   context.setValue("workflow_status", std::string(workflowStatusFor(state.terminal_reason)));
-  if (state.terminal_reason == WorkflowTerminalReason::None) {
+  if (state.terminal_reason != WorkflowTerminalReason::Cancelled &&
+      state.terminal_reason != WorkflowTerminalReason::DeadlineExceeded) {
     saveCache();
   }
 }
