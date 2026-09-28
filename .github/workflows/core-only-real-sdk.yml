@@ -20,9 +20,9 @@ jobs:
     timeout-minutes: 90
     env:
       EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-      SALTS_SHA: f1d8466244e6e0d74baed86e99ae6205e431557f
-      SALTS_UTILS_SHA: 62576265ac66b0000127a04936f108a3dbb3f004
-      CHTTP_SHA: 9d2e64ee46d15541a24b61ae979df0cca8615d3b
+      SALTS_SHA: 91a64dc9e197e4df756f8dc99e10e34a2b236cff
+      SALTS_UTILS_SHA: 1ecca3eaa86544cf8be45fbf7a0e5a6636ffebf4
+      CHTTP_SHA: 78dbb67ebb556e333c9078bee2b8268fafabffc9
       TURBOAGENT_SHA: ebf99fd0944b07065055b3db641bcfc7f070c984
       CMAKE_BUILD_PARALLEL_LEVEL: 2
 
@@ -186,7 +186,7 @@ jobs:
           test -f "$config"
           test -f /opt/praktor/debug/include/praktor.h
           grep -F 'if("OFF" STREQUAL "ON")' "$config"
-          grep -F 'find_dependency(TurboScript CONFIG' "$config"
+          grep -F 'find_dependency(TurboScript 3.0.0 EXACT CONFIG' "$config"
 
       - name: Build installed-package ABI smoke
         shell: bash
