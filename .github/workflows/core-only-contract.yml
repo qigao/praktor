@@ -67,7 +67,7 @@ jobs:
           EOF
 
           cat > "$root/salts/lib/cmake/Salts/SaltsConfigVersion.cmake" <<'EOF'
-          set(PACKAGE_VERSION "1.7.12")
+          set(PACKAGE_VERSION "1.8.3")
           if(PACKAGE_FIND_VERSION VERSION_EQUAL PACKAGE_VERSION)
             set(PACKAGE_VERSION_EXACT TRUE)
             set(PACKAGE_VERSION_COMPATIBLE TRUE)
@@ -77,7 +77,7 @@ jobs:
           EOF
 
           cat > "$root/salts-utils/lib/cmake/SaltsUtils/SaltsUtilsConfigVersion.cmake" <<'EOF'
-          set(PACKAGE_VERSION "4.0.3")
+          set(PACKAGE_VERSION "4.1.3")
           if(PACKAGE_FIND_VERSION VERSION_EQUAL PACKAGE_VERSION)
             set(PACKAGE_VERSION_EXACT TRUE)
             set(PACKAGE_VERSION_COMPATIBLE TRUE)
@@ -87,7 +87,7 @@ jobs:
           EOF
 
           cat > "$root/chttp/lib/cmake/Chttp/ChttpConfigVersion.cmake" <<'EOF'
-          set(PACKAGE_VERSION "1.1.1")
+          set(PACKAGE_VERSION "1.1.4")
           if(PACKAGE_FIND_VERSION VERSION_EQUAL PACKAGE_VERSION)
             set(PACKAGE_VERSION_EXACT TRUE)
             set(PACKAGE_VERSION_COMPATIBLE TRUE)
@@ -122,5 +122,5 @@ jobs:
             exit 1
           fi
           grep -q 'if("OFF" STREQUAL "ON")' build/core-contract/PraktorConfig.cmake
-          grep -q 'find_dependency(TurboScript 3.0.0 EXACT CONFIG' build/core-contract/PraktorConfig.cmake
+          grep -q 'find_dependency(TurboScript 3.0.2 EXACT CONFIG' build/core-contract/PraktorConfig.cmake
           echo "PRAKTOR_CORE_ONLY_CONFIGURE_OK"
