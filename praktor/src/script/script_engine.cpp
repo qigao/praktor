@@ -3,15 +3,6 @@
 #include "execution/controlled_process.hpp"
 #include "turbo_script.h"
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-#include "exprtk_module.h"
-#include "exprtk_types.h"
-#ifdef __cplusplus
-}
-#endif
-
 #include "util/logging.hpp"
 #include "util/system_info.hpp"
 #include "util/turbo_script_runtime.hpp"
@@ -28,7 +19,6 @@ extern "C" {
 namespace Praktor::Script {
 
 static WorkflowValue parse_string_or_keep(std::string_view raw);
-static WorkflowValue exprtk_scalar_to_json(const exprtk_value_t &value);
 
 namespace {
 
@@ -201,26 +191,8 @@ std::string resolve_script_import_paths(std::string source,
 
 struct ScriptEvalContext {
   WorkflowContext &workflow_context;
-  std::deque<std::string> string_pool;
-  std::deque<std::vector<exprtk_value_t>> list_pool;
   bool failed = false;
   std::string failure_message;
-
-  exprtk_value_t keep(std::string s) {
-    string_pool.push_back(std::move(s));
-    const auto &last = string_pool.back();
-    exprtk_value_t v{};
-    v.type = EXPRTK_VAL_STRING;
-    v.data.string.data = const_cast<char *>(last.c_str());
-    v.data.string.len = last.length();
-    return v;
-  }
-
-  exprtk_value_t keepList(std::vector<exprtk_value_t> items) {
-    list_pool.push_back(std::move(items));
-    auto &last = list_pool.back();
-    return turbo_script_value_list_borrowed(last.empty() ? nullptr : last.data(), last.size());
-  }
 };
 
 std::string resolve_script_working_dir(const WorkflowContext &workflow_context,
@@ -242,30 +214,87 @@ std::string resolve_script_working_dir(const WorkflowContext &workflow_context,
   return (std::filesystem::path(source_path).parent_path() / path).lexically_normal().string();
 }
 
-WorkflowValue build_shell_options(const exprtk_value_t &value) {
-  if (value.type == EXPRTK_VAL_MAP) {
-    return exprtk_scalar_to_json(value);
+std::string trim_copy(std::string_view value) {
+  size_t begin = 0;
+  while (begin < value.size() && std::isspace(static_cast<unsigned char>(value[begin]))) {
+    ++begin;
   }
 
-  if (value.type == EXPRTK_VAL_STRING) {
-    const WorkflowValue parsed =
-        parse_string_or_keep(std::string_view(value.data.string.data, value.data.string.len));
+  size_t end = value.size();
+  while (end > begin && std::isspace(static_cast<unsigned char>(value[end - 1]))) {
+    --end;
+  }
+
+  return std::string(value.substr(begin, end - begin));
+}
+
+WorkflowValue parse_string_or_keep(std::string_view raw) {
+  const std::string trimmed = trim_copy(raw);
+  if (!trimmed.empty() && (trimmed.front() == '{' || trimmed.front() == '[')) {
+    try {
+      return WorkflowValue::parse(trimmed);
+    } catch (const std::exception &) {
+      // Preserve non-JSON strings verbatim.
+    }
+  }
+  return std::string(raw);
+}
+
+WorkflowValue workflow_value_from_host(const turbo_script_value_view_t &value) {
+  switch (value.kind) {
+  case TURBO_SCRIPT_VALUE_NULL:
+    return WorkflowValue::null();
+  case TURBO_SCRIPT_VALUE_BOOL:
+    return value.as.boolean != 0;
+  case TURBO_SCRIPT_VALUE_INT64:
+    return value.as.integer;
+  case TURBO_SCRIPT_VALUE_NUMBER:
+    return value.as.number;
+  case TURBO_SCRIPT_VALUE_STRING:
+    return std::string(value.as.string.data ? value.as.string.data : "",
+                       value.as.string.size);
+  case TURBO_SCRIPT_VALUE_ARRAY: {
+    WorkflowValue result = WorkflowValue::array();
+    for (size_t i = 0; i < value.as.array.count; ++i) {
+      result.push_back(workflow_value_from_host(value.as.array.items[i]));
+    }
+    return result;
+  }
+  case TURBO_SCRIPT_VALUE_RECORD: {
+    WorkflowValue result = WorkflowValue::object();
+    for (size_t i = 0; i < value.as.record.count; ++i) {
+      const auto &entry = value.as.record.entries[i];
+      const std::string key(entry.key.data ? entry.key.data : "", entry.key.size);
+      result[key] = workflow_value_from_host(entry.value);
+    }
+    return result;
+  }
+  default:
+    return WorkflowValue::null();
+  }
+}
+
+WorkflowValue context_value_from_host(const turbo_script_value_view_t &value) {
+  WorkflowValue result = workflow_value_from_host(value);
+  if (result.is_string()) {
+    return parse_string_or_keep(result.as<std::string>());
+  }
+  return result;
+}
+
+WorkflowValue build_shell_options(const turbo_script_value_view_t &value) {
+  WorkflowValue options = workflow_value_from_host(value);
+  if (options.is_object()) {
+    return options;
+  }
+  if (options.is_string()) {
+    WorkflowValue parsed = parse_string_or_keep(options.as<std::string>());
     if (parsed.is_object()) {
       return parsed;
     }
   }
-
   return WorkflowValue::object();
 }
-
-struct LegacyHostBinding {
-  const char *name;
-  uint32_t min_arity;
-  uint32_t max_arity;
-  turbo_script_func_t callback;
-  void *legacy_user_data;
-  ScriptEvalContext *eval_ctx;
-};
 
 struct HostValueStorage {
   std::deque<std::string> strings;
@@ -273,206 +302,370 @@ struct HostValueStorage {
   std::deque<std::vector<turbo_script_record_entry_view_t>> records;
 };
 
-exprtk_value_t exprtk_from_host_value(const turbo_script_value_view_t &value,
-                                      ScriptEvalContext &eval_ctx) {
-  switch (value.kind) {
-  case TURBO_SCRIPT_VALUE_NULL: {
-    exprtk_value_t result{};
-    result.type = EXPRTK_VAL_NULL;
-    return result;
-  }
-  case TURBO_SCRIPT_VALUE_BOOL: {
-    exprtk_value_t result{};
-    result.type = EXPRTK_VAL_BOOL;
-    result.data.boolean = value.as.boolean != 0;
-    return result;
-  }
-  case TURBO_SCRIPT_VALUE_INT64: {
-    exprtk_value_t result{};
-    result.type = EXPRTK_VAL_INTEGER;
-    result.data.integer = value.as.integer;
-    return result;
-  }
-  case TURBO_SCRIPT_VALUE_NUMBER: {
-    exprtk_value_t result{};
-    result.type = EXPRTK_VAL_NUMBER;
-    result.data.number = value.as.number;
-    return result;
-  }
-  case TURBO_SCRIPT_VALUE_STRING:
-    return eval_ctx.keep(std::string(value.as.string.data ? value.as.string.data : "",
-                                     value.as.string.size));
-  case TURBO_SCRIPT_VALUE_ARRAY: {
-    std::vector<exprtk_value_t> items;
-    items.reserve(value.as.array.count);
-    for (size_t i = 0; i < value.as.array.count; ++i) {
-      items.push_back(exprtk_from_host_value(value.as.array.items[i], eval_ctx));
-    }
-    return eval_ctx.keepList(std::move(items));
-  }
-  case TURBO_SCRIPT_VALUE_RECORD: {
-    exprtk_value_t map = turbo_script_value_map();
-    for (size_t i = 0; i < value.as.record.count; ++i) {
-      const auto &entry = value.as.record.entries[i];
-      const std::string key(entry.key.data ? entry.key.data : "", entry.key.size);
-      exprtk_value_t child = exprtk_from_host_value(entry.value, eval_ctx);
-      turbo_script_value_map_set(&map, key.c_str(), child);
-      exprtk_value_destroy(&child);
-    }
-    return map;
-  }
-  default: {
-    exprtk_value_t result{};
-    result.type = EXPRTK_VAL_NULL;
-    return result;
-  }
-  }
-}
-
-turbo_script_value_view_t host_value_from_exprtk(const exprtk_value_t &value,
-                                                 HostValueStorage &storage) {
+turbo_script_value_view_t host_value_from_workflow(const WorkflowValue &value,
+                                                   HostValueStorage &storage) {
   turbo_script_value_view_t result{};
-  switch (value.type) {
-  case EXPRTK_VAL_NULL:
+  if (value.is_null()) {
     result.kind = TURBO_SCRIPT_VALUE_NULL;
-    break;
-  case EXPRTK_VAL_BOOL:
+  } else if (value.is_bool()) {
     result.kind = TURBO_SCRIPT_VALUE_BOOL;
-    result.as.boolean = value.data.boolean != 0;
-    break;
-  case EXPRTK_VAL_INTEGER:
+    result.as.boolean = value.as<bool>() ? 1 : 0;
+  } else if (value.is_int64()) {
     result.kind = TURBO_SCRIPT_VALUE_INT64;
-    result.as.integer = value.data.integer;
-    break;
-  case EXPRTK_VAL_NUMBER:
+    result.as.integer = value.as<int64_t>();
+  } else if (value.is_uint64()) {
+    const auto integer = value.as<uint64_t>();
+    if (integer <= static_cast<uint64_t>(std::numeric_limits<int64_t>::max())) {
+      result.kind = TURBO_SCRIPT_VALUE_INT64;
+      result.as.integer = static_cast<int64_t>(integer);
+    } else {
+      result.kind = TURBO_SCRIPT_VALUE_STRING;
+      storage.strings.push_back(value.to_string());
+      const auto &text = storage.strings.back();
+      result.as.string = {text.data(), text.size()};
+    }
+  } else if (value.is_double()) {
     result.kind = TURBO_SCRIPT_VALUE_NUMBER;
-    result.as.number = value.data.number;
-    break;
-  case EXPRTK_VAL_STRING: {
+    result.as.number = value.as<double>();
+  } else if (value.is_string()) {
     result.kind = TURBO_SCRIPT_VALUE_STRING;
-    storage.strings.emplace_back(value.data.string.data ? value.data.string.data : "",
-                                 value.data.string.len);
+    storage.strings.push_back(value.as<std::string>());
     const auto &text = storage.strings.back();
     result.as.string = {text.data(), text.size()};
-    break;
-  }
-  case EXPRTK_VAL_VECTOR: {
+  } else if (value.is_array()) {
     result.kind = TURBO_SCRIPT_VALUE_ARRAY;
     std::vector<turbo_script_value_view_t> items;
-    items.reserve(value.data.vector.size);
-    for (size_t i = 0; i < value.data.vector.size; ++i) {
-      turbo_script_value_view_t item{};
-      item.kind = TURBO_SCRIPT_VALUE_NUMBER;
-      item.as.number = value.data.vector.data[i];
-      items.push_back(item);
+    items.reserve(value.size());
+    for (const auto &item : value.array_range()) {
+      items.push_back(host_value_from_workflow(item, storage));
     }
     storage.arrays.push_back(std::move(items));
     const auto &stored = storage.arrays.back();
     result.as.array = {stored.empty() ? nullptr : stored.data(), stored.size()};
-    break;
-  }
-  case EXPRTK_VAL_LIST:
-  case EXPRTK_VAL_SET: {
-    result.kind = TURBO_SCRIPT_VALUE_ARRAY;
-    std::vector<turbo_script_value_view_t> items;
-    items.reserve(value.data.list.count);
-    for (size_t i = 0; i < value.data.list.count; ++i) {
-      items.push_back(host_value_from_exprtk(value.data.list.items[i], storage));
-    }
-    storage.arrays.push_back(std::move(items));
-    const auto &stored = storage.arrays.back();
-    result.as.array = {stored.empty() ? nullptr : stored.data(), stored.size()};
-    break;
-  }
-  case EXPRTK_VAL_MAP:
-  case EXPRTK_VAL_OBJECT: {
+  } else if (value.is_object()) {
     result.kind = TURBO_SCRIPT_VALUE_RECORD;
     std::vector<turbo_script_record_entry_view_t> entries;
-    turbo_script_value_map_iterator_t it = turbo_script_value_map_iter_begin(&value);
-    const char *key = nullptr;
-    exprtk_value_t entry{};
-    while (turbo_script_value_map_iter_next(&it, &key, &entry)) {
-      storage.strings.emplace_back(key ? key : "");
-      const auto &stored_key = storage.strings.back();
-      turbo_script_record_entry_view_t converted{};
-      converted.key = {stored_key.data(), stored_key.size()};
-      converted.value = host_value_from_exprtk(entry, storage);
-      entries.push_back(converted);
+    entries.reserve(value.size());
+    for (const auto &member : value.object_range()) {
+      storage.strings.push_back(std::string(member.key()));
+      const auto &key = storage.strings.back();
+      turbo_script_record_entry_view_t entry{};
+      entry.key = {key.data(), key.size()};
+      entry.value = host_value_from_workflow(member.value(), storage);
+      entries.push_back(entry);
     }
     storage.records.push_back(std::move(entries));
     const auto &stored = storage.records.back();
     result.as.record = {stored.empty() ? nullptr : stored.data(), stored.size()};
-    break;
-  }
-  case EXPRTK_VAL_FUNCTION:
-    result.kind = TURBO_SCRIPT_VALUE_NULL;
-    break;
+  } else {
+    result.kind = TURBO_SCRIPT_VALUE_STRING;
+    storage.strings.push_back(value.to_string());
+    const auto &text = storage.strings.back();
+    result.as.string = {text.data(), text.size()};
   }
   return result;
 }
 
-turbo_script_status_t legacy_host_callback(
+turbo_script_status_t set_host_value(turbo_script_host_result_builder_t *builder,
+                                     const WorkflowValue &value) {
+  HostValueStorage storage;
+  const auto host_value = host_value_from_workflow(value, storage);
+  return turbo_script_host_result_set_value(builder, &host_value);
+}
+
+turbo_script_status_t set_host_null(turbo_script_host_result_builder_t *builder) {
+  return set_host_value(builder, WorkflowValue::null());
+}
+
+bool host_string_arg(const turbo_script_value_view_t *args, size_t arg_count,
+                     size_t index, std::string &out) {
+  if (!args || index >= arg_count || args[index].kind != TURBO_SCRIPT_VALUE_STRING) {
+    return false;
+  }
+  out.assign(args[index].as.string.data ? args[index].as.string.data : "",
+             args[index].as.string.size);
+  return true;
+}
+
+using PraktorHostHandler = turbo_script_status_t (*)(
+    ScriptEvalContext &, const turbo_script_value_view_t *, size_t,
+    turbo_script_host_result_builder_t *);
+
+struct HostBinding {
+  const char *name;
+  uint32_t min_arity;
+  uint32_t max_arity;
+  PraktorHostHandler handler;
+  ScriptEvalContext *eval_ctx;
+};
+
+turbo_script_status_t host_callback_bridge(
     void *user_data, const turbo_script_value_view_t *args, size_t arg_count,
     turbo_script_host_result_builder_t *builder) {
-  auto *binding = static_cast<LegacyHostBinding *>(user_data);
-  if (!binding || !binding->callback || !binding->eval_ctx || (!args && arg_count != 0)) {
+  auto *binding = static_cast<HostBinding *>(user_data);
+  if (!binding || !binding->handler || !binding->eval_ctx) {
     return TURBO_SCRIPT_STATUS_INVALID_ARGUMENT;
   }
 
-  std::vector<exprtk_value_t> converted_args;
-  converted_args.reserve(arg_count);
-  exprtk_value_t output{};
-  bool has_output = false;
-
-  const auto cleanup_values = [&]() {
-    if (has_output) {
-      exprtk_value_destroy(&output);
-      has_output = false;
-    }
-    for (auto &value : converted_args) {
-      exprtk_value_destroy(&value);
-    }
-  };
-
   try {
-    for (size_t i = 0; i < arg_count; ++i) {
-      converted_args.push_back(exprtk_from_host_value(args[i], *binding->eval_ctx));
-    }
-
-    output = binding->callback(arg_count,
-                               converted_args.empty() ? nullptr : converted_args.data(),
-                               nullptr,
-                               binding->legacy_user_data);
-    has_output = true;
-    HostValueStorage storage;
-    const turbo_script_value_view_t host_output = host_value_from_exprtk(output, storage);
-    const auto status = turbo_script_host_result_set_value(builder, &host_output);
-    cleanup_values();
-    return status;
+    return binding->handler(*binding->eval_ctx, args, arg_count, builder);
   } catch (const std::exception &e) {
-    cleanup_values();
     const std::string message = e.what();
     return turbo_script_host_result_set_error(
         builder, -1, {message.data(), message.size()});
   } catch (...) {
-    cleanup_values();
     static constexpr std::string_view message = "Praktor host callback failed";
     return turbo_script_host_result_set_error(
         builder, -1, {message.data(), message.size()});
   }
 }
 
-bool register_legacy_host_binding(turbo_script_ctx_t *ctx,
-                                  turbo_script_result_t *host_result,
-                                  LegacyHostBinding &binding) {
+bool register_host_binding(turbo_script_ctx_t *ctx,
+                           turbo_script_result_t *host_result,
+                           HostBinding &binding) {
   turbo_script_host_function_descriptor_t descriptor{};
   descriptor.struct_size = sizeof(descriptor);
   descriptor.min_arity = binding.min_arity;
   descriptor.max_arity = binding.max_arity;
   descriptor.name = {binding.name, std::char_traits<char>::length(binding.name)};
   return turbo_script_context_register_host_function(
-             ctx, &descriptor, legacy_host_callback, &binding, host_result) ==
+             ctx, &descriptor, host_callback_bridge, &binding, host_result) ==
          TURBO_SCRIPT_STATUS_OK;
+}
+
+turbo_script_status_t ctx_get_host(
+    ScriptEvalContext &eval_ctx, const turbo_script_value_view_t *args,
+    size_t arg_count, turbo_script_host_result_builder_t *builder) {
+  std::string path;
+  if (!host_string_arg(args, arg_count, 0, path)) {
+    return set_host_null(builder);
+  }
+
+  WorkflowValue value = eval_ctx.workflow_context.getValueByPath(path);
+  if (value.is_string()) {
+    const WorkflowValue parsed = parse_string_or_keep(value.as<std::string>());
+    if (parsed.is_object() || parsed.is_array()) {
+      value = parsed;
+    }
+  }
+  return set_host_value(builder, value);
+}
+
+turbo_script_status_t ctx_set_host(
+    ScriptEvalContext &eval_ctx, const turbo_script_value_view_t *args,
+    size_t arg_count, turbo_script_host_result_builder_t *builder) {
+  std::string path;
+  if (!host_string_arg(args, arg_count, 0, path) || arg_count < 2) {
+    return set_host_null(builder);
+  }
+
+  if (path == "tasks" || path.rfind("tasks.", 0) == 0 || path == "workflow_status" ||
+      path == "failure_context" || path.rfind("failure_context.", 0) == 0) {
+    eval_ctx.failed = true;
+    eval_ctx.failure_message = "ctx.set cannot write reserved runtime path: " + path;
+    return set_host_null(builder);
+  }
+
+  eval_ctx.workflow_context.setValue(path, context_value_from_host(args[1]));
+  return set_host_null(builder);
+}
+
+turbo_script_status_t ctx_output_host(
+    ScriptEvalContext &eval_ctx, const turbo_script_value_view_t *args,
+    size_t arg_count, turbo_script_host_result_builder_t *builder) {
+  std::string key;
+  if (!host_string_arg(args, arg_count, 0, key) || arg_count < 2) {
+    return set_host_null(builder);
+  }
+  eval_ctx.workflow_context.setCurrentTaskOutput(key, context_value_from_host(args[1]));
+  return set_host_null(builder);
+}
+
+turbo_script_status_t ctx_output_text_host(
+    ScriptEvalContext &eval_ctx, const turbo_script_value_view_t *args,
+    size_t arg_count, turbo_script_host_result_builder_t *builder) {
+  std::string key;
+  std::string value;
+  if (!host_string_arg(args, arg_count, 0, key) ||
+      !host_string_arg(args, arg_count, 1, value)) {
+    return set_host_null(builder);
+  }
+  eval_ctx.workflow_context.setCurrentTaskOutput(key, value);
+  return set_host_null(builder);
+}
+
+turbo_script_status_t log_host(
+    ScriptEvalContext &, const turbo_script_value_view_t *args,
+    size_t arg_count, turbo_script_host_result_builder_t *builder) {
+  std::string message;
+  if (host_string_arg(args, arg_count, 0, message)) {
+    Praktor::Logging::printScriptMessage(message);
+  }
+  return set_host_null(builder);
+}
+
+turbo_script_status_t json_stringify_host(
+    ScriptEvalContext &, const turbo_script_value_view_t *args,
+    size_t arg_count, turbo_script_host_result_builder_t *builder) {
+  if (!args || arg_count < 1) {
+    return set_host_value(builder, std::string("null"));
+  }
+
+  WorkflowValue value = context_value_from_host(args[0]);
+  return set_host_value(builder, value.to_string());
+}
+
+turbo_script_status_t json_parse_host(
+    ScriptEvalContext &, const turbo_script_value_view_t *args,
+    size_t arg_count, turbo_script_host_result_builder_t *builder) {
+  std::string raw;
+  if (!host_string_arg(args, arg_count, 0, raw)) {
+    return set_host_null(builder);
+  }
+
+  try {
+    return set_host_value(builder, WorkflowValue::parse(trim_copy(raw)));
+  } catch (const std::exception &) {
+    return set_host_value(builder, raw);
+  }
+}
+
+turbo_script_status_t json_query_host(
+    ScriptEvalContext &, const turbo_script_value_view_t *args,
+    size_t arg_count, turbo_script_host_result_builder_t *builder) {
+  std::string query;
+  if (!args || arg_count < 2 || !host_string_arg(args, arg_count, 1, query)) {
+    return set_host_null(builder);
+  }
+
+  const WorkflowValue source = context_value_from_host(args[0]);
+  try {
+    if (query == "length(@)") {
+      if (!source.is_array() && !source.is_object() && !source.is_string()) {
+        return set_host_null(builder);
+      }
+      return set_host_value(builder, static_cast<double>(source.size()));
+    }
+
+    return set_host_value(
+        builder, Praktor::Data::StructuredDocumentQuery::queryJson(source, query));
+  } catch (const std::exception &) {
+    return set_host_null(builder);
+  }
+}
+
+turbo_script_status_t trim_host(
+    ScriptEvalContext &, const turbo_script_value_view_t *args,
+    size_t arg_count, turbo_script_host_result_builder_t *builder) {
+  std::string value;
+  if (!host_string_arg(args, arg_count, 0, value)) {
+    return set_host_null(builder);
+  }
+  return set_host_value(builder, trim_copy(value));
+}
+
+turbo_script_status_t shell_exec_host(
+    ScriptEvalContext &eval_ctx, const turbo_script_value_view_t *args,
+    size_t arg_count, turbo_script_host_result_builder_t *builder) {
+  std::string command;
+  if (!host_string_arg(args, arg_count, 0, command)) {
+    return set_host_null(builder);
+  }
+
+  std::string input;
+  std::string working_dir;
+  int timeout_ms = 30000;
+  bool stream_output = false;
+  std::map<std::string, std::string> environment;
+  for (const auto &[key, value] : Praktor::system::getEnvironmentVariables()) {
+    environment[key] = value;
+  }
+
+  if (arg_count >= 2) {
+    WorkflowValue options = build_shell_options(args[1]);
+    if (options.is_object()) {
+      if (options.contains("input") && options["input"].is_string()) {
+        input = options["input"].as<std::string>();
+      }
+      if (options.contains("working_dir") && options["working_dir"].is_string()) {
+        working_dir = options["working_dir"].as<std::string>();
+      }
+      if (options.contains("timeout_ms")) {
+        if (options["timeout_ms"].is_number()) {
+          timeout_ms = options["timeout_ms"].as<int>();
+        } else if (options["timeout_ms"].is_string()) {
+          timeout_ms = std::stoi(options["timeout_ms"].as<std::string>());
+        }
+      }
+      if (options.contains("stream_output")) {
+        if (options["stream_output"].is_bool()) {
+          stream_output = options["stream_output"].as<bool>();
+        } else if (options["stream_output"].is_number()) {
+          stream_output = options["stream_output"].as<int>() != 0;
+        } else if (options["stream_output"].is_string()) {
+          const std::string raw = options["stream_output"].as<std::string>();
+          stream_output = (raw == "true" || raw == "1" || raw == "yes");
+        }
+      }
+      if (options.contains("env") && options["env"].is_object()) {
+        for (const auto &member : options["env"].object_range()) {
+          if (member.value().is_string()) {
+            environment[member.key()] = member.value().as<std::string>();
+          } else {
+            environment[member.key()] = member.value().to_string();
+          }
+        }
+      }
+    }
+  }
+
+  const std::string resolved_working_dir =
+      resolve_script_working_dir(eval_ctx.workflow_context, working_dir);
+  const auto execution_control = eval_ctx.workflow_context.getExecutionControl();
+  if (execution_control && execution_control->stopRequested()) {
+    eval_ctx.failed = true;
+    eval_ctx.failure_message =
+        execution_control->stopReason() ==
+                Praktor::Execution::ExecutionControl::StopReason::DeadlineExceeded
+            ? "Script shell execution timed out before start"
+            : "Script shell execution cancelled before start";
+    return set_host_null(builder);
+  }
+
+  timeout_ms =
+      Praktor::Execution::clampProcessTimeoutMs(timeout_ms, execution_control);
+  auto process = Praktor::Shell::ShellExecutor::start(
+      command, input, resolved_working_dir, timeout_ms, environment, stream_output);
+  const auto result =
+      Praktor::Execution::waitForManagedProcess(process, execution_control);
+
+  WorkflowValue payload = WorkflowValue::object();
+  payload["exit_code"] = result.exit_code;
+  payload["stdout"] = result.stdout_output;
+  payload["stderr"] = result.stderr_output;
+  payload["pid"] = result.pid;
+  payload["success"] = result.success();
+  payload["output_streamed_live"] = result.output_streamed_live;
+  if (!resolved_working_dir.empty()) {
+    payload["working_dir"] = resolved_working_dir;
+  }
+
+  // Preserve the legacy shell.exec contract: return serialized JSON text and
+  // let ctx.set/ctx.output decode JSON-like strings into structured values.
+  return set_host_value(builder, payload.to_string());
+}
+
+turbo_script_status_t fail_host(
+    ScriptEvalContext &eval_ctx, const turbo_script_value_view_t *args,
+    size_t arg_count, turbo_script_host_result_builder_t *builder) {
+  eval_ctx.failed = true;
+  std::string message;
+  if (host_string_arg(args, arg_count, 0, message)) {
+    eval_ctx.failure_message = std::move(message);
+  } else {
+    eval_ctx.failure_message = "Script failed";
+  }
+  return set_host_null(builder);
 }
 
 std::string build_host_module_source(std::string_view source) {
@@ -514,416 +707,6 @@ std::string host_result_error_message(turbo_script_result_t *host_result,
 }
 
 } // namespace
-
-static exprtk_value_t make_null() {
-  exprtk_value_t v{};
-  v.type = EXPRTK_VAL_NULL;
-  return v;
-}
-
-static exprtk_value_t make_num(double val) {
-  exprtk_value_t v{};
-  v.type = EXPRTK_VAL_NUMBER;
-  v.data.number = val;
-  return v;
-}
-
-static exprtk_value_t make_str(const char *str, size_t len) {
-  exprtk_value_t v{};
-  v.type = EXPRTK_VAL_STRING;
-  v.data.string.data = const_cast<char *>(str);
-  v.data.string.len = len;
-  return v;
-}
-
-static exprtk_value_t json_to_exprtk_value(const WorkflowValue &value, ScriptEvalContext &eval_ctx) {
-  if (value.is_null()) {
-    return make_null();
-  }
-  if (value.is_bool()) {
-    exprtk_value_t result{};
-    result.type = EXPRTK_VAL_BOOL;
-    result.data.boolean = value.as<bool>() ? 1 : 0;
-    return result;
-  }
-  if (value.is_int64()) {
-    exprtk_value_t result{};
-    result.type = EXPRTK_VAL_INTEGER;
-    result.data.integer = value.as<int64_t>();
-    return result;
-  }
-  if (value.is_uint64()) {
-    const auto integer = value.as<uint64_t>();
-    if (integer <= static_cast<uint64_t>(std::numeric_limits<int64_t>::max())) {
-      exprtk_value_t result{};
-      result.type = EXPRTK_VAL_INTEGER;
-      result.data.integer = static_cast<int64_t>(integer);
-      return result;
-    }
-    return eval_ctx.keep(value.to_string());
-  }
-  if (value.is_double()) {
-    return make_num(value.as<double>());
-  }
-  if (value.is_string()) {
-    std::string raw = value.as<std::string>();
-    const WorkflowValue parsed = parse_string_or_keep(raw);
-    if (parsed.is_object() || parsed.is_array()) {
-      return json_to_exprtk_value(parsed, eval_ctx);
-    }
-    return eval_ctx.keep(std::move(raw));
-  }
-  if (value.is_array()) {
-    std::vector<exprtk_value_t> items;
-    items.reserve(value.size());
-    for (const auto &item : value.array_range()) {
-      items.push_back(json_to_exprtk_value(item, eval_ctx));
-    }
-    return eval_ctx.keepList(std::move(items));
-  }
-  if (value.is_object()) {
-    exprtk_value_t map = turbo_script_value_map();
-    for (const auto &member : value.object_range()) {
-      const std::string key(member.key());
-      turbo_script_value_map_set(&map, key.c_str(),
-                                 json_to_exprtk_value(member.value(), eval_ctx));
-    }
-    return map;
-  }
-  return eval_ctx.keep(value.to_string());
-}
-
-static std::string trim_copy(std::string_view value) {
-  size_t begin = 0;
-  while (begin < value.size() && std::isspace(static_cast<unsigned char>(value[begin]))) {
-    ++begin;
-  }
-
-  size_t end = value.size();
-  while (end > begin && std::isspace(static_cast<unsigned char>(value[end - 1]))) {
-    --end;
-  }
-
-  return std::string(value.substr(begin, end - begin));
-}
-
-static WorkflowValue parse_string_or_keep(std::string_view raw) {
-  const std::string trimmed = trim_copy(raw);
-  if (!trimmed.empty() && (trimmed.front() == '{' || trimmed.front() == '[')) {
-    try {
-      return WorkflowValue::parse(trimmed);
-    } catch (const std::exception &) {
-      // Fall through and preserve the original string.
-    }
-  }
-  return std::string(raw);
-}
-
-static WorkflowValue exprtk_scalar_to_json(const exprtk_value_t &value) {
-  switch (value.type) {
-  case EXPRTK_VAL_NUMBER:
-    return value.data.number;
-  case EXPRTK_VAL_INTEGER:
-    return value.data.integer;
-  case EXPRTK_VAL_BOOL:
-    return value.data.boolean != 0;
-  case EXPRTK_VAL_STRING:
-    return parse_string_or_keep(std::string_view(value.data.string.data, value.data.string.len));
-  case EXPRTK_VAL_VECTOR: {
-    WorkflowValue result = WorkflowValue::array();
-    for (size_t i = 0; i < value.data.vector.size; ++i) {
-      result.push_back(value.data.vector.data[i]);
-    }
-    return result;
-  }
-  case EXPRTK_VAL_NULL:
-    return WorkflowValue::null();
-  case EXPRTK_VAL_MAP:
-  case EXPRTK_VAL_OBJECT: {
-    WorkflowValue obj = WorkflowValue::object();
-    turbo_script_value_map_iterator_t it = turbo_script_value_map_iter_begin(&value);
-    const char *key = nullptr;
-    exprtk_value_t entry;
-    while (turbo_script_value_map_iter_next(&it, &key, &entry)) {
-      obj[key] = exprtk_scalar_to_json(entry);
-    }
-    return obj;
-  }
-  case EXPRTK_VAL_LIST:
-  case EXPRTK_VAL_SET: {
-    WorkflowValue arr = WorkflowValue::array();
-    for (size_t i = 0; i < value.data.list.count; ++i) {
-      arr.push_back(exprtk_scalar_to_json(value.data.list.items[i]));
-    }
-    return arr;
-  }
-  case EXPRTK_VAL_FUNCTION:
-    return WorkflowValue::null();
-  }
-  return WorkflowValue::null();
-}
-
-// Native function for json.stringify(value) — converts any TurboScript value to a JSON string
-static exprtk_value_t json_stringify_fn(size_t argc, exprtk_value_t *args,
-                                        exprtk_env_t * /*env*/, void *user_data) {
-  if (argc < 1 || !user_data) {
-    return make_str("null", 4);
-  }
-  auto *eval_ctx = static_cast<ScriptEvalContext *>(user_data);
-
-  if (args[0].type == EXPRTK_VAL_STRING) {
-    const std::string raw(args[0].data.string.data, args[0].data.string.len);
-    const WorkflowValue parsed = parse_string_or_keep(raw);
-    if (parsed.is_object() || parsed.is_array()) {
-      return eval_ctx->keep(parsed.to_string());
-    }
-  }
-
-  WorkflowValue j = exprtk_scalar_to_json(args[0]);
-  return eval_ctx->keep(j.to_string());
-}
-
-// Native function for json.parse(string) — parses a JSON string into a structured TurboScript value.
-// If parsing fails, preserve the original string for compatibility.
-static exprtk_value_t json_parse_fn(size_t argc, exprtk_value_t *args,
-                                    exprtk_env_t * /*env*/, void *user_data) {
-  if (argc < 1 || args[0].type != EXPRTK_VAL_STRING || !user_data) {
-    return make_null();
-  }
-
-  auto *eval_ctx = static_cast<ScriptEvalContext *>(user_data);
-  const std::string raw(args[0].data.string.data, args[0].data.string.len);
-
-  try {
-    const WorkflowValue parsed = WorkflowValue::parse(trim_copy(raw));
-    return json_to_exprtk_value(parsed, *eval_ctx);
-  } catch (const std::exception &) {
-    return eval_ctx->keep(raw);
-  }
-}
-
-static exprtk_value_t json_query_fn(size_t argc, exprtk_value_t *args,
-                                    exprtk_env_t * /*env*/, void *user_data) {
-  if (argc < 2 || args[1].type != EXPRTK_VAL_STRING || !user_data) {
-    return make_null();
-  }
-
-  auto *eval_ctx = static_cast<ScriptEvalContext *>(user_data);
-  const WorkflowValue source = exprtk_scalar_to_json(args[0]);
-  const std::string query(args[1].data.string.data, args[1].data.string.len);
-
-  try {
-    // Keep the established scalar helper while path selection moves to JSONPath.
-    if (query == "length(@)") {
-      if (!source.is_array() && !source.is_object() && !source.is_string()) {
-        return make_null();
-      }
-      return make_num(static_cast<double>(source.size()));
-    }
-    const WorkflowValue result =
-        Praktor::Data::StructuredDocumentQuery::queryJson(source, query);
-    return json_to_exprtk_value(result, *eval_ctx);
-  } catch (const std::exception &) {
-    return make_null();
-  }
-}
-
-// Native function for trim(string) — removes leading and trailing whitespace
-static exprtk_value_t trim_fn_call(size_t argc, exprtk_value_t *args,
-                                   exprtk_env_t * /*env*/, void *user_data) {
-  if (argc < 1 || args[0].type != EXPRTK_VAL_STRING || !user_data) {
-    return make_null();
-  }
-  auto *eval_ctx = static_cast<ScriptEvalContext *>(user_data);
-  return eval_ctx->keep(
-      trim_copy(std::string_view(args[0].data.string.data, args[0].data.string.len)));
-}
-
-static exprtk_value_t shell_exec_fn(size_t argc, exprtk_value_t *args,
-                                    exprtk_env_t * /*env*/, void *user_data) {
-  if (argc < 1 || args[0].type != EXPRTK_VAL_STRING || !user_data) {
-    return make_null();
-  }
-
-  auto *eval_ctx = static_cast<ScriptEvalContext *>(user_data);
-  std::string command(args[0].data.string.data, args[0].data.string.len);
-  std::string input;
-  std::string working_dir;
-  int timeout_ms = 30000;
-  bool stream_output = false;
-  std::map<std::string, std::string> environment;
-  for (const auto &[key, value] : Praktor::system::getEnvironmentVariables()) {
-    environment[key] = value;
-  }
-
-  if (argc >= 2) {
-    WorkflowValue options = build_shell_options(args[1]);
-    if (options.is_object()) {
-      if (options.contains("input") && options["input"].is_string()) {
-        input = options["input"].as<std::string>();
-      }
-      if (options.contains("working_dir") && options["working_dir"].is_string()) {
-        working_dir = options["working_dir"].as<std::string>();
-      }
-      if (options.contains("timeout_ms")) {
-        if (options["timeout_ms"].is_number()) {
-          timeout_ms = options["timeout_ms"].as<int>();
-        } else if (options["timeout_ms"].is_string()) {
-          timeout_ms = std::stoi(options["timeout_ms"].as<std::string>());
-        }
-      }
-      if (options.contains("stream_output")) {
-        if (options["stream_output"].is_bool()) {
-          stream_output = options["stream_output"].as<bool>();
-        } else if (options["stream_output"].is_number()) {
-          stream_output = options["stream_output"].as<int>() != 0;
-        } else if (options["stream_output"].is_string()) {
-          const std::string raw = options["stream_output"].as<std::string>();
-          stream_output = (raw == "true" || raw == "1" || raw == "yes");
-        }
-      }
-      if (options.contains("env") && options["env"].is_object()) {
-        for (const auto &member : options["env"].object_range()) {
-          if (member.value().is_string()) {
-            environment[member.key()] = member.value().as<std::string>();
-          } else {
-            environment[member.key()] = member.value().to_string();
-          }
-        }
-      }
-    }
-  }
-
-  const std::string resolved_working_dir =
-      resolve_script_working_dir(eval_ctx->workflow_context, working_dir);
-  const auto execution_control = eval_ctx->workflow_context.getExecutionControl();
-  if (execution_control && execution_control->stopRequested()) {
-    eval_ctx->failed = true;
-    eval_ctx->failure_message =
-        execution_control->stopReason() ==
-                Praktor::Execution::ExecutionControl::StopReason::DeadlineExceeded
-            ? "Script shell execution timed out before start"
-            : "Script shell execution cancelled before start";
-    return make_null();
-  }
-
-  timeout_ms =
-      Praktor::Execution::clampProcessTimeoutMs(timeout_ms, execution_control);
-  auto process = Praktor::Shell::ShellExecutor::start(
-      command, input, resolved_working_dir, timeout_ms, environment, stream_output);
-  const auto result =
-      Praktor::Execution::waitForManagedProcess(process, execution_control);
-
-  WorkflowValue payload = WorkflowValue::object();
-  payload["exit_code"] = result.exit_code;
-  payload["stdout"] = result.stdout_output;
-  payload["stderr"] = result.stderr_output;
-  payload["pid"] = result.pid;
-  payload["success"] = result.success();
-  payload["output_streamed_live"] = result.output_streamed_live;
-  if (!resolved_working_dir.empty()) {
-    payload["working_dir"] = resolved_working_dir;
-  }
-
-  return eval_ctx->keep(payload.to_string());
-}
-
-// Native function for ctx.get("path")
-static exprtk_value_t ctx_get_fn(size_t argc, exprtk_value_t *args,
-                                 exprtk_env_t * /*env*/, void *user_data) {
-  if (argc != 1 || args[0].type != EXPRTK_VAL_STRING || !user_data) {
-    return make_null();
-  }
-  auto *eval_ctx = static_cast<ScriptEvalContext *>(user_data);
-  std::string path(args[0].data.string.data, args[0].data.string.len);
-  auto val = eval_ctx->workflow_context.getValueByPath(path);
-  return json_to_exprtk_value(val, *eval_ctx);
-}
-
-// Native function for ctx.set("path", value)
-static exprtk_value_t ctx_set_fn(size_t argc, exprtk_value_t *args,
-                                 exprtk_env_t * /*env*/, void *user_data) {
-  if (argc < 2 || args[0].type != EXPRTK_VAL_STRING || !user_data) {
-    return make_null();
-  }
-  auto *eval_ctx = static_cast<ScriptEvalContext *>(user_data);
-  std::string path(args[0].data.string.data, args[0].data.string.len);
-  if (path == "tasks" || path.rfind("tasks.", 0) == 0 || path == "workflow_status" ||
-      path == "failure_context" || path.rfind("failure_context.", 0) == 0) {
-    eval_ctx->failed = true;
-    eval_ctx->failure_message = "ctx.set cannot write reserved runtime path: " + path;
-    return make_null();
-  }
-  eval_ctx->workflow_context.setValue(path, exprtk_scalar_to_json(args[1]));
-  return make_null();
-}
-
-static exprtk_value_t ctx_output_fn(size_t argc, exprtk_value_t *args,
-                                    exprtk_env_t * /*env*/, void *user_data) {
-  if (argc < 2 || args[0].type != EXPRTK_VAL_STRING || !user_data) {
-    return make_null();
-  }
-  auto *eval_ctx = static_cast<ScriptEvalContext *>(user_data);
-  std::string key(args[0].data.string.data, args[0].data.string.len);
-  WorkflowValue val = exprtk_scalar_to_json(args[1]);
-  eval_ctx->workflow_context.setCurrentTaskOutput(key, val);
-  return make_null();
-}
-
-static exprtk_value_t ctx_output_text_fn(size_t argc, exprtk_value_t *args,
-                                         exprtk_env_t * /*env*/, void *user_data) {
-  if (argc < 2 || args[0].type != EXPRTK_VAL_STRING ||
-      args[1].type != EXPRTK_VAL_STRING || !user_data) {
-    return make_null();
-  }
-  auto *eval_ctx = static_cast<ScriptEvalContext *>(user_data);
-  std::string key(args[0].data.string.data, args[0].data.string.len);
-  std::string value(args[1].data.string.data, args[1].data.string.len);
-  eval_ctx->workflow_context.setCurrentTaskOutput(key, value);
-  return make_null();
-}
-
-static exprtk_value_t log_message_fn(size_t argc, exprtk_value_t *args,
-                                     void (*emitter)(std::string_view)) {
-  if (argc < 1 || args[0].type != EXPRTK_VAL_STRING) {
-    return make_null();
-  }
-
-  std::string message(args[0].data.string.data, args[0].data.string.len);
-  emitter(message);
-  return make_null();
-}
-
-static exprtk_value_t log_info_fn(size_t argc, exprtk_value_t *args,
-                                  exprtk_env_t * /*env*/, void * /*user_data*/) {
-  return log_message_fn(argc, args, Praktor::Logging::printScriptMessage);
-}
-
-static exprtk_value_t log_warn_fn(size_t argc, exprtk_value_t *args,
-                                  exprtk_env_t * /*env*/, void * /*user_data*/) {
-  return log_message_fn(argc, args, Praktor::Logging::printScriptMessage);
-}
-
-static exprtk_value_t log_error_fn(size_t argc, exprtk_value_t *args,
-                                   exprtk_env_t * /*env*/, void * /*user_data*/) {
-  return log_message_fn(argc, args, Praktor::Logging::printScriptMessage);
-}
-
-static exprtk_value_t fail_fn(size_t argc, exprtk_value_t *args,
-                              exprtk_env_t * /*env*/, void *user_data) {
-  if (!user_data) {
-    return make_null();
-  }
-
-  auto *eval_ctx = static_cast<ScriptEvalContext *>(user_data);
-  eval_ctx->failed = true;
-  if (argc >= 1 && args[0].type == EXPRTK_VAL_STRING) {
-    eval_ctx->failure_message.assign(args[0].data.string.data, args[0].data.string.len);
-  } else {
-    eval_ctx->failure_message = "Script failed";
-  }
-  return make_null();
-}
 
 ScriptResult execute(const std::string &source, WorkflowContext &context,
                      const std::string &script_source_path) {
@@ -969,25 +752,25 @@ ScriptResult execute(const std::string &source, WorkflowContext &context,
     return result;
   }
 
-  ScriptEvalContext eval_ctx{context, {}};
-  std::array<LegacyHostBinding, 13> bindings{{
-      {"ctx_get", 1, 1, ctx_get_fn, &eval_ctx, &eval_ctx},
-      {"ctx_set", 2, 16, ctx_set_fn, &eval_ctx, &eval_ctx},
-      {"ctx_output", 2, 16, ctx_output_fn, &eval_ctx, &eval_ctx},
-      {"ctx_output_text", 2, 16, ctx_output_text_fn, &eval_ctx, &eval_ctx},
-      {"log_info", 1, 16, log_info_fn, nullptr, &eval_ctx},
-      {"log_warn", 1, 16, log_warn_fn, nullptr, &eval_ctx},
-      {"log_error", 1, 16, log_error_fn, nullptr, &eval_ctx},
-      {"json_stringify", 1, 16, json_stringify_fn, &eval_ctx, &eval_ctx},
-      {"json_parse", 1, 16, json_parse_fn, &eval_ctx, &eval_ctx},
-      {"json_query", 2, 16, json_query_fn, &eval_ctx, &eval_ctx},
-      {"shell_exec", 1, 16, shell_exec_fn, &eval_ctx, &eval_ctx},
-      {"trim_fn", 1, 16, trim_fn_call, &eval_ctx, &eval_ctx},
-      {"fail", 0, 16, fail_fn, &eval_ctx, &eval_ctx},
+  ScriptEvalContext eval_ctx{context};
+  std::array<HostBinding, 13> bindings{{
+      {"ctx_get", 1, 1, ctx_get_host, &eval_ctx},
+      {"ctx_set", 2, 16, ctx_set_host, &eval_ctx},
+      {"ctx_output", 2, 16, ctx_output_host, &eval_ctx},
+      {"ctx_output_text", 2, 16, ctx_output_text_host, &eval_ctx},
+      {"log_info", 1, 16, log_host, &eval_ctx},
+      {"log_warn", 1, 16, log_host, &eval_ctx},
+      {"log_error", 1, 16, log_host, &eval_ctx},
+      {"json_stringify", 1, 16, json_stringify_host, &eval_ctx},
+      {"json_parse", 1, 16, json_parse_host, &eval_ctx},
+      {"json_query", 2, 16, json_query_host, &eval_ctx},
+      {"shell_exec", 1, 16, shell_exec_host, &eval_ctx},
+      {"trim_fn", 1, 16, trim_host, &eval_ctx},
+      {"fail", 0, 16, fail_host, &eval_ctx},
   }};
 
   for (auto &binding : bindings) {
-    if (!register_legacy_host_binding(ctx, host_result, binding)) {
+    if (!register_host_binding(ctx, host_result, binding)) {
       result.success = false;
       ScriptError error{};
       result.error_message =
