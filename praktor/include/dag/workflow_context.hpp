@@ -9,6 +9,7 @@
 #include <unordered_set>
 #include <vector>
 #include <type_traits>
+#include <utility>
 
 // Project includes
 #include "dag/failure_context_state.hpp"
