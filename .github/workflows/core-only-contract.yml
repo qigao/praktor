@@ -66,6 +66,36 @@ jobs:
           set(Chttp_FOUND TRUE)
           EOF
 
+          cat > "$root/salts/lib/cmake/Salts/SaltsConfigVersion.cmake" <<'EOF'
+          set(PACKAGE_VERSION "1.7.12")
+          if(PACKAGE_FIND_VERSION VERSION_EQUAL PACKAGE_VERSION)
+            set(PACKAGE_VERSION_EXACT TRUE)
+            set(PACKAGE_VERSION_COMPATIBLE TRUE)
+          else()
+            set(PACKAGE_VERSION_COMPATIBLE FALSE)
+          endif()
+          EOF
+
+          cat > "$root/salts-utils/lib/cmake/SaltsUtils/SaltsUtilsConfigVersion.cmake" <<'EOF'
+          set(PACKAGE_VERSION "4.0.3")
+          if(PACKAGE_FIND_VERSION VERSION_EQUAL PACKAGE_VERSION)
+            set(PACKAGE_VERSION_EXACT TRUE)
+            set(PACKAGE_VERSION_COMPATIBLE TRUE)
+          else()
+            set(PACKAGE_VERSION_COMPATIBLE FALSE)
+          endif()
+          EOF
+
+          cat > "$root/chttp/lib/cmake/Chttp/ChttpConfigVersion.cmake" <<'EOF'
+          set(PACKAGE_VERSION "1.1.1")
+          if(PACKAGE_FIND_VERSION VERSION_EQUAL PACKAGE_VERSION)
+            set(PACKAGE_VERSION_EXACT TRUE)
+            set(PACKAGE_VERSION_COMPATIBLE TRUE)
+          else()
+            set(PACKAGE_VERSION_COMPATIBLE FALSE)
+          endif()
+          EOF
+
           cat > "$root/cxxopts/lib/cmake/cxxopts/cxxoptsConfig.cmake" <<'EOF'
           if(NOT TARGET cxxopts::cxxopts)
             add_library(cxxopts::cxxopts INTERFACE IMPORTED)
@@ -92,5 +122,5 @@ jobs:
             exit 1
           fi
           grep -q 'if("OFF" STREQUAL "ON")' build/core-contract/PraktorConfig.cmake
-          grep -q 'find_dependency(TurboScript CONFIG' build/core-contract/PraktorConfig.cmake
+          grep -q 'find_dependency(TurboScript 3.0.0 EXACT CONFIG' build/core-contract/PraktorConfig.cmake
           echo "PRAKTOR_CORE_ONLY_CONFIGURE_OK"
