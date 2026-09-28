@@ -12,6 +12,7 @@
 
 // Project includes
 #include "dag/failure_context_state.hpp"
+#include "execution/execution_control.hpp"
 #include "dag/task_failure_context.hpp"
 #include "dag/task_registry.hpp"
 #include "dag/variable_scope.hpp"
@@ -64,6 +65,7 @@ public:
         child->task_registry_ = this->task_registry_;
         child->task_scope_stack_ = this->task_scope_stack_;
         child->source_path_ = this->source_path_;
+        child->execution_control_ = this->execution_control_;
         // Failure context is not inherited
         return child;
     }
@@ -384,6 +386,15 @@ public:
         return source_path_;
     }
 
+    void setExecutionControl(
+        std::shared_ptr<Praktor::Execution::ExecutionControl> execution_control) {
+        execution_control_ = std::move(execution_control);
+    }
+
+    std::shared_ptr<Praktor::Execution::ExecutionControl> getExecutionControl() const {
+        return execution_control_;
+    }
+
 private:
     // Core components
     std::unique_ptr<VariableScope> scope_;
@@ -392,5 +403,6 @@ private:
     // Supporting members
     std::vector<std::pair<std::string, std::optional<std::string>>> task_scope_stack_;
     std::string source_path_;
+    std::shared_ptr<Praktor::Execution::ExecutionControl> execution_control_;
     FailureContextState failure_state_;
 };
