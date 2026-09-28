@@ -11,6 +11,7 @@ namespace Praktor::Execution {
 class ExecutionControl {
 public:
     using Clock = std::chrono::steady_clock;
+    using CancelProbe = bool (*)(void*) noexcept;
 
     enum class StopReason {
         None,
@@ -25,6 +26,15 @@ public:
     {
     }
 
+    ExecutionControl(std::optional<Clock::time_point> deadline,
+                     CancelProbe cancel_probe,
+                     void* cancel_probe_user_data) noexcept
+        : deadline_(deadline)
+        , cancel_probe_(cancel_probe)
+        , cancel_probe_user_data_(cancel_probe_user_data)
+    {
+    }
+
     void requestCancel() noexcept
     {
         const auto requested_at = toNanoseconds(Clock::now());
@@ -35,7 +45,7 @@ public:
 
     bool cancellationRequested() const noexcept
     {
-        return cancel_requested_at_ns_.load(std::memory_order_acquire) != kNotRequested;
+        return observeCancellation(Clock::now()) != kNotRequested;
     }
 
     std::optional<Clock::time_point> deadline() const noexcept
@@ -59,8 +69,7 @@ public:
     StopReason stopReason() const noexcept
     {
         const auto now = Clock::now();
-        const auto cancelled_at =
-            cancel_requested_at_ns_.load(std::memory_order_acquire);
+        const auto cancelled_at = observeCancellation(now);
 
         if (deadline_ && now >= *deadline_) {
             const auto deadline_ns = toNanoseconds(*deadline_);
@@ -92,8 +101,30 @@ private:
             .count();
     }
 
-    std::atomic<std::int64_t> cancel_requested_at_ns_{kNotRequested};
+    std::int64_t observeCancellation(Clock::time_point observed_at) const noexcept
+    {
+        auto cancelled_at =
+            cancel_requested_at_ns_.load(std::memory_order_acquire);
+        if (cancelled_at != kNotRequested || !cancel_probe_) {
+            return cancelled_at;
+        }
+
+        if (cancel_probe_(cancel_probe_user_data_)) {
+            const auto requested_at = toNanoseconds(observed_at);
+            auto expected = kNotRequested;
+            cancel_requested_at_ns_.compare_exchange_strong(
+                expected, requested_at,
+                std::memory_order_release, std::memory_order_relaxed);
+            cancelled_at =
+                cancel_requested_at_ns_.load(std::memory_order_acquire);
+        }
+        return cancelled_at;
+    }
+
+    mutable std::atomic<std::int64_t> cancel_requested_at_ns_{kNotRequested};
     std::optional<Clock::time_point> deadline_;
+    CancelProbe cancel_probe_ = nullptr;
+    void* cancel_probe_user_data_ = nullptr;
 };
 
 } // namespace Praktor::Execution
