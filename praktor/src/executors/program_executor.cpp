@@ -1,6 +1,7 @@
 #include "executors/program_executor.hpp"
 
 #include "praktor/shell/process_executor.hpp"
+#include "execution/controlled_process.hpp"
 #include "util/env_parser.hpp"
 #include "util/logging.hpp"
 #include "util/path_utils.hpp"
@@ -131,6 +132,19 @@ TaskResult ProgramExecutor::execute(const Task& task, WorkflowContext& context) 
   spec.input = substituteVariables(params.input, context);
   spec.working_dir = resolveWorkingDirectory(task, context);
   spec.timeout_ms = task.timeout ? parseDurationMs(*task.timeout) : 30000;
+  const auto execution_control = context.getExecutionControl();
+  if (execution_control && execution_control->stopRequested()) {
+    const auto reason = execution_control->stopReason();
+    return TaskResult::fail(
+        reason == ExecutionControl::StopReason::DeadlineExceeded
+            ? TaskErrorCode::Timeout
+            : TaskErrorCode::Cancelled,
+        "execution_control",
+        reason == ExecutionControl::StopReason::DeadlineExceeded
+            ? "Program execution deadline exceeded before start"
+            : "Program execution cancelled before start");
+  }
+  spec.timeout_ms = clampProcessTimeoutMs(spec.timeout_ms, execution_control);
   spec.stream_output = !task.silent;
 
   spec.args.reserve(params.args.size());
@@ -143,7 +157,8 @@ TaskResult ProgramExecutor::execute(const Task& task, WorkflowContext& context) 
 
   Praktor::Shell::ShellExecutor::setStreamCallback(emitProcessConsoleLine);
   auto start_time = std::chrono::high_resolution_clock::now();
-  auto process_result = Praktor::Shell::ProcessExecutor::execute(spec);
+  auto process = Praktor::Shell::ProcessExecutor::start(spec);
+  auto process_result = waitForManagedProcess(process, execution_control);
   auto end_time = std::chrono::high_resolution_clock::now();
   auto duration =
       std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
@@ -157,16 +172,37 @@ TaskResult ProgramExecutor::execute(const Task& task, WorkflowContext& context) 
     context.setCurrentTaskOutput("data", parseJsonOutput(process_result.stdout_output));
   }
 
-  TaskResult result(process_result.success(),
-                    process_result.success() ? "" :
-                        "Program failed with exit code " + std::to_string(process_result.exit_code));
+  TaskResult result(
+      process_result.success(),
+      process_result.success()
+          ? ""
+          : "Program failed with state " +
+                std::string(Praktor::Shell::processStateName(process_result.state)) +
+                " and exit code " + std::to_string(process_result.exit_code));
   result.exit_code = process_result.exit_code;
   result.stdout_data = process_result.stdout_output;
   result.stderr_data = process_result.stderr_output;
   result.output_streamed_live = process_result.output_streamed_live;
 
-  if (!process_result.success() && !process_result.stderr_output.empty()) {
-    result.error_message += ". Stderr: " + process_result.stderr_output;
+  if (!process_result.success()) {
+    if (execution_control && execution_control->stopRequested()) {
+      const auto reason = execution_control->stopReason();
+      result.error_code = std::string(taskErrorCodeName(
+          reason == ExecutionControl::StopReason::DeadlineExceeded
+              ? TaskErrorCode::Timeout
+              : TaskErrorCode::Cancelled));
+      result.error_phase = "execution_control";
+    } else if (process_result.state == Praktor::Shell::ProcessState::TimedOut) {
+      result.error_code = std::string(taskErrorCodeName(TaskErrorCode::Timeout));
+      result.error_phase = "process";
+    } else if (process_result.state == Praktor::Shell::ProcessState::Cancelled) {
+      result.error_code = std::string(taskErrorCodeName(TaskErrorCode::Cancelled));
+      result.error_phase = "process";
+    }
+
+    if (!process_result.stderr_output.empty()) {
+      result.error_message += ". Stderr: " + process_result.stderr_output;
+    }
   }
 
   return result;
