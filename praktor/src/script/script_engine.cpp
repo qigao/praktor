@@ -18,8 +18,6 @@
 
 namespace Praktor::Script {
 
-static WorkflowValue parse_string_or_keep(std::string_view raw);
-
 namespace {
 
 // Replace all occurrences of `from` with `to` that are NOT inside a string literal.
