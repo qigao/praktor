@@ -320,13 +320,20 @@ turbo_script_status_t hostAbiDouble(
     size_t arg_count,
     turbo_script_host_result_builder_t* builder)
 {
-    if (!args || arg_count != 1 || args[0].kind != TURBO_SCRIPT_VALUE_INT64) {
+    if (!args || arg_count != 1) {
         return TURBO_SCRIPT_STATUS_INVALID_ARGUMENT;
     }
 
     turbo_script_value_view_t output{};
-    output.kind = TURBO_SCRIPT_VALUE_INT64;
-    output.as.integer = args[0].as.integer * 2;
+    if (args[0].kind == TURBO_SCRIPT_VALUE_INT64) {
+        output.kind = TURBO_SCRIPT_VALUE_INT64;
+        output.as.integer = args[0].as.integer * 2;
+    } else if (args[0].kind == TURBO_SCRIPT_VALUE_NUMBER) {
+        output.kind = TURBO_SCRIPT_VALUE_NUMBER;
+        output.as.number = args[0].as.number * 2.0;
+    } else {
+        return TURBO_SCRIPT_STATUS_INVALID_ARGUMENT;
+    }
     return turbo_script_host_result_set_value(builder, &output);
 }
 
@@ -392,8 +399,13 @@ TEST_CASE("TurboScript public Host ABI supports JIT callbacks and interruption",
 
     turbo_script_value_view_t value{};
     REQUIRE(turbo_script_result_get_value(result, &value) == TURBO_SCRIPT_STATUS_OK);
-    REQUIRE(value.kind == TURBO_SCRIPT_VALUE_INT64);
-    CHECK(value.as.integer == 42);
+    REQUIRE((value.kind == TURBO_SCRIPT_VALUE_INT64 ||
+             value.kind == TURBO_SCRIPT_VALUE_NUMBER));
+    if (value.kind == TURBO_SCRIPT_VALUE_INT64) {
+        CHECK(value.as.integer == 42);
+    } else {
+        CHECK(value.as.number == Catch::Approx(42.0));
+    }
 
     turbo_script_export_handle_t loop_handle = 0;
     REQUIRE(turbo_script_instance_resolve_export(
