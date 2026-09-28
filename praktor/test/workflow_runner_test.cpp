@@ -977,12 +977,12 @@ TEST_CASE("workflow executor honors pre-start execution control",
 
     const auto dir = createTempDir();
     const auto workflow_path = dir / "controlled.yml";
-    const auto output_path = dir / "should-not-run.txt";
-    writeFile(workflow_path,
-              "tasks:\n"
-              "  - name: should_not_run\n"
-              "    command: \"" +
-                  writeLiteralToFileCommand(output_path, "ran") + "\"\n");
+    writeFile(workflow_path, R"(
+tasks:
+  - name: should_not_run
+    script: |
+      ctx.set("executed", true);
+)");
 
     const auto run_controlled = [&](std::shared_ptr<Control> control) {
         auto workflow = TaskParser::parseFile(workflow_path.string());
@@ -993,6 +993,7 @@ TEST_CASE("workflow executor honors pre-start execution control",
 
         WorkflowExecutor executor(graph, workflow.tasks, {}, 1, false);
         executor.execute(context);
+        CHECK_FALSE(context.hasKey("executed"));
         return context.getValueOrDefault<std::string>("workflow_status", "unknown");
     };
 
@@ -1001,14 +1002,12 @@ TEST_CASE("workflow executor honors pre-start execution control",
         control->requestCancel();
 
         CHECK(run_controlled(control) == "cancelled");
-        CHECK_FALSE(std::filesystem::exists(output_path));
     }
 
     SECTION("expired deadline prevents initial task scheduling") {
         auto control = std::make_shared<Control>(Control::Clock::now() - 1ms);
 
         CHECK(run_controlled(control) == "timed_out");
-        CHECK_FALSE(std::filesystem::exists(output_path));
     }
 
     std::filesystem::remove_all(dir);
