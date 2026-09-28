@@ -10,6 +10,7 @@
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <random>
 #include <thread>
 
@@ -501,6 +502,39 @@ TEST_CASE("Script engine: concurrent executions stay stable", "[script][concurre
     }
 
     REQUIRE(failures.load(std::memory_order_relaxed) == 0);
+}
+
+TEST_CASE("Script engine: execution control interrupts Host ABI calls",
+          "[script][execution-control]") {
+    using Control = Praktor::Execution::ExecutionControl;
+    using namespace std::chrono_literals;
+
+    SECTION("pre-cancelled execution does not run script side effects") {
+        WorkflowContext context;
+        auto control = std::make_shared<Control>();
+        control->requestCancel();
+        context.setExecutionControl(control);
+
+        const auto result = Praktor::Script::execute(
+            "ctx.set(\"should_not_run\", 1);", context);
+
+        CHECK_FALSE(result.success);
+        CHECK(result.error_message.find("cancel") != std::string::npos);
+        CHECK_FALSE(context.hasKey("should_not_run"));
+    }
+
+    SECTION("expired deadline is reported distinctly") {
+        WorkflowContext context;
+        auto control = std::make_shared<Control>(Control::Clock::now() - 1ms);
+        context.setExecutionControl(control);
+
+        const auto result = Praktor::Script::execute(
+            "ctx.set(\"should_not_run\", 1);", context);
+
+        CHECK_FALSE(result.success);
+        CHECK(result.error_message.find("timed out") != std::string::npos);
+        CHECK_FALSE(context.hasKey("should_not_run"));
+    }
 }
 
 TEST_CASE("Script engine: control flow", "[script]") {
