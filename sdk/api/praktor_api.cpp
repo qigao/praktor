@@ -1,5 +1,6 @@
 #include "praktor.h"
 
+#include "workflow_plan.hpp"
 #include "workflow_runner.hpp"
 
 #include <chrono>
@@ -15,11 +16,20 @@
 #include <string_view>
 #include <utility>
 
+struct praktor_workflow_plan {
+    explicit praktor_workflow_plan(Praktor::Plan::WorkflowPlan compiled)
+        : value(std::move(compiled)) {}
+
+    Praktor::Plan::WorkflowPlan value;
+};
+
 namespace {
 
 constexpr uint64_t buildCapabilities() {
     uint64_t capabilities =
-        PRAKTOR_CAPABILITY_JSON_WORKFLOW | PRAKTOR_CAPABILITY_EXECUTION_CONTROL;
+        PRAKTOR_CAPABILITY_JSON_WORKFLOW |
+        PRAKTOR_CAPABILITY_EXECUTION_CONTROL |
+        PRAKTOR_CAPABILITY_WORKFLOW_PLAN;
 #if PRAKTOR_SCRIPT_ENGINE_ENABLED
     capabilities |= PRAKTOR_CAPABILITY_SCRIPT_ENGINE;
 #endif
@@ -46,26 +56,38 @@ void setError(praktor_error* error, praktor_error_phase phase, const char* messa
     std::snprintf(error->message, sizeof(error->message), "%s", message ? message : "");
 }
 
+bool validateError(praktor_error* error) {
+    return !error || error->struct_size >= sizeof(praktor_error);
+}
+
+bool validateOutput(praktor_owned_json* output, praktor_error* error) {
+    if (!output || output->struct_size < sizeof(praktor_owned_json)) {
+        setError(error, PRAKTOR_ERROR_PHASE_REQUEST, "Invalid output structure");
+        return false;
+    }
+    if (output->data) {
+        setError(error, PRAKTOR_ERROR_PHASE_REQUEST,
+                 "Output must be empty before operation");
+        return false;
+    }
+    return true;
+}
+
 bool validateRequest(const praktor_execute_request* request,
                      praktor_owned_json* output,
                      praktor_error* error) {
-    if (!request || request->struct_size < sizeof(praktor_execute_request) || !output ||
-        output->struct_size < sizeof(praktor_owned_json)) {
+    if (!request || request->struct_size < sizeof(praktor_execute_request) ||
+        !validateOutput(output, error)) {
         setError(error, PRAKTOR_ERROR_PHASE_REQUEST, "Invalid request or output structure");
         return false;
     }
-    if (error && error->struct_size < sizeof(praktor_error)) {
+    if (!validateError(error)) {
         return false;
     }
     if (!isPresent(request->workflow_path) || !request->input_json ||
         request->input_json_size == 0) {
         setError(error, PRAKTOR_ERROR_PHASE_REQUEST,
                  "workflow_path and non-empty input_json are required");
-        return false;
-    }
-    if (output->data) {
-        setError(error, PRAKTOR_ERROR_PHASE_REQUEST,
-                 "Output must be empty before workflow execution");
         return false;
     }
     return true;
@@ -111,7 +133,6 @@ bool pollCancellationProbe(void* user_data) noexcept {
     try {
         return bridge->probe(bridge->user_data) != 0;
     } catch (...) {
-        // A C ABI callback must not throw. Fail closed if a C++ consumer does.
         return true;
     }
 }
@@ -146,12 +167,13 @@ std::shared_ptr<Praktor::Execution::ExecutionControl> makeExecutionControl(
         bridge.probe ? static_cast<void*>(&bridge) : nullptr);
 }
 
-praktor_result decodeInputs(const praktor_execute_request& request,
+praktor_result decodeInputs(const char* input_json,
+                            size_t input_json_size,
                             WorkflowInputs& inputs,
                             praktor_error* error) {
     try {
         const auto root = WorkflowValue::parse(
-            std::string_view(request.input_json, request.input_json_size));
+            std::string_view(input_json, input_json_size));
         if (!root.is_object()) {
             setError(error, PRAKTOR_ERROR_PHASE_INPUT_JSON,
                      "Workflow input JSON root must be an object");
@@ -204,21 +226,6 @@ praktor_result encodeResult(const WorkflowValue& result,
     }
 }
 
-int32_t PRAKTOR_CALL executeWorkflow(const praktor_execute_request* request,
-                                     praktor_owned_json* output,
-                                     praktor_error* error) {
-    return static_cast<int32_t>(praktor_execute_workflow(request, output, error));
-}
-
-int32_t PRAKTOR_CALL executeWorkflowControlled(
-    const praktor_execute_request* request,
-    const praktor_execution_control* control,
-    praktor_owned_json* output,
-    praktor_error* error) {
-    return static_cast<int32_t>(
-        praktor_execute_workflow_controlled(request, control, output, error));
-}
-
 praktor_result executeWorkflowImpl(
     const praktor_execute_request* request,
     const praktor_execution_control* control,
@@ -232,7 +239,8 @@ praktor_result executeWorkflowImpl(
     output->size = 0;
 
     WorkflowInputs inputs;
-    const auto input_status = decodeInputs(*request, inputs, error);
+    const auto input_status =
+        decodeInputs(request->input_json, request->input_json_size, inputs, error);
     if (input_status != PRAKTOR_RESULT_SUCCESS) {
         return input_status;
     }
@@ -275,6 +283,46 @@ praktor_result executeWorkflowImpl(
     return PRAKTOR_RESULT_EXECUTION_FAILED;
 }
 
+int32_t PRAKTOR_CALL executeWorkflow(const praktor_execute_request* request,
+                                     praktor_owned_json* output,
+                                     praktor_error* error) {
+    return static_cast<int32_t>(praktor_execute_workflow(request, output, error));
+}
+
+int32_t PRAKTOR_CALL executeWorkflowControlled(
+    const praktor_execute_request* request,
+    const praktor_execution_control* control,
+    praktor_owned_json* output,
+    praktor_error* error) {
+    return static_cast<int32_t>(
+        praktor_execute_workflow_controlled(request, control, output, error));
+}
+
+int32_t PRAKTOR_CALL compileWorkflow(
+    const praktor_compile_request* request,
+    praktor_workflow_plan** out_plan,
+    praktor_error* error) {
+    return static_cast<int32_t>(
+        praktor_compile_workflow(request, out_plan, error));
+}
+
+int32_t PRAKTOR_CALL describeWorkflowPlan(
+    const praktor_workflow_plan* plan,
+    praktor_owned_json* output,
+    praktor_error* error) {
+    return static_cast<int32_t>(
+        praktor_describe_workflow_plan(plan, output, error));
+}
+
+int32_t PRAKTOR_CALL executeWorkflowPlan(
+    const praktor_plan_execute_request* request,
+    const praktor_execution_control* control,
+    praktor_owned_json* output,
+    praktor_error* error) {
+    return static_cast<int32_t>(
+        praktor_execute_workflow_plan(request, control, output, error));
+}
+
 } // namespace
 
 praktor_result PRAKTOR_CALL praktor_execute_workflow(
@@ -290,6 +338,79 @@ praktor_result PRAKTOR_CALL praktor_execute_workflow_controlled(
     praktor_owned_json* output,
     praktor_error* error) {
     return executeWorkflowImpl(request, control, output, error);
+}
+
+praktor_result PRAKTOR_CALL praktor_compile_workflow(
+    const praktor_compile_request* request,
+    praktor_workflow_plan** out_plan,
+    praktor_error* error) {
+    clearError(error);
+    if (!request || request->struct_size < sizeof(praktor_compile_request) ||
+        !out_plan || *out_plan != nullptr || !validateError(error) ||
+        !isPresent(request->workflow_path)) {
+        setError(error, PRAKTOR_ERROR_PHASE_REQUEST,
+                 "Valid workflow_path and empty out_plan are required");
+        return PRAKTOR_RESULT_INVALID_ARGUMENT;
+    }
+
+    try {
+        auto compiled = Praktor::Plan::WorkflowPlan::compile(request->workflow_path);
+        *out_plan = new praktor_workflow_plan(std::move(compiled));
+        return PRAKTOR_RESULT_SUCCESS;
+    } catch (const std::bad_alloc&) {
+        setError(error, PRAKTOR_ERROR_PHASE_PLAN,
+                 "Out of memory while compiling WorkflowPlan");
+        return PRAKTOR_RESULT_OUT_OF_MEMORY;
+    } catch (const std::exception& exception) {
+        setError(error, PRAKTOR_ERROR_PHASE_PLAN, exception.what());
+        return PRAKTOR_RESULT_PLAN_INVALID;
+    }
+}
+
+praktor_result PRAKTOR_CALL praktor_describe_workflow_plan(
+    const praktor_workflow_plan* plan,
+    praktor_owned_json* output,
+    praktor_error* error) {
+    clearError(error);
+    if (!plan || !validateError(error) || !validateOutput(output, error)) {
+        setError(error, PRAKTOR_ERROR_PHASE_REQUEST,
+                 "Valid WorkflowPlan and empty output are required");
+        return PRAKTOR_RESULT_INVALID_ARGUMENT;
+    }
+    output->size = 0;
+    return encodeResult(plan->value.toValue(), *output, error);
+}
+
+praktor_result PRAKTOR_CALL praktor_execute_workflow_plan(
+    const praktor_plan_execute_request* request,
+    const praktor_execution_control* control,
+    praktor_owned_json* output,
+    praktor_error* error) {
+    clearError(error);
+    if (!request || request->struct_size < sizeof(praktor_plan_execute_request) ||
+        !request->plan || !request->input_json || request->input_json_size == 0 ||
+        !validateError(error) || !validateOutput(output, error) ||
+        !validateControl(control, error)) {
+        setError(error, PRAKTOR_ERROR_PHASE_REQUEST,
+                 "Valid WorkflowPlan, non-empty input_json, and empty output are required");
+        return PRAKTOR_RESULT_INVALID_ARGUMENT;
+    }
+
+    std::string validation_error;
+    if (!request->plan->value.validate(&validation_error)) {
+        setError(error, PRAKTOR_ERROR_PHASE_PLAN, validation_error.c_str());
+        return PRAKTOR_RESULT_PLAN_MISMATCH;
+    }
+
+    praktor_execute_request execute_request = PRAKTOR_EXECUTE_REQUEST_INIT;
+    execute_request.workflow_path = request->plan->value.rootPath().c_str();
+    execute_request.input_json = request->input_json;
+    execute_request.input_json_size = request->input_json_size;
+    return executeWorkflowImpl(&execute_request, control, output, error);
+}
+
+void PRAKTOR_CALL praktor_release_workflow_plan(praktor_workflow_plan* plan) {
+    delete plan;
 }
 
 void PRAKTOR_CALL praktor_release_json(praktor_owned_json* data) {
@@ -310,6 +431,10 @@ const praktor_api* PRAKTOR_CALL praktor_get_api(void) {
         &executeWorkflow,
         &praktor_release_json,
         &executeWorkflowControlled,
+        &compileWorkflow,
+        &describeWorkflowPlan,
+        &executeWorkflowPlan,
+        &praktor_release_workflow_plan,
     };
     return &api;
 }

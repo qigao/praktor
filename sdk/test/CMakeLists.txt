@@ -1,10 +1,14 @@
+set(TEST_SOURCES
+    workflow_plan_api_test.cpp
+)
+
 if(ENABLE_SCRIPT_ENGINE)
-    set(TEST_SOURCES
+    list(APPEND TEST_SOURCES
         praktor_api_test.cpp
         template_contract_test.cpp
     )
 else()
-    set(TEST_SOURCES core_only_api_test.cpp)
+    list(APPEND TEST_SOURCES core_only_api_test.cpp)
 endif()
 
 cmake_add_test(
