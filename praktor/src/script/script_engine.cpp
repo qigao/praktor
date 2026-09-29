@@ -133,6 +133,11 @@ std::string escape_script_path(std::string_view path, char quote) {
   return escaped;
 }
 
+std::string resolve_script_import_paths(
+    std::string source,
+    const WorkflowContext &workflow_context,
+    const std::string &script_source_path);
+
 struct ImportDirective {
   std::string name;
 };
