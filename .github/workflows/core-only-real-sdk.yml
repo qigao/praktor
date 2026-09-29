@@ -27,9 +27,6 @@ jobs:
     timeout-minutes: 90
     env:
       EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-      SALTS_SDK_VERSION: "1.8.3"
-      SALTS_UTILS_SDK_VERSION: "4.1.3"
-      CHTTP_SDK_VERSION: "1.1.4"
       TURBOAGENT_SHA: ebf99fd0944b07065055b3db641bcfc7f070c984
       CMAKE_BUILD_PARALLEL_LEVEL: 2
 
@@ -47,10 +44,6 @@ jobs:
 
       - name: Restore shared re2c binary
         uses: qigao/vcpkg-cache/.github/actions/setup-re2c-tools@master
-
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: "8.0.x"
 
       - name: Verify source identity
         shell: bash
@@ -79,41 +72,39 @@ jobs:
           sudo ln -sfn "$VCPKG_ROOT" /opt/vcpkg
 
 
-      - name: Restore released native SDK graph
+      - name: Restore current native SDK graph
         shell: bash
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euxo pipefail
-          packages="$RUNNER_TEMP/praktor-core-native-sdks"
-          config="$RUNNER_TEMP/praktor-core-native-sdks.config"
-          project="$RUNNER_TEMP/praktor-core-native-sdks.csproj"
+          sdk_root="$RUNNER_TEMP/praktor-core-native-sdks"
+          mkdir -p "$sdk_root"
 
-          printf '<configuration><packageSources><clear /></packageSources></configuration>\n' > "$config"
-          dotnet nuget add source https://nuget.pkg.github.com/qigao/index.json \
-            --name github --username qigao --password "$GITHUB_TOKEN" \
-            --store-password-in-clear-text --configfile "$config"
+          restore_sdk() {
+            local repo="$1"
+            local pattern="$2"
+            local name="$3"
+            local config_rel="$4"
+            local dir="$sdk_root/$name"
+            local tag
+            local nupkg
+            tag="$(gh release view --repo "$repo" --json tagName --jq .tagName)"
+            test -n "$tag"
+            mkdir -p "$dir/download" "$dir/package"
+            gh release download "$tag" --repo "$repo" --pattern "$pattern" \
+              --dir "$dir/download" --clobber
+            nupkg="$(find "$dir/download" -maxdepth 1 -type f -name '*.nupkg' -print -quit)"
+            test -n "$nupkg"
+            unzip -q "$nupkg" -d "$dir/package"
+            local root="$dir/package/sdk/linux-x64"
+            test -f "$root/$config_rel"
+            printf '%s\n' "$root"
+          }
 
-          cat > "$project" <<EOF
-          <Project Sdk="Microsoft.NET.Sdk">
-            <PropertyGroup><TargetFramework>net8.0</TargetFramework></PropertyGroup>
-            <ItemGroup>
-              <PackageReference Include="Salts.Native" Version="[$SALTS_SDK_VERSION]" />
-              <PackageReference Include="SaltsUtils.Native" Version="[$SALTS_UTILS_SDK_VERSION]" />
-              <PackageReference Include="CHttp.Native" Version="[$CHTTP_SDK_VERSION]" />
-            </ItemGroup>
-          </Project>
-          EOF
-
-          dotnet restore "$project" --packages "$packages" --configfile "$config" --no-cache
-
-          salts_root="$packages/salts.native/$SALTS_SDK_VERSION/sdk/linux-x64"
-          utils_root="$packages/saltsutils.native/$SALTS_UTILS_SDK_VERSION/sdk/linux-x64"
-          chttp_root="$packages/chttp.native/$CHTTP_SDK_VERSION/sdk/linux-x64"
-
-          test -f "$salts_root/lib/cmake/Salts/SaltsConfig.cmake"
-          test -f "$utils_root/lib/cmake/SaltsUtils/SaltsUtilsConfig.cmake"
-          test -f "$chttp_root/lib/cmake/Chttp/ChttpConfig.cmake"
+          salts_root="$(restore_sdk qigao/salts 'Salts.Native.*.nupkg' salts 'lib/cmake/Salts/SaltsConfig.cmake')"
+          utils_root="$(restore_sdk qigao/salts-utils 'SaltsUtils.Native.*.nupkg' salts-utils 'lib/cmake/SaltsUtils/SaltsUtilsConfig.cmake')"
+          chttp_root="$(restore_sdk qigao/chttp 'CHttp.Native.*.nupkg' chttp 'lib/cmake/Chttp/ChttpConfig.cmake')"
 
           ln -sfn "$salts_root" /opt/salts/debug
           ln -sfn "$utils_root" /opt/salts-utils/debug
