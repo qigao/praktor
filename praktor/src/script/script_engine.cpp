@@ -130,6 +130,97 @@ std::string escape_script_path(std::string_view path, char quote) {
   return escaped;
 }
 
+struct HoistedScriptSource {
+  std::string initializer;
+  std::string body;
+};
+
+HoistedScriptSource hoist_top_level_imports(std::string source) {
+  HoistedScriptSource result;
+  result.body = std::move(source);
+
+  size_t cursor = 0;
+  size_t brace_depth = 0;
+  while (cursor < result.body.size()) {
+    if (result.body.compare(cursor, 2, "//") == 0) {
+      const size_t newline = result.body.find('\n', cursor + 2);
+      cursor = newline == std::string::npos ? result.body.size() : newline + 1;
+      continue;
+    }
+    if (result.body.compare(cursor, 2, "/*") == 0) {
+      const size_t comment_end = result.body.find("*/", cursor + 2);
+      cursor = comment_end == std::string::npos ? result.body.size() : comment_end + 2;
+      continue;
+    }
+    if (result.body[cursor] == '"' || result.body[cursor] == '\'') {
+      const char quote = result.body[cursor++];
+      while (cursor < result.body.size()) {
+        if (result.body[cursor] == '\\' && cursor + 1 < result.body.size()) {
+          cursor += 2;
+        } else if (result.body[cursor++] == quote) {
+          break;
+        }
+      }
+      continue;
+    }
+
+    if (result.body[cursor] == '{') {
+      ++brace_depth;
+      ++cursor;
+      continue;
+    }
+    if (result.body[cursor] == '}') {
+      if (brace_depth > 0) {
+        --brace_depth;
+      }
+      ++cursor;
+      continue;
+    }
+
+    size_t path_begin = 0;
+    size_t path_end = 0;
+    char quote = '\0';
+    if (brace_depth == 0 &&
+        parse_script_import_literal(result.body, cursor, path_begin, path_end, quote)) {
+      size_t statement_end = path_end + 1;
+      while (statement_end < result.body.size() &&
+             std::isspace(static_cast<unsigned char>(result.body[statement_end])) &&
+             result.body[statement_end] != '\n') {
+        ++statement_end;
+      }
+      if (statement_end < result.body.size() && result.body[statement_end] == ')') {
+        ++statement_end;
+      } else {
+        ++cursor;
+        continue;
+      }
+      while (statement_end < result.body.size() &&
+             std::isspace(static_cast<unsigned char>(result.body[statement_end])) &&
+             result.body[statement_end] != '\n') {
+        ++statement_end;
+      }
+      if (statement_end < result.body.size() && result.body[statement_end] == ';') {
+        ++statement_end;
+      }
+
+      result.initializer.append(result.body, cursor, statement_end - cursor);
+      result.initializer.push_back('\n');
+
+      for (size_t i = cursor; i < statement_end; ++i) {
+        if (result.body[i] != '\n' && result.body[i] != '\r') {
+          result.body[i] = ' ';
+        }
+      }
+      cursor = statement_end;
+      continue;
+    }
+
+    ++cursor;
+  }
+
+  return result;
+}
+
 std::string resolve_script_import_paths(std::string source,
                                         const WorkflowContext &workflow_context,
                                         const std::string &script_source_path) {
@@ -666,11 +757,13 @@ turbo_script_status_t fail_host(
   return set_host_null(builder);
 }
 
-std::string build_host_module_source(std::string_view source) {
+std::string build_host_module_source(std::string source) {
+  auto hoisted = hoist_top_level_imports(std::move(source));
   std::string wrapped;
-  wrapped.reserve(source.size() + 96);
+  wrapped.reserve(hoisted.initializer.size() + hoisted.body.size() + 96);
+  wrapped += hoisted.initializer;
   wrapped += "func __praktor_entry(){\n";
-  wrapped.append(source.data(), source.size());
+  wrapped += hoisted.body;
   wrapped += "\nreturn 0;\n};\nexport(\"__praktor_entry\");\n";
   return wrapped;
 }
