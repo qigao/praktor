@@ -26,12 +26,13 @@ typedef enum praktor_result {
 } praktor_result;
 
 #define PRAKTOR_ABI_MAJOR 2u
-#define PRAKTOR_ABI_MINOR 3u
+#define PRAKTOR_ABI_MINOR 4u
 
 #define PRAKTOR_CAPABILITY_JSON_WORKFLOW (UINT64_C(1) << 0)
 #define PRAKTOR_CAPABILITY_SCRIPT_ENGINE (UINT64_C(1) << 1)
 #define PRAKTOR_CAPABILITY_EXECUTION_CONTROL (UINT64_C(1) << 2)
 #define PRAKTOR_CAPABILITY_WORKFLOW_PLAN (UINT64_C(1) << 3)
+#define PRAKTOR_CAPABILITY_EXECUTION_EVENTS (UINT64_C(1) << 4)
 
 typedef enum praktor_error_phase {
     PRAKTOR_ERROR_PHASE_NONE = 0,
@@ -107,6 +108,62 @@ typedef struct praktor_execution_control {
     uint64_t reserved[4];
 } praktor_execution_control;
 
+
+typedef enum praktor_event_type {
+    PRAKTOR_EVENT_WORKFLOW_STARTED = 1,
+    PRAKTOR_EVENT_TASK_STARTED = 2,
+    PRAKTOR_EVENT_TASK_PROGRESS = 3,
+    PRAKTOR_EVENT_TASK_COMPLETED = 4,
+    PRAKTOR_EVENT_TASK_FAILED = 5,
+    PRAKTOR_EVENT_WORKFLOW_COMPLETED = 6
+} praktor_event_type;
+
+/**
+ * Borrowed event view valid only for the duration of one observer callback.
+ *
+ * Events are serialized by Praktor even when workflow tasks run concurrently,
+ * and sequence is monotonically increasing within one observed execution.
+ * Lineage values are copied from the observer configuration and are trace-only:
+ * they are not injected into workflow variables or scripts.
+ */
+typedef struct praktor_execution_event {
+    uint32_t struct_size;
+    praktor_event_type type;
+    uint64_t sequence;
+    const char* task_name;
+    const char* status;
+    const char* payload_json;
+    size_t payload_json_size;
+    const char* thread_id;
+    const char* run_id;
+    const char* turn_id;
+    const char* tool_call_id;
+} praktor_execution_event;
+
+typedef void (PRAKTOR_CALL *praktor_event_fn)(
+    const praktor_execution_event* event,
+    void* user_data);
+
+/**
+ * Optional synchronous execution observer.
+ *
+ * on_event may be called from workflow worker threads, but Praktor serializes
+ * callbacks so only one invocation is active at a time. The callback must be
+ * non-blocking and must not throw across the C ABI. All strings are borrowed
+ * only for the duration of the observed execution call.
+ */
+typedef struct praktor_execution_observer {
+    uint32_t struct_size;
+    uint32_t reserved0;
+    praktor_event_fn on_event;
+    void* user_data;
+    const char* thread_id;
+    const char* run_id;
+    const char* turn_id;
+    const char* tool_call_id;
+    uint64_t reserved[4];
+} praktor_execution_observer;
+
 /** Canonical JSON owned by Praktor. Release it exactly once with praktor_release_json(). */
 typedef struct praktor_owned_json {
     uint32_t struct_size;
@@ -125,6 +182,7 @@ typedef struct praktor_error {
 #define PRAKTOR_COMPILE_REQUEST_INIT {sizeof(praktor_compile_request), NULL}
 #define PRAKTOR_PLAN_EXECUTE_REQUEST_INIT {sizeof(praktor_plan_execute_request), NULL, NULL, 0}
 #define PRAKTOR_EXECUTION_CONTROL_INIT {sizeof(praktor_execution_control), 0, NULL, NULL, 0, {0, 0, 0, 0}}
+#define PRAKTOR_EXECUTION_OBSERVER_INIT {sizeof(praktor_execution_observer), 0, NULL, NULL, NULL, NULL, NULL, NULL, {0, 0, 0, 0}}
 #define PRAKTOR_OWNED_JSON_INIT {sizeof(praktor_owned_json), NULL, 0}
 #define PRAKTOR_ERROR_INIT {sizeof(praktor_error), PRAKTOR_ERROR_PHASE_NONE, {0}}
 
@@ -152,6 +210,18 @@ typedef int32_t (PRAKTOR_CALL *praktor_execute_workflow_plan_fn)(
     praktor_error* error);
 typedef void (PRAKTOR_CALL *praktor_release_workflow_plan_fn)(
     praktor_workflow_plan* plan);
+typedef int32_t (PRAKTOR_CALL *praktor_execute_workflow_observed_fn)(
+    const praktor_execute_request* request,
+    const praktor_execution_control* control,
+    const praktor_execution_observer* observer,
+    praktor_owned_json* output,
+    praktor_error* error);
+typedef int32_t (PRAKTOR_CALL *praktor_execute_workflow_plan_observed_fn)(
+    const praktor_plan_execute_request* request,
+    const praktor_execution_control* control,
+    const praktor_execution_observer* observer,
+    praktor_owned_json* output,
+    praktor_error* error);
 typedef void (PRAKTOR_CALL *praktor_release_json_fn)(praktor_owned_json* data);
 
 typedef struct praktor_api {
@@ -166,6 +236,8 @@ typedef struct praktor_api {
     praktor_describe_workflow_plan_fn describe_workflow_plan;
     praktor_execute_workflow_plan_fn execute_workflow_plan;
     praktor_release_workflow_plan_fn release_workflow_plan;
+    praktor_execute_workflow_observed_fn execute_workflow_observed;
+    praktor_execute_workflow_plan_observed_fn execute_workflow_plan_observed;
 } praktor_api;
 
 typedef const praktor_api* (PRAKTOR_CALL *praktor_get_api_fn)(void);
@@ -226,6 +298,28 @@ PRAKTOR_C_API praktor_result PRAKTOR_CALL praktor_describe_workflow_plan(
 PRAKTOR_C_API praktor_result PRAKTOR_CALL praktor_execute_workflow_plan(
     const praktor_plan_execute_request* request,
     const praktor_execution_control* control,
+    praktor_owned_json* output,
+    praktor_error* error);
+
+/**
+ * Execute a path-based workflow with cancellation/deadline control plus a
+ * serialized event/lineage observer.
+ */
+PRAKTOR_C_API praktor_result PRAKTOR_CALL praktor_execute_workflow_observed(
+    const praktor_execute_request* request,
+    const praktor_execution_control* control,
+    const praktor_execution_observer* observer,
+    praktor_owned_json* output,
+    praktor_error* error);
+
+/**
+ * Execute a reviewed WorkflowPlan with cancellation/deadline control plus a
+ * serialized event/lineage observer.
+ */
+PRAKTOR_C_API praktor_result PRAKTOR_CALL praktor_execute_workflow_plan_observed(
+    const praktor_plan_execute_request* request,
+    const praktor_execution_control* control,
+    const praktor_execution_observer* observer,
     praktor_owned_json* output,
     praktor_error* error);
 
