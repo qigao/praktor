@@ -1,6 +1,7 @@
 #include "workflow_plan.hpp"
 #include "workflow_contract.hpp"
 #include "workflow_effects.hpp"
+#include "workflow_profile.hpp"
 
 #include "util/path_utils.hpp"
 #include "yml/task_parser.hpp"
@@ -154,6 +155,11 @@ public:
 
         const Workflow root_workflow = TaskParser::parseFileWithIncludes(
             root_path_.string(), root_directory_.string());
+        const auto effects = Praktor::Effects::analyzeWorkflow(root_path_);
+        WorkflowValue profiles = WorkflowValue::object();
+        profiles["harness_safe"] =
+            Praktor::Profile::evaluateHarnessSafe(root_workflow, effects).toValue();
+
         return WorkflowPlan(
             root_path_.generic_string(),
             root_directory_.generic_string(),
@@ -161,7 +167,8 @@ public:
             std::move(dependencies),
             Praktor::Contract::inputSchema(root_workflow),
             Praktor::Contract::outputSchema(root_workflow),
-            Praktor::Effects::analyzeWorkflow(root_path_).toValue());
+            effects.toValue(),
+            std::move(profiles));
     }
 
 private:
@@ -447,6 +454,7 @@ WorkflowValue WorkflowPlan::toValue() const {
     result["input_schema"] = input_schema_;
     result["output_schema"] = output_schema_;
     result["effect_manifest"] = effect_manifest_;
+    result["profiles"] = profiles_;
 
     WorkflowValue dependencies = WorkflowValue::array();
     for (const auto& dependency : dependencies_) {
