@@ -116,7 +116,8 @@ PreparedWorkflow prepareExecution(
     const std::filesystem::path& base_directory,
     const WorkflowInputs& input_values,
     const std::unordered_map<std::string, std::string>& base_environment,
-    std::shared_ptr<Praktor::Execution::ExecutionControl> execution_control = {}) {
+    std::shared_ptr<Praktor::Execution::ExecutionControl> execution_control = {},
+    std::shared_ptr<Praktor::Execution::ExecutionObserver> execution_observer = {}) {
     PreparedWorkflow prepared;
     prepared.workflow = TaskParser::parseFileWithIncludes(yaml_path, base_directory.string());
     const auto normalized_inputs =
@@ -125,6 +126,7 @@ PreparedWorkflow prepareExecution(
     prepared.graph = TaskParser::buildGraph(prepared.workflow);
     prepared.context = std::make_unique<WorkflowContext>();
     prepared.context->setExecutionControl(std::move(execution_control));
+    prepared.context->setExecutionObserver(std::move(execution_observer));
     prepared.context->setSourcePath(prepared.workflow.source_path);
     populateWorkflowEnvironmentContext(*prepared.context, prepared.runtime_environment);
     populateWorkflowVariables(*prepared.context, prepared.workflow, normalized_inputs);
@@ -198,17 +200,30 @@ WorkflowRunner::WorkflowRunner(std::string const& yamlPath,
 WorkflowRunner::~WorkflowRunner() = default;
 
 WorkflowExecutionResult WorkflowRunner::execute(bool useConcurrent, int maxConcurrency) {
-    return executeWithControl({}, useConcurrent, maxConcurrency);
+    return executeObserved({}, {}, useConcurrent, maxConcurrency);
 }
 
 WorkflowExecutionResult WorkflowRunner::executeWithControl(
     std::shared_ptr<Praktor::Execution::ExecutionControl> executionControl,
     bool useConcurrent, int maxConcurrency) {
+    return executeObserved(
+        std::move(executionControl), {}, useConcurrent, maxConcurrency);
+}
+
+WorkflowExecutionResult WorkflowRunner::executeObserved(
+    std::shared_ptr<Praktor::Execution::ExecutionControl> executionControl,
+    std::shared_ptr<Praktor::Execution::ExecutionObserver> executionObserver,
+    bool useConcurrent, int maxConcurrency) {
+    if (executionObserver) {
+        executionObserver->emit(
+            Praktor::Execution::ExecutionEventType::WorkflowStarted,
+            {}, "running");
+    }
     try {
         TLOG_DEBUGF("Loading workflow from: {}", yamlPath_);
         auto prepared = prepareExecution(
             yamlPath_, base_directory_, inputValues_, baseEnvironment_,
-            std::move(executionControl));
+            std::move(executionControl), executionObserver);
 
         TLOG_DEBUGF("Loaded {} workflow environment variables",
                    prepared.runtime_environment.size());
@@ -224,6 +239,13 @@ WorkflowExecutionResult WorkflowRunner::executeWithControl(
         executor.execute(*prepared.context);
 
         auto result = makeExecutionResult(*prepared.context, prepared.workflow);
+        const std::string workflow_status =
+            result.value["workflow_status"].as<std::string>();
+        if (executionObserver) {
+            executionObserver->emit(
+                Praktor::Execution::ExecutionEventType::WorkflowCompleted,
+                {}, workflow_status);
+        }
         if (!result.success) {
             if (!Praktor::Logging::isVerboseEnabled()) {
                 Praktor::Logging::printWorkflowStatus("FAILED");
@@ -239,6 +261,11 @@ WorkflowExecutionResult WorkflowRunner::executeWithControl(
         return result;
 
     } catch (const std::exception& e) {
+        if (executionObserver) {
+            executionObserver->emit(
+                Praktor::Execution::ExecutionEventType::WorkflowCompleted,
+                {}, "failed");
+        }
         TLOG_ERRORF("An error occurred during workflow execution: {}", e.what());
         return makeFailedExecutionResult(e.what());
     }
