@@ -11,9 +11,11 @@
 #include <cctype>
 #include <deque>
 #include <filesystem>
+#include <fstream>
 #include <limits>
 #include <stdexcept>
 #include <string_view>
+#include <unordered_set>
 #include <vector>
 
 namespace Praktor::Script {
@@ -130,13 +132,17 @@ std::string escape_script_path(std::string_view path, char quote) {
   return escaped;
 }
 
-struct HoistedScriptSource {
-  std::string initializer;
+struct ImportDirective {
+  std::string name;
+};
+
+struct ExtractedImports {
+  std::vector<ImportDirective> imports;
   std::string body;
 };
 
-HoistedScriptSource hoist_top_level_imports(std::string source) {
-  HoistedScriptSource result;
+ExtractedImports extract_top_level_imports(std::string source) {
+  ExtractedImports result;
   result.body = std::move(source);
 
   size_t cursor = 0;
@@ -188,12 +194,11 @@ HoistedScriptSource hoist_top_level_imports(std::string source) {
              result.body[statement_end] != '\n') {
         ++statement_end;
       }
-      if (statement_end < result.body.size() && result.body[statement_end] == ')') {
-        ++statement_end;
-      } else {
+      if (statement_end >= result.body.size() || result.body[statement_end] != ')') {
         ++cursor;
         continue;
       }
+      ++statement_end;
       while (statement_end < result.body.size() &&
              std::isspace(static_cast<unsigned char>(result.body[statement_end])) &&
              result.body[statement_end] != '\n') {
@@ -203,9 +208,8 @@ HoistedScriptSource hoist_top_level_imports(std::string source) {
         ++statement_end;
       }
 
-      result.initializer.append(result.body, cursor, statement_end - cursor);
-      result.initializer.push_back('\n');
-
+      result.imports.push_back(
+          {result.body.substr(path_begin, path_end - path_begin)});
       for (size_t i = cursor; i < statement_end; ++i) {
         if (result.body[i] != '\n' && result.body[i] != '\r') {
           result.body[i] = ' ';
@@ -219,6 +223,71 @@ HoistedScriptSource hoist_top_level_imports(std::string source) {
   }
 
   return result;
+}
+
+bool is_tbs_import(std::string_view name) {
+  return std::filesystem::path(name).extension() == ".tbs";
+}
+
+void append_unique_plugin(std::vector<std::string>& plugins, std::string name) {
+  if (std::find(plugins.begin(), plugins.end(), name) == plugins.end()) {
+    plugins.push_back(std::move(name));
+  }
+}
+
+struct ExpandedImports {
+  std::string initializer;
+  std::string body;
+};
+
+ExpandedImports expand_host_imports(
+    std::string source,
+    const WorkflowContext& workflow_context,
+    const std::string& source_path,
+    std::unordered_set<std::string>& imported_scripts,
+    std::vector<std::string>& plugins,
+    size_t depth = 0) {
+  if (depth > 64) {
+    throw std::runtime_error("TurboScript import depth exceeds 64");
+  }
+
+  source = normalize_script_source(
+      resolve_script_import_paths(std::move(source), workflow_context, source_path));
+  auto extracted = extract_top_level_imports(std::move(source));
+
+  ExpandedImports expanded;
+  expanded.body = std::move(extracted.body);
+
+  for (const auto& directive : extracted.imports) {
+    if (!is_tbs_import(directive.name)) {
+      append_unique_plugin(plugins, directive.name);
+      continue;
+    }
+
+    const auto path =
+        std::filesystem::absolute(std::filesystem::path(directive.name)).lexically_normal();
+    const std::string key = path.generic_string();
+    if (!imported_scripts.insert(key).second) {
+      continue;
+    }
+
+    std::ifstream input(path, std::ios::binary);
+    if (!input) {
+      throw std::runtime_error("Unable to open TurboScript import: " + key);
+    }
+    const std::string imported_source(
+        (std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+
+    auto child = expand_host_imports(
+        imported_source, workflow_context, key, imported_scripts, plugins, depth + 1);
+    expanded.initializer += child.initializer;
+    expanded.initializer += child.body;
+    if (!expanded.initializer.empty() && expanded.initializer.back() != '\n') {
+      expanded.initializer.push_back('\n');
+    }
+  }
+
+  return expanded;
 }
 
 std::string resolve_script_import_paths(std::string source,
@@ -742,13 +811,20 @@ turbo_script_status_t fail_host(
   return set_host_null(builder);
 }
 
-std::string build_host_module_source(std::string source) {
-  auto hoisted = hoist_top_level_imports(std::move(source));
+std::string build_host_module_source(
+    std::string source,
+    const WorkflowContext& workflow_context,
+    const std::string& source_path,
+    std::vector<std::string>& plugins) {
+  std::unordered_set<std::string> imported_scripts;
+  auto expanded = expand_host_imports(
+      std::move(source), workflow_context, source_path, imported_scripts, plugins);
+
   std::string wrapped;
-  wrapped.reserve(hoisted.initializer.size() + hoisted.body.size() + 96);
-  wrapped += hoisted.initializer;
+  wrapped.reserve(expanded.initializer.size() + expanded.body.size() + 96);
+  wrapped += expanded.initializer;
   wrapped += "func __praktor_entry(){\n";
-  wrapped += hoisted.body;
+  wrapped += expanded.body;
   wrapped += "\nreturn 0;\n};\nexport(\"__praktor_entry\");\n";
   return wrapped;
 }
@@ -787,9 +863,19 @@ std::string host_result_error_message(turbo_script_result_t *host_result,
 ScriptResult execute(const std::string &source, WorkflowContext &context,
                      const std::string &script_source_path) {
   ScriptResult result;
-  const std::string normalized_source =
-      normalize_script_source(resolve_script_import_paths(source, context, script_source_path));
-  const std::string host_source = build_host_module_source(normalized_source);
+  const std::string& effective_source_path =
+      script_source_path.empty() ? context.getSourcePath() : script_source_path;
+  std::vector<std::string> required_plugins;
+  std::string host_source;
+  try {
+    host_source = build_host_module_source(
+        source, context, effective_source_path, required_plugins);
+  } catch (const std::exception& exception) {
+    result.success = false;
+    result.error_message = exception.what();
+    result.errors.push_back({0, result.error_message});
+    return result;
+  }
   const Praktor::util::TurboScriptRuntimeGuard runtime_guard;
 
   turbo_script_ctx_t *ctx = turbo_script_init(TURBO_SCRIPT_INIT_DEFAULT);
@@ -853,6 +939,19 @@ ScriptResult execute(const std::string &source, WorkflowContext &context,
           host_result_error_message(host_result, "Failed to register TurboScript host callback",
                                     &error);
       result.errors.push_back(std::move(error));
+      cleanup();
+      return result;
+    }
+  }
+
+  for (const auto& plugin : required_plugins) {
+    if (turbo_script_load_plugin(ctx, plugin.c_str()) != 0) {
+      result.success = false;
+      result.error_message = turbo_script_get_error(ctx);
+      if (result.error_message.empty()) {
+        result.error_message = "Failed to load TurboScript plugin: " + plugin;
+      }
+      result.errors.push_back({0, result.error_message});
       cleanup();
       return result;
     }
