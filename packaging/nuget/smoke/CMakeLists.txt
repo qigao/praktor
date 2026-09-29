@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 project(praktor_package_smoke LANGUAGES C)
-find_package(Praktor 0.3.0 CONFIG REQUIRED)
+find_package(Praktor 0.4.0 CONFIG REQUIRED)
 add_executable(praktor_package_smoke main.c)
 target_link_libraries(praktor_package_smoke PRIVATE Praktor::Praktor)
 enable_testing()

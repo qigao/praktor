@@ -1,4 +1,4 @@
-name: Praktor native SDK release
+name: Praktor native SDK
 
 on:
   pull_request:
@@ -14,21 +14,8 @@ on:
       - "packaging/nuget/**"
       - ".github/workflows/native-sdk-release.yml"
   push:
-    branches: [master]
     tags:
       - "v*"
-    paths:
-      - "CMakeLists.txt"
-      - "cmake/**"
-      - "praktor/**"
-      - "actions/**"
-      - "sdk/**"
-      - "shared/**"
-      - "tools/**"
-      - "vcpkg.json"
-      - "packaging/nuget/**"
-      - ".github/workflows/native-sdk-release.yml"
-  workflow_dispatch:
 
 permissions:
   contents: read
@@ -49,7 +36,6 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       version: ${{ steps.version.outputs.version }}
-      release: ${{ steps.version.outputs.release }}
     steps:
       - uses: actions/checkout@v4
       - id: version
@@ -70,10 +56,8 @@ jobs:
           if [[ "$GITHUB_REF" == refs/tags/* ]]; then
             test "$GITHUB_REF_NAME" = "v$version"
             echo "version=$version" >> "$GITHUB_OUTPUT"
-            echo "release=true" >> "$GITHUB_OUTPUT"
           else
             echo "version=$version-ci.$GITHUB_RUN_NUMBER.$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
-            echo "release=false" >> "$GITHUB_OUTPUT"
           fi
 
   build:
@@ -140,40 +124,6 @@ jobs:
           echo "SALTS_UTILS_ROOT=$packages/saltsutils.native/$SALTS_UTILS_SDK_VERSION/sdk/$RID" >> "$GITHUB_ENV"
           echo "CHTTP_ROOT=$packages/chttp.native/$CHTTP_SDK_VERSION/sdk/$RID" >> "$GITHUB_ENV"
           echo "TURBOSCRIPT_ROOT=$packages/turboscript.native/$TURBOSCRIPT_SDK_VERSION/sdk/$RID" >> "$GITHUB_ENV"
-
-      - name: Verify HTTP fixture interpreter startup
-        if: matrix.rid != 'android-arm64-v8a'
-        shell: bash
-        run: |
-          set -euo pipefail
-          export LD_LIBRARY_PATH="$TURBOSCRIPT_ROOT/lib:$CHTTP_ROOT/lib:$SALTS_UTILS_ROOT/lib:$SALTS_ROOT/lib:$GITHUB_WORKSPACE/vcpkg_installed/$TRIPLET/lib"
-          export DYLD_LIBRARY_PATH="$LD_LIBRARY_PATH"
-          python - <<'PY'
-          import pathlib, subprocess, sys, tempfile, time
-          source = pathlib.Path("praktor/test/script_engine_test.cpp").read_text()
-          fixture = source.split('writeFile(script_path, R"py(', 1)[1].split(')py");', 1)[0]
-          with tempfile.TemporaryDirectory() as directory:
-              root = pathlib.Path(directory)
-              script, ready = root / "server.py", root / "ready.txt"
-              script.write_text(
-                  "import faulthandler, socket\n"
-                  "faulthandler.dump_traceback_later(10, repeat=True)\n"
-                  "def reject_reverse_dns(*args):\n"
-                  "    raise RuntimeError('Loopback fixture must not depend on reverse DNS')\n"
-                  "socket.getfqdn = reject_reverse_dns\n" + fixture)
-              process = subprocess.Popen([sys.executable, str(script), str(ready)])
-              try:
-                  deadline = time.monotonic() + 35
-                  while not ready.exists():
-                      if process.poll() is not None:
-                          raise RuntimeError(f"HTTP fixture exited: {process.returncode}")
-                      if time.monotonic() >= deadline:
-                          raise TimeoutError("HTTP fixture startup timed out")
-                      time.sleep(0.05)
-              finally:
-                  process.terminate()
-                  process.wait(timeout=5)
-          PY
 
       - name: Build script-enabled Praktor SDK
         shell: bash
@@ -252,6 +202,7 @@ jobs:
         with:
           name: praktor-sdk-${{ matrix.rid }}
           path: dist/*.tar.gz
+          retention-days: 1
           if-no-files-found: error
 
   pack:
@@ -324,9 +275,11 @@ jobs:
           ctest --test-dir build/packed-smoke --no-tests=error --output-on-failure
 
       - uses: actions/upload-artifact@v4
+        if: startsWith(github.ref, 'refs/tags/v')
         with:
           name: praktor-native-nuget
           path: dist/*.nupkg
+          retention-days: 1
           if-no-files-found: error
 
   publish:

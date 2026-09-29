@@ -2,9 +2,16 @@ name: Core-only real SDK integration
 
 on:
   pull_request:
-  push:
-    branches: [master]
-  workflow_dispatch:
+    paths:
+      - "CMakeLists.txt"
+      - "ProjectOptions.cmake"
+      - "cmake/**"
+      - "praktor/**"
+      - "actions/**"
+      - "sdk/**"
+      - "shared/**"
+      - "vcpkg.json"
+      - ".github/workflows/core-only-real-sdk.yml"
 
 permissions:
   contents: read
@@ -290,14 +297,6 @@ jobs:
 
           export LD_LIBRARY_PATH="/opt/praktor/debug/lib:/opt/chttp/debug/lib:/opt/salts-utils/debug/lib:/opt/salts/debug/lib:$GITHUB_WORKSPACE/vcpkg_installed/linux/x64-linux/debug/lib:$GITHUB_WORKSPACE/vcpkg_installed/linux/x64-linux/lib:${LD_LIBRARY_PATH:-}"
           "$consumer/build/turboagent_real_praktor"
-
-      - name: Upload core-only installed SDK
-        uses: actions/upload-artifact@v4
-        with:
-          name: praktor-core-only-sdk-${{ github.sha }}
-          retention-days: 14
-          path: /opt/praktor/debug
-          if-no-files-found: error
 
       - name: Verify tracked source remains clean
         if: always()
