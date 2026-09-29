@@ -2,6 +2,7 @@
 
 #include "workflow_plan.hpp"
 #include "workflow_runner.hpp"
+#include "workflow_contract.hpp"
 
 #include <chrono>
 #include <cstdio>
@@ -195,6 +196,25 @@ praktor_result decodeInputs(const char* input_json,
     }
 }
 
+praktor_result validateWorkflowInputContract(
+    const char* workflow_path,
+    WorkflowInputs& inputs,
+    praktor_error* error) {
+    try {
+        const std::filesystem::path path(workflow_path);
+        const Workflow workflow = TaskParser::parseFileWithIncludes(
+            path.string(), path.parent_path().string());
+        inputs = Praktor::Contract::validateAndApplyInputs(workflow, inputs);
+        return PRAKTOR_RESULT_SUCCESS;
+    } catch (const Praktor::Contract::WorkflowContractError& exception) {
+        setError(error, PRAKTOR_ERROR_PHASE_INPUT_CONTRACT, exception.what());
+        return PRAKTOR_RESULT_INPUT_CONTRACT;
+    } catch (...) {
+        // Preserve legacy parse/execution error semantics for non-contract failures.
+        return PRAKTOR_RESULT_SUCCESS;
+    }
+}
+
 praktor_result encodeResult(const WorkflowValue& result,
                             praktor_owned_json& output,
                             praktor_error* error) {
@@ -243,6 +263,12 @@ praktor_result executeWorkflowImpl(
         decodeInputs(request->input_json, request->input_json_size, inputs, error);
     if (input_status != PRAKTOR_RESULT_SUCCESS) {
         return input_status;
+    }
+
+    const auto contract_status =
+        validateWorkflowInputContract(request->workflow_path, inputs, error);
+    if (contract_status != PRAKTOR_RESULT_SUCCESS) {
+        return contract_status;
     }
 
     WorkflowExecutionResult execution;
