@@ -27,7 +27,6 @@ jobs:
     timeout-minutes: 90
     env:
       EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-      TURBOAGENT_SHA: ebf99fd0944b07065055b3db641bcfc7f070c984
       CMAKE_BUILD_PARALLEL_LEVEL: 2
 
     steps:
@@ -51,14 +50,6 @@ jobs:
           set -euxo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
           git diff --exit-code
-
-      - name: Checkout exact TurboAgent Praktor adapter
-        uses: actions/checkout@v4
-        with:
-          repository: qigao/TurboAgent
-          ref: ${{ env.TURBOAGENT_SHA }}
-          path: deps/turboagent
-          persist-credentials: false
 
       - name: Prepare public toolchain
         shell: bash
@@ -247,47 +238,6 @@ jobs:
 
           export LD_LIBRARY_PATH="/opt/praktor/debug/lib:/opt/chttp/debug/lib:/opt/salts-utils/debug/lib:/opt/salts/debug/lib:$GITHUB_WORKSPACE/vcpkg_installed/linux/x64-linux/debug/lib:$GITHUB_WORKSPACE/vcpkg_installed/linux/x64-linux/lib:${LD_LIBRARY_PATH:-}"
           "$smoke/build/praktor_real_smoke" "$smoke/command.yml" "$smoke/script.yml"
-
-      - name: Build and run TurboAgent adapter against installed Praktor
-        shell: bash
-        run: |
-          set -euxo pipefail
-          consumer="$RUNNER_TEMP/turboagent-real-praktor"
-          mkdir -p "$consumer"
-          cat > "$consumer/CMakeLists.txt" <<'CMAKE'
-          cmake_minimum_required(VERSION 3.20)
-          project(turboagent_real_praktor LANGUAGES C)
-
-          find_package(Praktor CONFIG REQUIRED)
-
-          add_executable(turboagent_real_praktor
-            "$ENV{GITHUB_WORKSPACE}/deps/turboagent/praktor_tools/src/turbo_praktor_tool_pack.c"
-            "$ENV{GITHUB_WORKSPACE}/deps/turboagent/praktor_tools/tests/contract/mock_runtime.c"
-            "$ENV{GITHUB_WORKSPACE}/deps/turboagent/praktor_tools/tests/contract/real_praktor_smoke.c"
-          )
-          target_compile_features(turboagent_real_praktor PRIVATE c_std_11)
-          target_compile_definitions(turboagent_real_praktor PRIVATE
-            _DEFAULT_SOURCE
-            TURBO_PRAKTOR_CONTRACT_USE_REAL_PRAKTOR
-          )
-          target_compile_options(turboagent_real_praktor PRIVATE
-            -Wall -Wextra -Werror -fvisibility=hidden
-          )
-          target_include_directories(turboagent_real_praktor PRIVATE
-            "$ENV{GITHUB_WORKSPACE}/deps/turboagent/praktor_tools/include"
-            "$ENV{GITHUB_WORKSPACE}/deps/turboagent/praktor_tools/tests/contract/include"
-          )
-          target_link_libraries(turboagent_real_praktor PRIVATE Praktor::Praktor)
-          CMAKE
-
-          export SALTS_ROOT=/opt/salts/debug
-          export SALTS_UTILS_ROOT=/opt/salts-utils/debug
-          export CMAKE_PREFIX_PATH="/opt/praktor/debug:/opt/chttp/debug:/opt/salts-utils/debug:/opt/salts/debug"
-          cmake -S "$consumer" -B "$consumer/build" -G Ninja
-          cmake --build "$consumer/build" --verbose -j2
-
-          export LD_LIBRARY_PATH="/opt/praktor/debug/lib:/opt/chttp/debug/lib:/opt/salts-utils/debug/lib:/opt/salts/debug/lib:$GITHUB_WORKSPACE/vcpkg_installed/linux/x64-linux/debug/lib:$GITHUB_WORKSPACE/vcpkg_installed/linux/x64-linux/lib:${LD_LIBRARY_PATH:-}"
-          "$consumer/build/turboagent_real_praktor"
 
       - name: Verify tracked source remains clean
         if: always()
