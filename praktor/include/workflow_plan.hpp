@@ -26,13 +26,15 @@ public:
                  std::string digest,
                  std::vector<WorkflowDependency> dependencies,
                  WorkflowValue input_schema = WorkflowValue::object(),
-                 WorkflowValue output_schema = WorkflowValue::object())
+                 WorkflowValue output_schema = WorkflowValue::object(),
+                 WorkflowValue effect_manifest = WorkflowValue::object())
         : root_path_(std::move(root_path)),
           root_directory_(std::move(root_directory)),
           digest_(std::move(digest)),
           dependencies_(std::move(dependencies)),
           input_schema_(std::move(input_schema)),
-          output_schema_(std::move(output_schema)) {}
+          output_schema_(std::move(output_schema)),
+          effect_manifest_(std::move(effect_manifest)) {}
 
     static WorkflowPlan compile(const std::filesystem::path& workflow_path);
 
@@ -44,6 +46,7 @@ public:
     }
     const WorkflowValue& inputSchema() const noexcept { return input_schema_; }
     const WorkflowValue& outputSchema() const noexcept { return output_schema_; }
+    const WorkflowValue& effectManifest() const noexcept { return effect_manifest_; }
 
     bool validate(std::string* error_message = nullptr) const;
     WorkflowValue toValue() const;
@@ -55,6 +58,7 @@ private:
     std::vector<WorkflowDependency> dependencies_;
     WorkflowValue input_schema_{WorkflowValue::object()};
     WorkflowValue output_schema_{WorkflowValue::object()};
+    WorkflowValue effect_manifest_{WorkflowValue::object()};
 };
 
 } // namespace Praktor::Plan
