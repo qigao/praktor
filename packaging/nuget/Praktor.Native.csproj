@@ -4,7 +4,7 @@
     <IsPackable>true</IsPackable>
     <IncludeBuildOutput>false</IncludeBuildOutput>
     <PackageId>Praktor.Native</PackageId>
-    <PackageVersion Condition="'$(PackageVersion)' == ''">0.4.0</PackageVersion>
+    <PackageVersion Condition="'$(PackageVersion)' == ''">0.4.1</PackageVersion>
     <Authors>qigao</Authors>
     <Description>Praktor script-enabled native SDK for Linux x64, macOS arm64 and Android arm64-v8a.</Description>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
