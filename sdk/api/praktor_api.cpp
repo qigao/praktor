@@ -2,11 +2,15 @@
 
 #include "workflow_runner.hpp"
 
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <exception>
 #include <limits>
+#include <memory>
+#include <mutex>
+#include <optional>
 #include <new>
 #include <string>
 #include <string_view>
@@ -15,7 +19,8 @@
 namespace {
 
 constexpr uint64_t buildCapabilities() {
-    uint64_t capabilities = PRAKTOR_CAPABILITY_JSON_WORKFLOW;
+    uint64_t capabilities =
+        PRAKTOR_CAPABILITY_JSON_WORKFLOW | PRAKTOR_CAPABILITY_EXECUTION_CONTROL;
 #if PRAKTOR_SCRIPT_ENGINE_ENABLED
     capabilities |= PRAKTOR_CAPABILITY_SCRIPT_ENGINE;
 #endif
@@ -41,6 +46,83 @@ void setError(praktor_error* error, praktor_error_phase phase, const char* messa
     error->phase = phase;
     std::snprintf(error->message, sizeof(error->message), "%s", message ? message : "");
 }
+
+struct AbiCancelProbeBridge {
+    praktor_cancel_probe_fn probe = nullptr;
+    void* user_data = nullptr;
+    std::mutex mutex;
+};
+
+bool abiCancelProbe(void* user_data) noexcept {
+    auto* bridge = static_cast<AbiCancelProbeBridge*>(user_data);
+    if (!bridge || !bridge->probe) {
+        return false;
+    }
+
+    std::lock_guard<std::mutex> lock(bridge->mutex);
+    try {
+        return bridge->probe(bridge->user_data) != 0;
+    } catch (...) {
+        // A C callback must not throw. Treat an ABI violation conservatively as cancellation.
+        return true;
+    }
+}
+
+bool validateControl(const praktor_execution_control* control,
+                     praktor_error* error) {
+    if (!control) {
+        return true;
+    }
+    if (control->struct_size < sizeof(praktor_execution_control) ||
+        control->reserved0 != 0) {
+        setError(error, PRAKTOR_ERROR_PHASE_REQUEST,
+                 "Invalid execution control structure");
+        return false;
+    }
+    for (const auto value : control->reserved) {
+        if (value != 0) {
+            setError(error, PRAKTOR_ERROR_PHASE_REQUEST,
+                     "Execution control reserved fields must be zero");
+            return false;
+        }
+    }
+    if (control->timeout_ms >
+        static_cast<uint64_t>(std::numeric_limits<int64_t>::max())) {
+        setError(error, PRAKTOR_ERROR_PHASE_REQUEST,
+                 "Execution control timeout is too large");
+        return false;
+    }
+    return true;
+}
+
+std::shared_ptr<Praktor::Execution::ExecutionControl> makeExecutionControl(
+    const praktor_execution_control* control,
+    AbiCancelProbeBridge& bridge) {
+    if (!control) {
+        return {};
+    }
+
+    using Control = Praktor::Execution::ExecutionControl;
+    std::optional<Control::Clock::time_point> deadline;
+    if (control->timeout_ms != 0) {
+        const auto timeout =
+            std::chrono::milliseconds(static_cast<int64_t>(control->timeout_ms));
+        const auto now = Control::Clock::now();
+        const auto remaining =
+            Control::Clock::time_point::max() - now;
+        deadline = timeout >= remaining
+            ? Control::Clock::time_point::max()
+            : now + timeout;
+    }
+
+    bridge.probe = control->cancel_probe;
+    bridge.user_data = control->cancel_user_data;
+    return std::make_shared<Control>(
+        deadline,
+        bridge.probe ? &abiCancelProbe : nullptr,
+        bridge.probe ? static_cast<void*>(&bridge) : nullptr);
+}
+
 
 bool validateRequest(const praktor_execute_request* request,
                      praktor_owned_json* output,
@@ -131,16 +213,25 @@ int32_t PRAKTOR_CALL executeWorkflow(const praktor_execute_request* request,
     return static_cast<int32_t>(praktor_execute_workflow(request, output, error));
 }
 
-} // namespace
-
-praktor_result PRAKTOR_CALL praktor_execute_workflow(
+int32_t PRAKTOR_CALL executeWorkflowControlled(
     const praktor_execute_request* request,
+    const praktor_execution_control* control,
     praktor_owned_json* output,
     praktor_error* error) {
-    clearError(error);
-    if (!validateRequest(request, output, error)) {
-        return PRAKTOR_RESULT_INVALID_ARGUMENT;
-    }
+    return static_cast<int32_t>(
+        praktor_execute_workflow_controlled(request, control, output, error));
+}
+
+} // namespace
+
+namespace {
+
+praktor_result executeWorkflowImpl(
+    const praktor_execute_request* request,
+    std::shared_ptr<Praktor::Execution::ExecutionControl> execution_control,
+    bool controlled_result_codes,
+    praktor_owned_json* output,
+    praktor_error* error) {
     output->size = 0;
 
     WorkflowInputs inputs;
@@ -152,7 +243,9 @@ praktor_result PRAKTOR_CALL praktor_execute_workflow(
     WorkflowExecutionResult execution;
     try {
         WorkflowRunner runner(request->workflow_path, std::move(inputs));
-        execution = runner.execute();
+        execution = execution_control
+            ? runner.executeWithControl(std::move(execution_control))
+            : runner.execute();
     } catch (const std::bad_alloc&) {
         setError(error, PRAKTOR_ERROR_PHASE_EXECUTION,
                  "Out of memory while executing workflow");
@@ -167,11 +260,61 @@ praktor_result PRAKTOR_CALL praktor_execute_workflow(
         return output_status;
     }
 
-    if (!execution.success) {
-        setError(error, PRAKTOR_ERROR_PHASE_EXECUTION, execution.error_message.c_str());
-        return PRAKTOR_RESULT_EXECUTION_FAILED;
+    if (execution.success) {
+        return PRAKTOR_RESULT_SUCCESS;
     }
-    return PRAKTOR_RESULT_SUCCESS;
+
+    setError(error, PRAKTOR_ERROR_PHASE_EXECUTION, execution.error_message.c_str());
+    if (controlled_result_codes) {
+        const auto status =
+            execution.value["workflow_status"].as<std::string>();
+        if (status == "cancelled") {
+            return PRAKTOR_RESULT_CANCELLED;
+        }
+        if (status == "timed_out") {
+            return PRAKTOR_RESULT_TIMED_OUT;
+        }
+    }
+    return PRAKTOR_RESULT_EXECUTION_FAILED;
+}
+
+} // namespace
+
+praktor_result PRAKTOR_CALL praktor_execute_workflow(
+    const praktor_execute_request* request,
+    praktor_owned_json* output,
+    praktor_error* error) {
+    clearError(error);
+    if (!validateRequest(request, output, error)) {
+        return PRAKTOR_RESULT_INVALID_ARGUMENT;
+    }
+    return executeWorkflowImpl(request, {}, false, output, error);
+}
+
+praktor_result PRAKTOR_CALL praktor_execute_workflow_controlled(
+    const praktor_execute_request* request,
+    const praktor_execution_control* control,
+    praktor_owned_json* output,
+    praktor_error* error) {
+    clearError(error);
+    if (!validateRequest(request, output, error) ||
+        !validateControl(control, error)) {
+        return PRAKTOR_RESULT_INVALID_ARGUMENT;
+    }
+
+    AbiCancelProbeBridge bridge;
+    try {
+        auto execution_control = makeExecutionControl(control, bridge);
+        return executeWorkflowImpl(
+            request, std::move(execution_control), true, output, error);
+    } catch (const std::bad_alloc&) {
+        setError(error, PRAKTOR_ERROR_PHASE_EXECUTION,
+                 "Out of memory while creating execution control");
+        return PRAKTOR_RESULT_OUT_OF_MEMORY;
+    } catch (const std::exception& exception) {
+        setError(error, PRAKTOR_ERROR_PHASE_REQUEST, exception.what());
+        return PRAKTOR_RESULT_INVALID_ARGUMENT;
+    }
 }
 
 void PRAKTOR_CALL praktor_release_json(praktor_owned_json* data) {
@@ -191,6 +334,7 @@ const praktor_api* PRAKTOR_CALL praktor_get_api(void) {
         buildCapabilities(),
         &executeWorkflow,
         &praktor_release_json,
+        &executeWorkflowControlled,
     };
     return &api;
 }
