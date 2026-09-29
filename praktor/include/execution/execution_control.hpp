@@ -11,7 +11,6 @@ namespace Praktor::Execution {
 class ExecutionControl {
 public:
     using Clock = std::chrono::steady_clock;
-    using CancellationProbe = bool (*)(void* user_data);
     using CancelProbe = bool (*)(void*) noexcept;
 
     enum class StopReason {
@@ -24,14 +23,6 @@ public:
 
     explicit ExecutionControl(Clock::time_point deadline)
         : deadline_(deadline)
-    {
-    }
-
-    ExecutionControl(CancellationProbe probe, void* probe_user_data,
-                     std::optional<Clock::time_point> deadline = std::nullopt)
-        : cancellation_probe_(probe)
-        , cancellation_probe_user_data_(probe_user_data)
-        , deadline_(deadline)
     {
     }
 
@@ -100,33 +91,6 @@ public:
     }
 
 private:
-    void observeExternalCancellation(Clock::time_point now) const noexcept
-    {
-        if (!cancellation_probe_ ||
-            cancel_requested_at_ns_.load(std::memory_order_acquire) != kNotRequested) {
-            return;
-        }
-
-        bool requested = false;
-        try {
-            requested = cancellation_probe_(cancellation_probe_user_data_);
-        } catch (...) {
-            // C-facing cancellation probes must not throw. Treat a violation as
-            // a cancellation request so execution fails closed rather than
-            // propagating an exception across the callback boundary.
-            requested = true;
-        }
-        if (!requested) {
-            return;
-        }
-
-        auto expected = kNotRequested;
-        const auto observed_at = toNanoseconds(now);
-        cancel_requested_at_ns_.compare_exchange_strong(
-            expected, observed_at, std::memory_order_release,
-            std::memory_order_relaxed);
-    }
-
     static constexpr std::int64_t kNotRequested =
         std::numeric_limits<std::int64_t>::max();
 
