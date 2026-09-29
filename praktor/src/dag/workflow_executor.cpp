@@ -786,6 +786,13 @@ void WorkflowExecutor::updateTaskCache(const Task &task, WorkflowContext &contex
 bool WorkflowExecutor::executeTask(const Task &task, WorkflowContext &context,
                                    std::optional<std::string> alias, bool ignore_when,
                                    size_t trigger_depth) {
+  const auto execution_observer = context.getExecutionObserver();
+  if (execution_observer) {
+    execution_observer->emit(
+        Praktor::Execution::ExecutionEventType::TaskStarted,
+        task.name, "running");
+  }
+
   // Mark as running in registry to allow setOutput calls
   setTaskExecutionStatus(task, context, alias, "running");
 
@@ -870,6 +877,14 @@ bool WorkflowExecutor::executeTask(const Task &task, WorkflowContext &context,
   setTaskExecutionStatus(task, context, alias, final_status,
                          failure.result.error_message,
                          failure_snapshot ? &*failure_snapshot : nullptr);
+
+  if (execution_observer) {
+    execution_observer->emit(
+        overall_success
+            ? Praktor::Execution::ExecutionEventType::TaskCompleted
+            : Praktor::Execution::ExecutionEventType::TaskFailed,
+        task.name, final_status, failure.result.error_message);
+  }
 
   if (failure_snapshot) {
     context.setFailureContext(*failure_snapshot);
