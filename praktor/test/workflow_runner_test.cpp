@@ -1013,6 +1013,50 @@ tasks:
     std::filesystem::remove_all(dir);
 }
 
+TEST_CASE("WorkflowRunner injects controlled terminal state",
+          "[workflow][execution-control][runner]")
+{
+    using Control = Praktor::Execution::ExecutionControl;
+    using namespace std::chrono_literals;
+
+    const auto dir = createTempDir();
+    const auto workflow_path = dir / "runner-controlled.yml";
+    writeFile(workflow_path, R"(
+tasks:
+  - name: should_not_run
+    script: |
+      ctx.output("ran", true);
+)");
+
+    SECTION("pre-cancelled runner returns cancelled") {
+        auto control = std::make_shared<Control>();
+        control->requestCancel();
+
+        const auto result =
+            WorkflowRunner(workflow_path.string()).executeWithControl(control);
+
+        CHECK_FALSE(result.success);
+        CHECK(result.value["workflow_status"].as<std::string>() == "cancelled");
+        CHECK(result.error_message == "Workflow execution cancelled");
+        CHECK(result.value["tasks"]["should_not_run"]["outputs"]["ran"].is_null());
+    }
+
+    SECTION("expired runner deadline returns timed_out") {
+        auto control =
+            std::make_shared<Control>(Control::Clock::now() - 1ms);
+
+        const auto result =
+            WorkflowRunner(workflow_path.string()).executeWithControl(control);
+
+        CHECK_FALSE(result.success);
+        CHECK(result.value["workflow_status"].as<std::string>() == "timed_out");
+        CHECK(result.error_message == "Workflow execution timed out");
+        CHECK(result.value["tasks"]["should_not_run"]["outputs"]["ran"].is_null());
+    }
+
+    std::filesystem::remove_all(dir);
+}
+
 TEST_CASE("workflow env is exposed through ctx.env")
 {
     auto dir = createTempDir();
