@@ -2,12 +2,15 @@
 
 #include "workflow_runner.hpp"
 
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <exception>
 #include <limits>
+#include <memory>
 #include <new>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -15,7 +18,8 @@
 namespace {
 
 constexpr uint64_t buildCapabilities() {
-    uint64_t capabilities = PRAKTOR_CAPABILITY_JSON_WORKFLOW;
+    uint64_t capabilities =
+        PRAKTOR_CAPABILITY_JSON_WORKFLOW | PRAKTOR_CAPABILITY_EXECUTION_CONTROL;
 #if PRAKTOR_SCRIPT_ENGINE_ENABLED
     capabilities |= PRAKTOR_CAPABILITY_SCRIPT_ENGINE;
 #endif
@@ -65,6 +69,81 @@ bool validateRequest(const praktor_execute_request* request,
         return false;
     }
     return true;
+}
+
+bool validateControl(const praktor_execution_control* control,
+                     praktor_error* error) {
+    if (!control) {
+        return true;
+    }
+    if (control->struct_size < sizeof(praktor_execution_control) ||
+        control->reserved0 != 0) {
+        setError(error, PRAKTOR_ERROR_PHASE_REQUEST,
+                 "Invalid execution control structure");
+        return false;
+    }
+    for (const auto value : control->reserved) {
+        if (value != 0) {
+            setError(error, PRAKTOR_ERROR_PHASE_REQUEST,
+                     "Execution control reserved fields must be zero");
+            return false;
+        }
+    }
+    if (control->timeout_ms >
+        static_cast<uint64_t>(std::numeric_limits<int64_t>::max())) {
+        setError(error, PRAKTOR_ERROR_PHASE_REQUEST,
+                 "Execution control timeout_ms is too large");
+        return false;
+    }
+    return true;
+}
+
+struct CancellationProbeBridge {
+    praktor_cancel_probe_fn probe = nullptr;
+    void* user_data = nullptr;
+};
+
+bool pollCancellationProbe(void* user_data) noexcept {
+    const auto* bridge = static_cast<const CancellationProbeBridge*>(user_data);
+    if (!bridge || !bridge->probe) {
+        return false;
+    }
+    try {
+        return bridge->probe(bridge->user_data) != 0;
+    } catch (...) {
+        // A C ABI callback must not throw. Fail closed if a C++ consumer does.
+        return true;
+    }
+}
+
+std::shared_ptr<Praktor::Execution::ExecutionControl> makeExecutionControl(
+    const praktor_execution_control* control,
+    CancellationProbeBridge& bridge) {
+    if (!control) {
+        return {};
+    }
+
+    using Control = Praktor::Execution::ExecutionControl;
+    std::optional<Control::Clock::time_point> deadline;
+    if (control->timeout_ms != 0) {
+        const auto now = Control::Clock::now();
+        const auto max_remaining_ms =
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                Control::Clock::time_point::max() - now).count();
+        const auto requested_ms =
+            static_cast<int64_t>(control->timeout_ms);
+        deadline = requested_ms >= max_remaining_ms
+            ? Control::Clock::time_point::max()
+            : now + std::chrono::duration_cast<Control::Clock::duration>(
+                        std::chrono::milliseconds(requested_ms));
+    }
+
+    bridge.probe = control->is_cancelled;
+    bridge.user_data = control->user_data;
+    return std::make_shared<Control>(
+        deadline,
+        bridge.probe ? &pollCancellationProbe : nullptr,
+        bridge.probe ? static_cast<void*>(&bridge) : nullptr);
 }
 
 praktor_result decodeInputs(const praktor_execute_request& request,
@@ -131,14 +210,23 @@ int32_t PRAKTOR_CALL executeWorkflow(const praktor_execute_request* request,
     return static_cast<int32_t>(praktor_execute_workflow(request, output, error));
 }
 
-} // namespace
-
-praktor_result PRAKTOR_CALL praktor_execute_workflow(
+int32_t PRAKTOR_CALL executeWorkflowControlled(
     const praktor_execute_request* request,
+    const praktor_execution_control* control,
+    praktor_owned_json* output,
+    praktor_error* error) {
+    return static_cast<int32_t>(
+        praktor_execute_workflow_controlled(request, control, output, error));
+}
+
+praktor_result executeWorkflowImpl(
+    const praktor_execute_request* request,
+    const praktor_execution_control* control,
     praktor_owned_json* output,
     praktor_error* error) {
     clearError(error);
-    if (!validateRequest(request, output, error)) {
+    if (!validateRequest(request, output, error) ||
+        !validateControl(control, error)) {
         return PRAKTOR_RESULT_INVALID_ARGUMENT;
     }
     output->size = 0;
@@ -151,8 +239,12 @@ praktor_result PRAKTOR_CALL praktor_execute_workflow(
 
     WorkflowExecutionResult execution;
     try {
+        CancellationProbeBridge bridge;
+        auto execution_control = makeExecutionControl(control, bridge);
         WorkflowRunner runner(request->workflow_path, std::move(inputs));
-        execution = runner.execute();
+        execution = execution_control
+            ? runner.executeWithControl(std::move(execution_control))
+            : runner.execute();
     } catch (const std::bad_alloc&) {
         setError(error, PRAKTOR_ERROR_PHASE_EXECUTION,
                  "Out of memory while executing workflow");
@@ -167,11 +259,37 @@ praktor_result PRAKTOR_CALL praktor_execute_workflow(
         return output_status;
     }
 
-    if (!execution.success) {
-        setError(error, PRAKTOR_ERROR_PHASE_EXECUTION, execution.error_message.c_str());
-        return PRAKTOR_RESULT_EXECUTION_FAILED;
+    if (execution.success) {
+        return PRAKTOR_RESULT_SUCCESS;
     }
-    return PRAKTOR_RESULT_SUCCESS;
+
+    setError(error, PRAKTOR_ERROR_PHASE_EXECUTION, execution.error_message.c_str());
+    const std::string status =
+        execution.value["workflow_status"].as<std::string>();
+    if (status == "cancelled") {
+        return PRAKTOR_RESULT_CANCELLED;
+    }
+    if (status == "timed_out") {
+        return PRAKTOR_RESULT_TIMED_OUT;
+    }
+    return PRAKTOR_RESULT_EXECUTION_FAILED;
+}
+
+} // namespace
+
+praktor_result PRAKTOR_CALL praktor_execute_workflow(
+    const praktor_execute_request* request,
+    praktor_owned_json* output,
+    praktor_error* error) {
+    return executeWorkflowImpl(request, nullptr, output, error);
+}
+
+praktor_result PRAKTOR_CALL praktor_execute_workflow_controlled(
+    const praktor_execute_request* request,
+    const praktor_execution_control* control,
+    praktor_owned_json* output,
+    praktor_error* error) {
+    return executeWorkflowImpl(request, control, output, error);
 }
 
 void PRAKTOR_CALL praktor_release_json(praktor_owned_json* data) {
@@ -191,6 +309,7 @@ const praktor_api* PRAKTOR_CALL praktor_get_api(void) {
         buildCapabilities(),
         &executeWorkflow,
         &praktor_release_json,
+        &executeWorkflowControlled,
     };
     return &api;
 }

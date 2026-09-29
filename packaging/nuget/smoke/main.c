@@ -33,8 +33,11 @@ int main(int argc, char **argv) {
   if (!api) return 3;
   if ((api->capabilities & PRAKTOR_CAPABILITY_JSON_WORKFLOW) == 0) return 4;
   if ((api->capabilities & PRAKTOR_CAPABILITY_SCRIPT_ENGINE) == 0) return 5;
-  if (run_one(argv[1], "success") != 0) return 6;
-  if (run_one(argv[2], "42") != 0) return 7;
+  if ((api->capabilities & PRAKTOR_CAPABILITY_EXECUTION_CONTROL) == 0) return 6;
+  if (api->abi_major != PRAKTOR_ABI_MAJOR || api->abi_minor < 1) return 7;
+  if (!api->execute_workflow_controlled) return 8;
+  if (run_one(argv[1], "success") != 0) return 9;
+  if (run_one(argv[2], "42") != 0) return 10;
   puts("PRAKTOR_SCRIPT_ENABLED_REAL_ABI_OK");
   return 0;
 }

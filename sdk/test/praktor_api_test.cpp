@@ -16,12 +16,14 @@
 
 #include <catch2/catch_all.hpp>
 
+#include <atomic>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <random>
 #include <string>
 #include <string_view>
+#include <thread>
 
 namespace {
 
@@ -58,6 +60,15 @@ constexpr const char* kSleepCommand = "sleep 0.5";
 constexpr long long kSequentialMinMs = 900;
 #endif
 
+struct CancellationProbe {
+    std::atomic<int> requested{0};
+};
+
+int32_t PRAKTOR_CALL cancellationProbe(void* user_data) {
+    auto* probe = static_cast<CancellationProbe*>(user_data);
+    return probe && probe->requested.load(std::memory_order_acquire) != 0 ? 1 : 0;
+}
+
 } // namespace
 
 TEST_CASE("Praktor C API publishes JSON workflow execution and ownership", "[sdk][abi]") {
@@ -69,8 +80,10 @@ TEST_CASE("Praktor C API publishes JSON workflow execution and ownership", "[sdk
     CHECK(api->abi_minor >= PRAKTOR_ABI_MINOR);
     CHECK((api->capabilities & PRAKTOR_CAPABILITY_JSON_WORKFLOW) != 0);
     CHECK((api->capabilities & PRAKTOR_CAPABILITY_SCRIPT_ENGINE) != 0);
+    CHECK((api->capabilities & PRAKTOR_CAPABILITY_EXECUTION_CONTROL) != 0);
     REQUIRE(api->execute_workflow != nullptr);
     REQUIRE(api->release_json != nullptr);
+    REQUIRE(api->execute_workflow_controlled != nullptr);
 
     praktor_owned_json output = PRAKTOR_OWNED_JSON_INIT;
     praktor_error error = PRAKTOR_ERROR_INIT;
@@ -216,5 +229,97 @@ tasks:
     CHECK(std::string(error.message) == "Workflow execution failed");
 
     praktor_release_json(&output);
+    std::filesystem::remove_all(dir);
+}
+
+
+TEST_CASE("Praktor C API supports cooperative cancellation and deadlines",
+          "[sdk][abi][execution-control]") {
+    using namespace std::chrono_literals;
+
+    const auto dir = createTempDir();
+    const auto workflow_path = dir / "controlled.yml";
+    writeFile(workflow_path, R"(
+tasks:
+  - name: controlled
+    script: |
+      i = 0;
+      while (i < 1000000000) {
+        i = i + 1;
+      }
+      ctx.output("completed", true);
+)" );
+
+    const std::string input = "{}";
+    const std::string workflow_path_storage = workflow_path.string();
+    const auto request = makeRequest(workflow_path_storage, input);
+
+    SECTION("pre-cancel returns canonical cancelled result") {
+        CancellationProbe probe;
+        probe.requested.store(1, std::memory_order_release);
+        praktor_execution_control control = PRAKTOR_EXECUTION_CONTROL_INIT;
+        control.is_cancelled = &cancellationProbe;
+        control.user_data = &probe;
+
+        praktor_owned_json output = PRAKTOR_OWNED_JSON_INIT;
+        praktor_error error = PRAKTOR_ERROR_INIT;
+        const auto status =
+            praktor_execute_workflow_controlled(&request, &control, &output, &error);
+
+        REQUIRE(status == PRAKTOR_RESULT_CANCELLED);
+        REQUIRE(output.data != nullptr);
+        const auto result =
+            WorkflowValue::parse(std::string_view(output.data, output.size));
+        CHECK(result.at("workflow_status").as<std::string>() == "cancelled");
+        CHECK(std::string(error.message) == "Workflow execution cancelled");
+        praktor_release_json(&output);
+    }
+
+    SECTION("running JIT script observes host cancellation probe") {
+        CancellationProbe probe;
+        praktor_execution_control control = PRAKTOR_EXECUTION_CONTROL_INIT;
+        control.is_cancelled = &cancellationProbe;
+        control.user_data = &probe;
+
+        std::thread canceller([&probe]() {
+            std::this_thread::sleep_for(50ms);
+            probe.requested.store(1, std::memory_order_release);
+        });
+
+        praktor_owned_json output = PRAKTOR_OWNED_JSON_INIT;
+        praktor_error error = PRAKTOR_ERROR_INIT;
+        const auto started = std::chrono::steady_clock::now();
+        const auto status =
+            praktor_execute_workflow_controlled(&request, &control, &output, &error);
+        const auto elapsed = std::chrono::steady_clock::now() - started;
+        canceller.join();
+
+        REQUIRE(status == PRAKTOR_RESULT_CANCELLED);
+        CHECK(elapsed < 5s);
+        REQUIRE(output.data != nullptr);
+        const auto result =
+            WorkflowValue::parse(std::string_view(output.data, output.size));
+        CHECK(result.at("workflow_status").as<std::string>() == "cancelled");
+        praktor_release_json(&output);
+    }
+
+    SECTION("relative deadline returns timed out distinctly") {
+        praktor_execution_control control = PRAKTOR_EXECUTION_CONTROL_INIT;
+        control.timeout_ms = 30;
+
+        praktor_owned_json output = PRAKTOR_OWNED_JSON_INIT;
+        praktor_error error = PRAKTOR_ERROR_INIT;
+        const auto status =
+            praktor_execute_workflow_controlled(&request, &control, &output, &error);
+
+        REQUIRE(status == PRAKTOR_RESULT_TIMED_OUT);
+        REQUIRE(output.data != nullptr);
+        const auto result =
+            WorkflowValue::parse(std::string_view(output.data, output.size));
+        CHECK(result.at("workflow_status").as<std::string>() == "timed_out");
+        CHECK(std::string(error.message) == "Workflow execution timed out");
+        praktor_release_json(&output);
+    }
+
     std::filesystem::remove_all(dir);
 }
