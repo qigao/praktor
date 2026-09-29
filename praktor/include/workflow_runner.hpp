@@ -3,6 +3,7 @@
 #include "dag/dependency_graph.hpp"
 #include "dag/workflow_executor.hpp"
 #include "execution/execution_control.hpp"
+#include "execution/execution_observer.hpp"
 #include "yml/task_parser.hpp"
 
 #include <cstddef>
@@ -36,6 +37,10 @@ public:
     WorkflowExecutionResult execute(bool useConcurrent = false, int maxConcurrency = 4);
     WorkflowExecutionResult executeWithControl(
         std::shared_ptr<Praktor::Execution::ExecutionControl> executionControl,
+        bool useConcurrent = false, int maxConcurrency = 4);
+    WorkflowExecutionResult executeObserved(
+        std::shared_ptr<Praktor::Execution::ExecutionControl> executionControl,
+        std::shared_ptr<Praktor::Execution::ExecutionObserver> executionObserver,
         bool useConcurrent = false, int maxConcurrency = 4);
     bool run(bool useConcurrent = false, int maxConcurrency = 4);
     bool runTask(std::string const& taskName, bool useConcurrent = false, int maxConcurrency = 4);
