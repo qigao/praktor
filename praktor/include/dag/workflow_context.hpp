@@ -14,6 +14,7 @@
 // Project includes
 #include "dag/failure_context_state.hpp"
 #include "execution/execution_control.hpp"
+#include "execution/execution_observer.hpp"
 #include "dag/task_failure_context.hpp"
 #include "dag/task_registry.hpp"
 #include "dag/variable_scope.hpp"
@@ -67,6 +68,7 @@ public:
         child->task_scope_stack_ = this->task_scope_stack_;
         child->source_path_ = this->source_path_;
         child->execution_control_ = this->execution_control_;
+        child->execution_observer_ = this->execution_observer_;
         // Failure context is not inherited
         return child;
     }
@@ -396,6 +398,26 @@ public:
         return execution_control_;
     }
 
+    void setExecutionObserver(
+        std::shared_ptr<Praktor::Execution::ExecutionObserver> observer) {
+        execution_observer_ = std::move(observer);
+    }
+
+    std::shared_ptr<Praktor::Execution::ExecutionObserver> getExecutionObserver() const {
+        return execution_observer_;
+    }
+
+    void emitExecutionEvent(
+        Praktor::Execution::ExecutionEventType type,
+        std::string task_name = {},
+        std::string status = {},
+        std::string payload_json = {}) const {
+        if (execution_observer_) {
+            execution_observer_->emit(
+                type, std::move(task_name), std::move(status), std::move(payload_json));
+        }
+    }
+
 private:
     // Core components
     std::unique_ptr<VariableScope> scope_;
@@ -405,5 +427,6 @@ private:
     std::vector<std::pair<std::string, std::optional<std::string>>> task_scope_stack_;
     std::string source_path_;
     std::shared_ptr<Praktor::Execution::ExecutionControl> execution_control_;
+    std::shared_ptr<Praktor::Execution::ExecutionObserver> execution_observer_;
     FailureContextState failure_state_;
 };
