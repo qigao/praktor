@@ -230,6 +230,19 @@ private:
             const fs::path include_path =
                 canonicalFile(workflow_path.parent_path() / include_name);
             addDependency(include_path, "include");
+
+            // parseFileWithIncludes merges included tasks/variables/env into the
+            // parent Workflow but intentionally does not merge the included
+            // workflow's top-level dotEnv list. Capture those files directly
+            // from the declaring include so the reviewed closure is complete.
+            {
+                const std::string include_content = readFile(include_path);
+                TaskYamlDetail::YamlDocument include_document(include_content);
+                Workflow included_workflow =
+                    parse_workflow(include_document.root(), include_path.string());
+                collectDotEnv(included_workflow.dot_env, include_path);
+            }
+
             collectIncludes(include_path);
         }
     }
