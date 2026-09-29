@@ -152,6 +152,11 @@ private:
         if (source.find("http.") != std::string::npos) {
             manifest_.add("network");
         }
+        if (source.find("api.openai.com") != std::string::npos ||
+            source.find("api.anthropic.com") != std::string::npos ||
+            source.find("generativelanguage.googleapis.com") != std::string::npos) {
+            manifest_.add("model_api");
+        }
         if (source.find("fs.") != std::string::npos) {
             manifest_.add("filesystem_read");
             manifest_.add("filesystem_write");
