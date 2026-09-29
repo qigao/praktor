@@ -1,4 +1,5 @@
 #include "workflow_runner.hpp"
+#include "workflow_contract.hpp"
 #include "util/env_parser.hpp"
 #include "util/logging.hpp"
 #include "util/file_utils.hpp"
@@ -118,13 +119,15 @@ PreparedWorkflow prepareExecution(
     std::shared_ptr<Praktor::Execution::ExecutionControl> execution_control = {}) {
     PreparedWorkflow prepared;
     prepared.workflow = TaskParser::parseFileWithIncludes(yaml_path, base_directory.string());
+    const auto normalized_inputs =
+        Praktor::Contract::validateAndApplyInputs(prepared.workflow, input_values);
     prepared.runtime_environment = buildRuntimeEnvironment(prepared.workflow, base_environment);
     prepared.graph = TaskParser::buildGraph(prepared.workflow);
     prepared.context = std::make_unique<WorkflowContext>();
     prepared.context->setExecutionControl(std::move(execution_control));
     prepared.context->setSourcePath(prepared.workflow.source_path);
     populateWorkflowEnvironmentContext(*prepared.context, prepared.runtime_environment);
-    populateWorkflowVariables(*prepared.context, prepared.workflow, input_values);
+    populateWorkflowVariables(*prepared.context, prepared.workflow, normalized_inputs);
     return prepared;
 }
 
@@ -138,11 +141,16 @@ WorkflowInputs convertStringInputs(
     return result;
 }
 
-WorkflowExecutionResult makeExecutionResult(const WorkflowContext& context) {
+WorkflowExecutionResult makeExecutionResult(const WorkflowContext& context,
+                                            const Workflow& workflow) {
     WorkflowExecutionResult result;
     result.value["workflow_status"] =
         context.getValueOrDefault<std::string>("workflow_status", "unknown");
     result.value["tasks"] = context.getTasksSnapshot();
+    if (!workflow.outputs.empty()) {
+        result.value["outputs"] =
+            Praktor::Contract::projectOutputs(workflow, context);
+    }
 
     const std::string status = result.value["workflow_status"].as<std::string>();
     result.success = status == "success";
@@ -215,7 +223,7 @@ WorkflowExecutionResult WorkflowRunner::executeWithControl(
             max_trigger_depth_);
         executor.execute(*prepared.context);
 
-        auto result = makeExecutionResult(*prepared.context);
+        auto result = makeExecutionResult(*prepared.context, prepared.workflow);
         if (!result.success) {
             if (!Praktor::Logging::isVerboseEnabled()) {
                 Praktor::Logging::printWorkflowStatus("FAILED");
