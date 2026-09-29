@@ -12,6 +12,7 @@ set(SOURCE_FILES
     src/workflow_runner.cpp
     src/workflow_plan.cpp
     src/workflow_contract.cpp
+    src/workflow_effects.cpp
     src/data/workflow_value.cpp
     src/data/structured_document_query.cpp
     src/yml/yaml_document.cpp
