@@ -1,5 +1,6 @@
 #include "workflow_plan.hpp"
 #include "workflow_contract.hpp"
+#include "workflow_effects.hpp"
 
 #include "util/path_utils.hpp"
 #include "yml/task_parser.hpp"
@@ -159,7 +160,8 @@ public:
             sha256(manifest),
             std::move(dependencies),
             Praktor::Contract::inputSchema(root_workflow),
-            Praktor::Contract::outputSchema(root_workflow));
+            Praktor::Contract::outputSchema(root_workflow),
+            Praktor::Effects::analyzeWorkflow(root_path_).toValue());
     }
 
 private:
@@ -444,6 +446,7 @@ WorkflowValue WorkflowPlan::toValue() const {
     result["digest"] = digest_;
     result["input_schema"] = input_schema_;
     result["output_schema"] = output_schema_;
+    result["effect_manifest"] = effect_manifest_;
 
     WorkflowValue dependencies = WorkflowValue::array();
     for (const auto& dependency : dependencies_) {
