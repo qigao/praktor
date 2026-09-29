@@ -653,6 +653,12 @@ static exprtk_value_t fail_fn(size_t argc, exprtk_value_t *args,
   return make_null();
 }
 
+static int execution_control_interrupt(void *user_data) {
+  const auto *control =
+      static_cast<const Praktor::Execution::ExecutionControl *>(user_data);
+  return control && control->stopRequested() ? 1 : 0;
+}
+
 ScriptResult execute(const std::string &source, WorkflowContext &context,
                      const std::string &script_source_path) {
   ScriptResult result;
@@ -668,6 +674,15 @@ ScriptResult execute(const std::string &source, WorkflowContext &context,
   }
 
   ScriptEvalContext eval_ctx{context, {}};
+  const auto execution_control = context.getExecutionControl();
+  if (execution_control &&
+      turbo_script_set_interrupt(ctx, execution_control_interrupt,
+                                 execution_control.get()) != 0) {
+    result.success = false;
+    result.error_message = "Failed to install TurboScript execution control";
+    turbo_script_free(ctx);
+    return result;
+  }
 
   // Bind praktor-specific functions
   ts_bind_func(ctx, "ctx_get", ctx_get_fn, &eval_ctx);
@@ -686,7 +701,17 @@ ScriptResult execute(const std::string &source, WorkflowContext &context,
 
   if (turbo_script_run_jit(ctx, normalized_source.c_str()) != 0) {
     result.success = false;
-    result.error_message = turbo_script_get_error(ctx);
+    const auto error_code = turbo_script_get_error_code(ctx);
+    if (error_code == TURBO_SCRIPT_ERROR_CANCELLED && execution_control) {
+      if (execution_control->stopReason() ==
+          Praktor::Execution::ExecutionControl::StopReason::DeadlineExceeded) {
+        result.error_message = "Script execution timed out";
+      } else {
+        result.error_message = "Script execution cancelled";
+      }
+    } else {
+      result.error_message = turbo_script_get_error(ctx);
+    }
 
     ScriptError err;
     err.line = 0;
