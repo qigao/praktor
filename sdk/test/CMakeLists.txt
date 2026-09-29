@@ -4,6 +4,7 @@ set(TEST_SOURCES
     workflow_effect_manifest_test.cpp
     workflow_profile_test.cpp
     workflow_event_api_test.cpp
+    workflow_agent_output_test.cpp
 )
 
 if(ENABLE_SCRIPT_ENGINE)

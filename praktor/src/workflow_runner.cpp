@@ -143,20 +143,80 @@ WorkflowInputs convertStringInputs(
     return result;
 }
 
+WorkflowValue compactFailure(const TaskFailureContext& failure) {
+    WorkflowValue result = WorkflowValue::object();
+    result["task_name"] = failure.task_name;
+    result["task_type"] = failure.task_type;
+    result["exit_code"] = failure.exit_code;
+    result["error"] = failure.error_message;
+    result["error_code"] = failure.error_code;
+    result["error_phase"] = failure.error_phase;
+    result["error_details"] = failure.error_details;
+    if (failure.inner_failure) {
+        result["inner"] = compactFailure(*failure.inner_failure);
+    }
+    return result;
+}
+
+std::optional<TaskFailureContext> firstFailure(
+    const Workflow& workflow,
+    const WorkflowContext& context) {
+    for (const auto& task : workflow.tasks) {
+        auto failure = context.getTaskFailureSnapshot(task.name);
+        if (failure.has_value()) {
+            return failure;
+        }
+    }
+    return std::nullopt;
+}
+
+WorkflowValue buildAgentOutput(const WorkflowExecutionResult& result,
+                               const Workflow& workflow,
+                               const WorkflowContext& context) {
+    WorkflowValue projection = WorkflowValue::object();
+    const std::string status =
+        result.value["workflow_status"].as<std::string>();
+    projection["workflow_status"] = status;
+
+    if (result.value.contains("outputs")) {
+        projection["outputs"] = result.value["outputs"];
+    }
+
+    if (!result.success) {
+        projection["error"] = result.error_message;
+        if (const auto failure = firstFailure(workflow, context);
+            failure.has_value()) {
+            projection["failure"] = compactFailure(*failure);
+        }
+    }
+    return projection;
+}
+
 WorkflowExecutionResult makeExecutionResult(const WorkflowContext& context,
                                             const Workflow& workflow) {
     WorkflowExecutionResult result;
-    result.value["workflow_status"] =
+    std::string status =
         context.getValueOrDefault<std::string>("workflow_status", "unknown");
+    result.value["workflow_status"] = status;
     result.value["tasks"] = context.getTasksSnapshot();
-    if (!workflow.outputs.empty()) {
-        result.value["outputs"] =
-            Praktor::Contract::projectOutputs(workflow, context);
+
+    result.success = status == "success";
+    if (result.success && !workflow.outputs.empty()) {
+        try {
+            result.value["outputs"] =
+                Praktor::Contract::projectOutputs(workflow, context);
+        } catch (const Praktor::Contract::WorkflowContractError& exception) {
+            result.success = false;
+            status = "failed";
+            result.value["workflow_status"] = status;
+            result.error_message =
+                std::string("Workflow output contract violation: ") +
+                exception.what();
+            result.value["error"] = result.error_message;
+        }
     }
 
-    const std::string status = result.value["workflow_status"].as<std::string>();
-    result.success = status == "success";
-    if (!result.success) {
+    if (!result.success && result.error_message.empty()) {
         if (status == "cancelled") {
             result.error_message = "Workflow execution cancelled";
         } else if (status == "timed_out") {
@@ -166,6 +226,9 @@ WorkflowExecutionResult makeExecutionResult(const WorkflowContext& context,
         }
         result.value["error"] = result.error_message;
     }
+
+    result.value["agent_output"] =
+        buildAgentOutput(result, workflow, context);
     return result;
 }
 
@@ -174,7 +237,12 @@ WorkflowExecutionResult makeFailedExecutionResult(std::string message) {
     result.value["workflow_status"] = "failed";
     result.value["tasks"] = WorkflowValue::object();
     result.value["error"] = message;
-    result.error_message = std::move(message);
+    result.error_message = message;
+
+    WorkflowValue projection = WorkflowValue::object();
+    projection["workflow_status"] = "failed";
+    projection["error"] = std::move(message);
+    result.value["agent_output"] = std::move(projection);
     return result;
 }
 
