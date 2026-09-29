@@ -150,12 +150,11 @@ public:
             manifest.push_back('\n');
         }
 
-        WorkflowPlan plan;
-        plan.root_path_ = root_path_.generic_string();
-        plan.root_directory_ = root_directory_.generic_string();
-        plan.digest_ = sha256(manifest);
-        plan.dependencies_ = std::move(dependencies);
-        return plan;
+        return WorkflowPlan(
+            root_path_.generic_string(),
+            root_directory_.generic_string(),
+            sha256(manifest),
+            std::move(dependencies));
     }
 
 private:
