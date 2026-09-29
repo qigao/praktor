@@ -37,6 +37,10 @@ praktor_result executeFile(const std::filesystem::path& path,
     return praktor_execute_workflow(&request, &output, &error);
 }
 
+int32_t PRAKTOR_CALL alwaysCancelled(void*) {
+    return 1;
+}
+
 } // namespace
 
 TEST_CASE("core-only ABI advertises JSON workflows without script capability") {
@@ -107,10 +111,8 @@ tasks:
     request.input_json = input;
     request.input_json_size = sizeof(input) - 1;
 
-    const auto always_cancelled =
-        +[](void*) -> int32_t { return 1; };
     praktor_execution_control control = PRAKTOR_EXECUTION_CONTROL_INIT;
-    control.is_cancelled = always_cancelled;
+    control.is_cancelled = &alwaysCancelled;
 
     praktor_owned_json output = PRAKTOR_OWNED_JSON_INIT;
     praktor_error error = PRAKTOR_ERROR_INIT;
