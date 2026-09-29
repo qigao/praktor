@@ -4,6 +4,8 @@
 #include "executors/uses_executor.hpp"
 #include "yml/task_parser.hpp"
 #include "dag/workflow_executor_internal.hpp"
+#include "execution/controlled_process.hpp"
+#include "executors/program_executor.hpp"
 #include "system/managed_process.hpp"
 #include "util/file_utils.hpp"
 
@@ -1009,6 +1011,47 @@ TEST_CASE("dynamic_tasks reject generated names that collide with static tasks")
     REQUIRE_FALSE(runner.run());
     CHECK_FALSE(std::filesystem::exists(output_path));
     std::filesystem::remove_all(dir);
+}
+
+TEST_CASE("controlled process timeout follows workflow deadline",
+          "[workflow][execution-control][process]") {
+    using Control = Praktor::Execution::ExecutionControl;
+    using namespace std::chrono_literals;
+
+    CHECK(Praktor::Execution::clampProcessTimeoutMs(5000, {}) == 5000);
+
+    auto future = std::make_shared<Control>(Control::Clock::now() + 10s);
+    const int bounded =
+        Praktor::Execution::clampProcessTimeoutMs(30000, future);
+    CHECK(bounded > 0);
+    CHECK(bounded <= 10000);
+
+    auto expired = std::make_shared<Control>(Control::Clock::now() - 1ms);
+    CHECK(Praktor::Execution::clampProcessTimeoutMs(30000, expired) == 1);
+}
+
+TEST_CASE("ProgramExecutor rejects cancellation before process spawn",
+          "[workflow][execution-control][program]") {
+    using Control = Praktor::Execution::ExecutionControl;
+
+    Task task;
+    task.name = "controlled_program";
+    task.action = TaskAction::Program;
+    ProgramParams params;
+    params.program = "praktor-program-that-must-not-spawn";
+    task.specifics = params;
+
+    WorkflowContext context;
+    auto control = std::make_shared<Control>();
+    control->requestCancel();
+    context.setExecutionControl(control);
+
+    Praktor::Execution::ProgramExecutor executor;
+    const auto result = executor.execute(task, context);
+
+    CHECK_FALSE(result.success);
+    CHECK(result.error_code == "cancelled");
+    CHECK(result.error_phase == "execution_control");
 }
 
 TEST_CASE("workflow executor honors pre-start execution control",
