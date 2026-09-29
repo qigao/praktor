@@ -138,3 +138,36 @@ tasks:
 
     std::filesystem::remove_all(dir);
 }
+
+TEST_CASE("effect manifest distinguishes generated writes and proven outside-root access",
+          "[sdk][plan][effects]") {
+    const auto dir = effectTempDir();
+    const auto outside = effectTempDir();
+    const auto root = dir / "paths.yml";
+    const std::string outside_file =
+        (outside / "artifact.bin").generic_string();
+
+    writeEffectFile(root,
+        "tasks:\n"
+        "  - name: build\n"
+        "    sources: [input.txt]\n"
+        "    generates: [output.txt]\n"
+        "    command: \"echo build\"\n"
+        "  - name: fetch\n"
+        "    download:\n"
+        "      url: https://example.com/payload\n"
+        "      path: \"" + outside_file + "\"\n");
+
+    const auto manifest = describePlan(root).at("effect_manifest");
+    const auto effects = stringSet(manifest.at("effects"));
+
+    CHECK(effects.count("filesystem_read") == 1);
+    CHECK(effects.count("filesystem_write") == 1);
+    CHECK(effects.count("network") == 1);
+    CHECK(effects.count("process") == 1);
+    CHECK(effects.count("outside_workspace") == 1);
+    CHECK_FALSE(manifest.at("unknown_effects").as<bool>());
+
+    std::filesystem::remove_all(dir);
+    std::filesystem::remove_all(outside);
+}
