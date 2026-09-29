@@ -25,12 +25,6 @@ concurrency:
   group: praktor-native-sdk-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
-env:
-  SALTS_SDK_VERSION: "1.8.3"
-  SALTS_UTILS_SDK_VERSION: "4.1.3"
-  CHTTP_SDK_VERSION: "1.1.4"
-  TURBOSCRIPT_SDK_VERSION: "3.0.3"
-
 jobs:
   metadata:
     runs-on: ubuntu-24.04
@@ -120,10 +114,34 @@ jobs:
           packages="$RUNNER_TEMP/native-dependencies"
           dotnet restore packaging/nuget/Praktor.Native.csproj \
             --configfile "$config" --packages "$packages" --no-cache
-          echo "SALTS_ROOT=$packages/salts.native/$SALTS_SDK_VERSION/sdk/$RID" >> "$GITHUB_ENV"
-          echo "SALTS_UTILS_ROOT=$packages/saltsutils.native/$SALTS_UTILS_SDK_VERSION/sdk/$RID" >> "$GITHUB_ENV"
-          echo "CHTTP_ROOT=$packages/chttp.native/$CHTTP_SDK_VERSION/sdk/$RID" >> "$GITHUB_ENV"
-          echo "TURBOSCRIPT_ROOT=$packages/turboscript.native/$TURBOSCRIPT_SDK_VERSION/sdk/$RID" >> "$GITHUB_ENV"
+
+          resolve_sdk_root() {
+            local package_id="$1"
+            local package_dir="$packages/$package_id"
+            local count
+            local version_dir
+            count="$(find "$package_dir" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')"
+            test "$count" -eq 1
+            version_dir="$(find "$package_dir" -mindepth 1 -maxdepth 1 -type d -print -quit)"
+            test -d "$version_dir/sdk/$RID"
+            printf '%s\n' "$version_dir/sdk/$RID"
+          }
+
+          salts_root="$(resolve_sdk_root salts.native)"
+          salts_utils_root="$(resolve_sdk_root saltsutils.native)"
+          chttp_root="$(resolve_sdk_root chttp.native)"
+          turboscript_root="$(resolve_sdk_root turboscript.native)"
+
+          {
+            echo "SALTS_ROOT=$salts_root"
+            echo "SALTS_UTILS_ROOT=$salts_utils_root"
+            echo "CHTTP_ROOT=$chttp_root"
+            echo "TURBOSCRIPT_ROOT=$turboscript_root"
+            echo "SALTS_NATIVE_VERSION=$(basename "$(dirname "$(dirname "$salts_root")")")"
+            echo "SALTS_UTILS_NATIVE_VERSION=$(basename "$(dirname "$(dirname "$salts_utils_root")")")"
+            echo "CHTTP_NATIVE_VERSION=$(basename "$(dirname "$(dirname "$chttp_root")")")"
+            echo "TURBOSCRIPT_NATIVE_VERSION=$(basename "$(dirname "$(dirname "$turboscript_root")")")"
+          } >> "$GITHUB_ENV"
 
       - name: Build script-enabled Praktor SDK
         shell: bash
@@ -158,10 +176,10 @@ jobs:
           rid=$RID
           profile=Release
           script_engine=ON
-          turboscript=$TURBOSCRIPT_SDK_VERSION
-          chttp=$CHTTP_SDK_VERSION
-          salts=$SALTS_SDK_VERSION
-          salts_utils=$SALTS_UTILS_SDK_VERSION
+          turboscript=$TURBOSCRIPT_NATIVE_VERSION
+          chttp=$CHTTP_NATIVE_VERSION
+          salts=$SALTS_NATIVE_VERSION
+          salts_utils=$SALTS_UTILS_NATIVE_VERSION
           EOF
           mkdir -p dist
           tar -chzf "dist/praktor-$RID.tar.gz" -C stage "$RID"
@@ -245,6 +263,17 @@ jobs:
             "-p:PackageVersion=$SDK_VERSION" "-p:PackageRoot=$GITHUB_WORKSPACE/package" \
             "-p:RestorePackagesPath=$RUNNER_TEMP/pack-deps"
 
+          package="dist/Praktor.Native.$SDK_VERSION.nupkg"
+          nuspec="$RUNNER_TEMP/Praktor.Native.nuspec"
+          unzip -p "$package" 'Praktor.Native.nuspec' > "$nuspec"
+          for dep in Salts.Native SaltsUtils.Native CHttp.Native TurboScript.Native; do
+            grep -F "id=\"$dep\"" "$nuspec"
+          done
+          if grep -E 'id="(Salts\.Native|SaltsUtils\.Native|CHttp\.Native|TurboScript\.Native)" version="\[[0-9]' "$nuspec"; then
+            echo "Praktor.Native must not pin foundation dependency versions" >&2
+            exit 1
+          fi
+
           dotnet nuget add source "$GITHUB_WORKSPACE/dist" --name local-praktor --configfile "$config"
           project="$RUNNER_TEMP/praktor-packed-restore.csproj"
           cat > "$project" <<EOF
@@ -256,10 +285,22 @@ jobs:
           restored="$RUNNER_TEMP/praktor-packed-restore"
           dotnet restore "$project" --packages "$restored" --configfile "$config" --no-cache
 
-          export SALTS_ROOT="$restored/salts.native/$SALTS_SDK_VERSION/sdk/linux-x64"
-          export SALTS_UTILS_ROOT="$restored/saltsutils.native/$SALTS_UTILS_SDK_VERSION/sdk/linux-x64"
-          export CHTTP_ROOT="$restored/chttp.native/$CHTTP_SDK_VERSION/sdk/linux-x64"
-          export TURBOSCRIPT_ROOT="$restored/turboscript.native/$TURBOSCRIPT_SDK_VERSION/sdk/linux-x64"
+          resolve_restored_sdk() {
+            local package_id="$1"
+            local package_dir="$restored/$package_id"
+            local count
+            local version_dir
+            count="$(find "$package_dir" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')"
+            test "$count" -eq 1
+            version_dir="$(find "$package_dir" -mindepth 1 -maxdepth 1 -type d -print -quit)"
+            test -d "$version_dir/sdk/linux-x64"
+            printf '%s\n' "$version_dir/sdk/linux-x64"
+          }
+
+          export SALTS_ROOT="$(resolve_restored_sdk salts.native)"
+          export SALTS_UTILS_ROOT="$(resolve_restored_sdk saltsutils.native)"
+          export CHTTP_ROOT="$(resolve_restored_sdk chttp.native)"
+          export TURBOSCRIPT_ROOT="$(resolve_restored_sdk turboscript.native)"
           prefix="$restored/praktor.native/$SDK_VERSION/sdk/linux-x64"
           sudo apt-get update
           sudo apt-get install -y ninja-build pkg-config nasm
