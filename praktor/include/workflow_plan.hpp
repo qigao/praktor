@@ -5,7 +5,6 @@
 #include <cstdint>
 #include <filesystem>
 #include <string>
-#include <utility>
 #include <vector>
 
 namespace Praktor::Plan {
@@ -24,11 +23,7 @@ public:
     WorkflowPlan(std::string root_path,
                  std::string root_directory,
                  std::string digest,
-                 std::vector<WorkflowDependency> dependencies)
-        : root_path_(std::move(root_path)),
-          root_directory_(std::move(root_directory)),
-          digest_(std::move(digest)),
-          dependencies_(std::move(dependencies)) {}
+                 std::vector<WorkflowDependency> dependencies);
 
     static WorkflowPlan compile(const std::filesystem::path& workflow_path);
 
