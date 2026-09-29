@@ -64,8 +64,14 @@ TEST_CASE("WorkflowPlan describes reviewed dependency closure with SHA-256",
     const auto script = dir / "model.tbs";
     const auto dotenv = dir / "config.env";
 
-    writePlanFile(included, "tasks: []\n");
-    writePlanFile(nested, "tasks: []\n");
+    writePlanFile(included, R"(tasks:
+  - name: included_probe
+    command: "echo included"
+)");
+    writePlanFile(nested, R"(tasks:
+  - name: nested_probe
+    command: "echo nested"
+)");
     writePlanFile(script, "var imported_value = 1;\n");
     writePlanFile(dotenv, "PLAN_TEST=value\n");
     writePlanFile(root, R"(dotEnv:
@@ -148,7 +154,10 @@ TEST_CASE("WorkflowPlan rejects dependency mutation before execution",
     const auto root = dir / "workflow.yml";
     const auto nested = dir / "nested.yml";
 
-    writePlanFile(nested, "tasks: []\n");
+    writePlanFile(nested, R"(tasks:
+  - name: initial_probe
+    command: "echo initial"
+)");
     writePlanFile(root, R"(tasks:
   - name: nested
     uses: ./nested.yml
@@ -187,7 +196,10 @@ TEST_CASE("WorkflowPlan rejects transitive workflow escape outside root",
     const auto root = root_dir / "workflow.yml";
     const auto outside = parent / "outside.yml";
 
-    writePlanFile(outside, "tasks: []\n");
+    writePlanFile(outside, R"(tasks:
+  - name: outside_probe
+    command: "echo outside"
+)");
     writePlanFile(root, R"(tasks:
   - name: escaped
     uses: ../outside.yml
