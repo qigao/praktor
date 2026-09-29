@@ -131,6 +131,7 @@ std::unique_ptr<WorkflowContext> UsesExecutor::createIsolatedContext(
   // Nested reusable workflows share the parent's execution-control lifetime,
   // even though their variable/task contexts remain isolated.
   ctx->setExecutionControl(parent_context.getExecutionControl());
+  ctx->setExecutionObserver(parent_context.getExecutionObserver());
 
   // Set source path for relative path resolution
   ctx->setSourcePath(nested.source_path);
