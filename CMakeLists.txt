@@ -56,7 +56,7 @@ find_package(SaltsUtils 4.1.3 EXACT CONFIG REQUIRED
 find_package(Chttp 1.1.4 EXACT CONFIG REQUIRED
              PATHS "$ENV{CHTTP_ROOT}" NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)
 if(ENABLE_SCRIPT_ENGINE)
-    find_package(TurboScript 3.0.2 EXACT CONFIG REQUIRED
+    find_package(TurboScript 3.0.3 EXACT CONFIG REQUIRED
                  PATHS "$ENV{TURBOSCRIPT_ROOT}" NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)
 endif()
 find_package(cxxopts CONFIG REQUIRED)
