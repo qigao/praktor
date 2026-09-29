@@ -7,6 +7,7 @@
 #include "util/system_info.hpp"
 #include "util/turbo_script_runtime.hpp"
 #include "data/structured_document_query.hpp"
+#include <algorithm>
 #include <array>
 #include <cctype>
 #include <deque>
@@ -947,7 +948,8 @@ ScriptResult execute(const std::string &source, WorkflowContext &context,
   for (const auto& plugin : required_plugins) {
     if (turbo_script_load_plugin(ctx, plugin.c_str()) != 0) {
       result.success = false;
-      result.error_message = turbo_script_get_error(ctx);
+      const char* plugin_error = turbo_script_get_error(ctx);
+      result.error_message = plugin_error ? plugin_error : "";
       if (result.error_message.empty()) {
         result.error_message = "Failed to load TurboScript plugin: " + plugin;
       }
