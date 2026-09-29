@@ -567,6 +567,38 @@ TEST_CASE("Script engine: context execution control",
     }
 }
 
+TEST_CASE("Script engine: execution control cancels running shell process",
+          "[script][execution-control][shell]") {
+    using Control = Praktor::Execution::ExecutionControl;
+    using namespace std::chrono_literals;
+
+    WorkflowContext context;
+    auto control = std::make_shared<Control>();
+    context.setExecutionControl(control);
+
+#ifdef _WIN32
+    const std::string command =
+        "powershell -NoProfile -Command \"Start-Sleep -Seconds 10\"";
+#else
+    const std::string command = "sleep 10";
+#endif
+
+    std::thread canceller([control]() {
+        std::this_thread::sleep_for(100ms);
+        control->requestCancel();
+    });
+
+    const auto started = std::chrono::steady_clock::now();
+    const auto result = Praktor::Script::execute(
+        "shell.exec(\"" + escape_script_string(command) + "\");", context);
+    const auto elapsed = std::chrono::steady_clock::now() - started;
+    canceller.join();
+
+    CHECK_FALSE(result.success);
+    CHECK(result.error_message.find("cancel") != std::string::npos);
+    CHECK(elapsed < 5s);
+}
+
 TEST_CASE("Script engine: control flow", "[script]") {
     WorkflowContext context;
 
