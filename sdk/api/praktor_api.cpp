@@ -31,7 +31,8 @@ constexpr uint64_t buildCapabilities() {
     uint64_t capabilities =
         PRAKTOR_CAPABILITY_JSON_WORKFLOW |
         PRAKTOR_CAPABILITY_EXECUTION_CONTROL |
-        PRAKTOR_CAPABILITY_WORKFLOW_PLAN;
+        PRAKTOR_CAPABILITY_WORKFLOW_PLAN |
+        PRAKTOR_CAPABILITY_EXECUTION_EVENTS;
 #if PRAKTOR_SCRIPT_ENGINE_ENABLED
     capabilities |= PRAKTOR_CAPABILITY_SCRIPT_ENGINE;
 #endif
@@ -120,6 +121,76 @@ bool validateControl(const praktor_execution_control* control,
         return false;
     }
     return true;
+}
+
+bool validateObserver(const praktor_execution_observer* observer,
+                      praktor_error* error) {
+    if (!observer) {
+        return true;
+    }
+    if (observer->struct_size < sizeof(praktor_execution_observer)) {
+        setError(error, PRAKTOR_ERROR_PHASE_REQUEST,
+                 "Invalid execution observer structure");
+        return false;
+    }
+    for (const auto value : observer->reserved) {
+        if (value != 0) {
+            setError(error, PRAKTOR_ERROR_PHASE_REQUEST,
+                     "Execution observer reserved fields must be zero");
+            return false;
+        }
+    }
+    return true;
+}
+
+praktor_event_type toPublicEventType(
+    Praktor::Execution::ExecutionEventType type) {
+    using Type = Praktor::Execution::ExecutionEventType;
+    switch (type) {
+    case Type::WorkflowStarted:
+        return PRAKTOR_EVENT_WORKFLOW_STARTED;
+    case Type::TaskStarted:
+        return PRAKTOR_EVENT_TASK_STARTED;
+    case Type::TaskProgress:
+        return PRAKTOR_EVENT_TASK_PROGRESS;
+    case Type::TaskCompleted:
+        return PRAKTOR_EVENT_TASK_COMPLETED;
+    case Type::TaskFailed:
+        return PRAKTOR_EVENT_TASK_FAILED;
+    case Type::WorkflowCompleted:
+        return PRAKTOR_EVENT_WORKFLOW_COMPLETED;
+    }
+    return PRAKTOR_EVENT_WORKFLOW_COMPLETED;
+}
+
+std::shared_ptr<Praktor::Execution::ExecutionObserver> makeExecutionObserver(
+    const praktor_execution_observer* observer) {
+    if (!observer || !observer->on_event) {
+        return {};
+    }
+
+    return std::make_shared<Praktor::Execution::ExecutionObserver>(
+        [observer](const Praktor::Execution::ExecutionEvent& event) {
+            praktor_execution_event public_event{};
+            public_event.struct_size = sizeof(public_event);
+            public_event.sequence = event.sequence;
+            public_event.type = toPublicEventType(event.type);
+            public_event.task_name =
+                event.task_name.empty() ? nullptr : event.task_name.c_str();
+            public_event.status =
+                event.status.empty() ? nullptr : event.status.c_str();
+            public_event.message =
+                event.message.empty() ? nullptr : event.message.c_str();
+            public_event.thread_id = observer->thread_id;
+            public_event.run_id = observer->run_id;
+            public_event.turn_id = observer->turn_id;
+            public_event.tool_call_id = observer->tool_call_id;
+            try {
+                observer->on_event(&public_event, observer->user_data);
+            } catch (...) {
+                // Observation must never alter workflow execution semantics.
+            }
+        });
 }
 
 struct CancellationProbeBridge {
@@ -250,11 +321,13 @@ praktor_result encodeResult(const WorkflowValue& result,
 praktor_result executeWorkflowImpl(
     const praktor_execute_request* request,
     const praktor_execution_control* control,
+    const praktor_execution_observer* observer,
     praktor_owned_json* output,
     praktor_error* error) {
     clearError(error);
     if (!validateRequest(request, output, error) ||
-        !validateControl(control, error)) {
+        !validateControl(control, error) ||
+        !validateObserver(observer, error)) {
         return PRAKTOR_RESULT_INVALID_ARGUMENT;
     }
     output->size = 0;
@@ -276,10 +349,15 @@ praktor_result executeWorkflowImpl(
     try {
         CancellationProbeBridge bridge;
         auto execution_control = makeExecutionControl(control, bridge);
+        auto execution_observer = makeExecutionObserver(observer);
         WorkflowRunner runner(request->workflow_path, std::move(inputs));
-        execution = execution_control
-            ? runner.executeWithControl(std::move(execution_control))
-            : runner.execute();
+        execution = execution_observer
+            ? runner.executeObserved(
+                  std::move(execution_control),
+                  std::move(execution_observer))
+            : execution_control
+                  ? runner.executeWithControl(std::move(execution_control))
+                  : runner.execute();
     } catch (const std::bad_alloc&) {
         setError(error, PRAKTOR_ERROR_PHASE_EXECUTION,
                  "Out of memory while executing workflow");
@@ -350,13 +428,24 @@ int32_t PRAKTOR_CALL executeWorkflowPlan(
         praktor_execute_workflow_plan(request, control, output, error));
 }
 
+int32_t PRAKTOR_CALL executeWorkflowPlanObserved(
+    const praktor_plan_execute_request* request,
+    const praktor_execution_control* control,
+    const praktor_execution_observer* observer,
+    praktor_owned_json* output,
+    praktor_error* error) {
+    return static_cast<int32_t>(
+        praktor_execute_workflow_plan_observed(
+            request, control, observer, output, error));
+}
+
 } // namespace
 
 praktor_result PRAKTOR_CALL praktor_execute_workflow(
     const praktor_execute_request* request,
     praktor_owned_json* output,
     praktor_error* error) {
-    return executeWorkflowImpl(request, nullptr, output, error);
+    return executeWorkflowImpl(request, nullptr, nullptr, output, error);
 }
 
 praktor_result PRAKTOR_CALL praktor_execute_workflow_controlled(
@@ -364,7 +453,7 @@ praktor_result PRAKTOR_CALL praktor_execute_workflow_controlled(
     const praktor_execution_control* control,
     praktor_owned_json* output,
     praktor_error* error) {
-    return executeWorkflowImpl(request, control, output, error);
+    return executeWorkflowImpl(request, control, nullptr, output, error);
 }
 
 praktor_result PRAKTOR_CALL praktor_compile_workflow(
@@ -408,18 +497,21 @@ praktor_result PRAKTOR_CALL praktor_describe_workflow_plan(
     return encodeResult(plan->value.toValue(), *output, error);
 }
 
-praktor_result PRAKTOR_CALL praktor_execute_workflow_plan(
+namespace {
+
+praktor_result executeWorkflowPlanImpl(
     const praktor_plan_execute_request* request,
     const praktor_execution_control* control,
+    const praktor_execution_observer* observer,
     praktor_owned_json* output,
     praktor_error* error) {
     clearError(error);
     if (!request || request->struct_size < sizeof(praktor_plan_execute_request) ||
         !request->plan || !request->input_json || request->input_json_size == 0 ||
         !validateError(error) || !validateOutput(output, error) ||
-        !validateControl(control, error)) {
+        !validateControl(control, error) || !validateObserver(observer, error)) {
         setError(error, PRAKTOR_ERROR_PHASE_REQUEST,
-                 "Valid WorkflowPlan, non-empty input_json, and empty output are required");
+                 "Valid WorkflowPlan, execution controls, non-empty input_json, and empty output are required");
         return PRAKTOR_RESULT_INVALID_ARGUMENT;
     }
 
@@ -433,7 +525,29 @@ praktor_result PRAKTOR_CALL praktor_execute_workflow_plan(
     execute_request.workflow_path = request->plan->value.rootPath().c_str();
     execute_request.input_json = request->input_json;
     execute_request.input_json_size = request->input_json_size;
-    return executeWorkflowImpl(&execute_request, control, output, error);
+    return executeWorkflowImpl(
+        &execute_request, control, observer, output, error);
+}
+
+} // namespace
+
+praktor_result PRAKTOR_CALL praktor_execute_workflow_plan(
+    const praktor_plan_execute_request* request,
+    const praktor_execution_control* control,
+    praktor_owned_json* output,
+    praktor_error* error) {
+    return executeWorkflowPlanImpl(
+        request, control, nullptr, output, error);
+}
+
+praktor_result PRAKTOR_CALL praktor_execute_workflow_plan_observed(
+    const praktor_plan_execute_request* request,
+    const praktor_execution_control* control,
+    const praktor_execution_observer* observer,
+    praktor_owned_json* output,
+    praktor_error* error) {
+    return executeWorkflowPlanImpl(
+        request, control, observer, output, error);
 }
 
 void PRAKTOR_CALL praktor_release_workflow_plan(praktor_workflow_plan* plan) {
@@ -462,6 +576,7 @@ const praktor_api* PRAKTOR_CALL praktor_get_api(void) {
         &describeWorkflowPlan,
         &executeWorkflowPlan,
         &praktor_release_workflow_plan,
+        &executeWorkflowPlanObserved,
     };
     return &api;
 }
