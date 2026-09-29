@@ -63,8 +63,11 @@ TEST_CASE("WorkflowPlan describes reviewed dependency closure with SHA-256",
     const auto nested = dir / "nested.yml";
     const auto script = dir / "model.tbs";
     const auto dotenv = dir / "config.env";
+    const auto included_dotenv = dir / "shared.env";
 
-    writePlanFile(included, R"(tasks:
+    writePlanFile(included, R"(dotEnv:
+  - shared.env
+tasks:
   - name: included_probe
     command: "echo included"
 )");
@@ -74,6 +77,7 @@ TEST_CASE("WorkflowPlan describes reviewed dependency closure with SHA-256",
 )");
     writePlanFile(script, "var imported_value = 1;\n");
     writePlanFile(dotenv, "PLAN_TEST=value\n");
+    writePlanFile(included_dotenv, "INCLUDED_PLAN_TEST=value\n");
     writePlanFile(root, R"(dotEnv:
   - config.env
 includes:
@@ -100,7 +104,7 @@ tasks:
     const auto digest = json.at("digest").as<std::string>();
     CHECK(digest.size() == 64);
     REQUIRE(json.at("dependencies").is_array());
-    CHECK(json.at("dependencies").size() == 5);
+    CHECK(json.at("dependencies").size() == 6);
 
     const std::string serialized(metadata.data, metadata.size);
     CHECK(serialized.find("workflow.yml") != std::string::npos);
@@ -108,6 +112,7 @@ tasks:
     CHECK(serialized.find("nested.yml") != std::string::npos);
     CHECK(serialized.find("model.tbs") != std::string::npos);
     CHECK(serialized.find("config.env") != std::string::npos);
+    CHECK(serialized.find("shared.env") != std::string::npos);
     CHECK(serialized.find("\"root\"") != std::string::npos);
     CHECK(serialized.find("\"include\"") != std::string::npos);
     CHECK(serialized.find("\"uses\"") != std::string::npos);
