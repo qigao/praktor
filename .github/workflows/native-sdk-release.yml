@@ -25,12 +25,6 @@ concurrency:
   group: praktor-native-sdk-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
-env:
-  SALTS_SDK_VERSION: "1.8.3"
-  SALTS_UTILS_SDK_VERSION: "4.1.3"
-  CHTTP_SDK_VERSION: "1.1.4"
-  TURBOSCRIPT_SDK_VERSION: "3.0.3"
-
 jobs:
   metadata:
     runs-on: ubuntu-24.04
@@ -86,10 +80,6 @@ jobs:
 
       - uses: qigao/vcpkg-cache/.github/actions/setup-re2c-tools@master
 
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: "8.0.x"
-
       - uses: actions/setup-python@v5
         if: matrix.rid != 'android-arm64-v8a'
         with:
@@ -107,23 +97,50 @@ jobs:
           fi
           if [[ "$RID" == macos-arm64 ]]; then test "$(uname -m)" = arm64; fi
 
-      - name: Restore released native SDK dependencies
+      - name: Restore current native SDK dependencies
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail
-          config="$RUNNER_TEMP/praktor-sdk-nuget.config"
-          printf '<configuration><packageSources><clear /></packageSources></configuration>\n' > "$config"
-          dotnet nuget add source https://nuget.pkg.github.com/qigao/index.json --name github \
-            --username qigao --password "$GITHUB_TOKEN" --store-password-in-clear-text --configfile "$config"
-          packages="$RUNNER_TEMP/native-dependencies"
-          dotnet restore packaging/nuget/Praktor.Native.csproj \
-            --configfile "$config" --packages "$packages" --no-cache
-          echo "SALTS_ROOT=$packages/salts.native/$SALTS_SDK_VERSION/sdk/$RID" >> "$GITHUB_ENV"
-          echo "SALTS_UTILS_ROOT=$packages/saltsutils.native/$SALTS_UTILS_SDK_VERSION/sdk/$RID" >> "$GITHUB_ENV"
-          echo "CHTTP_ROOT=$packages/chttp.native/$CHTTP_SDK_VERSION/sdk/$RID" >> "$GITHUB_ENV"
-          echo "TURBOSCRIPT_ROOT=$packages/turboscript.native/$TURBOSCRIPT_SDK_VERSION/sdk/$RID" >> "$GITHUB_ENV"
+          sdk_root="$RUNNER_TEMP/native-dependencies"
+          mkdir -p "$sdk_root"
+
+          restore_sdk() {
+            local repo="$1"
+            local pattern="$2"
+            local name="$3"
+            local config_rel="$4"
+            local release_env="$5"
+            local dir="$sdk_root/$name"
+            local tag
+            local nupkg
+
+            tag="$(gh release view --repo "$repo" --json tagName --jq .tagName)"
+            test -n "$tag"
+            mkdir -p "$dir/download" "$dir/package"
+            gh release download "$tag" --repo "$repo" --pattern "$pattern" \
+              --dir "$dir/download" --clobber
+            nupkg="$(find "$dir/download" -maxdepth 1 -type f -name '*.nupkg' -print -quit)"
+            test -n "$nupkg"
+            unzip -q "$nupkg" -d "$dir/package"
+            local root="$dir/package/sdk/$RID"
+            test -f "$root/$config_rel"
+            echo "$release_env=$tag" >> "$GITHUB_ENV"
+            printf '%s\n' "$root"
+          }
+
+          salts_root="$(restore_sdk qigao/salts 'Salts.Native.*.nupkg' salts 'lib/cmake/Salts/SaltsConfig.cmake' SALTS_SDK_RELEASE)"
+          utils_root="$(restore_sdk qigao/salts-utils 'SaltsUtils.Native.*.nupkg' salts-utils 'lib/cmake/SaltsUtils/SaltsUtilsConfig.cmake' SALTS_UTILS_SDK_RELEASE)"
+          chttp_root="$(restore_sdk qigao/chttp 'CHttp.Native.*.nupkg' chttp 'lib/cmake/Chttp/ChttpConfig.cmake' CHTTP_SDK_RELEASE)"
+          script_root="$(restore_sdk qigao/TurboScript 'TurboScript.Native.*.nupkg' turboscript 'lib/cmake/TurboScript/TurboScriptConfig.cmake' TURBOSCRIPT_SDK_RELEASE)"
+
+          {
+            echo "SALTS_ROOT=$salts_root"
+            echo "SALTS_UTILS_ROOT=$utils_root"
+            echo "CHTTP_ROOT=$chttp_root"
+            echo "TURBOSCRIPT_ROOT=$script_root"
+          } >> "$GITHUB_ENV"
 
       - name: Build script-enabled Praktor SDK
         shell: bash
@@ -158,10 +175,10 @@ jobs:
           rid=$RID
           profile=Release
           script_engine=ON
-          turboscript=$TURBOSCRIPT_SDK_VERSION
-          chttp=$CHTTP_SDK_VERSION
-          salts=$SALTS_SDK_VERSION
-          salts_utils=$SALTS_UTILS_SDK_VERSION
+          turboscript_release=$TURBOSCRIPT_SDK_RELEASE
+          chttp_release=$CHTTP_SDK_RELEASE
+          salts_release=$SALTS_SDK_RELEASE
+          salts_utils_release=$SALTS_UTILS_SDK_RELEASE
           EOF
           mkdir -p dist
           tar -chzf "dist/praktor-$RID.tar.gz" -C stage "$RID"
@@ -225,6 +242,7 @@ jobs:
       - name: Pack and qualify final NuGet
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SDK_VERSION: ${{ needs.metadata.outputs.version }}
         shell: bash
         run: |
@@ -256,10 +274,31 @@ jobs:
           restored="$RUNNER_TEMP/praktor-packed-restore"
           dotnet restore "$project" --packages "$restored" --configfile "$config" --no-cache
 
-          export SALTS_ROOT="$restored/salts.native/$SALTS_SDK_VERSION/sdk/linux-x64"
-          export SALTS_UTILS_ROOT="$restored/saltsutils.native/$SALTS_UTILS_SDK_VERSION/sdk/linux-x64"
-          export CHTTP_ROOT="$restored/chttp.native/$CHTTP_SDK_VERSION/sdk/linux-x64"
-          export TURBOSCRIPT_ROOT="$restored/turboscript.native/$TURBOSCRIPT_SDK_VERSION/sdk/linux-x64"
+          sdk_root="$RUNNER_TEMP/praktor-pack-native-deps"
+          mkdir -p "$sdk_root"
+          restore_sdk() {
+            local repo="$1"
+            local pattern="$2"
+            local name="$3"
+            local config_rel="$4"
+            local dir="$sdk_root/$name"
+            local tag
+            local nupkg
+            tag="$(gh release view --repo "$repo" --json tagName --jq .tagName)"
+            test -n "$tag"
+            mkdir -p "$dir/download" "$dir/package"
+            gh release download "$tag" --repo "$repo" --pattern "$pattern" --dir "$dir/download" --clobber
+            nupkg="$(find "$dir/download" -maxdepth 1 -type f -name '*.nupkg' -print -quit)"
+            test -n "$nupkg"
+            unzip -q "$nupkg" -d "$dir/package"
+            local root="$dir/package/sdk/linux-x64"
+            test -f "$root/$config_rel"
+            printf '%s\n' "$root"
+          }
+          export SALTS_ROOT="$(restore_sdk qigao/salts 'Salts.Native.*.nupkg' salts 'lib/cmake/Salts/SaltsConfig.cmake')"
+          export SALTS_UTILS_ROOT="$(restore_sdk qigao/salts-utils 'SaltsUtils.Native.*.nupkg' salts-utils 'lib/cmake/SaltsUtils/SaltsUtilsConfig.cmake')"
+          export CHTTP_ROOT="$(restore_sdk qigao/chttp 'CHttp.Native.*.nupkg' chttp 'lib/cmake/Chttp/ChttpConfig.cmake')"
+          export TURBOSCRIPT_ROOT="$(restore_sdk qigao/TurboScript 'TurboScript.Native.*.nupkg' turboscript 'lib/cmake/TurboScript/TurboScriptConfig.cmake')"
           prefix="$restored/praktor.native/$SDK_VERSION/sdk/linux-x64"
           sudo apt-get update
           sudo apt-get install -y ninja-build pkg-config nasm
