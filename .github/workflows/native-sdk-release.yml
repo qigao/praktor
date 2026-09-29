@@ -1,4 +1,4 @@
-name: Praktor native SDK release
+name: Praktor native SDK
 
 on:
   pull_request:
@@ -36,7 +36,6 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       version: ${{ steps.version.outputs.version }}
-      release: ${{ steps.version.outputs.release }}
     steps:
       - uses: actions/checkout@v4
       - id: version
@@ -57,10 +56,8 @@ jobs:
           if [[ "$GITHUB_REF" == refs/tags/* ]]; then
             test "$GITHUB_REF_NAME" = "v$version"
             echo "version=$version" >> "$GITHUB_OUTPUT"
-            echo "release=true" >> "$GITHUB_OUTPUT"
           else
             echo "version=$version-ci.$GITHUB_RUN_NUMBER.$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
-            echo "release=false" >> "$GITHUB_OUTPUT"
           fi
 
   build:
