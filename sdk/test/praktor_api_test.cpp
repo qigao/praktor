@@ -88,6 +88,47 @@ TEST_CASE("Praktor C API publishes JSON workflow execution and ownership", "[sdk
     CHECK(error.phase == PRAKTOR_ERROR_PHASE_REQUEST);
 }
 
+TEST_CASE("Praktor C API rejects malformed execution control before execution",
+          "[sdk][abi][execution-control]") {
+    const auto dir = createTempDir();
+    const auto workflow_path = dir / "invalid-control.yml";
+    writeFile(workflow_path, "tasks: []\n");
+
+    const std::string input = "{}";
+    const std::string workflow_path_storage = workflow_path.string();
+    const auto request = makeRequest(workflow_path_storage, input);
+
+    SECTION("short struct") {
+        praktor_execution_control control = PRAKTOR_EXECUTION_CONTROL_INIT;
+        control.struct_size = sizeof(uint32_t);
+
+        praktor_owned_json output = PRAKTOR_OWNED_JSON_INIT;
+        praktor_error error = PRAKTOR_ERROR_INIT;
+        CHECK(praktor_execute_workflow_controlled(
+                  &request, &control, &output, &error) ==
+              PRAKTOR_RESULT_INVALID_ARGUMENT);
+        CHECK(output.data == nullptr);
+        CHECK(output.size == 0);
+        CHECK(error.phase == PRAKTOR_ERROR_PHASE_REQUEST);
+    }
+
+    SECTION("nonzero reserved field") {
+        praktor_execution_control control = PRAKTOR_EXECUTION_CONTROL_INIT;
+        control.reserved[0] = 1;
+
+        praktor_owned_json output = PRAKTOR_OWNED_JSON_INIT;
+        praktor_error error = PRAKTOR_ERROR_INIT;
+        CHECK(praktor_execute_workflow_controlled(
+                  &request, &control, &output, &error) ==
+              PRAKTOR_RESULT_INVALID_ARGUMENT);
+        CHECK(output.data == nullptr);
+        CHECK(output.size == 0);
+        CHECK(error.phase == PRAKTOR_ERROR_PHASE_REQUEST);
+    }
+
+    std::filesystem::remove_all(dir);
+}
+
 TEST_CASE("Praktor C API controlled execution reports cancellation",
           "[sdk][abi][execution-control]") {
     const auto dir = createTempDir();
