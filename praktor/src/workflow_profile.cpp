@@ -1,6 +1,7 @@
 #include "workflow_profile.hpp"
 
 #include <algorithm>
+#include <utility>
 
 namespace Praktor::Profile {
 
