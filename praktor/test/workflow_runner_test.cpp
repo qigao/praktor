@@ -1038,7 +1038,7 @@ tasks:
         CHECK_FALSE(result.success);
         CHECK(result.value["workflow_status"].as<std::string>() == "cancelled");
         CHECK(result.error_message == "Workflow execution cancelled");
-        CHECK(result.value["tasks"]["should_not_run"]["outputs"]["ran"].is_null());
+        CHECK_FALSE(result.value["tasks"].contains("should_not_run"));
     }
 
     SECTION("expired runner deadline returns timed_out") {
@@ -1051,7 +1051,7 @@ tasks:
         CHECK_FALSE(result.success);
         CHECK(result.value["workflow_status"].as<std::string>() == "timed_out");
         CHECK(result.error_message == "Workflow execution timed out");
-        CHECK(result.value["tasks"]["should_not_run"]["outputs"]["ran"].is_null());
+        CHECK_FALSE(result.value["tasks"].contains("should_not_run"));
     }
 
     std::filesystem::remove_all(dir);
