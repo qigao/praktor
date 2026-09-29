@@ -29,4 +29,4 @@ find_package(Praktor 0.4.0 CONFIG REQUIRED)
 target_link_libraries(my_app PRIVATE Praktor::Praktor)
 ```
 
-PR/master 只做 qualification。正式 package 由匹配项目版本的 `v0.4.0` tag 发布。
+PR 只做 qualification；不在 master push 上重复跑整套三平台构建。正式 package 只由匹配项目版本的 `v0.4.0` tag 发布。
