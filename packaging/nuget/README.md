@@ -2,12 +2,13 @@
 
 Praktor 的 script-enabled native SDK，由 `qigao/praktor` 自己构建、验证和发布。
 
-正式依赖固定为：
+正式依赖不在 Praktor 中固定版本。NuGet restore 使用 floating dependency，
+由发布/消费时可用的最新兼容 Native SDK 决定：
 
-- `Salts.Native 1.8.3`
-- `SaltsUtils.Native 4.1.3`
-- `CHttp.Native 1.1.4`
-- `TurboScript.Native 3.0.3`
+- `Salts.Native`
+- `SaltsUtils.Native`
+- `CHttp.Native`
+- `TurboScript.Native`
 
 其中 TurboScript 负责 Praktor 的脚本执行能力（MIR interpreter/JIT 和 native modules）。
 `ENABLE_SCRIPT_ENGINE=OFF` 的 core-only Praktor 不依赖 TurboScript。
@@ -25,8 +26,8 @@ SDK 平台：
 `TURBOSCRIPT_ROOT` 和 `PRAKTOR_ROOT`，再使用：
 
 ```cmake
-find_package(Praktor 0.4.0 CONFIG REQUIRED)
+find_package(Praktor CONFIG REQUIRED)
 target_link_libraries(my_app PRIVATE Praktor::Praktor)
 ```
 
-PR 只做 qualification；不在 master push 上重复跑整套三平台构建。正式 package 只由匹配项目版本的 `v0.4.0` tag 发布。
+PR 只做 qualification；不在 master push 上重复跑整套三平台构建。正式 package 只由与当前项目版本匹配的 release tag 发布。
