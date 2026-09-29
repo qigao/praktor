@@ -10,6 +10,7 @@
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <random>
 #include <thread>
 
@@ -501,6 +502,69 @@ TEST_CASE("Script engine: concurrent executions stay stable", "[script][concurre
     }
 
     REQUIRE(failures.load(std::memory_order_relaxed) == 0);
+}
+
+TEST_CASE("Script engine: context execution control",
+          "[script][execution-control]") {
+    using Control = Praktor::Execution::ExecutionControl;
+    using namespace std::chrono_literals;
+
+    SECTION("pre-cancel prevents script side effects while preserving legacy run path") {
+        WorkflowContext context;
+        auto control = std::make_shared<Control>();
+        control->requestCancel();
+        context.setExecutionControl(control);
+
+        const auto result = Praktor::Script::execute(R"script(
+            import("net");
+            ctx.set("should_not_run", 1);
+        )script", context);
+
+        CHECK_FALSE(result.success);
+        CHECK(result.error_message.find("cancel") != std::string::npos);
+        CHECK_FALSE(context.hasKey("should_not_run"));
+    }
+
+    SECTION("expired deadline is reported distinctly") {
+        WorkflowContext context;
+        auto control = std::make_shared<Control>(Control::Clock::now() - 1ms);
+        context.setExecutionControl(control);
+
+        const auto result =
+            Praktor::Script::execute("ctx.set(\"should_not_run\", 1);", context);
+
+        CHECK_FALSE(result.success);
+        CHECK(result.error_message.find("timed out") != std::string::npos);
+        CHECK_FALSE(context.hasKey("should_not_run"));
+    }
+
+    SECTION("running JIT loop observes cooperative cancellation") {
+        WorkflowContext context;
+        auto control = std::make_shared<Control>();
+        context.setExecutionControl(control);
+
+        std::thread canceller([control]() {
+            std::this_thread::sleep_for(50ms);
+            control->requestCancel();
+        });
+
+        const auto started = std::chrono::steady_clock::now();
+        const auto result = Praktor::Script::execute(R"script(
+            import("net");
+            i = 0;
+            while (i < 1000000000) {
+                i = i + 1;
+            }
+            ctx.set("should_not_run", 1);
+        )script", context);
+        const auto elapsed = std::chrono::steady_clock::now() - started;
+        canceller.join();
+
+        CHECK_FALSE(result.success);
+        CHECK(result.error_message.find("cancel") != std::string::npos);
+        CHECK_FALSE(context.hasKey("should_not_run"));
+        CHECK(elapsed < 5s);
+    }
 }
 
 TEST_CASE("Script engine: control flow", "[script]") {
