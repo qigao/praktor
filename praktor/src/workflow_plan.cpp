@@ -380,6 +380,15 @@ std::string manifestDigest(const std::vector<WorkflowDependency>& dependencies) 
 
 } // namespace
 
+WorkflowPlan::WorkflowPlan(std::string root_path,
+                           std::string root_directory,
+                           std::string digest,
+                           std::vector<WorkflowDependency> dependencies)
+    : root_path_(std::move(root_path)),
+      root_directory_(std::move(root_directory)),
+      digest_(std::move(digest)),
+      dependencies_(std::move(dependencies)) {}
+
 WorkflowPlan WorkflowPlan::compile(const fs::path& workflow_path) {
     if (workflow_path.empty()) {
         throw std::runtime_error("WorkflowPlan requires a workflow path");
