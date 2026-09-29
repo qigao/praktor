@@ -788,6 +788,9 @@ bool WorkflowExecutor::executeTask(const Task &task, WorkflowContext &context,
                                    size_t trigger_depth) {
   // Mark as running in registry to allow setOutput calls
   setTaskExecutionStatus(task, context, alias, "running");
+  context.emitExecutionEvent(
+      Praktor::Execution::ExecutionEventType::TaskStarted,
+      task.name, "running");
 
   bool overall_success = false;
   std::string final_status = "failed";
@@ -870,6 +873,11 @@ bool WorkflowExecutor::executeTask(const Task &task, WorkflowContext &context,
   setTaskExecutionStatus(task, context, alias, final_status,
                          failure.result.error_message,
                          failure_snapshot ? &*failure_snapshot : nullptr);
+  context.emitExecutionEvent(
+      overall_success
+          ? Praktor::Execution::ExecutionEventType::TaskCompleted
+          : Praktor::Execution::ExecutionEventType::TaskFailed,
+      task.name, final_status);
 
   if (failure_snapshot) {
     context.setFailureContext(*failure_snapshot);
