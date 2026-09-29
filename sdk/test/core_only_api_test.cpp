@@ -2,6 +2,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <atomic>
 #include <chrono>
 #include <cstring>
 #include <filesystem>
@@ -45,6 +46,44 @@ TEST_CASE("core-only ABI advertises JSON workflows without script capability") {
     REQUIRE(api != nullptr);
     CHECK((api->capabilities & PRAKTOR_CAPABILITY_JSON_WORKFLOW) != 0);
     CHECK((api->capabilities & PRAKTOR_CAPABILITY_SCRIPT_ENGINE) == 0);
+    CHECK((api->capabilities & PRAKTOR_CAPABILITY_EXECUTION_CONTROL) != 0);
+    REQUIRE(api->execute_workflow_controlled != nullptr);
+}
+
+TEST_CASE("core-only ABI supports controlled pre-start cancellation") {
+    const auto dir = createApiTempDir();
+    const auto workflow = dir / "controlled.yml";
+    writeText(workflow, R"(
+tasks:
+  - name: should_not_run
+    command: "echo should-not-run"
+)");
+
+    static const char input[] = "{}";
+    const std::string stable_path = workflow.string();
+    praktor_execute_request request = PRAKTOR_EXECUTE_REQUEST_INIT;
+    request.workflow_path = stable_path.c_str();
+    request.input_json = input;
+    request.input_json_size = sizeof(input) - 1;
+
+    std::atomic<bool> cancelled{true};
+    praktor_execution_control control = PRAKTOR_EXECUTION_CONTROL_INIT;
+    control.cancel_probe = [](void* user_data) -> int32_t {
+        return static_cast<std::atomic<bool>*>(user_data)
+                       ->load(std::memory_order_acquire)
+            ? 1
+            : 0;
+    };
+    control.cancel_user_data = &cancelled;
+
+    praktor_owned_json output = PRAKTOR_OWNED_JSON_INIT;
+    praktor_error error = PRAKTOR_ERROR_INIT;
+    CHECK(praktor_execute_workflow_controlled(
+              &request, &control, &output, &error) == PRAKTOR_RESULT_CANCELLED);
+    REQUIRE(output.data != nullptr);
+    CHECK(std::strstr(output.data, "\"workflow_status\":\"cancelled\"") != nullptr);
+    praktor_release_json(&output);
+    std::filesystem::remove_all(dir);
 }
 
 TEST_CASE("core-only ABI executes command workflow and rejects script workflow") {
