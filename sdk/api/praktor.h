@@ -21,11 +21,12 @@ typedef enum praktor_result {
     PRAKTOR_RESULT_OUT_OF_MEMORY = -3,
     PRAKTOR_RESULT_INTERNAL_ERROR = -4,
     PRAKTOR_RESULT_PLAN_INVALID = -5,
-    PRAKTOR_RESULT_PLAN_MISMATCH = -6
+    PRAKTOR_RESULT_PLAN_MISMATCH = -6,
+    PRAKTOR_RESULT_INPUT_CONTRACT = -7
 } praktor_result;
 
 #define PRAKTOR_ABI_MAJOR 2u
-#define PRAKTOR_ABI_MINOR 2u
+#define PRAKTOR_ABI_MINOR 3u
 
 #define PRAKTOR_CAPABILITY_JSON_WORKFLOW (UINT64_C(1) << 0)
 #define PRAKTOR_CAPABILITY_SCRIPT_ENGINE (UINT64_C(1) << 1)
@@ -38,7 +39,8 @@ typedef enum praktor_error_phase {
     PRAKTOR_ERROR_PHASE_INPUT_JSON = 2,
     PRAKTOR_ERROR_PHASE_EXECUTION = 3,
     PRAKTOR_ERROR_PHASE_RESULT_JSON = 4,
-    PRAKTOR_ERROR_PHASE_PLAN = 5
+    PRAKTOR_ERROR_PHASE_PLAN = 5,
+    PRAKTOR_ERROR_PHASE_INPUT_CONTRACT = 6
 } praktor_error_phase;
 
 /** Opaque immutable reviewed workflow identity owned by Praktor. */
