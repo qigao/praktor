@@ -105,14 +105,23 @@ std::shared_ptr<Praktor::Execution::ExecutionControl> makeExecutionControl(
     using Control = Praktor::Execution::ExecutionControl;
     std::optional<Control::Clock::time_point> deadline;
     if (control->timeout_ms != 0) {
-        const auto timeout =
-            std::chrono::milliseconds(static_cast<int64_t>(control->timeout_ms));
         const auto now = Control::Clock::now();
         const auto remaining =
             Control::Clock::time_point::max() - now;
-        deadline = timeout >= remaining
-            ? Control::Clock::time_point::max()
-            : now + timeout;
+        using MillisecondsLongDouble =
+            std::chrono::duration<long double, std::milli>;
+        const MillisecondsLongDouble requested(
+            static_cast<long double>(control->timeout_ms));
+        const MillisecondsLongDouble available(remaining);
+        if (requested >= available) {
+            deadline = Control::Clock::time_point::max();
+        } else {
+            const auto timeout =
+                std::chrono::duration_cast<Control::Clock::duration>(
+                    std::chrono::milliseconds(
+                        static_cast<int64_t>(control->timeout_ms)));
+            deadline = now + timeout;
+        }
     }
 
     bridge.probe = control->cancel_probe;
