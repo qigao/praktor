@@ -12,6 +12,20 @@
       "type": "string",
       "description": "Optional workflow summary."
     },
+    "input_policy": {
+      "type": "string",
+      "enum": ["allow_extra", "strict"],
+      "default": "allow_extra",
+      "description": "Controls whether undeclared workflow inputs are accepted."
+    },
+    "inputs": {
+      "$ref": "#/$defs/workflowInputContract",
+      "description": "Typed public workflow input contract."
+    },
+    "outputs": {
+      "$ref": "#/$defs/workflowOutputContract",
+      "description": "Typed public workflow output contract."
+    },
     "variables": {
       "$ref": "#/$defs/stringMap",
       "description": "Global variables available for Mustache templating and expression evaluation."
@@ -45,23 +59,6 @@
       "items": {
         "$ref": "#/$defs/taskDefinition"
       }
-    },
-    "input_policy": {
-      "type": "string",
-      "enum": [
-        "allow_extra",
-        "strict"
-      ],
-      "default": "allow_extra",
-      "description": "Controls whether undeclared workflow inputs are accepted."
-    },
-    "inputs": {
-      "$ref": "#/$defs/workflowInputContract",
-      "description": "Typed public workflow input contract."
-    },
-    "outputs": {
-      "$ref": "#/$defs/workflowOutputContract",
-      "description": "Typed public workflow output contract."
     }
   },
   "required": [
@@ -69,6 +66,67 @@
   ],
   "additionalProperties": false,
   "$defs": {
+    "workflowInputField": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["string", "boolean", "integer", "number", "array", "object"]
+        },
+        "required": {
+          "type": "boolean",
+          "default": false
+        },
+        "default": {},
+        "enum": {
+          "type": "array",
+          "minItems": 1
+        },
+        "description": {
+          "type": "string"
+        }
+      },
+      "required": ["type"],
+      "additionalProperties": false
+    },
+    "workflowOutputField": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["string", "boolean", "integer", "number", "array", "object"]
+        },
+        "required": {
+          "type": "boolean",
+          "default": false
+        },
+        "default": {},
+        "enum": {
+          "type": "array",
+          "minItems": 1
+        },
+        "description": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "required": ["type"],
+      "additionalProperties": false
+    },
+    "workflowInputContract": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/workflowInputField"
+      }
+    },
+    "workflowOutputContract": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/workflowOutputField"
+      }
+    },
     "stringOrStringArray": {
       "oneOf": [
         {
@@ -182,99 +240,48 @@
     },
     "systemOperation": {
       "type": "string",
-      "enum": [
-        "status",
-        "start",
-        "stop",
-        "restart"
-      ]
+      "enum": ["status", "start", "stop", "restart"]
     },
     "serviceAction": {
       "type": "object",
       "properties": {
-        "operation": {
-          "$ref": "#/$defs/systemOperation"
-        },
-        "name": {
-          "type": "string",
-          "minLength": 1
-        },
-        "profile": {
-          "type": "string",
-          "minLength": 1
-        },
+        "operation": { "$ref": "#/$defs/systemOperation" },
+        "name": { "type": "string", "minLength": 1 },
+        "profile": { "type": "string", "minLength": 1 },
         "arguments": {
           "type": "array",
-          "items": {
-            "type": "string"
-          }
+          "items": { "type": "string" }
         },
-        "timeout_ms": {
-          "type": "integer",
-          "minimum": 1
-        },
-        "poll_interval_ms": {
-          "type": "integer",
-          "minimum": 1
-        }
+        "timeout_ms": { "type": "integer", "minimum": 1 },
+        "poll_interval_ms": { "type": "integer", "minimum": 1 }
       },
-      "required": [
-        "name"
-      ],
+      "required": ["name"],
       "additionalProperties": false
     },
     "managedProcessAction": {
       "type": "object",
       "properties": {
-        "operation": {
-          "$ref": "#/$defs/systemOperation"
-        },
-        "executable": {
-          "type": "string"
-        },
+        "operation": { "$ref": "#/$defs/systemOperation" },
+        "executable": { "type": "string" },
         "arguments": {
           "type": "array",
-          "items": {
-            "type": "string"
-          }
+          "items": { "type": "string" }
         },
-        "working_directory": {
-          "type": "string",
-          "minLength": 1
-        },
+        "working_directory": { "type": "string", "minLength": 1 },
         "identity": {
           "type": "object",
           "properties": {
-            "image_name": {
-              "type": "string",
-              "minLength": 1
-            }
+            "image_name": { "type": "string", "minLength": 1 }
           },
-          "required": [
-            "image_name"
-          ],
+          "required": ["image_name"],
           "additionalProperties": false
         },
-        "startup_timeout_ms": {
-          "type": "integer",
-          "minimum": 1
-        },
-        "stop_timeout_ms": {
-          "type": "integer",
-          "minimum": 1
-        },
+        "startup_timeout_ms": { "type": "integer", "minimum": 1 },
+        "stop_timeout_ms": { "type": "integer", "minimum": 1 },
         "force_terminate": {
           "oneOf": [
-            {
-              "type": "boolean"
-            },
-            {
-              "type": "integer",
-              "enum": [
-                0,
-                1
-              ]
-            },
+            { "type": "boolean" },
+            { "type": "integer", "enum": [0, 1] },
             {
               "type": "string",
               "pattern": "^([Tt][Rr][Uu][Ee]|[Ff][Aa][Ll][Ss][Ee]|[Yy][Ee][Ss]|[Nn][Oo]|[Oo][Nn]|[Oo][Ff][Ff]|[+-]?0[0_]*|[+]?1[_]*|[+]?0[0_]*1[_]*|[+-]?0[BbOoXx][0_]*0[0_]*|[+]?0[BbOoXx][0_]*1[_]*)$"
@@ -282,33 +289,17 @@
           ]
         }
       },
-      "required": [
-        "identity"
-      ],
+      "required": ["identity"],
       "allOf": [
         {
           "if": {
-            "properties": {
-              "operation": {
-                "enum": [
-                  "start",
-                  "restart"
-                ]
-              }
-            },
-            "required": [
-              "operation"
-            ]
+            "properties": { "operation": { "enum": ["start", "restart"] } },
+            "required": ["operation"]
           },
           "then": {
-            "required": [
-              "executable"
-            ],
+            "required": ["executable"],
             "properties": {
-              "executable": {
-                "type": "string",
-                "minLength": 1
-              }
+              "executable": { "type": "string", "minLength": 1 }
             }
           }
         }
@@ -339,12 +330,8 @@
         },
         "timeout": {
           "oneOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "number"
-            }
+            { "type": "string" },
+            { "type": "number" }
           ]
         },
         "when": {
@@ -390,31 +377,13 @@
           "type": "object",
           "description": "Streams one absolute HTTPS URL to a local file, with optional SHA-256 verification and atomic replacement.",
           "properties": {
-            "url": {
-              "type": "string",
-              "minLength": 1
-            },
-            "path": {
-              "type": "string",
-              "minLength": 1
-            },
-            "sha256": {
-              "type": "string"
-            },
-            "overwrite": {
-              "type": "boolean",
-              "default": false
-            },
-            "timeout_ms": {
-              "type": "integer",
-              "minimum": 1,
-              "default": 300000
-            }
+            "url": { "type": "string", "minLength": 1 },
+            "path": { "type": "string", "minLength": 1 },
+            "sha256": { "type": "string" },
+            "overwrite": { "type": "boolean", "default": false },
+            "timeout_ms": { "type": "integer", "minimum": 1, "default": 300000 }
           },
-          "required": [
-            "url",
-            "path"
-          ],
+          "required": ["url", "path"],
           "additionalProperties": false
         },
         "service": {
@@ -462,37 +431,18 @@
               "type": "object",
               "description": "Task template with {{ item }} placeholders.",
               "properties": {
-                "name": {
-                  "type": "string",
-                  "minLength": 1
-                },
-                "command": {
-                  "$ref": "#/$defs/nonEmptyStringOrStringArray"
-                },
-                "timeout": {
-                  "$ref": "#/$defs/durationString"
-                },
-                "when": {
-                  "type": "string"
-                },
-                "depends_on": {
-                  "$ref": "#/$defs/stringOrStringArray"
-                },
-                "env": {
-                  "$ref": "#/$defs/stringMap"
-                }
+                "name": { "type": "string", "minLength": 1 },
+                "command": { "$ref": "#/$defs/nonEmptyStringOrStringArray" },
+                "timeout": { "$ref": "#/$defs/durationString" },
+                "when": { "type": "string" },
+                "depends_on": { "$ref": "#/$defs/stringOrStringArray" },
+                "env": { "$ref": "#/$defs/stringMap" }
               },
-              "required": [
-                "name",
-                "command"
-              ],
+              "required": ["name", "command"],
               "additionalProperties": false
             }
           },
-          "required": [
-            "items_variable",
-            "template"
-          ],
+          "required": ["items_variable", "template"],
           "additionalProperties": false
         },
         "actions": {
@@ -528,45 +478,27 @@
         },
         "repeat": {
           "oneOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "number"
-            }
+            { "type": "string" },
+            { "type": "number" }
           ]
         },
         "delay": {
           "oneOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "number"
-            }
+            { "type": "string" },
+            { "type": "number" }
           ]
         },
         "run_once": {
           "oneOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "number"
-            },
-            {
-              "type": "boolean"
-            }
+            { "type": "string" },
+            { "type": "number" },
+            { "type": "boolean" }
           ]
         },
         "keep_running_until_failure": {
           "oneOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "number"
-            }
+            { "type": "string" },
+            { "type": "number" }
           ]
         },
         "consume_queue": {
@@ -595,29 +527,19 @@
         },
         "max_iterations": {
           "oneOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "number"
-            }
+            { "type": "string" },
+            { "type": "number" }
           ]
         },
         "switch": {
           "oneOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "number"
-            }
+            { "type": "string" },
+            { "type": "number" }
           ]
         },
         "cases": {
           "type": "array",
-          "items": {
-            "$ref": "#/$defs/orchestrationNodeChildren"
-          },
+          "items": { "$ref": "#/$defs/orchestrationNodeChildren" },
           "minItems": 1
         },
         "child": {
@@ -628,42 +550,26 @@
         },
         "parse_json": {
           "oneOf": [
-            {
-              "$ref": "#/$defs/commandParseJsonNode"
-            },
-            {
-              "$ref": "#/$defs/orchestrationParseJsonNode"
-            }
+            { "$ref": "#/$defs/commandParseJsonNode" },
+            { "$ref": "#/$defs/orchestrationParseJsonNode" }
           ]
         },
         "parse_regex": {
           "oneOf": [
-            {
-              "$ref": "#/$defs/commandParseRegexNode"
-            },
-            {
-              "$ref": "#/$defs/orchestrationParseRegexNode"
-            }
+            { "$ref": "#/$defs/commandParseRegexNode" },
+            { "$ref": "#/$defs/orchestrationParseRegexNode" }
           ]
         },
         "parse_lines": {
           "oneOf": [
-            {
-              "$ref": "#/$defs/commandParseLinesNode"
-            },
-            {
-              "$ref": "#/$defs/orchestrationParseLinesNode"
-            }
+            { "$ref": "#/$defs/commandParseLinesNode" },
+            { "$ref": "#/$defs/orchestrationParseLinesNode" }
           ]
         },
         "parse_keyvalue": {
           "oneOf": [
-            {
-              "$ref": "#/$defs/commandParseKeyValueNode"
-            },
-            {
-              "$ref": "#/$defs/orchestrationParseKeyValueNode"
-            }
+            { "$ref": "#/$defs/commandParseKeyValueNode" },
+            { "$ref": "#/$defs/orchestrationParseKeyValueNode" }
           ]
         },
         "check_exit_code": {
@@ -1397,42 +1303,12 @@
         {
           "not": {
             "anyOf": [
-              {
-                "required": [
-                  "parse_json",
-                  "parse_regex"
-                ]
-              },
-              {
-                "required": [
-                  "parse_json",
-                  "parse_lines"
-                ]
-              },
-              {
-                "required": [
-                  "parse_json",
-                  "parse_keyvalue"
-                ]
-              },
-              {
-                "required": [
-                  "parse_regex",
-                  "parse_lines"
-                ]
-              },
-              {
-                "required": [
-                  "parse_regex",
-                  "parse_keyvalue"
-                ]
-              },
-              {
-                "required": [
-                  "parse_lines",
-                  "parse_keyvalue"
-                ]
-              }
+              { "required": ["parse_json", "parse_regex"] },
+              { "required": ["parse_json", "parse_lines"] },
+              { "required": ["parse_json", "parse_keyvalue"] },
+              { "required": ["parse_regex", "parse_lines"] },
+              { "required": ["parse_regex", "parse_keyvalue"] },
+              { "required": ["parse_lines", "parse_keyvalue"] }
             ]
           }
         }
@@ -1441,271 +1317,60 @@
     },
     "orchestrationNode": {
       "oneOf": [
-        {
-          "$ref": "#/$defs/orchestrationControlNode"
-        },
-        {
-          "$ref": "#/$defs/orchestrationLeafNode"
-        }
+        { "$ref": "#/$defs/orchestrationControlNode" },
+        { "$ref": "#/$defs/orchestrationLeafNode" }
       ]
     },
     "orchestrationControlNode": {
       "oneOf": [
-        {
-          "type": "object",
-          "properties": {
-            "sequence": {
-              "$ref": "#/$defs/orchestrationNodeChildren"
-            }
-          },
-          "required": [
-            "sequence"
-          ],
-          "additionalProperties": false
-        },
-        {
-          "type": "object",
-          "properties": {
-            "parallel": {
-              "$ref": "#/$defs/orchestrationNodeChildren"
-            }
-          },
-          "required": [
-            "parallel"
-          ],
-          "additionalProperties": false
-        },
-        {
-          "type": "object",
-          "properties": {
-            "reactive_sequence": {
-              "$ref": "#/$defs/orchestrationNodeChildren"
-            }
-          },
-          "required": [
-            "reactive_sequence"
-          ],
-          "additionalProperties": false
-        },
-        {
-          "type": "object",
-          "properties": {
-            "pipeline_sequence": {
-              "$ref": "#/$defs/orchestrationPipelineSequenceNodeValue"
-            }
-          },
-          "required": [
-            "pipeline_sequence"
-          ],
-          "additionalProperties": false
-        },
-        {
-          "type": "object",
-          "properties": {
-            "fallback": {
-              "$ref": "#/$defs/orchestrationNodeChildren"
-            }
-          },
-          "required": [
-            "fallback"
-          ],
-          "additionalProperties": false
-        },
-        {
-          "type": "object",
-          "properties": {
-            "selector": {
-              "$ref": "#/$defs/orchestrationNodeChildren"
-            }
-          },
-          "required": [
-            "selector"
-          ],
-          "additionalProperties": false
-        },
-        {
-          "$ref": "#/$defs/orchestrationIfNode"
-        },
-        {
-          "$ref": "#/$defs/orchestrationWhileNode"
-        },
-        {
-          "$ref": "#/$defs/orchestrationSwitchNode"
-        },
-        {
-          "$ref": "#/$defs/orchestrationTimeoutNode"
-        },
-        {
-          "$ref": "#/$defs/orchestrationRepeatNode"
-        },
-        {
-          "$ref": "#/$defs/orchestrationDelayNode"
-        },
-        {
-          "$ref": "#/$defs/orchestrationRunOnceNode"
-        },
-        {
-          "$ref": "#/$defs/orchestrationKeepRunningUntilFailureNode"
-        },
-        {
-          "$ref": "#/$defs/orchestrationConsumeQueueNode"
-        },
-        {
-          "$ref": "#/$defs/orchestrationPreconditionNode"
-        },
-        {
-          "$ref": "#/$defs/orchestrationEntryUpdatedNode"
-        },
-        {
-          "$ref": "#/$defs/orchestrationInverterNode"
-        },
-        {
-          "$ref": "#/$defs/orchestrationForceSuccessNode"
-        },
-        {
-          "$ref": "#/$defs/orchestrationForceFailureNode"
-        }
+        { "type": "object", "properties": { "sequence": { "$ref": "#/$defs/orchestrationNodeChildren" } }, "required": ["sequence"], "additionalProperties": false },
+        { "type": "object", "properties": { "parallel": { "$ref": "#/$defs/orchestrationNodeChildren" } }, "required": ["parallel"], "additionalProperties": false },
+        { "type": "object", "properties": { "reactive_sequence": { "$ref": "#/$defs/orchestrationNodeChildren" } }, "required": ["reactive_sequence"], "additionalProperties": false },
+        { "type": "object", "properties": { "pipeline_sequence": { "$ref": "#/$defs/orchestrationPipelineSequenceNodeValue" } }, "required": ["pipeline_sequence"], "additionalProperties": false },
+        { "type": "object", "properties": { "fallback": { "$ref": "#/$defs/orchestrationNodeChildren" } }, "required": ["fallback"], "additionalProperties": false },
+        { "type": "object", "properties": { "selector": { "$ref": "#/$defs/orchestrationNodeChildren" } }, "required": ["selector"], "additionalProperties": false },
+        { "$ref": "#/$defs/orchestrationIfNode" },
+        { "$ref": "#/$defs/orchestrationWhileNode" },
+        { "$ref": "#/$defs/orchestrationSwitchNode" },
+        { "$ref": "#/$defs/orchestrationTimeoutNode" },
+        { "$ref": "#/$defs/orchestrationRepeatNode" },
+        { "$ref": "#/$defs/orchestrationDelayNode" },
+        { "$ref": "#/$defs/orchestrationRunOnceNode" },
+        { "$ref": "#/$defs/orchestrationKeepRunningUntilFailureNode" },
+        { "$ref": "#/$defs/orchestrationConsumeQueueNode" },
+        { "$ref": "#/$defs/orchestrationPreconditionNode" },
+        { "$ref": "#/$defs/orchestrationEntryUpdatedNode" },
+        { "$ref": "#/$defs/orchestrationInverterNode" },
+        { "$ref": "#/$defs/orchestrationForceSuccessNode" },
+        { "$ref": "#/$defs/orchestrationForceFailureNode" }
       ]
     },
     "orchestrationLeafNode": {
       "oneOf": [
-        {
-          "type": "object",
-          "properties": {
-            "shell": {
-              "$ref": "#/$defs/orchestrationShellNode"
-            }
-          },
-          "required": [
-            "shell"
-          ],
-          "additionalProperties": false
-        },
-        {
-          "type": "object",
-          "properties": {
-            "parse_json": {
-              "$ref": "#/$defs/orchestrationParseJsonNode"
-            }
-          },
-          "required": [
-            "parse_json"
-          ],
-          "additionalProperties": false
-        },
-        {
-          "type": "object",
-          "properties": {
-            "parse_regex": {
-              "$ref": "#/$defs/orchestrationParseRegexNode"
-            }
-          },
-          "required": [
-            "parse_regex"
-          ],
-          "additionalProperties": false
-        },
-        {
-          "type": "object",
-          "properties": {
-            "parse_lines": {
-              "$ref": "#/$defs/orchestrationParseLinesNode"
-            }
-          },
-          "required": [
-            "parse_lines"
-          ],
-          "additionalProperties": false
-        },
-        {
-          "type": "object",
-          "properties": {
-            "parse_keyvalue": {
-              "$ref": "#/$defs/orchestrationParseKeyValueNode"
-            }
-          },
-          "required": [
-            "parse_keyvalue"
-          ],
-          "additionalProperties": false
-        },
-        {
-          "type": "object",
-          "properties": {
-            "check_exit_code": {
-              "$ref": "#/$defs/orchestrationCheckExitCodeNode"
-            }
-          },
-          "required": [
-            "check_exit_code"
-          ],
-          "additionalProperties": false
-        },
-        {
-          "type": "object",
-          "properties": {
-            "wait_event": {
-              "$ref": "#/$defs/orchestrationWaitEventNode"
-            }
-          },
-          "required": [
-            "wait_event"
-          ],
-          "additionalProperties": false
-        },
-        {
-          "type": "object",
-          "properties": {
-            "file_exists": {
-              "$ref": "#/$defs/orchestrationFileExistsNode"
-            }
-          },
-          "required": [
-            "file_exists"
-          ],
-          "additionalProperties": false
-        },
-        {
-          "type": "object",
-          "properties": {
-            "sleep": {
-              "$ref": "#/$defs/orchestrationSleepNode"
-            }
-          },
-          "required": [
-            "sleep"
-          ],
-          "additionalProperties": false
-        },
-        {
-          "$ref": "#/$defs/orchestrationSetVariableNode"
-        },
-        {
-          "$ref": "#/$defs/orchestrationSubTreeNode"
-        }
+        { "type": "object", "properties": { "shell": { "$ref": "#/$defs/orchestrationShellNode" } }, "required": ["shell"], "additionalProperties": false },
+        { "type": "object", "properties": { "parse_json": { "$ref": "#/$defs/orchestrationParseJsonNode" } }, "required": ["parse_json"], "additionalProperties": false },
+        { "type": "object", "properties": { "parse_regex": { "$ref": "#/$defs/orchestrationParseRegexNode" } }, "required": ["parse_regex"], "additionalProperties": false },
+        { "type": "object", "properties": { "parse_lines": { "$ref": "#/$defs/orchestrationParseLinesNode" } }, "required": ["parse_lines"], "additionalProperties": false },
+        { "type": "object", "properties": { "parse_keyvalue": { "$ref": "#/$defs/orchestrationParseKeyValueNode" } }, "required": ["parse_keyvalue"], "additionalProperties": false },
+        { "type": "object", "properties": { "check_exit_code": { "$ref": "#/$defs/orchestrationCheckExitCodeNode" } }, "required": ["check_exit_code"], "additionalProperties": false },
+        { "type": "object", "properties": { "wait_event": { "$ref": "#/$defs/orchestrationWaitEventNode" } }, "required": ["wait_event"], "additionalProperties": false },
+        { "type": "object", "properties": { "file_exists": { "$ref": "#/$defs/orchestrationFileExistsNode" } }, "required": ["file_exists"], "additionalProperties": false },
+        { "type": "object", "properties": { "sleep": { "$ref": "#/$defs/orchestrationSleepNode" } }, "required": ["sleep"], "additionalProperties": false },
+        { "$ref": "#/$defs/orchestrationSetVariableNode" },
+        { "$ref": "#/$defs/orchestrationSubTreeNode" }
       ]
     },
     "orchestrationConditionScalar": {
       "oneOf": [
-        {
-          "type": "string"
-        },
-        {
-          "type": "number"
-        },
-        {
-          "type": "boolean"
-        }
+        { "type": "string" },
+        { "type": "number" },
+        { "type": "boolean" }
       ]
     },
     "orchestrationConditionValue": {
       "oneOf": [
-        {
-          "$ref": "#/$defs/orchestrationConditionScalar"
-        },
-        {
-          "$ref": "#/$defs/orchestrationNodeChildren"
-        }
+        { "$ref": "#/$defs/orchestrationConditionScalar" },
+        { "$ref": "#/$defs/orchestrationNodeChildren" }
       ]
     },
     "orchestrationIfNode": {
@@ -1721,10 +1386,7 @@
           "$ref": "#/$defs/orchestrationNodeChildren"
         }
       },
-      "required": [
-        "if",
-        "then"
-      ],
+      "required": ["if", "then"],
       "additionalProperties": false
     },
     "orchestrationWhileNode": {
@@ -1738,19 +1400,12 @@
         },
         "max_iterations": {
           "oneOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "number"
-            }
+            { "type": "string" },
+            { "type": "number" }
           ]
         }
       },
-      "required": [
-        "while",
-        "do"
-      ],
+      "required": ["while", "do"],
       "additionalProperties": false
     },
     "orchestrationSwitchNode": {
@@ -1758,26 +1413,17 @@
       "properties": {
         "switch": {
           "oneOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "number"
-            }
+            { "type": "string" },
+            { "type": "number" }
           ]
         },
         "cases": {
           "type": "array",
-          "items": {
-            "$ref": "#/$defs/orchestrationNodeChildren"
-          },
+          "items": { "$ref": "#/$defs/orchestrationNodeChildren" },
           "minItems": 1
         }
       },
-      "required": [
-        "switch",
-        "cases"
-      ],
+      "required": ["switch", "cases"],
       "additionalProperties": false
     },
     "orchestrationTimeoutNode": {
@@ -1785,22 +1431,15 @@
       "properties": {
         "timeout": {
           "oneOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "number"
-            }
+            { "type": "string" },
+            { "type": "number" }
           ]
         },
         "child": {
           "$ref": "#/$defs/orchestrationNodeChildren"
         }
       },
-      "required": [
-        "timeout",
-        "child"
-      ],
+      "required": ["timeout", "child"],
       "additionalProperties": false
     },
     "orchestrationRepeatNode": {
@@ -1808,22 +1447,15 @@
       "properties": {
         "repeat": {
           "oneOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "number"
-            }
+            { "type": "string" },
+            { "type": "number" }
           ]
         },
         "child": {
           "$ref": "#/$defs/orchestrationNodeChildren"
         }
       },
-      "required": [
-        "repeat",
-        "child"
-      ],
+      "required": ["repeat", "child"],
       "additionalProperties": false
     },
     "orchestrationDelayNode": {
@@ -1831,22 +1463,15 @@
       "properties": {
         "delay": {
           "oneOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "number"
-            }
+            { "type": "string" },
+            { "type": "number" }
           ]
         },
         "child": {
           "$ref": "#/$defs/orchestrationNodeChildren"
         }
       },
-      "required": [
-        "delay",
-        "child"
-      ],
+      "required": ["delay", "child"],
       "additionalProperties": false
     },
     "orchestrationInverterNode": {
@@ -1856,9 +1481,7 @@
           "$ref": "#/$defs/orchestrationNodeChildren"
         }
       },
-      "required": [
-        "inverter"
-      ],
+      "required": ["inverter"],
       "additionalProperties": false
     },
     "orchestrationForceSuccessNode": {
@@ -1868,9 +1491,7 @@
           "$ref": "#/$defs/orchestrationNodeChildren"
         }
       },
-      "required": [
-        "force_success"
-      ],
+      "required": ["force_success"],
       "additionalProperties": false
     },
     "orchestrationForceFailureNode": {
@@ -1880,51 +1501,31 @@
           "$ref": "#/$defs/orchestrationNodeChildren"
         }
       },
-      "required": [
-        "force_failure"
-      ],
+      "required": ["force_failure"],
       "additionalProperties": false
     },
     "orchestrationPipelineSequenceNodeValue": {
       "oneOf": [
         {
           "type": "array",
-          "items": {
-            "$ref": "#/$defs/orchestrationNode"
-          },
+          "items": { "$ref": "#/$defs/orchestrationNode" },
           "minItems": 1
         },
         {
           "type": "object",
           "properties": {
-            "input_key": {
-              "type": "string"
-            },
-            "output_key": {
-              "type": "string"
-            },
-            "child": {
-              "$ref": "#/$defs/orchestrationNodeChildren"
-            },
+            "input_key": { "type": "string" },
+            "output_key": { "type": "string" },
+            "child": { "$ref": "#/$defs/orchestrationNodeChildren" },
             "children": {
               "type": "array",
-              "items": {
-                "$ref": "#/$defs/orchestrationNode"
-              },
+              "items": { "$ref": "#/$defs/orchestrationNode" },
               "minItems": 1
             }
           },
           "oneOf": [
-            {
-              "required": [
-                "child"
-              ]
-            },
-            {
-              "required": [
-                "children"
-              ]
-            }
+            { "required": ["child"] },
+            { "required": ["children"] }
           ],
           "additionalProperties": false
         }
@@ -1940,15 +1541,11 @@
               "$ref": "#/$defs/orchestrationNodeChildren"
             }
           },
-          "required": [
-            "child"
-          ],
+          "required": ["child"],
           "additionalProperties": false
         }
       },
-      "required": [
-        "run_once"
-      ],
+      "required": ["run_once"],
       "additionalProperties": false
     },
     "orchestrationKeepRunningUntilFailureNode": {
@@ -1959,27 +1556,19 @@
           "properties": {
             "max_iterations": {
               "oneOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "number"
-                }
+                { "type": "string" },
+                { "type": "number" }
               ]
             },
             "child": {
               "$ref": "#/$defs/orchestrationNodeChildren"
             }
           },
-          "required": [
-            "child"
-          ],
+          "required": ["child"],
           "additionalProperties": false
         }
       },
-      "required": [
-        "keep_running_until_failure"
-      ],
+      "required": ["keep_running_until_failure"],
       "additionalProperties": false
     },
     "orchestrationConsumeQueueNode": {
@@ -1988,26 +1577,17 @@
         "consume_queue": {
           "type": "object",
           "properties": {
-            "queue_key": {
-              "type": "string"
-            },
-            "item_key": {
-              "type": "string"
-            },
+            "queue_key": { "type": "string" },
+            "item_key": { "type": "string" },
             "child": {
               "$ref": "#/$defs/orchestrationNodeChildren"
             }
           },
-          "required": [
-            "queue_key",
-            "child"
-          ],
+          "required": ["queue_key", "child"],
           "additionalProperties": false
         }
       },
-      "required": [
-        "consume_queue"
-      ],
+      "required": ["consume_queue"],
       "additionalProperties": false
     },
     "orchestrationPreconditionNode": {
@@ -2023,16 +1603,11 @@
               "$ref": "#/$defs/orchestrationNodeChildren"
             }
           },
-          "required": [
-            "condition",
-            "child"
-          ],
+          "required": ["condition", "child"],
           "additionalProperties": false
         }
       },
-      "required": [
-        "precondition"
-      ],
+      "required": ["precondition"],
       "additionalProperties": false
     },
     "orchestrationEntryUpdatedNode": {
@@ -2041,37 +1616,26 @@
         "entry_updated": {
           "type": "object",
           "properties": {
-            "watch_key": {
-              "type": "string"
-            },
+            "watch_key": { "type": "string" },
             "child": {
               "$ref": "#/$defs/orchestrationNodeChildren"
             }
           },
-          "required": [
-            "watch_key",
-            "child"
-          ],
+          "required": ["watch_key", "child"],
           "additionalProperties": false
         }
       },
-      "required": [
-        "entry_updated"
-      ],
+      "required": ["entry_updated"],
       "additionalProperties": false
     },
     "orchestrationNodeChildren": {
       "oneOf": [
         {
           "type": "array",
-          "items": {
-            "$ref": "#/$defs/orchestrationNode"
-          },
+          "items": { "$ref": "#/$defs/orchestrationNode" },
           "minItems": 1
         },
-        {
-          "$ref": "#/$defs/orchestrationNode"
-        }
+        { "$ref": "#/$defs/orchestrationNode" }
       ]
     },
     "orchestrationShellNode": {
@@ -2094,19 +1658,13 @@
             },
             "timeout": {
               "oneOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "number"
-                }
+                { "type": "string" },
+                { "type": "number" }
               ],
               "description": "Execution timeout"
             }
           },
-          "required": [
-            "cmd"
-          ],
+          "required": ["cmd"],
           "additionalProperties": false
         }
       ]
@@ -2123,10 +1681,7 @@
           "description": "Task output key for extracted data"
         }
       },
-      "required": [
-        "path",
-        "output_key"
-      ],
+      "required": ["path", "output_key"],
       "additionalProperties": false
     },
     "commandParseRegexNode": {
@@ -2138,12 +1693,8 @@
         },
         "capture_group": {
           "oneOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "number"
-            }
+            { "type": "string" },
+            { "type": "number" }
           ],
           "description": "Capture group to extract (default: 1)"
         },
@@ -2152,10 +1703,7 @@
           "description": "Task output key for extracted data"
         }
       },
-      "required": [
-        "pattern",
-        "output_key"
-      ],
+      "required": ["pattern", "output_key"],
       "additionalProperties": false
     },
     "commandParseLinesNode": {
@@ -2170,9 +1718,7 @@
           "description": "Task output key for extracted lines"
         }
       },
-      "required": [
-        "output_key"
-      ],
+      "required": ["output_key"],
       "additionalProperties": false
     },
     "commandParseKeyValueNode": {
@@ -2191,9 +1737,7 @@
           "description": "Task output key for parsed key/value data"
         }
       },
-      "required": [
-        "output_key"
-      ],
+      "required": ["output_key"],
       "additionalProperties": false
     },
     "orchestrationParseJsonNode": {
@@ -2212,9 +1756,7 @@
           "description": "Blackboard key to store extracted data"
         }
       },
-      "required": [
-        "input_key"
-      ],
+      "required": ["input_key"],
       "additionalProperties": false
     },
     "orchestrationParseRegexNode": {
@@ -2230,12 +1772,8 @@
         },
         "capture_group": {
           "oneOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "number"
-            }
+            { "type": "string" },
+            { "type": "number" }
           ],
           "description": "Capture group to extract (default: 0)"
         },
@@ -2244,10 +1782,7 @@
           "description": "Blackboard key to store extracted data"
         }
       },
-      "required": [
-        "input_key",
-        "pattern"
-      ],
+      "required": ["input_key", "pattern"],
       "additionalProperties": false
     },
     "orchestrationParseLinesNode": {
@@ -2266,9 +1801,7 @@
           "description": "Blackboard key to store extracted lines"
         }
       },
-      "required": [
-        "input_key"
-      ],
+      "required": ["input_key"],
       "additionalProperties": false
     },
     "orchestrationParseKeyValueNode": {
@@ -2291,9 +1824,7 @@
           "description": "Blackboard key to store parsed key/value data"
         }
       },
-      "required": [
-        "input_key"
-      ],
+      "required": ["input_key"],
       "additionalProperties": false
     },
     "orchestrationCheckExitCodeNode": {
@@ -2315,19 +1846,13 @@
             },
             "expected": {
               "oneOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "number"
-                }
+                { "type": "string" },
+                { "type": "number" }
               ],
               "description": "Expected exit code value"
             }
           },
-          "required": [
-            "expected"
-          ],
+          "required": ["expected"],
           "additionalProperties": false
         }
       ]
@@ -2341,19 +1866,13 @@
         },
         "timeout": {
           "oneOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "number"
-            }
+            { "type": "string" },
+            { "type": "number" }
           ],
           "description": "Wait timeout"
         }
       },
-      "required": [
-        "event"
-      ],
+      "required": ["event"],
       "additionalProperties": false
     },
     "orchestrationFileExistsNode": {
@@ -2380,9 +1899,7 @@
               "description": "Fail the node if file doesn't exist (default: true)"
             }
           },
-          "required": [
-            "path"
-          ],
+          "required": ["path"],
           "additionalProperties": false
         }
       ]
@@ -2403,12 +1920,8 @@
           "properties": {
             "duration": {
               "oneOf": [
-                {
-                  "type": "number"
-                },
-                {
-                  "type": "string"
-                }
+                { "type": "number" },
+                { "type": "string" }
               ],
               "description": "Sleep duration (number in ms or string like '5s')"
             },
@@ -2417,9 +1930,7 @@
               "description": "Optional reason for the delay (for logging)"
             }
           },
-          "required": [
-            "duration"
-          ],
+          "required": ["duration"],
           "additionalProperties": false
         }
       ]
@@ -2439,22 +1950,10 @@
           "description": "Alternative: copy value from another blackboard key"
         }
       },
-      "required": [
-        "set_variable"
-      ],
+      "required": ["set_variable"],
       "oneOf": [
-        {
-          "required": [
-            "set_variable",
-            "value"
-          ]
-        },
-        {
-          "required": [
-            "set_variable",
-            "from"
-          ]
-        }
+        { "required": ["set_variable", "value"] },
+        { "required": ["set_variable", "from"] }
       ],
       "additionalProperties": false
     },
@@ -2466,89 +1965,8 @@
           "description": "Registered subtree identifier"
         }
       },
-      "required": [
-        "subtree"
-      ],
+      "required": ["subtree"],
       "additionalProperties": false
-    },
-    "workflowInputField": {
-      "type": "object",
-      "properties": {
-        "type": {
-          "type": "string",
-          "enum": [
-            "string",
-            "boolean",
-            "integer",
-            "number",
-            "array",
-            "object"
-          ]
-        },
-        "required": {
-          "type": "boolean",
-          "default": false
-        },
-        "default": {},
-        "enum": {
-          "type": "array",
-          "minItems": 1
-        },
-        "description": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "type"
-      ],
-      "additionalProperties": false
-    },
-    "workflowOutputField": {
-      "type": "object",
-      "properties": {
-        "type": {
-          "type": "string",
-          "enum": [
-            "string",
-            "boolean",
-            "integer",
-            "number",
-            "array",
-            "object"
-          ]
-        },
-        "required": {
-          "type": "boolean",
-          "default": false
-        },
-        "default": {},
-        "enum": {
-          "type": "array",
-          "minItems": 1
-        },
-        "description": {
-          "type": "string"
-        },
-        "value": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "type"
-      ],
-      "additionalProperties": false
-    },
-    "workflowInputContract": {
-      "type": "object",
-      "additionalProperties": {
-        "$ref": "#/$defs/workflowInputField"
-      }
-    },
-    "workflowOutputContract": {
-      "type": "object",
-      "additionalProperties": {
-        "$ref": "#/$defs/workflowOutputField"
-      }
     }
   }
 }
