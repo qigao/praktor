@@ -38,6 +38,13 @@ praktor_result executeFile(const std::filesystem::path& path,
     return praktor_execute_workflow(&request, &output, &error);
 }
 
+int32_t PRAKTOR_CALL coreCancellationProbe(void* user_data) {
+    return static_cast<std::atomic<bool>*>(user_data)
+                   ->load(std::memory_order_acquire)
+        ? 1
+        : 0;
+}
+
 } // namespace
 
 TEST_CASE("core-only ABI advertises JSON workflows without script capability") {
@@ -68,12 +75,7 @@ tasks:
 
     std::atomic<bool> cancelled{true};
     praktor_execution_control control = PRAKTOR_EXECUTION_CONTROL_INIT;
-    control.cancel_probe = [](void* user_data) -> int32_t {
-        return static_cast<std::atomic<bool>*>(user_data)
-                       ->load(std::memory_order_acquire)
-            ? 1
-            : 0;
-    };
+    control.cancel_probe = &coreCancellationProbe;
     control.cancel_user_data = &cancelled;
 
     praktor_owned_json output = PRAKTOR_OWNED_JSON_INIT;
