@@ -110,15 +110,18 @@ struct PreparedWorkflow {
     std::unique_ptr<WorkflowContext> context;
 };
 
-PreparedWorkflow prepareExecution(const std::string& yaml_path,
-                                  const std::filesystem::path& base_directory,
-                                  const WorkflowInputs& input_values,
-                                  const std::unordered_map<std::string, std::string>& base_environment) {
+PreparedWorkflow prepareExecution(
+    const std::string& yaml_path,
+    const std::filesystem::path& base_directory,
+    const WorkflowInputs& input_values,
+    const std::unordered_map<std::string, std::string>& base_environment,
+    std::shared_ptr<Praktor::Execution::ExecutionControl> execution_control = {}) {
     PreparedWorkflow prepared;
     prepared.workflow = TaskParser::parseFileWithIncludes(yaml_path, base_directory.string());
     prepared.runtime_environment = buildRuntimeEnvironment(prepared.workflow, base_environment);
     prepared.graph = TaskParser::buildGraph(prepared.workflow);
     prepared.context = std::make_unique<WorkflowContext>();
+    prepared.context->setExecutionControl(std::move(execution_control));
     prepared.context->setSourcePath(prepared.workflow.source_path);
     populateWorkflowEnvironmentContext(*prepared.context, prepared.runtime_environment);
     populateWorkflowVariables(*prepared.context, prepared.workflow, input_values);
@@ -187,9 +190,17 @@ WorkflowRunner::WorkflowRunner(std::string const& yamlPath,
 WorkflowRunner::~WorkflowRunner() = default;
 
 WorkflowExecutionResult WorkflowRunner::execute(bool useConcurrent, int maxConcurrency) {
+    return executeWithControl({}, useConcurrent, maxConcurrency);
+}
+
+WorkflowExecutionResult WorkflowRunner::executeWithControl(
+    std::shared_ptr<Praktor::Execution::ExecutionControl> executionControl,
+    bool useConcurrent, int maxConcurrency) {
     try {
         TLOG_DEBUGF("Loading workflow from: {}", yamlPath_);
-        auto prepared = prepareExecution(yamlPath_, base_directory_, inputValues_, baseEnvironment_);
+        auto prepared = prepareExecution(
+            yamlPath_, base_directory_, inputValues_, baseEnvironment_,
+            std::move(executionControl));
 
         TLOG_DEBUGF("Loaded {} workflow environment variables",
                    prepared.runtime_environment.size());
@@ -232,7 +243,8 @@ bool WorkflowRunner::run(bool useConcurrent, int maxConcurrency) {
 bool WorkflowRunner::runTask(std::string const& taskName, bool useConcurrent, int maxConcurrency) {
     try {
         TLOG_DEBUGF("Loading workflow to run single task: {}", taskName);
-        auto prepared = prepareExecution(yamlPath_, base_directory_, inputValues_, baseEnvironment_);
+        auto prepared = prepareExecution(
+            yamlPath_, base_directory_, inputValues_, baseEnvironment_);
 
         auto targetTaskIt = std::find_if(prepared.workflow.tasks.begin(), prepared.workflow.tasks.end(),
             [&](const Task& task) { return task.name == taskName; });

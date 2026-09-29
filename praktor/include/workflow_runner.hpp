@@ -2,12 +2,14 @@
 
 #include "dag/dependency_graph.hpp"
 #include "dag/workflow_executor.hpp"
+#include "execution/execution_control.hpp"
 #include "yml/task_parser.hpp"
 
 #include <cstddef>
 #include <ctime>
 #include <filesystem>
 #include <iostream>
+#include <memory>
 #include <string>
 #include <unordered_map>
 
@@ -32,6 +34,9 @@ public:
     ~WorkflowRunner(); // Declared destructor
 
     WorkflowExecutionResult execute(bool useConcurrent = false, int maxConcurrency = 4);
+    WorkflowExecutionResult executeWithControl(
+        std::shared_ptr<Praktor::Execution::ExecutionControl> executionControl,
+        bool useConcurrent = false, int maxConcurrency = 4);
     bool run(bool useConcurrent = false, int maxConcurrency = 4);
     bool runTask(std::string const& taskName, bool useConcurrent = false, int maxConcurrency = 4);
 
