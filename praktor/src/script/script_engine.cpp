@@ -1,6 +1,6 @@
 #include "script/script_engine.hpp"
-#include "actions/shell_executor.hpp"
 #include "dag/workflow_context.hpp"
+#include "execution/controlled_process.hpp"
 #include "turbo_script.h"
 
 #ifdef __cplusplus
@@ -539,8 +539,32 @@ static exprtk_value_t shell_exec_fn(size_t argc, exprtk_value_t *args,
 
   const std::string resolved_working_dir =
       resolve_script_working_dir(eval_ctx->workflow_context, working_dir);
-  const auto result = actions::ShellExecutor::execute(command, input, resolved_working_dir,
-                                                    timeout_ms, environment, stream_output);
+  const auto execution_control = eval_ctx->workflow_context.getExecutionControl();
+  if (execution_control && execution_control->stopRequested()) {
+    eval_ctx->failed = true;
+    eval_ctx->failure_message =
+        execution_control->stopReason() ==
+                Praktor::Execution::ExecutionControl::StopReason::DeadlineExceeded
+            ? "Script shell execution timed out before start"
+            : "Script shell execution cancelled before start";
+    return make_null();
+  }
+
+  timeout_ms =
+      Praktor::Execution::clampProcessTimeoutMs(timeout_ms, execution_control);
+  auto process = Praktor::Shell::ShellExecutor::start(
+      command, input, resolved_working_dir, timeout_ms, environment, stream_output);
+  const auto result =
+      Praktor::Execution::waitForManagedProcess(process, execution_control);
+
+  if (execution_control && execution_control->stopRequested()) {
+    eval_ctx->failed = true;
+    eval_ctx->failure_message =
+        execution_control->stopReason() ==
+                Praktor::Execution::ExecutionControl::StopReason::DeadlineExceeded
+            ? "Script shell execution timed out"
+            : "Script shell execution cancelled";
+  }
 
   WorkflowValue payload = WorkflowValue::object();
   payload["exit_code"] = result.exit_code;
