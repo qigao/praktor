@@ -2,6 +2,7 @@ set(TEST_SOURCES
     workflow_plan_api_test.cpp
     workflow_contract_api_test.cpp
     workflow_effect_manifest_test.cpp
+    workflow_profile_test.cpp
 )
 
 if(ENABLE_SCRIPT_ENGINE)
