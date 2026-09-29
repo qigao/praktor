@@ -16,6 +16,7 @@
 
 #include <catch2/catch_all.hpp>
 
+#include <atomic>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -49,6 +50,13 @@ praktor_execute_request makeRequest(const std::string& workflow_path_storage,
     return request;
 }
 
+int32_t PRAKTOR_CALL cancellationProbe(void* user_data) {
+    return static_cast<std::atomic<bool>*>(user_data)
+                   ->load(std::memory_order_acquire)
+        ? 1
+        : 0;
+}
+
 #ifdef _WIN32
 constexpr const char* kSleepCommand =
     "waitfor SomethingThatNeverHappens /T 1 >nul 2>nul & exit /b 0";
@@ -69,13 +77,89 @@ TEST_CASE("Praktor C API publishes JSON workflow execution and ownership", "[sdk
     CHECK(api->abi_minor >= PRAKTOR_ABI_MINOR);
     CHECK((api->capabilities & PRAKTOR_CAPABILITY_JSON_WORKFLOW) != 0);
     CHECK((api->capabilities & PRAKTOR_CAPABILITY_SCRIPT_ENGINE) != 0);
+    CHECK((api->capabilities & PRAKTOR_CAPABILITY_EXECUTION_CONTROL) != 0);
     REQUIRE(api->execute_workflow != nullptr);
     REQUIRE(api->release_json != nullptr);
+    REQUIRE(api->execute_workflow_controlled != nullptr);
 
     praktor_owned_json output = PRAKTOR_OWNED_JSON_INIT;
     praktor_error error = PRAKTOR_ERROR_INIT;
     CHECK(api->execute_workflow(nullptr, &output, &error) == PRAKTOR_RESULT_INVALID_ARGUMENT);
     CHECK(error.phase == PRAKTOR_ERROR_PHASE_REQUEST);
+}
+
+TEST_CASE("Praktor C API controlled execution reports cancellation",
+          "[sdk][abi][execution-control]") {
+    const auto dir = createTempDir();
+    const auto workflow_path = dir / "cancelled.yml";
+    writeFile(workflow_path, R"(
+tasks:
+  - name: should_not_run
+    script: |
+      ctx.output("ran", true);
+)");
+
+    const std::string input = "{}";
+    const std::string workflow_path_storage = workflow_path.string();
+    const auto request = makeRequest(workflow_path_storage, input);
+
+    std::atomic<bool> cancelled{true};
+    praktor_execution_control control = PRAKTOR_EXECUTION_CONTROL_INIT;
+    control.cancel_probe = &cancellationProbe;
+    control.cancel_user_data = &cancelled;
+
+    praktor_owned_json output = PRAKTOR_OWNED_JSON_INIT;
+    praktor_error error = PRAKTOR_ERROR_INIT;
+    const auto status =
+        praktor_execute_workflow_controlled(&request, &control, &output, &error);
+
+    INFO(error.message);
+    REQUIRE(status == PRAKTOR_RESULT_CANCELLED);
+    REQUIRE(output.data != nullptr);
+    const auto result = WorkflowValue::parse(
+        std::string_view(output.data, output.size));
+    CHECK(result.at("workflow_status").as<std::string>() == "cancelled");
+    CHECK_FALSE(result.at("tasks").contains("should_not_run"));
+    CHECK(error.phase == PRAKTOR_ERROR_PHASE_EXECUTION);
+    CHECK(std::string(error.message) == "Workflow execution cancelled");
+
+    praktor_release_json(&output);
+    std::filesystem::remove_all(dir);
+}
+
+TEST_CASE("Praktor C API controlled execution reports relative deadline expiry",
+          "[sdk][abi][execution-control]") {
+    const auto dir = createTempDir();
+    const auto workflow_path = dir / "timed-out.yml";
+    const std::string workflow =
+        "tasks:\n"
+        "  - name: slow\n"
+        "    command: \"" + std::string(kSleepCommand) + "\"\n";
+    writeFile(workflow_path, workflow);
+
+    const std::string input = "{}";
+    const std::string workflow_path_storage = workflow_path.string();
+    const auto request = makeRequest(workflow_path_storage, input);
+
+    praktor_execution_control control = PRAKTOR_EXECUTION_CONTROL_INIT;
+    control.timeout_ms = 10;
+
+    praktor_owned_json output = PRAKTOR_OWNED_JSON_INIT;
+    praktor_error error = PRAKTOR_ERROR_INIT;
+    const auto status =
+        praktor_execute_workflow_controlled(&request, &control, &output, &error);
+
+    INFO(error.message);
+    REQUIRE(status == PRAKTOR_RESULT_TIMED_OUT);
+    REQUIRE(output.data != nullptr);
+    const auto result = WorkflowValue::parse(
+        std::string_view(output.data, output.size));
+    CHECK(result.at("workflow_status").as<std::string>() == "timed_out");
+    CHECK(error.phase == PRAKTOR_ERROR_PHASE_EXECUTION);
+    CHECK(std::string(error.message) == "Workflow execution timed out");
+
+    praktor_release_json(&output);
+    std::filesystem::remove_all(dir);
 }
 
 TEST_CASE("Praktor C API preserves sequential runner defaults", "[sdk]") {
