@@ -103,9 +103,17 @@ struct CancellationProbeBridge {
     void* user_data = nullptr;
 };
 
-bool pollCancellationProbe(void* user_data) {
+bool pollCancellationProbe(void* user_data) noexcept {
     const auto* bridge = static_cast<const CancellationProbeBridge*>(user_data);
-    return bridge && bridge->probe && bridge->probe(bridge->user_data) != 0;
+    if (!bridge || !bridge->probe) {
+        return false;
+    }
+    try {
+        return bridge->probe(bridge->user_data) != 0;
+    } catch (...) {
+        // A C ABI callback must not throw. Fail closed if a C++ consumer does.
+        return true;
+    }
 }
 
 std::shared_ptr<Praktor::Execution::ExecutionControl> makeExecutionControl(
@@ -115,18 +123,27 @@ std::shared_ptr<Praktor::Execution::ExecutionControl> makeExecutionControl(
         return {};
     }
 
-    std::optional<Praktor::Execution::ExecutionControl::Clock::time_point> deadline;
+    using Control = Praktor::Execution::ExecutionControl;
+    std::optional<Control::Clock::time_point> deadline;
     if (control->timeout_ms != 0) {
-        deadline = Praktor::Execution::ExecutionControl::Clock::now() +
-            std::chrono::milliseconds(static_cast<int64_t>(control->timeout_ms));
+        const auto now = Control::Clock::now();
+        const auto max_remaining_ms =
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                Control::Clock::time_point::max() - now).count();
+        const auto requested_ms =
+            static_cast<int64_t>(control->timeout_ms);
+        deadline = requested_ms >= max_remaining_ms
+            ? Control::Clock::time_point::max()
+            : now + std::chrono::duration_cast<Control::Clock::duration>(
+                        std::chrono::milliseconds(requested_ms));
     }
 
     bridge.probe = control->is_cancelled;
     bridge.user_data = control->user_data;
-    return std::make_shared<Praktor::Execution::ExecutionControl>(
+    return std::make_shared<Control>(
+        deadline,
         bridge.probe ? &pollCancellationProbe : nullptr,
-        bridge.probe ? static_cast<void*>(&bridge) : nullptr,
-        deadline);
+        bridge.probe ? static_cast<void*>(&bridge) : nullptr);
 }
 
 praktor_result decodeInputs(const praktor_execute_request& request,
