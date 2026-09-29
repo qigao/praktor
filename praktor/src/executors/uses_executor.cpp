@@ -67,12 +67,22 @@ TaskResult UsesExecutor::execute(const Task &task, WorkflowContext &context) {
 
     const std::string nested_status =
         nested_context->getValueOrDefault<std::string>("workflow_status", "unknown");
-    if (nested_status == "failed") {
-      TaskResult result(false, "Nested workflow '" + resolved.string() + "' failed");
-      result.nested_failure_context = nestedFailureSnapshot(nested, *nested_context);
-      if (result.nested_failure_context.has_value() &&
-          !result.nested_failure_context->task_name.empty()) {
-        result.error_message += " (first failed task: '" + result.nested_failure_context->task_name + "')";
+    if (nested_status != "success") {
+      TaskResult result(false, "Nested workflow '" + resolved.string() +
+                                   "' ended with status '" + nested_status + "'");
+      if (nested_status == "failed") {
+        result.nested_failure_context = nestedFailureSnapshot(nested, *nested_context);
+        if (result.nested_failure_context.has_value() &&
+            !result.nested_failure_context->task_name.empty()) {
+          result.error_message +=
+              " (first failed task: '" + result.nested_failure_context->task_name + "')";
+        }
+      } else if (nested_status == "cancelled") {
+        result.error_code = std::string(taskErrorCodeName(TaskErrorCode::Cancelled));
+        result.error_phase = "execution_control";
+      } else if (nested_status == "timed_out") {
+        result.error_code = std::string(taskErrorCodeName(TaskErrorCode::Timeout));
+        result.error_phase = "execution_control";
       }
       return result;
     }
@@ -117,6 +127,10 @@ std::unique_ptr<WorkflowContext> UsesExecutor::createIsolatedContext(
       ctx->setValue(key, substituteVariables(value, *ctx));
     }
   }
+
+  // Nested reusable workflows share the parent's execution-control lifetime,
+  // even though their variable/task contexts remain isolated.
+  ctx->setExecutionControl(parent_context.getExecutionControl());
 
   // Set source path for relative path resolution
   ctx->setSourcePath(nested.source_path);

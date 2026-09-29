@@ -1,6 +1,7 @@
 #include "workflow_runner.hpp"
 #include "dag/workflow_executor.hpp"
 #include "execution/execution_control.hpp"
+#include "executors/uses_executor.hpp"
 #include "yml/task_parser.hpp"
 #include "dag/workflow_executor_internal.hpp"
 #include "system/managed_process.hpp"
@@ -318,6 +319,47 @@ tasks:
 
     WorkflowRunner runner(workflow_path.string());
     REQUIRE(runner.run());
+}
+
+TEST_CASE("uses propagates execution control into isolated nested workflow",
+          "[workflow][uses][execution-control]")
+{
+    using Control = Praktor::Execution::ExecutionControl;
+
+    const auto dir = createTempDir();
+    const auto reusable_path = dir / "controlled-reusable.yml";
+    writeFile(reusable_path, R"(
+tasks:
+  - name: should_not_run
+    script: |
+      ctx.output("ran", true);
+)");
+
+    Task task;
+    task.name = "call";
+    task.action = TaskAction::Uses;
+    UsesParams params;
+    params.path = reusable_path.string();
+    task.specifics = params;
+    task.source_path = (dir / "main.yml").string();
+
+    WorkflowContext context;
+    auto control = std::make_shared<Control>();
+    control->requestCancel();
+    context.setExecutionControl(control);
+
+    Praktor::Execution::UsesExecutor executor({}, 1);
+    const auto result = executor.execute(task, context);
+
+    CHECK_FALSE(result.success);
+    CHECK(result.error_code == "cancelled");
+    CHECK(result.error_phase == "execution_control");
+    CHECK(context.getValueByPath("tasks.call.outputs.workflow_status").as<std::string>() ==
+          "cancelled");
+    CHECK(context.getValueByPath("tasks.call.outputs.nested_tasks.should_not_run.outputs.ran")
+              .is_null());
+
+    std::filesystem::remove_all(dir);
 }
 
 TEST_CASE("uses exports nested task summary")
