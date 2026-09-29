@@ -94,11 +94,48 @@ void analyzeOrchNode(const OrchNode& node, EffectManifest& manifest) {
 class Analyzer {
 public:
     EffectManifest analyze(const fs::path& workflow_path) {
-        analyzeWorkflowFile(fs::absolute(workflow_path).lexically_normal());
+        const fs::path absolute =
+            fs::absolute(workflow_path).lexically_normal();
+        root_directory_ = absolute.parent_path();
+        analyzeWorkflowFile(absolute);
         return manifest_;
     }
 
 private:
+    bool outsideRoot(const std::string& raw_path,
+                     const fs::path& source_path) const {
+        if (raw_path.empty() ||
+            raw_path.find("{{") != std::string::npos ||
+            raw_path.find("}}") != std::string::npos) {
+            return false;
+        }
+        fs::path path(raw_path);
+        if (!path.is_absolute()) {
+            path = source_path.parent_path() / path;
+        }
+        path = fs::absolute(path).lexically_normal();
+
+        auto root_it = root_directory_.begin();
+        auto path_it = path.begin();
+        for (; root_it != root_directory_.end(); ++root_it, ++path_it) {
+            if (path_it == path.end() || *root_it != *path_it) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    void classifyPath(const std::string& raw_path,
+                      const fs::path& source_path,
+                      const char* effect) {
+        if (raw_path.empty()) {
+            return;
+        }
+        manifest_.add(effect);
+        if (outsideRoot(raw_path, source_path)) {
+            manifest_.add("outside_workspace");
+        }
+    }
     void markUnknown(std::string reason) {
         manifest_.unknown_effects = true;
         if (std::find(manifest_.unknown_reasons.begin(),
@@ -192,29 +229,59 @@ private:
         Workflow workflow = TaskParser::parseFileWithIncludes(
             key, fs::path(key).parent_path().string());
 
-        if (!workflow.dot_env.empty()) {
-            manifest_.add("filesystem_read");
+        for (const auto& env_file : workflow.dot_env) {
+            classifyPath(env_file, fs::path(key), "filesystem_read");
         }
 
         for (const auto& task : workflow.tasks) {
-            if (!task.dot_env.empty() || !task.sources.empty() ||
-                !task.generates.empty()) {
-                manifest_.add("filesystem_read");
+            const fs::path task_source =
+                task.source_path.empty() ? fs::path(key)
+                                         : fs::path(task.source_path);
+
+            for (const auto& env_file : task.dot_env) {
+                classifyPath(env_file, task_source, "filesystem_read");
+            }
+            for (const auto& source : task.sources) {
+                classifyPath(source, task_source, "filesystem_read");
+            }
+            for (const auto& generated : task.generates) {
+                classifyPath(generated, task_source, "filesystem_write");
+            }
+            if (task.working_dir.has_value() &&
+                outsideRoot(*task.working_dir, task_source)) {
+                manifest_.add("outside_workspace");
             }
 
             switch (task.action) {
-            case TaskAction::Program:
+            case TaskAction::Program: {
                 manifest_.add("process");
+                const auto& params = std::get<ProgramParams>(task.specifics);
+                if (outsideRoot(params.program, task_source)) {
+                    manifest_.add("outside_workspace");
+                }
                 break;
-            case TaskAction::Download:
+            }
+            case TaskAction::Download: {
                 manifest_.add("network");
-                manifest_.add("filesystem_write");
+                const auto& params = std::get<DownloadParams>(task.specifics);
+                classifyPath(params.path, task_source, "filesystem_write");
                 break;
+            }
             case TaskAction::Service:
-            case TaskAction::ManagedProcess:
                 manifest_.add("process");
                 manifest_.add("system_control");
                 break;
+            case TaskAction::ManagedProcess: {
+                manifest_.add("process");
+                manifest_.add("system_control");
+                const auto& params =
+                    std::get<ManagedProcessParams>(task.specifics);
+                if (outsideRoot(params.executable, task_source) ||
+                    outsideRoot(params.working_directory, task_source)) {
+                    manifest_.add("outside_workspace");
+                }
+                break;
+            }
             case TaskAction::DynamicTasks:
                 // Dynamic task templates currently generate command/orch tasks.
                 manifest_.add("process");
@@ -249,6 +316,7 @@ private:
     }
 
     EffectManifest manifest_;
+    fs::path root_directory_;
     std::unordered_set<std::string> workflow_files_;
     std::unordered_set<std::string> script_files_;
 };
