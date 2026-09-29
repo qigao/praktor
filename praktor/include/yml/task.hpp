@@ -2,7 +2,9 @@
 
 #include "task_types.hpp"
 #include "dag/dependency_graph.hpp"
+#include "data/workflow_value.hpp"
 
+#include <map>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -45,7 +47,21 @@ struct Task {
     }
 };
 
+struct WorkflowContractField {
+    std::string type;
+    bool required = false;
+    std::optional<WorkflowValue> default_value;
+    std::vector<WorkflowValue> enum_values;
+    std::string description;
+    std::optional<std::string> value;
+};
+
+using WorkflowContractFields = std::map<std::string, WorkflowContractField>;
+
 struct Workflow {
+    WorkflowContractFields inputs;
+    WorkflowContractFields outputs;
+    bool strict_inputs = false;
     Vars variables;
     Vars env;
     DotEnv dot_env;

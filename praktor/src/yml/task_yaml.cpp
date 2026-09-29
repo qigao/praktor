@@ -1,10 +1,157 @@
 #include "task_yaml_internal.hpp"
+#include "workflow_contract.hpp"
 
 #include <algorithm>
+#include <charconv>
+#include <cstdlib>
 #include <stdexcept>
 #include <string>
 #include <unordered_set>
 #include <vector>
+
+
+namespace {
+
+WorkflowValue parse_contract_value(const TaskYamlDetail::YamlNodeRef& node) {
+    if (node.is_map()) {
+        WorkflowValue object = WorkflowValue::object();
+        for (const auto& child : node) {
+            object[child.key()] = parse_contract_value(child);
+        }
+        return object;
+    }
+    if (node.is_seq()) {
+        WorkflowValue array = WorkflowValue::array();
+        for (const auto& child : node) {
+            array.push_back(parse_contract_value(child));
+        }
+        return array;
+    }
+    if (!node.has_val()) {
+        TaskYamlDetail::throw_parse_error(node, "contract value must be a scalar, sequence, or map");
+    }
+    if (node.is_string_scalar()) {
+        return WorkflowValue(node.scalar());
+    }
+
+    const std::string text = node.scalar();
+    const std::string lower = TaskYamlDetail::to_lower_copy(text);
+    if (lower == "null" || lower == "~") {
+        return WorkflowValue::null();
+    }
+    if (lower == "true" || lower == "yes" || lower == "on") {
+        return WorkflowValue(true);
+    }
+    if (lower == "false" || lower == "no" || lower == "off") {
+        return WorkflowValue(false);
+    }
+
+    std::int64_t integer = 0;
+    const auto parsed_integer =
+        std::from_chars(text.data(), text.data() + text.size(), integer);
+    if (parsed_integer.ec == std::errc{} &&
+        parsed_integer.ptr == text.data() + text.size()) {
+        return WorkflowValue(integer);
+    }
+
+    char* end = nullptr;
+    const double number = std::strtod(text.c_str(), &end);
+    if (end && end == text.c_str() + text.size()) {
+        return WorkflowValue(number);
+    }
+    return WorkflowValue(text);
+}
+
+WorkflowContractField parse_contract_field(
+    const TaskYamlDetail::YamlNodeRef& node,
+    const std::string& name,
+    bool output) {
+    if (!node.is_map()) {
+        TaskYamlDetail::throw_parse_error(
+            node, "workflow contract field '" + name + "' must be a map");
+    }
+
+    std::unordered_set<std::string> allowed = {
+        "type", "required", "default", "enum", "description"
+    };
+    if (output) {
+        allowed.insert("value");
+    }
+    TaskYamlDetail::check_unknown_keys(node, allowed);
+
+    if (!node.has_child("type")) {
+        TaskYamlDetail::throw_parse_error(
+            node, "workflow contract field '" + name + "' requires 'type'");
+    }
+
+    WorkflowContractField field;
+    field.type = TaskYamlDetail::read_scalar_or_throw(
+        node["type"], "workflow contract type must be a scalar");
+    static const std::unordered_set<std::string> valid_types = {
+        "string", "boolean", "integer", "number", "array", "object"
+    };
+    if (valid_types.find(field.type) == valid_types.end()) {
+        TaskYamlDetail::throw_parse_error(
+            node["type"], "unsupported workflow contract type '" + field.type + "'");
+    }
+
+    if (node.has_child("required")) {
+        field.required =
+            TaskYamlDetail::read_bool_or_throw(node["required"], "required");
+    }
+    if (node.has_child("description")) {
+        field.description = TaskYamlDetail::read_scalar_or_throw(
+            node["description"], "description must be a scalar");
+    }
+    if (node.has_child("value")) {
+        field.value = TaskYamlDetail::read_scalar_or_throw(
+            node["value"], "output value must be a scalar");
+    }
+    if (node.has_child("default")) {
+        field.default_value = parse_contract_value(node["default"]);
+        if (!Praktor::Contract::valueMatchesType(*field.default_value, field.type)) {
+            TaskYamlDetail::throw_parse_error(
+                node["default"], "default does not match declared type '" + field.type + "'");
+        }
+    }
+    if (node.has_child("enum")) {
+        const auto& values = node["enum"];
+        if (!values.is_seq() || values.num_children() == 0) {
+            TaskYamlDetail::throw_parse_error(
+                values, "enum must be a non-empty sequence");
+        }
+        for (const auto& enum_node : values) {
+            WorkflowValue value = parse_contract_value(enum_node);
+            if (!Praktor::Contract::valueMatchesType(value, field.type)) {
+                TaskYamlDetail::throw_parse_error(
+                    enum_node, "enum value does not match declared type '" + field.type + "'");
+            }
+            field.enum_values.push_back(std::move(value));
+        }
+    }
+    return field;
+}
+
+WorkflowContractFields parse_contract_fields(
+    const TaskYamlDetail::YamlNodeRef& node,
+    bool output) {
+    if (!node.is_map()) {
+        TaskYamlDetail::throw_parse_error(
+            node, output ? "'outputs' must be a map" : "'inputs' must be a map");
+    }
+
+    WorkflowContractFields fields;
+    for (const auto& child : node) {
+        const std::string name = child.key();
+        if (name.empty()) {
+            TaskYamlDetail::throw_parse_error(child, "workflow contract field name cannot be empty");
+        }
+        fields.emplace(name, parse_contract_field(child, name, output));
+    }
+    return fields;
+}
+
+} // namespace
 
 TaskDefaults parse_defaults(const TaskYamlDetail::YamlNodeRef& node) {
     if (!node.is_map()) {
@@ -290,8 +437,8 @@ Workflow parse_workflow(const TaskYamlDetail::YamlNodeRef& node, const std::stri
     }
 
     static const std::unordered_set<std::string> allowed_workflow_keys = {
-        "name", "description", "variables", "env", "dotEnv", "defaults",
-        "includes", "tasks"
+        "name", "description", "inputs", "outputs", "input_policy",
+        "variables", "env", "dotEnv", "defaults", "includes", "tasks"
     };
     TaskYamlDetail::check_unknown_keys(node, allowed_workflow_keys);
 
@@ -302,6 +449,25 @@ Workflow parse_workflow(const TaskYamlDetail::YamlNodeRef& node, const std::stri
     }
     if (node.has_child("description")) {
         node["description"] >> workflow.description;
+    }
+    if (node.has_child("inputs")) {
+        workflow.inputs = parse_contract_fields(node["inputs"], false);
+    }
+    if (node.has_child("outputs")) {
+        workflow.outputs = parse_contract_fields(node["outputs"], true);
+    }
+    if (node.has_child("input_policy")) {
+        const std::string policy = TaskYamlDetail::read_scalar_or_throw(
+            node["input_policy"], "input_policy must be a scalar");
+        if (policy == "strict") {
+            workflow.strict_inputs = true;
+        } else if (policy == "allow_extra") {
+            workflow.strict_inputs = false;
+        } else {
+            TaskYamlDetail::throw_parse_error(
+                node["input_policy"],
+                "input_policy must be 'strict' or 'allow_extra'");
+        }
     }
     if (node.has_child("variables")) {
         workflow.variables = node_to_string_map(node["variables"]);

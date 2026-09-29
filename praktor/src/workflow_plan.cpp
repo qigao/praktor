@@ -1,4 +1,5 @@
 #include "workflow_plan.hpp"
+#include "workflow_contract.hpp"
 
 #include "util/path_utils.hpp"
 #include "yml/task_parser.hpp"
@@ -150,11 +151,15 @@ public:
             manifest.push_back('\n');
         }
 
+        const Workflow root_workflow = TaskParser::parseFileWithIncludes(
+            root_path_.string(), root_directory_.string());
         return WorkflowPlan(
             root_path_.generic_string(),
             root_directory_.generic_string(),
             sha256(manifest),
-            std::move(dependencies));
+            std::move(dependencies),
+            Praktor::Contract::inputSchema(root_workflow),
+            Praktor::Contract::outputSchema(root_workflow));
     }
 
 private:
@@ -437,6 +442,8 @@ WorkflowValue WorkflowPlan::toValue() const {
     result["root_path"] = root_path_;
     result["root_directory"] = root_directory_;
     result["digest"] = digest_;
+    result["input_schema"] = input_schema_;
+    result["output_schema"] = output_schema_;
 
     WorkflowValue dependencies = WorkflowValue::array();
     for (const auto& dependency : dependencies_) {

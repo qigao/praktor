@@ -12,6 +12,20 @@
       "type": "string",
       "description": "Optional workflow summary."
     },
+    "input_policy": {
+      "type": "string",
+      "enum": ["allow_extra", "strict"],
+      "default": "allow_extra",
+      "description": "Controls whether undeclared workflow inputs are accepted."
+    },
+    "inputs": {
+      "$ref": "#/$defs/workflowInputContract",
+      "description": "Typed public workflow input contract."
+    },
+    "outputs": {
+      "$ref": "#/$defs/workflowOutputContract",
+      "description": "Typed public workflow output contract."
+    },
     "variables": {
       "$ref": "#/$defs/stringMap",
       "description": "Global variables available for Mustache templating and expression evaluation."
@@ -52,6 +66,67 @@
   ],
   "additionalProperties": false,
   "$defs": {
+    "workflowInputField": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["string", "boolean", "integer", "number", "array", "object"]
+        },
+        "required": {
+          "type": "boolean",
+          "default": false
+        },
+        "default": {},
+        "enum": {
+          "type": "array",
+          "minItems": 1
+        },
+        "description": {
+          "type": "string"
+        }
+      },
+      "required": ["type"],
+      "additionalProperties": false
+    },
+    "workflowOutputField": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["string", "boolean", "integer", "number", "array", "object"]
+        },
+        "required": {
+          "type": "boolean",
+          "default": false
+        },
+        "default": {},
+        "enum": {
+          "type": "array",
+          "minItems": 1
+        },
+        "description": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "required": ["type"],
+      "additionalProperties": false
+    },
+    "workflowInputContract": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/workflowInputField"
+      }
+    },
+    "workflowOutputContract": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/workflowOutputField"
+      }
+    },
     "stringOrStringArray": {
       "oneOf": [
         {
