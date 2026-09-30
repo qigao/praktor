@@ -113,7 +113,7 @@ jobs:
             --username qigao --password "$GITHUB_TOKEN" --store-password-in-clear-text --configfile "$config"
           packages="$RUNNER_TEMP/native-dependencies"
           dotnet restore packaging/nuget/Praktor.Native.csproj \
-            --configfile "$config" --packages "$packages" --no-cache
+            --configfile "$config" --packages "$packages" --no-cache --force-evaluate
 
           resolve_sdk_root() {
             local package_id="$1"
@@ -258,7 +258,7 @@ jobs:
           printf '<configuration><packageSources><clear /></packageSources></configuration>\n' > "$config"
           dotnet nuget add source https://nuget.pkg.github.com/qigao/index.json --name github \
             --username qigao --password "$GITHUB_TOKEN" --store-password-in-clear-text --configfile "$config"
-          dotnet restore packaging/nuget/Praktor.Native.csproj --configfile "$config" --packages "$RUNNER_TEMP/pack-deps"
+          dotnet restore packaging/nuget/Praktor.Native.csproj --configfile "$config" --packages "$RUNNER_TEMP/pack-deps" --no-cache --force-evaluate
           dotnet pack packaging/nuget/Praktor.Native.csproj --no-restore --configuration Release --output dist \
             "-p:PackageVersion=$SDK_VERSION" "-p:PackageRoot=$GITHUB_WORKSPACE/package" \
             "-p:RestorePackagesPath=$RUNNER_TEMP/pack-deps"

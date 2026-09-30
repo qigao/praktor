@@ -93,7 +93,7 @@ jobs:
           </Project>
           EOF
 
-          dotnet restore "$project" --packages "$packages" --configfile "$config" --no-cache
+          dotnet restore "$project" --packages "$packages" --configfile "$config" --no-cache --force-evaluate
 
           resolve_sdk_root() {
             local package_id="$1"
