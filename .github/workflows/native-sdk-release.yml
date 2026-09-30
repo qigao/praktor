@@ -266,24 +266,28 @@ jobs:
           package="dist/Praktor.Native.$SDK_VERSION.nupkg"
           nuspec="$RUNNER_TEMP/Praktor.Native.nuspec"
           unzip -p "$package" 'Praktor.Native.nuspec' > "$nuspec"
-          for dep in Salts.Native SaltsUtils.Native CHttp.Native TurboScript.Native; do
-            grep -F "id=\"$dep\"" "$nuspec"
-          done
-          if grep -E 'id="(Salts\.Native|SaltsUtils\.Native|CHttp\.Native|TurboScript\.Native)" version="\[[0-9]' "$nuspec"; then
-            echo "Praktor.Native must not pin foundation dependency versions" >&2
+          if grep -E 'id="(Salts\.Native|SaltsUtils\.Native|CHttp\.Native|TurboScript\.Native)"' "$nuspec"; then
+            echo "Praktor.Native must not publish versioned GitHub package dependency metadata" >&2
             exit 1
           fi
 
-          dotnet nuget add source "$GITHUB_WORKSPACE/dist" --name local-praktor --configfile "$config"
-          project="$RUNNER_TEMP/praktor-packed-restore.csproj"
-          cat > "$project" <<EOF
+          restored="$RUNNER_TEMP/praktor-packed-restore"
+          mkdir -p "$restored/praktor.native/$SDK_VERSION"
+          unzip -q "$package" -d "$restored/praktor.native/$SDK_VERSION"
+
+          project="$RUNNER_TEMP/praktor-latest-dependencies.csproj"
+          cat > "$project" <<'EOF'
           <Project Sdk="Microsoft.NET.Sdk">
             <PropertyGroup><TargetFramework>net8.0</TargetFramework></PropertyGroup>
-            <ItemGroup><PackageReference Include="Praktor.Native" Version="[$SDK_VERSION]" /></ItemGroup>
+            <ItemGroup>
+              <PackageReference Include="Salts.Native" Version="*" />
+              <PackageReference Include="SaltsUtils.Native" Version="*" />
+              <PackageReference Include="CHttp.Native" Version="*" />
+              <PackageReference Include="TurboScript.Native" Version="*" />
+            </ItemGroup>
           </Project>
           EOF
-          restored="$RUNNER_TEMP/praktor-packed-restore"
-          dotnet restore "$project" --packages "$restored" --configfile "$config" --no-cache
+          dotnet restore "$project" --packages "$restored" --configfile "$config" --no-cache --force-evaluate
 
           resolve_restored_sdk() {
             local package_id="$1"
