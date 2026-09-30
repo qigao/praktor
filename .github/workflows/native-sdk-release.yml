@@ -274,7 +274,9 @@ jobs:
             exit 1
           fi
 
-          dotnet nuget add source "$GITHUB_WORKSPACE/dist" --name local-praktor --configfile "$config"
+          local_config="$RUNNER_TEMP/praktor-local-only.config"
+          printf '<configuration><packageSources><clear /></packageSources></configuration>\n' > "$local_config"
+          dotnet nuget add source "$GITHUB_WORKSPACE/dist" --name local-praktor --configfile "$local_config"
           project="$RUNNER_TEMP/praktor-packed-restore.csproj"
           cat > "$project" <<EOF
           <Project Sdk="Microsoft.NET.Sdk">
@@ -283,7 +285,7 @@ jobs:
           </Project>
           EOF
           restored="$RUNNER_TEMP/praktor-packed-restore"
-          dotnet restore "$project" --packages "$restored" --configfile "$config" --no-cache
+          dotnet restore "$project" --packages "$restored" --configfile "$local_config" --no-cache
 
           resolve_restored_sdk() {
             local package_id="$1"
