@@ -1,6 +1,7 @@
 name: Core-only real SDK integration
 
 on:
+  workflow_dispatch:
   pull_request:
     paths:
       - "CMakeLists.txt"
@@ -110,6 +111,10 @@ jobs:
           salts_root="$(resolve_sdk_root salts.native)"
           utils_root="$(resolve_sdk_root saltsutils.native)"
           chttp_root="$(resolve_sdk_root chttp.native)"
+
+          printf 'Salts.Native=%s\n' "$(basename "$(dirname "$(dirname "$salts_root")")")"
+          printf 'SaltsUtils.Native=%s\n' "$(basename "$(dirname "$(dirname "$utils_root")")")"
+          printf 'CHttp.Native=%s\n' "$(basename "$(dirname "$(dirname "$chttp_root")")")"
 
           test -f "$salts_root/lib/cmake/Salts/SaltsConfig.cmake"
           test -f "$utils_root/lib/cmake/SaltsUtils/SaltsUtilsConfig.cmake"
