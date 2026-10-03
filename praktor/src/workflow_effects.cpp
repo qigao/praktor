@@ -287,6 +287,11 @@ private:
                 }
                 break;
             }
+            case TaskAction::HostTool:
+                // Backend authority/effects remain host-owned. Praktor records
+                // only that reviewed host execution is required.
+                manifest_.add("host_tool");
+                break;
             case TaskAction::DynamicTasks:
                 // Dynamic task templates currently generate command/orch tasks.
                 manifest_.add("process");
