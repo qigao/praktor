@@ -1,6 +1,6 @@
 {
     "name": "vcpkg-example",
-    "version-semver": "0.4.2",
+    "version-semver": "0.4.3",
     "dependencies": [
         {
             "name": "catch2",
