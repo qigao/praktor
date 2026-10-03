@@ -266,12 +266,17 @@ std::shared_ptr<Praktor::Execution::ExecutionControl> makeExecutionControl(
 struct HostToolSinkBuffer {
     std::string json;
     bool called = false;
+    bool rejected = false;
 };
 
 int32_t PRAKTOR_CALL collectHostToolResult(
     const char* json, size_t json_size, void* user_data) {
     auto* buffer = static_cast<HostToolSinkBuffer*>(user_data);
-    if (!buffer || buffer->called || (!json && json_size != 0)) {
+    if (!buffer) {
+        return -1;
+    }
+    if (buffer->called || (!json && json_size != 0)) {
+        buffer->rejected = true;
         return -1;
     }
     try {
@@ -279,6 +284,7 @@ int32_t PRAKTOR_CALL collectHostToolResult(
         buffer->called = true;
         return 0;
     } catch (...) {
+        buffer->rejected = true;
         return -1;
     }
 }
@@ -425,10 +431,11 @@ public:
 
         result.status = hostToolStatus(callback_status);
         if (result.status == Status::Ok) {
-            if (!sink.called) {
+            if (!sink.called || sink.rejected) {
                 result.status = Status::Failed;
-                result.error_message =
-                    "HostTool returned success without one result payload";
+                result.error_message = sink.rejected
+                    ? "HostTool result sink contract was violated"
+                    : "HostTool returned success without one result payload";
                 return result;
             }
             try {
