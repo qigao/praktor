@@ -160,6 +160,15 @@ public:
         profiles["harness_safe"] =
             Praktor::Profile::evaluateHarnessSafe(root_workflow, effects).toValue();
 
+        std::sort(host_tools_.begin(), host_tools_.end(),
+                  [](const WorkflowHostTool& lhs, const WorkflowHostTool& rhs) {
+                      if (lhs.workflow_path != rhs.workflow_path)
+                          return lhs.workflow_path < rhs.workflow_path;
+                      if (lhs.task_name != rhs.task_name)
+                          return lhs.task_name < rhs.task_name;
+                      return lhs.tool_name < rhs.tool_name;
+                  });
+
         return WorkflowPlan(
             root_path_.generic_string(),
             root_directory_.generic_string(),
@@ -168,7 +177,8 @@ public:
             Praktor::Contract::inputSchema(root_workflow),
             Praktor::Contract::outputSchema(root_workflow),
             effects.toValue(),
-            std::move(profiles));
+            std::move(profiles),
+            std::move(host_tools_));
     }
 
 private:
@@ -361,6 +371,17 @@ private:
                 scanScript(*task.script, task_source);
             }
 
+            if (task.action == TaskAction::HostTool) {
+                const auto& params = std::get<HostToolParams>(task.specifics);
+                WorkflowHostTool host_tool;
+                host_tool.workflow_path =
+                    fs::path(task_source).lexically_relative(root_directory_).generic_string();
+                host_tool.task_name = task.name;
+                host_tool.tool_name = params.tool;
+                host_tool.argument_template = params.arguments;
+                host_tools_.push_back(std::move(host_tool));
+            }
+
             if (task.action == TaskAction::Uses) {
                 const auto& params = std::get<UsesParams>(task.specifics);
                 const fs::path nested =
@@ -377,6 +398,7 @@ private:
     std::unordered_set<std::string> include_scanned_;
     std::unordered_set<std::string> script_scanned_;
     std::set<std::string> active_workflows_;
+    std::vector<WorkflowHostTool> host_tools_;
 };
 
 std::string manifestDigest(const std::vector<WorkflowDependency>& dependencies) {
@@ -455,6 +477,17 @@ WorkflowValue WorkflowPlan::toValue() const {
     result["output_schema"] = output_schema_;
     result["effect_manifest"] = effect_manifest_;
     result["profiles"] = profiles_;
+
+    WorkflowValue host_tools = WorkflowValue::array();
+    for (const auto& host_tool : host_tools_) {
+        WorkflowValue item = WorkflowValue::object();
+        item["workflow_path"] = host_tool.workflow_path;
+        item["task_name"] = host_tool.task_name;
+        item["tool"] = host_tool.tool_name;
+        item["arguments"] = host_tool.argument_template;
+        host_tools.push_back(std::move(item));
+    }
+    result["host_tools"] = std::move(host_tools);
 
     WorkflowValue dependencies = WorkflowValue::array();
     for (const auto& dependency : dependencies_) {
