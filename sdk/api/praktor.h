@@ -22,17 +22,19 @@ typedef enum praktor_result {
     PRAKTOR_RESULT_INTERNAL_ERROR = -4,
     PRAKTOR_RESULT_PLAN_INVALID = -5,
     PRAKTOR_RESULT_PLAN_MISMATCH = -6,
-    PRAKTOR_RESULT_INPUT_CONTRACT = -7
+    PRAKTOR_RESULT_INPUT_CONTRACT = -7,
+    PRAKTOR_RESULT_HOST_TOOL_REJECTED = -8
 } praktor_result;
 
 #define PRAKTOR_ABI_MAJOR 2u
-#define PRAKTOR_ABI_MINOR 4u
+#define PRAKTOR_ABI_MINOR 5u
 
 #define PRAKTOR_CAPABILITY_JSON_WORKFLOW (UINT64_C(1) << 0)
 #define PRAKTOR_CAPABILITY_SCRIPT_ENGINE (UINT64_C(1) << 1)
 #define PRAKTOR_CAPABILITY_EXECUTION_CONTROL (UINT64_C(1) << 2)
 #define PRAKTOR_CAPABILITY_WORKFLOW_PLAN (UINT64_C(1) << 3)
 #define PRAKTOR_CAPABILITY_EXECUTION_EVENTS (UINT64_C(1) << 4)
+#define PRAKTOR_CAPABILITY_HOST_TOOL (UINT64_C(1) << 5)
 
 typedef enum praktor_error_phase {
     PRAKTOR_ERROR_PHASE_NONE = 0,
@@ -41,7 +43,8 @@ typedef enum praktor_error_phase {
     PRAKTOR_ERROR_PHASE_EXECUTION = 3,
     PRAKTOR_ERROR_PHASE_RESULT_JSON = 4,
     PRAKTOR_ERROR_PHASE_PLAN = 5,
-    PRAKTOR_ERROR_PHASE_INPUT_CONTRACT = 6
+    PRAKTOR_ERROR_PHASE_INPUT_CONTRACT = 6,
+    PRAKTOR_ERROR_PHASE_HOST_TOOL = 7
 } praktor_error_phase;
 
 /** Opaque immutable reviewed workflow identity owned by Praktor. */
@@ -173,6 +176,69 @@ typedef struct praktor_error {
     char message[512];
 } praktor_error;
 
+#define PRAKTOR_HOST_TOOL_EXECUTOR_ABI_VERSION 1u
+
+typedef enum praktor_host_tool_status {
+    PRAKTOR_HOST_TOOL_OK = 0,
+    PRAKTOR_HOST_TOOL_NOT_FOUND = 1,
+    PRAKTOR_HOST_TOOL_DENIED = 2,
+    PRAKTOR_HOST_TOOL_FAILED = 3,
+    PRAKTOR_HOST_TOOL_CANCELLED = 4,
+    PRAKTOR_HOST_TOOL_TIMED_OUT = 5
+} praktor_host_tool_status;
+
+/**
+ * Result sink owned by Praktor and called synchronously by the host.
+ *
+ * The host retains ownership of json bytes and may release them as soon as the
+ * sink returns. The sink copies/parses the payload before returning.
+ */
+typedef int32_t (PRAKTOR_CALL *praktor_host_tool_result_sink_fn)(
+    const char* json,
+    size_t json_size,
+    void* user_data);
+
+/**
+ * Preflight one reviewed HostTool identity before any workflow task is started.
+ *
+ * arguments_template_json is the frozen typed `with:` object from the reviewed
+ * WorkflowPlan. The callback must not execute the tool or cause tool side
+ * effects.
+ */
+typedef int32_t (PRAKTOR_CALL *praktor_host_tool_validate_fn)(
+    void* user_data,
+    const char* tool_name,
+    const char* arguments_template_json,
+    size_t arguments_template_json_size,
+    praktor_error* error);
+
+/**
+ * Invoke one preflighted HostTool.
+ *
+ * Call result_sink exactly once when returning PRAKTOR_HOST_TOOL_OK. control and
+ * observer are the original borrowed public execution contracts so the embedding
+ * host can propagate cancellation/deadline and lineage into its own runtime.
+ */
+typedef int32_t (PRAKTOR_CALL *praktor_host_tool_invoke_fn)(
+    void* user_data,
+    const char* tool_name,
+    const char* arguments_json,
+    size_t arguments_json_size,
+    const praktor_execution_control* control,
+    const praktor_execution_observer* observer,
+    praktor_host_tool_result_sink_fn result_sink,
+    void* result_sink_user_data,
+    praktor_error* error);
+
+typedef struct praktor_host_tool_executor {
+    uint32_t struct_size;
+    uint32_t abi_version;
+    void* user_data;
+    praktor_host_tool_validate_fn validate;
+    praktor_host_tool_invoke_fn invoke;
+    uint64_t reserved[4];
+} praktor_host_tool_executor;
+
 #define PRAKTOR_EXECUTE_REQUEST_INIT {sizeof(praktor_execute_request), NULL, NULL, 0}
 #define PRAKTOR_COMPILE_REQUEST_INIT {sizeof(praktor_compile_request), NULL}
 #define PRAKTOR_PLAN_EXECUTE_REQUEST_INIT {sizeof(praktor_plan_execute_request), NULL, NULL, 0}
@@ -180,6 +246,7 @@ typedef struct praktor_error {
 #define PRAKTOR_EXECUTION_OBSERVER_INIT {sizeof(praktor_execution_observer), NULL, NULL, NULL, NULL, NULL, NULL, {0, 0, 0, 0}}
 #define PRAKTOR_OWNED_JSON_INIT {sizeof(praktor_owned_json), NULL, 0}
 #define PRAKTOR_ERROR_INIT {sizeof(praktor_error), PRAKTOR_ERROR_PHASE_NONE, {0}}
+#define PRAKTOR_HOST_TOOL_EXECUTOR_INIT {sizeof(praktor_host_tool_executor), PRAKTOR_HOST_TOOL_EXECUTOR_ABI_VERSION, NULL, NULL, NULL, {0, 0, 0, 0}}
 
 typedef int32_t (PRAKTOR_CALL *praktor_execute_workflow_fn)(
     const praktor_execute_request* request,
@@ -209,6 +276,13 @@ typedef int32_t (PRAKTOR_CALL *praktor_execute_workflow_plan_observed_fn)(
     const praktor_execution_observer* observer,
     praktor_owned_json* output,
     praktor_error* error);
+typedef int32_t (PRAKTOR_CALL *praktor_execute_workflow_plan_host_tools_fn)(
+    const praktor_plan_execute_request* request,
+    const praktor_execution_control* control,
+    const praktor_execution_observer* observer,
+    const praktor_host_tool_executor* host_tools,
+    praktor_owned_json* output,
+    praktor_error* error);
 typedef void (PRAKTOR_CALL *praktor_release_workflow_plan_fn)(
     praktor_workflow_plan* plan);
 typedef void (PRAKTOR_CALL *praktor_release_json_fn)(praktor_owned_json* data);
@@ -226,6 +300,7 @@ typedef struct praktor_api {
     praktor_execute_workflow_plan_fn execute_workflow_plan;
     praktor_release_workflow_plan_fn release_workflow_plan;
     praktor_execute_workflow_plan_observed_fn execute_workflow_plan_observed;
+    praktor_execute_workflow_plan_host_tools_fn execute_workflow_plan_host_tools;
 } praktor_api;
 
 typedef const praktor_api* (PRAKTOR_CALL *praktor_get_api_fn)(void);
@@ -300,6 +375,21 @@ PRAKTOR_C_API praktor_result PRAKTOR_CALL praktor_execute_workflow_plan_observed
     const praktor_plan_execute_request* request,
     const praktor_execution_control* control,
     const praktor_execution_observer* observer,
+    praktor_owned_json* output,
+    praktor_error* error);
+
+/**
+ * Execute a reviewed WorkflowPlan with backend-neutral HostTool authority.
+ *
+ * All HostTool identities retained by the plan are validated before the
+ * WorkflowRunner starts. Any missing/denied identity returns
+ * PRAKTOR_RESULT_HOST_TOOL_REJECTED with zero workflow side effects.
+ */
+PRAKTOR_C_API praktor_result PRAKTOR_CALL praktor_execute_workflow_plan_host_tools(
+    const praktor_plan_execute_request* request,
+    const praktor_execution_control* control,
+    const praktor_execution_observer* observer,
+    const praktor_host_tool_executor* host_tools,
     praktor_owned_json* output,
     praktor_error* error);
 
