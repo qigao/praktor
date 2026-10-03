@@ -200,6 +200,11 @@ Task parse_task(const TaskYamlDetail::YamlNodeRef& node, const std::string& sour
         TaskYamlDetail::check_unknown_keys(node, allowed_task_keys);
     }
 
+    if (node.has_child("with") && !node.has_child("tool")) {
+        TaskYamlDetail::throw_parse_error(
+            node["with"], "'with' is valid only with the 'tool' runner");
+    }
+
     Task task;
 
     if (!node.has_child("name")) {
