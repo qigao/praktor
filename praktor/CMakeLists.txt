@@ -32,6 +32,7 @@ set(SOURCE_FILES
     src/executors/download_executor.cpp
     src/executors/service_executor.cpp
     src/executors/managed_process_executor.cpp
+    src/executors/host_tool_executor.cpp
     src/system/service_controller.cpp
     src/system/managed_process.cpp
     src/system/managed_process_win.cpp
