@@ -349,8 +349,8 @@ Task parse_task(const TaskYamlDetail::YamlNodeRef& node, const std::string& sour
     if (node.has_child("tool")) {
         select_runner(TaskAction::HostTool, "tool", [&] {
             HostToolParams params;
-            params.tool = TaskYamlDetail::read_scalar_or_throw(
-                node["tool"], "'tool' must be a scalar stable host-tool identity");
+            params.tool = TaskYamlDetail::read_system_action_string_or_throw(
+                node["tool"], "'tool' must be a string stable host-tool identity");
             if (params.tool.empty()) {
                 TaskYamlDetail::throw_parse_error(
                     node["tool"], "'tool' identity cannot be empty");
