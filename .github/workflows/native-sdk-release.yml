@@ -1,6 +1,7 @@
 name: Praktor native SDK
 
 on:
+  workflow_dispatch:
   pull_request:
     paths:
       - "CMakeLists.txt"
@@ -142,6 +143,15 @@ jobs:
             echo "CHTTP_NATIVE_VERSION=$(basename "$(dirname "$(dirname "$chttp_root")")")"
             echo "TURBOSCRIPT_NATIVE_VERSION=$(basename "$(dirname "$(dirname "$turboscript_root")")")"
           } >> "$GITHUB_ENV"
+
+      - name: Report resolved native SDK baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf 'Salts.Native=%s\n' "$SALTS_NATIVE_VERSION"
+          printf 'SaltsUtils.Native=%s\n' "$SALTS_UTILS_NATIVE_VERSION"
+          printf 'CHttp.Native=%s\n' "$CHTTP_NATIVE_VERSION"
+          printf 'TurboScript.Native=%s\n' "$TURBOSCRIPT_NATIVE_VERSION"
 
       - name: Build script-enabled Praktor SDK
         shell: bash
