@@ -1,5 +1,7 @@
 #pragma once
 
+#include "data/workflow_value.hpp"
+
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -10,7 +12,7 @@ using Vars = std::unordered_map<std::string, std::string>;
 using StrList = std::vector<std::string>;
 using DotEnv = std::vector<std::string>;
 
-enum class TaskAction { None, Uses, DynamicTasks, Orch, Program, Download, Command, Service, ManagedProcess };
+enum class TaskAction { None, Uses, DynamicTasks, Orch, Program, Download, Command, Service, ManagedProcess, HostTool };
 
 enum class CommandOutputFormat { Text, Json };
 
@@ -92,6 +94,11 @@ struct ManagedProcessParams {
 
 struct UsesParams {
   std::string path;
+};
+
+struct HostToolParams {
+  std::string tool;
+  WorkflowValue arguments{WorkflowValue::object()};
 };
 
 /**
@@ -179,4 +186,4 @@ struct TaskDefaults {
 
 using TaskSpecifics =
     std::variant<std::monostate, UsesParams, DynamicTasksParams, OrchParams, ProgramParams,
-                 DownloadParams, ServiceParams, ManagedProcessParams>;
+                 DownloadParams, ServiceParams, ManagedProcessParams, HostToolParams>;
