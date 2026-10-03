@@ -283,6 +283,18 @@ int32_t PRAKTOR_CALL collectHostToolResult(
     }
 }
 
+struct HostToolControlBridge {
+    std::shared_ptr<Praktor::Execution::ExecutionControl> control;
+};
+
+int32_t PRAKTOR_CALL hostToolCancelProbe(void* user_data) {
+    const auto* bridge = static_cast<const HostToolControlBridge*>(user_data);
+    if (!bridge || !bridge->control) {
+        return 0;
+    }
+    return bridge->control->cancellationRequested() ? 1 : 0;
+}
+
 Praktor::Execution::HostToolStatus hostToolStatus(int32_t status) {
     using Status = Praktor::Execution::HostToolStatus;
     switch (status) {
@@ -305,9 +317,8 @@ Praktor::Execution::HostToolStatus hostToolStatus(int32_t status) {
 class CHostToolHost final : public Praktor::Execution::HostToolHost {
 public:
     CHostToolHost(const praktor_host_tool_executor* executor,
-                  const praktor_execution_control* control,
                   const praktor_execution_observer* observer)
-        : executor_(executor), control_(control), observer_(observer) {}
+        : executor_(executor), observer_(observer) {}
 
     bool validate(std::string_view tool_name,
                   const WorkflowValue& argument_template,
@@ -352,7 +363,7 @@ public:
     Praktor::Execution::HostToolResult invoke(
         std::string_view tool_name,
         const WorkflowValue& arguments,
-        const std::shared_ptr<Praktor::Execution::ExecutionControl>&,
+        const std::shared_ptr<Praktor::Execution::ExecutionControl>& execution_control,
         const std::shared_ptr<Praktor::Execution::ExecutionObserver>&) override {
         using Result = Praktor::Execution::HostToolResult;
         using Status = Praktor::Execution::HostToolStatus;
@@ -368,12 +379,42 @@ public:
         const std::string arguments_json = arguments.to_string();
         HostToolSinkBuffer sink;
         praktor_error callback_error = PRAKTOR_ERROR_INIT;
+
+        praktor_execution_control effective_control = PRAKTOR_EXECUTION_CONTROL_INIT;
+        const praktor_execution_control* public_control = nullptr;
+        HostToolControlBridge control_bridge;
+        if (execution_control) {
+            if (execution_control->stopRequested()) {
+                result.status =
+                    execution_control->stopReason() ==
+                            Praktor::Execution::ExecutionControl::StopReason::DeadlineExceeded
+                        ? Status::TimedOut
+                        : Status::Cancelled;
+                return result;
+            }
+
+            control_bridge.control = execution_control;
+            effective_control.is_cancelled = &hostToolCancelProbe;
+            effective_control.user_data = &control_bridge;
+            if (const auto remaining = execution_control->remainingDeadline();
+                remaining.has_value()) {
+                using namespace std::chrono;
+                auto timeout_ms = duration_cast<milliseconds>(*remaining);
+                if (timeout_ms < *remaining) {
+                    timeout_ms += milliseconds(1);
+                }
+                effective_control.timeout_ms =
+                    static_cast<uint64_t>(std::max<int64_t>(1, timeout_ms.count()));
+            }
+            public_control = &effective_control;
+        }
+
         int32_t callback_status = PRAKTOR_HOST_TOOL_FAILED;
         try {
             callback_status = executor_->invoke(
                 executor_->user_data, tool.c_str(),
                 arguments_json.data(), arguments_json.size(),
-                control_, observer_,
+                public_control, observer_,
                 &collectHostToolResult, &sink,
                 &callback_error);
         } catch (...) {
@@ -409,7 +450,6 @@ public:
 
 private:
     const praktor_host_tool_executor* executor_;
-    const praktor_execution_control* control_;
     const praktor_execution_observer* observer_;
 };
 
@@ -715,7 +755,7 @@ praktor_result executeWorkflowPlanImpl(
             return PRAKTOR_RESULT_HOST_TOOL_REJECTED;
         }
         host_tool_host = std::make_shared<CHostToolHost>(
-            host_tools, control, observer);
+            host_tools, observer);
         for (const auto& reviewed : reviewed_host_tools) {
             std::string preflight_error;
             if (!host_tool_host->validate(
