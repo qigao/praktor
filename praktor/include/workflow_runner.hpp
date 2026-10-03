@@ -4,6 +4,7 @@
 #include "dag/workflow_executor.hpp"
 #include "execution/execution_control.hpp"
 #include "execution/execution_observer.hpp"
+#include "execution/host_tool.hpp"
 #include "yml/task_parser.hpp"
 
 #include <cstddef>
@@ -41,6 +42,11 @@ public:
     WorkflowExecutionResult executeObserved(
         std::shared_ptr<Praktor::Execution::ExecutionControl> executionControl,
         std::shared_ptr<Praktor::Execution::ExecutionObserver> executionObserver,
+        bool useConcurrent = false, int maxConcurrency = 4);
+    WorkflowExecutionResult executeObservedWithHostTools(
+        std::shared_ptr<Praktor::Execution::ExecutionControl> executionControl,
+        std::shared_ptr<Praktor::Execution::ExecutionObserver> executionObserver,
+        std::shared_ptr<Praktor::Execution::HostToolHost> hostToolHost,
         bool useConcurrent = false, int maxConcurrency = 4);
     bool run(bool useConcurrent = false, int maxConcurrency = 4);
     bool runTask(std::string const& taskName, bool useConcurrent = false, int maxConcurrency = 4);
