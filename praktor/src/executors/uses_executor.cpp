@@ -132,6 +132,7 @@ std::unique_ptr<WorkflowContext> UsesExecutor::createIsolatedContext(
   // even though their variable/task contexts remain isolated.
   ctx->setExecutionControl(parent_context.getExecutionControl());
   ctx->setExecutionObserver(parent_context.getExecutionObserver());
+  ctx->setHostToolHost(parent_context.getHostToolHost());
 
   // Set source path for relative path resolution
   ctx->setSourcePath(nested.source_path);
