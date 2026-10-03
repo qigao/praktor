@@ -4,6 +4,7 @@
 #include "workflow_runner.hpp"
 #include "workflow_contract.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
