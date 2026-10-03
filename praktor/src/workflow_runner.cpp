@@ -117,7 +117,8 @@ PreparedWorkflow prepareExecution(
     const WorkflowInputs& input_values,
     const std::unordered_map<std::string, std::string>& base_environment,
     std::shared_ptr<Praktor::Execution::ExecutionControl> execution_control = {},
-    std::shared_ptr<Praktor::Execution::ExecutionObserver> execution_observer = {}) {
+    std::shared_ptr<Praktor::Execution::ExecutionObserver> execution_observer = {},
+    std::shared_ptr<Praktor::Execution::HostToolHost> host_tool_host = {}) {
     PreparedWorkflow prepared;
     prepared.workflow = TaskParser::parseFileWithIncludes(yaml_path, base_directory.string());
     const auto normalized_inputs =
@@ -127,6 +128,7 @@ PreparedWorkflow prepareExecution(
     prepared.context = std::make_unique<WorkflowContext>();
     prepared.context->setExecutionControl(std::move(execution_control));
     prepared.context->setExecutionObserver(std::move(execution_observer));
+    prepared.context->setHostToolHost(std::move(host_tool_host));
     prepared.context->setSourcePath(prepared.workflow.source_path);
     populateWorkflowEnvironmentContext(*prepared.context, prepared.runtime_environment);
     populateWorkflowVariables(*prepared.context, prepared.workflow, normalized_inputs);
@@ -282,12 +284,23 @@ WorkflowExecutionResult WorkflowRunner::executeObserved(
     std::shared_ptr<Praktor::Execution::ExecutionControl> executionControl,
     std::shared_ptr<Praktor::Execution::ExecutionObserver> executionObserver,
     bool useConcurrent, int maxConcurrency) {
+    return executeObservedWithHostTools(
+        std::move(executionControl), std::move(executionObserver), {},
+        useConcurrent, maxConcurrency);
+}
+
+WorkflowExecutionResult WorkflowRunner::executeObservedWithHostTools(
+    std::shared_ptr<Praktor::Execution::ExecutionControl> executionControl,
+    std::shared_ptr<Praktor::Execution::ExecutionObserver> executionObserver,
+    std::shared_ptr<Praktor::Execution::HostToolHost> hostToolHost,
+    bool useConcurrent, int maxConcurrency) {
     bool workflow_started = false;
     try {
         TLOG_DEBUGF("Loading workflow from: {}", yamlPath_);
         auto prepared = prepareExecution(
             yamlPath_, base_directory_, inputValues_, baseEnvironment_,
-            std::move(executionControl), executionObserver);
+            std::move(executionControl), executionObserver,
+            std::move(hostToolHost));
 
         if (executionObserver) {
             executionObserver->emit(
