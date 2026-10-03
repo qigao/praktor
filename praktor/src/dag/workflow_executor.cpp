@@ -10,6 +10,7 @@
 #include "executors/declarative_tree_executor.hpp"
 #include "executors/download_executor.hpp"
 #include "executors/managed_process_executor.hpp"
+#include "executors/host_tool_executor.hpp"
 #include "executors/program_executor.hpp"
 #include "executors/service_executor.hpp"
 #include "expressions/expression_evaluator.hpp"
@@ -278,6 +279,11 @@ std::string computeTaskActionHashImpl(const Task& task) {
     appendStringList(stream, "service.arguments", params.arguments);
     appendField(stream, "service.timeout_ms", std::to_string(params.timeout_ms));
     appendField(stream, "service.poll_interval_ms", std::to_string(params.poll_interval_ms));
+  } else if (std::holds_alternative<HostToolParams>(task.specifics)) {
+    const auto& params = std::get<HostToolParams>(task.specifics);
+    appendField(stream, "specifics", "host_tool");
+    appendField(stream, "host_tool.tool", params.tool);
+    appendField(stream, "host_tool.arguments", params.arguments.to_string());
   } else if (std::holds_alternative<ManagedProcessParams>(task.specifics)) {
     const auto& params = std::get<ManagedProcessParams>(task.specifics);
     appendField(stream, "specifics", "managed_process");
@@ -409,6 +415,8 @@ WorkflowExecutor::WorkflowExecutor(DependencyGraph<Task> &graph,
       Praktor::Execution::createServiceExecutor();
   executors_[TaskAction::ManagedProcess] =
       Praktor::Execution::createManagedProcessExecutor();
+  executors_[TaskAction::HostTool] =
+      Praktor::Execution::createHostToolTaskExecutor();
 
   // DynamicTasks executor needs a callback to execute generated subtasks
   auto dynamic_executor = Praktor::Execution::createDynamicTasksExecutor();

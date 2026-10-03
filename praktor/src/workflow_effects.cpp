@@ -287,6 +287,16 @@ private:
                 }
                 break;
             }
+            case TaskAction::HostTool: {
+                // Backend authority/effects remain host-owned. Praktor can prove
+                // only that reviewed host execution is required; the embedding
+                // host performs capability/effect admission before execution.
+                manifest_.add("host_tool");
+                const auto& params = std::get<HostToolParams>(task.specifics);
+                markUnknown("host tool effects resolved by embedding host: " +
+                            params.tool);
+                break;
+            }
             case TaskAction::DynamicTasks:
                 // Dynamic task templates currently generate command/orch tasks.
                 manifest_.add("process");

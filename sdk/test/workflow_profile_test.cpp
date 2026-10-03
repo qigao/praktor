@@ -144,3 +144,55 @@ TEST_CASE("harness_safe profile reports review blockers explicitly",
     std::filesystem::remove_all(dir);
     std::filesystem::remove_all(outside);
 }
+
+
+TEST_CASE("host tool effects remain host-resolved and reject harness_safe",
+          "[sdk][plan][profile][host-tool]") {
+    const auto dir = profileTempDir();
+    const auto workflow = dir / "host_tool.yml";
+
+    writeProfileFile(workflow, R"(
+input_policy: strict
+inputs:
+  path:
+    type: string
+    required: true
+
+outputs:
+  result:
+    type: string
+    required: true
+    value: "{{ tasks.inspect.outputs.result.status }}"
+
+tasks:
+  - name: inspect
+    tool: repo.inspect
+    with:
+      path: "{{ variables.path }}"
+)");
+
+    const auto description = describeProfile(workflow);
+    const auto profile =
+        description.at("profiles").at("harness_safe");
+
+    CHECK_FALSE(profile.at("qualified").as<bool>());
+    const auto reasons = strings(profile.at("reasons"));
+    CHECK(reasons.count(
+              "harness_safe rejects workflows with unknown effects") == 1);
+
+    const auto manifest = description.at("effect_manifest");
+    const auto effects = strings(manifest.at("effects"));
+    CHECK(effects.count("host_tool") == 1);
+    CHECK(manifest.at("unknown_effects").as<bool>());
+
+    const auto unknown_reasons = strings(manifest.at("unknown_reasons"));
+    CHECK(unknown_reasons.count(
+              "host tool effects resolved by embedding host: repo.inspect") == 1);
+
+    const auto host_tools = description.at("host_tools");
+    REQUIRE(host_tools.is_array());
+    REQUIRE(host_tools.size() == 1);
+    CHECK(host_tools.at(0).at("tool").as<std::string>() == "repo.inspect");
+
+    std::filesystem::remove_all(dir);
+}

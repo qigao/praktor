@@ -1480,3 +1480,80 @@ TEST_CASE("parse accepts flat run_once root syntax")
     REQUIRE(params.root.children.size() == 1);
     CHECK(params.root.children[0].type == "Shell");
 }
+
+
+TEST_CASE("parse host tool task preserves typed with arguments",
+          "[host-tool][parser]") {
+    auto wf = writeTempWorkflow("host_tool.yml", R"(
+tasks:
+  - name: inspect
+    tool: repo.inspect
+    with:
+      path: "{{ variables.path }}"
+      limit: 2
+      enabled: true
+      tags: [alpha, beta]
+      nested:
+        mode: safe
+)");
+
+    const Workflow workflow = TaskParser::parseFile(wf.string());
+    REQUIRE(workflow.tasks.size() == 1);
+    const Task& task = workflow.tasks[0];
+    CHECK(task.action == TaskAction::HostTool);
+    CHECK(task.declared_runner == "tool");
+    REQUIRE(std::holds_alternative<HostToolParams>(task.specifics));
+
+    const auto& params = std::get<HostToolParams>(task.specifics);
+    CHECK(params.tool == "repo.inspect");
+    REQUIRE(params.arguments.is_object());
+    CHECK(params.arguments.at("path").as<std::string>() ==
+          "{{ variables.path }}");
+    CHECK(params.arguments.at("limit").as<int>() == 2);
+    CHECK(params.arguments.at("enabled").as<bool>());
+    REQUIRE(params.arguments.at("tags").is_array());
+    CHECK(params.arguments.at("tags").at(0).as<std::string>() == "alpha");
+    CHECK(params.arguments.at("nested").at("mode").as<std::string>() == "safe");
+}
+
+TEST_CASE("host tool grammar rejects untyped identity and malformed with",
+          "[host-tool][parser]") {
+    SECTION("tool identity must be a string scalar") {
+        auto wf = writeTempWorkflow("host_tool_numeric.yml",
+            "tasks:\n"
+            "  - name: inspect\n"
+            "    tool: 7\n");
+
+        REQUIRE_THROWS_WITH(
+            TaskParser::parseFile(wf.string()),
+            Catch::Matchers::ContainsSubstring(
+                "'tool' must be a string stable host-tool identity"));
+    }
+
+    SECTION("with must be a map") {
+        auto wf = writeTempWorkflow("host_tool_with_array.yml",
+            "tasks:\n"
+            "  - name: inspect\n"
+            "    tool: repo.inspect\n"
+            "    with: [one, two]\n");
+
+        REQUIRE_THROWS_WITH(
+            TaskParser::parseFile(wf.string()),
+            Catch::Matchers::ContainsSubstring(
+                "'with' must be a map of typed host-tool arguments"));
+    }
+
+    SECTION("with cannot appear without tool") {
+        auto wf = writeTempWorkflow("host_tool_orphan_with.yml",
+            "tasks:\n"
+            "  - name: inspect\n"
+            "    command: echo inspect\n"
+            "    with:\n"
+            "      path: src\n");
+
+        REQUIRE_THROWS_WITH(
+            TaskParser::parseFile(wf.string()),
+            Catch::Matchers::ContainsSubstring(
+                "'with' is valid only with the 'tool' runner"));
+    }
+}

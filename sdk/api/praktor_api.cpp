@@ -4,6 +4,7 @@
 #include "workflow_runner.hpp"
 #include "workflow_contract.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -32,7 +33,8 @@ constexpr uint64_t buildCapabilities() {
         PRAKTOR_CAPABILITY_JSON_WORKFLOW |
         PRAKTOR_CAPABILITY_EXECUTION_CONTROL |
         PRAKTOR_CAPABILITY_WORKFLOW_PLAN |
-        PRAKTOR_CAPABILITY_EXECUTION_EVENTS;
+        PRAKTOR_CAPABILITY_EXECUTION_EVENTS |
+        PRAKTOR_CAPABILITY_HOST_TOOL;
 #if PRAKTOR_SCRIPT_ENGINE_ENABLED
     capabilities |= PRAKTOR_CAPABILITY_SCRIPT_ENGINE;
 #endif
@@ -143,6 +145,28 @@ bool validateObserver(const praktor_execution_observer* observer,
     return true;
 }
 
+bool validateHostToolExecutor(const praktor_host_tool_executor* host_tools,
+                              praktor_error* error) {
+    if (!host_tools) {
+        return true;
+    }
+    if (host_tools->struct_size < sizeof(praktor_host_tool_executor) ||
+        host_tools->abi_version != PRAKTOR_HOST_TOOL_EXECUTOR_ABI_VERSION ||
+        !host_tools->validate || !host_tools->invoke) {
+        setError(error, PRAKTOR_ERROR_PHASE_REQUEST,
+                 "Invalid HostTool executor structure");
+        return false;
+    }
+    for (const auto value : host_tools->reserved) {
+        if (value != 0) {
+            setError(error, PRAKTOR_ERROR_PHASE_REQUEST,
+                     "HostTool executor reserved fields must be zero");
+            return false;
+        }
+    }
+    return true;
+}
+
 praktor_event_type toPublicEventType(
     Praktor::Execution::ExecutionEventType type) {
     using Type = Praktor::Execution::ExecutionEventType;
@@ -240,6 +264,203 @@ std::shared_ptr<Praktor::Execution::ExecutionControl> makeExecutionControl(
         bridge.probe ? static_cast<void*>(&bridge) : nullptr);
 }
 
+struct HostToolSinkBuffer {
+    std::string json;
+    bool called = false;
+    bool rejected = false;
+};
+
+int32_t PRAKTOR_CALL collectHostToolResult(
+    const char* json, size_t json_size, void* user_data) {
+    auto* buffer = static_cast<HostToolSinkBuffer*>(user_data);
+    if (!buffer) {
+        return -1;
+    }
+    if (buffer->called || (!json && json_size != 0)) {
+        buffer->rejected = true;
+        return -1;
+    }
+    try {
+        buffer->json.assign(json ? json : "", json_size);
+        buffer->called = true;
+        return 0;
+    } catch (...) {
+        buffer->rejected = true;
+        return -1;
+    }
+}
+
+struct HostToolControlBridge {
+    std::shared_ptr<Praktor::Execution::ExecutionControl> control;
+};
+
+int32_t PRAKTOR_CALL hostToolCancelProbe(void* user_data) {
+    const auto* bridge = static_cast<const HostToolControlBridge*>(user_data);
+    if (!bridge || !bridge->control) {
+        return 0;
+    }
+    return bridge->control->cancellationRequested() ? 1 : 0;
+}
+
+Praktor::Execution::HostToolStatus hostToolStatus(int32_t status) {
+    using Status = Praktor::Execution::HostToolStatus;
+    switch (status) {
+    case PRAKTOR_HOST_TOOL_OK:
+        return Status::Ok;
+    case PRAKTOR_HOST_TOOL_NOT_FOUND:
+        return Status::NotFound;
+    case PRAKTOR_HOST_TOOL_DENIED:
+        return Status::Denied;
+    case PRAKTOR_HOST_TOOL_CANCELLED:
+        return Status::Cancelled;
+    case PRAKTOR_HOST_TOOL_TIMED_OUT:
+        return Status::TimedOut;
+    case PRAKTOR_HOST_TOOL_FAILED:
+    default:
+        return Status::Failed;
+    }
+}
+
+class CHostToolHost final : public Praktor::Execution::HostToolHost {
+public:
+    CHostToolHost(const praktor_host_tool_executor* executor,
+                  const praktor_execution_observer* observer)
+        : executor_(executor), observer_(observer) {}
+
+    bool validate(std::string_view tool_name,
+                  const WorkflowValue& argument_template,
+                  std::string* error_message) override {
+        if (!executor_ || !executor_->validate) {
+            if (error_message) *error_message = "HostTool executor is unavailable";
+            return false;
+        }
+
+        const std::string tool(tool_name);
+        const std::string arguments_json = argument_template.to_string();
+        praktor_error callback_error = PRAKTOR_ERROR_INIT;
+        int32_t status = PRAKTOR_HOST_TOOL_FAILED;
+        try {
+            status = executor_->validate(
+                executor_->user_data, tool.c_str(),
+                arguments_json.data(), arguments_json.size(),
+                &callback_error);
+        } catch (...) {
+            status = PRAKTOR_HOST_TOOL_FAILED;
+            std::snprintf(callback_error.message, sizeof(callback_error.message),
+                          "%s", "HostTool validate callback threw");
+        }
+
+        if (status == PRAKTOR_HOST_TOOL_OK) {
+            return true;
+        }
+        if (error_message) {
+            if (callback_error.message[0]) {
+                *error_message = callback_error.message;
+            } else if (status == PRAKTOR_HOST_TOOL_NOT_FOUND) {
+                *error_message = "HostTool identity not found: " + tool;
+            } else if (status == PRAKTOR_HOST_TOOL_DENIED) {
+                *error_message = "HostTool identity denied: " + tool;
+            } else {
+                *error_message = "HostTool preflight failed: " + tool;
+            }
+        }
+        return false;
+    }
+
+    Praktor::Execution::HostToolResult invoke(
+        std::string_view tool_name,
+        const WorkflowValue& arguments,
+        const std::shared_ptr<Praktor::Execution::ExecutionControl>& execution_control,
+        const std::shared_ptr<Praktor::Execution::ExecutionObserver>&) override {
+        using Result = Praktor::Execution::HostToolResult;
+        using Status = Praktor::Execution::HostToolStatus;
+
+        Result result;
+        if (!executor_ || !executor_->invoke) {
+            result.status = Status::Failed;
+            result.error_message = "HostTool executor is unavailable";
+            return result;
+        }
+
+        const std::string tool(tool_name);
+        const std::string arguments_json = arguments.to_string();
+        HostToolSinkBuffer sink;
+        praktor_error callback_error = PRAKTOR_ERROR_INIT;
+
+        praktor_execution_control effective_control = PRAKTOR_EXECUTION_CONTROL_INIT;
+        const praktor_execution_control* public_control = nullptr;
+        HostToolControlBridge control_bridge;
+        if (execution_control) {
+            if (execution_control->stopRequested()) {
+                result.status =
+                    execution_control->stopReason() ==
+                            Praktor::Execution::ExecutionControl::StopReason::DeadlineExceeded
+                        ? Status::TimedOut
+                        : Status::Cancelled;
+                return result;
+            }
+
+            control_bridge.control = execution_control;
+            effective_control.is_cancelled = &hostToolCancelProbe;
+            effective_control.user_data = &control_bridge;
+            if (const auto remaining = execution_control->remainingDeadline();
+                remaining.has_value()) {
+                using namespace std::chrono;
+                auto timeout_ms = duration_cast<milliseconds>(*remaining);
+                if (timeout_ms < *remaining) {
+                    timeout_ms += milliseconds(1);
+                }
+                effective_control.timeout_ms =
+                    static_cast<uint64_t>(std::max<int64_t>(1, timeout_ms.count()));
+            }
+            public_control = &effective_control;
+        }
+
+        int32_t callback_status = PRAKTOR_HOST_TOOL_FAILED;
+        try {
+            callback_status = executor_->invoke(
+                executor_->user_data, tool.c_str(),
+                arguments_json.data(), arguments_json.size(),
+                public_control, observer_,
+                &collectHostToolResult, &sink,
+                &callback_error);
+        } catch (...) {
+            callback_status = PRAKTOR_HOST_TOOL_FAILED;
+            std::snprintf(callback_error.message, sizeof(callback_error.message),
+                          "%s", "HostTool invoke callback threw");
+        }
+
+        result.status = hostToolStatus(callback_status);
+        if (result.status == Status::Ok) {
+            if (!sink.called || sink.rejected) {
+                result.status = Status::Failed;
+                result.error_message = sink.rejected
+                    ? "HostTool result sink contract was violated"
+                    : "HostTool returned success without one result payload";
+                return result;
+            }
+            try {
+                result.value = WorkflowValue::parse(sink.json);
+            } catch (const std::exception& exception) {
+                result.status = Status::Failed;
+                result.error_message =
+                    std::string("HostTool returned invalid canonical JSON: ") +
+                    exception.what();
+            }
+            return result;
+        }
+
+        if (callback_error.message[0]) {
+            result.error_message = callback_error.message;
+        }
+        return result;
+    }
+
+private:
+    const praktor_host_tool_executor* executor_;
+    const praktor_execution_observer* observer_;
+};
+
 praktor_result decodeInputs(const char* input_json,
                             size_t input_json_size,
                             WorkflowInputs& inputs,
@@ -322,6 +543,7 @@ praktor_result executeWorkflowImpl(
     const praktor_execute_request* request,
     const praktor_execution_control* control,
     const praktor_execution_observer* observer,
+    std::shared_ptr<Praktor::Execution::HostToolHost> host_tool_host,
     praktor_owned_json* output,
     praktor_error* error) {
     clearError(error);
@@ -351,13 +573,10 @@ praktor_result executeWorkflowImpl(
         auto execution_control = makeExecutionControl(control, bridge);
         auto execution_observer = makeExecutionObserver(observer);
         WorkflowRunner runner(request->workflow_path, std::move(inputs));
-        execution = execution_observer
-            ? runner.executeObserved(
-                  std::move(execution_control),
-                  std::move(execution_observer))
-            : execution_control
-                  ? runner.executeWithControl(std::move(execution_control))
-                  : runner.execute();
+        execution = runner.executeObservedWithHostTools(
+            std::move(execution_control),
+            std::move(execution_observer),
+            std::move(host_tool_host));
     } catch (const std::bad_alloc&) {
         setError(error, PRAKTOR_ERROR_PHASE_EXECUTION,
                  "Out of memory while executing workflow");
@@ -439,13 +658,25 @@ int32_t PRAKTOR_CALL executeWorkflowPlanObserved(
             request, control, observer, output, error));
 }
 
+int32_t PRAKTOR_CALL executeWorkflowPlanHostTools(
+    const praktor_plan_execute_request* request,
+    const praktor_execution_control* control,
+    const praktor_execution_observer* observer,
+    const praktor_host_tool_executor* host_tools,
+    praktor_owned_json* output,
+    praktor_error* error) {
+    return static_cast<int32_t>(
+        praktor_execute_workflow_plan_host_tools(
+            request, control, observer, host_tools, output, error));
+}
+
 } // namespace
 
 praktor_result PRAKTOR_CALL praktor_execute_workflow(
     const praktor_execute_request* request,
     praktor_owned_json* output,
     praktor_error* error) {
-    return executeWorkflowImpl(request, nullptr, nullptr, output, error);
+    return executeWorkflowImpl(request, nullptr, nullptr, {}, output, error);
 }
 
 praktor_result PRAKTOR_CALL praktor_execute_workflow_controlled(
@@ -453,7 +684,7 @@ praktor_result PRAKTOR_CALL praktor_execute_workflow_controlled(
     const praktor_execution_control* control,
     praktor_owned_json* output,
     praktor_error* error) {
-    return executeWorkflowImpl(request, control, nullptr, output, error);
+    return executeWorkflowImpl(request, control, nullptr, {}, output, error);
 }
 
 praktor_result PRAKTOR_CALL praktor_compile_workflow(
@@ -503,13 +734,15 @@ praktor_result executeWorkflowPlanImpl(
     const praktor_plan_execute_request* request,
     const praktor_execution_control* control,
     const praktor_execution_observer* observer,
+    const praktor_host_tool_executor* host_tools,
     praktor_owned_json* output,
     praktor_error* error) {
     clearError(error);
     if (!request || request->struct_size < sizeof(praktor_plan_execute_request) ||
         !request->plan || !request->input_json || request->input_json_size == 0 ||
         !validateError(error) || !validateOutput(output, error) ||
-        !validateControl(control, error) || !validateObserver(observer, error)) {
+        !validateControl(control, error) || !validateObserver(observer, error) ||
+        !validateHostToolExecutor(host_tools, error)) {
         setError(error, PRAKTOR_ERROR_PHASE_REQUEST,
                  "Valid WorkflowPlan, execution controls, non-empty input_json, and empty output are required");
         return PRAKTOR_RESULT_INVALID_ARGUMENT;
@@ -521,12 +754,35 @@ praktor_result executeWorkflowPlanImpl(
         return PRAKTOR_RESULT_PLAN_MISMATCH;
     }
 
+    std::shared_ptr<Praktor::Execution::HostToolHost> host_tool_host;
+    const auto& reviewed_host_tools = request->plan->value.hostTools();
+    if (!reviewed_host_tools.empty()) {
+        if (!host_tools) {
+            setError(error, PRAKTOR_ERROR_PHASE_HOST_TOOL,
+                     "WorkflowPlan requires a HostTool executor");
+            return PRAKTOR_RESULT_HOST_TOOL_REJECTED;
+        }
+        host_tool_host = std::make_shared<CHostToolHost>(
+            host_tools, observer);
+        for (const auto& reviewed : reviewed_host_tools) {
+            std::string preflight_error;
+            if (!host_tool_host->validate(
+                    reviewed.tool_name, reviewed.argument_template,
+                    &preflight_error)) {
+                setError(error, PRAKTOR_ERROR_PHASE_HOST_TOOL,
+                         preflight_error.c_str());
+                return PRAKTOR_RESULT_HOST_TOOL_REJECTED;
+            }
+        }
+    }
+
     praktor_execute_request execute_request = PRAKTOR_EXECUTE_REQUEST_INIT;
     execute_request.workflow_path = request->plan->value.rootPath().c_str();
     execute_request.input_json = request->input_json;
     execute_request.input_json_size = request->input_json_size;
     return executeWorkflowImpl(
-        &execute_request, control, observer, output, error);
+        &execute_request, control, observer, std::move(host_tool_host),
+        output, error);
 }
 
 } // namespace
@@ -537,7 +793,7 @@ praktor_result PRAKTOR_CALL praktor_execute_workflow_plan(
     praktor_owned_json* output,
     praktor_error* error) {
     return executeWorkflowPlanImpl(
-        request, control, nullptr, output, error);
+        request, control, nullptr, nullptr, output, error);
 }
 
 praktor_result PRAKTOR_CALL praktor_execute_workflow_plan_observed(
@@ -547,7 +803,18 @@ praktor_result PRAKTOR_CALL praktor_execute_workflow_plan_observed(
     praktor_owned_json* output,
     praktor_error* error) {
     return executeWorkflowPlanImpl(
-        request, control, observer, output, error);
+        request, control, observer, nullptr, output, error);
+}
+
+praktor_result PRAKTOR_CALL praktor_execute_workflow_plan_host_tools(
+    const praktor_plan_execute_request* request,
+    const praktor_execution_control* control,
+    const praktor_execution_observer* observer,
+    const praktor_host_tool_executor* host_tools,
+    praktor_owned_json* output,
+    praktor_error* error) {
+    return executeWorkflowPlanImpl(
+        request, control, observer, host_tools, output, error);
 }
 
 void PRAKTOR_CALL praktor_release_workflow_plan(praktor_workflow_plan* plan) {
@@ -577,6 +844,7 @@ const praktor_api* PRAKTOR_CALL praktor_get_api(void) {
         &executeWorkflowPlan,
         &praktor_release_workflow_plan,
         &executeWorkflowPlanObserved,
+        &executeWorkflowPlanHostTools,
     };
     return &api;
 }

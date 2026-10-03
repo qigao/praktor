@@ -21,6 +21,9 @@ enum class TaskErrorCode {
     ServiceStateFailed,
     Timeout,
     Cancelled,
+    HostToolUnavailable,
+    HostToolDenied,
+    HostToolFailed,
     UnsupportedPlatform,
 };
 
@@ -56,6 +59,12 @@ constexpr std::string_view taskErrorCodeName(TaskErrorCode code) {
         return "timeout";
     case TaskErrorCode::Cancelled:
         return "cancelled";
+    case TaskErrorCode::HostToolUnavailable:
+        return "host_tool_unavailable";
+    case TaskErrorCode::HostToolDenied:
+        return "host_tool_denied";
+    case TaskErrorCode::HostToolFailed:
+        return "host_tool_failed";
     case TaskErrorCode::UnsupportedPlatform:
         return "unsupported_platform";
     }

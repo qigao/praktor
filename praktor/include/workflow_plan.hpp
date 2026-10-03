@@ -18,6 +18,13 @@ struct WorkflowDependency {
     std::uint64_t size = 0;
 };
 
+struct WorkflowHostTool {
+    std::string workflow_path;
+    std::string task_name;
+    std::string tool_name;
+    WorkflowValue argument_template{WorkflowValue::object()};
+};
+
 class WorkflowPlan {
 public:
     WorkflowPlan() = default;
@@ -28,7 +35,8 @@ public:
                  WorkflowValue input_schema = WorkflowValue::object(),
                  WorkflowValue output_schema = WorkflowValue::object(),
                  WorkflowValue effect_manifest = WorkflowValue::object(),
-                 WorkflowValue profiles = WorkflowValue::object())
+                 WorkflowValue profiles = WorkflowValue::object(),
+                 std::vector<WorkflowHostTool> host_tools = {})
         : root_path_(std::move(root_path)),
           root_directory_(std::move(root_directory)),
           digest_(std::move(digest)),
@@ -36,7 +44,8 @@ public:
           input_schema_(std::move(input_schema)),
           output_schema_(std::move(output_schema)),
           effect_manifest_(std::move(effect_manifest)),
-          profiles_(std::move(profiles)) {}
+          profiles_(std::move(profiles)),
+          host_tools_(std::move(host_tools)) {}
 
     static WorkflowPlan compile(const std::filesystem::path& workflow_path);
 
@@ -50,6 +59,9 @@ public:
     const WorkflowValue& outputSchema() const noexcept { return output_schema_; }
     const WorkflowValue& effectManifest() const noexcept { return effect_manifest_; }
     const WorkflowValue& profiles() const noexcept { return profiles_; }
+    const std::vector<WorkflowHostTool>& hostTools() const noexcept {
+        return host_tools_;
+    }
 
     bool validate(std::string* error_message = nullptr) const;
     WorkflowValue toValue() const;
@@ -63,6 +75,7 @@ private:
     WorkflowValue output_schema_{WorkflowValue::object()};
     WorkflowValue effect_manifest_{WorkflowValue::object()};
     WorkflowValue profiles_{WorkflowValue::object()};
+    std::vector<WorkflowHostTool> host_tools_;
 };
 
 } // namespace Praktor::Plan

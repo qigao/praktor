@@ -180,7 +180,7 @@ Task parse_task(const TaskYamlDetail::YamlNodeRef& node, const std::string& sour
         "each", "timeout", "triggers",
         "working_dir", "silent", "sources", "generates", "finally",
         "command", "program", "args", "stdin", "download", "uses", "dynamic_tasks", "output_format",
-        "service", "managed_process",
+        "service", "managed_process", "tool", "with",
         "script", "actions",
         "sequence", "parallel", "reactive_sequence", "pipeline_sequence",
         "inverter", "force_success", "force_failure", "repeat",
@@ -198,6 +198,11 @@ Task parse_task(const TaskYamlDetail::YamlNodeRef& node, const std::string& sour
         TaskYamlDetail::check_unknown_keys(node, set_variable_keys);
     } else {
         TaskYamlDetail::check_unknown_keys(node, allowed_task_keys);
+    }
+
+    if (node.has_child("with") && !node.has_child("tool")) {
+        TaskYamlDetail::throw_parse_error(
+            node["with"], "'with' is valid only with the 'tool' runner");
     }
 
     Task task;
@@ -341,6 +346,26 @@ Task parse_task(const TaskYamlDetail::YamlNodeRef& node, const std::string& sour
         });
     }
 
+    if (node.has_child("tool")) {
+        select_runner(TaskAction::HostTool, "tool", [&] {
+            HostToolParams params;
+            params.tool = TaskYamlDetail::read_system_action_string_or_throw(
+                node["tool"], "'tool' must be a string stable host-tool identity");
+            if (params.tool.empty()) {
+                TaskYamlDetail::throw_parse_error(
+                    node["tool"], "'tool' identity cannot be empty");
+            }
+            if (node.has_child("with")) {
+                if (!node["with"].is_map()) {
+                    TaskYamlDetail::throw_parse_error(
+                        node["with"], "'with' must be a map of typed host-tool arguments");
+                }
+                params.arguments = parse_contract_value(node["with"]);
+            }
+            return params;
+        });
+    }
+
     static const std::vector<std::string> orch_control_nodes = {
         "sequence", "parallel", "reactive_sequence", "pipeline_sequence", "fallback", "selector"
     };
@@ -424,7 +449,7 @@ Task parse_task(const TaskYamlDetail::YamlNodeRef& node, const std::string& sour
     if (action_count == 0 && !task.script) {
         TaskYamlDetail::throw_parse_error(
             node, "task '" + task.name +
-                      "' must declare a runner (command/program/download/service/managed_process/uses/dynamic_tasks) or script");
+                      "' must declare a runner (command/program/download/service/managed_process/uses/dynamic_tasks/tool) or script");
     }
 
     task.source_path = source_path;

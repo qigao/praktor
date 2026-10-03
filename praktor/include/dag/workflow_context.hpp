@@ -15,6 +15,7 @@
 #include "dag/failure_context_state.hpp"
 #include "execution/execution_control.hpp"
 #include "execution/execution_observer.hpp"
+#include "execution/host_tool.hpp"
 #include "dag/task_failure_context.hpp"
 #include "dag/task_registry.hpp"
 #include "dag/variable_scope.hpp"
@@ -69,6 +70,7 @@ public:
         child->source_path_ = this->source_path_;
         child->execution_control_ = this->execution_control_;
         child->execution_observer_ = this->execution_observer_;
+        child->host_tool_host_ = this->host_tool_host_;
         // Failure context is not inherited
         return child;
     }
@@ -407,6 +409,15 @@ public:
         return execution_observer_;
     }
 
+    void setHostToolHost(
+        std::shared_ptr<Praktor::Execution::HostToolHost> host_tool_host) {
+        host_tool_host_ = std::move(host_tool_host);
+    }
+
+    std::shared_ptr<Praktor::Execution::HostToolHost> getHostToolHost() const {
+        return host_tool_host_;
+    }
+
 private:
     // Core components
     std::unique_ptr<VariableScope> scope_;
@@ -417,5 +428,6 @@ private:
     std::string source_path_;
     std::shared_ptr<Praktor::Execution::ExecutionControl> execution_control_;
     std::shared_ptr<Praktor::Execution::ExecutionObserver> execution_observer_;
+    std::shared_ptr<Praktor::Execution::HostToolHost> host_tool_host_;
     FailureContextState failure_state_;
 };
