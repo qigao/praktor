@@ -34,7 +34,8 @@ constexpr uint64_t buildCapabilities() {
         PRAKTOR_CAPABILITY_EXECUTION_CONTROL |
         PRAKTOR_CAPABILITY_WORKFLOW_PLAN |
         PRAKTOR_CAPABILITY_EXECUTION_EVENTS |
-        PRAKTOR_CAPABILITY_HOST_TOOL;
+        PRAKTOR_CAPABILITY_HOST_TOOL |
+        PRAKTOR_CAPABILITY_INLINE_WORKFLOW_PLAN;
 #if PRAKTOR_SCRIPT_ENGINE_ENABLED
     capabilities |= PRAKTOR_CAPABILITY_SCRIPT_ENGINE;
 #endif
@@ -490,6 +491,19 @@ praktor_result decodeInputs(const char* input_json,
 }
 
 praktor_result validateWorkflowInputContract(
+    const Workflow& workflow,
+    WorkflowInputs& inputs,
+    praktor_error* error) {
+    try {
+        inputs = Praktor::Contract::validateAndApplyInputs(workflow, inputs);
+        return PRAKTOR_RESULT_SUCCESS;
+    } catch (const Praktor::Contract::WorkflowContractError& exception) {
+        setError(error, PRAKTOR_ERROR_PHASE_INPUT_CONTRACT, exception.what());
+        return PRAKTOR_RESULT_INPUT_CONTRACT;
+    }
+}
+
+praktor_result validateWorkflowInputContract(
     const char* workflow_path,
     WorkflowInputs& inputs,
     praktor_error* error) {
@@ -497,11 +511,7 @@ praktor_result validateWorkflowInputContract(
         const std::filesystem::path path(workflow_path);
         const Workflow workflow = TaskParser::parseFileWithIncludes(
             path.string(), path.parent_path().string());
-        inputs = Praktor::Contract::validateAndApplyInputs(workflow, inputs);
-        return PRAKTOR_RESULT_SUCCESS;
-    } catch (const Praktor::Contract::WorkflowContractError& exception) {
-        setError(error, PRAKTOR_ERROR_PHASE_INPUT_CONTRACT, exception.what());
-        return PRAKTOR_RESULT_INPUT_CONTRACT;
+        return validateWorkflowInputContract(workflow, inputs, error);
     } catch (...) {
         // Preserve legacy parse/execution error semantics for non-contract failures.
         return PRAKTOR_RESULT_SUCCESS;
@@ -537,6 +547,31 @@ praktor_result encodeResult(const WorkflowValue& result,
         setError(error, PRAKTOR_ERROR_PHASE_RESULT_JSON, exception.what());
         return PRAKTOR_RESULT_INTERNAL_ERROR;
     }
+}
+
+praktor_result finalizeExecutionResult(
+    const WorkflowExecutionResult& execution,
+    praktor_owned_json* output,
+    praktor_error* error) {
+    const auto output_status = encodeResult(execution.value, *output, error);
+    if (output_status != PRAKTOR_RESULT_SUCCESS) {
+        return output_status;
+    }
+
+    if (execution.success) {
+        return PRAKTOR_RESULT_SUCCESS;
+    }
+
+    setError(error, PRAKTOR_ERROR_PHASE_EXECUTION, execution.error_message.c_str());
+    const std::string status =
+        execution.value["workflow_status"].as<std::string>();
+    if (status == "cancelled") {
+        return PRAKTOR_RESULT_CANCELLED;
+    }
+    if (status == "timed_out") {
+        return PRAKTOR_RESULT_TIMED_OUT;
+    }
+    return PRAKTOR_RESULT_EXECUTION_FAILED;
 }
 
 praktor_result executeWorkflowImpl(
@@ -586,25 +621,7 @@ praktor_result executeWorkflowImpl(
         return PRAKTOR_RESULT_INTERNAL_ERROR;
     }
 
-    const auto output_status = encodeResult(execution.value, *output, error);
-    if (output_status != PRAKTOR_RESULT_SUCCESS) {
-        return output_status;
-    }
-
-    if (execution.success) {
-        return PRAKTOR_RESULT_SUCCESS;
-    }
-
-    setError(error, PRAKTOR_ERROR_PHASE_EXECUTION, execution.error_message.c_str());
-    const std::string status =
-        execution.value["workflow_status"].as<std::string>();
-    if (status == "cancelled") {
-        return PRAKTOR_RESULT_CANCELLED;
-    }
-    if (status == "timed_out") {
-        return PRAKTOR_RESULT_TIMED_OUT;
-    }
-    return PRAKTOR_RESULT_EXECUTION_FAILED;
+    return finalizeExecutionResult(execution, output, error);
 }
 
 int32_t PRAKTOR_CALL executeWorkflow(const praktor_execute_request* request,
@@ -628,6 +645,14 @@ int32_t PRAKTOR_CALL compileWorkflow(
     praktor_error* error) {
     return static_cast<int32_t>(
         praktor_compile_workflow(request, out_plan, error));
+}
+
+int32_t PRAKTOR_CALL compileWorkflowInline(
+    const praktor_compile_inline_request* request,
+    praktor_workflow_plan** out_plan,
+    praktor_error* error) {
+    return static_cast<int32_t>(
+        praktor_compile_workflow_inline(request, out_plan, error));
 }
 
 int32_t PRAKTOR_CALL describeWorkflowPlan(
@@ -714,6 +739,37 @@ praktor_result PRAKTOR_CALL praktor_compile_workflow(
     }
 }
 
+praktor_result PRAKTOR_CALL praktor_compile_workflow_inline(
+    const praktor_compile_inline_request* request,
+    praktor_workflow_plan** out_plan,
+    praktor_error* error) {
+    clearError(error);
+    if (!request ||
+        request->struct_size < sizeof(praktor_compile_inline_request) ||
+        !out_plan || *out_plan != nullptr || !validateError(error) ||
+        !isPresent(request->source_id) || !request->workflow_yaml ||
+        request->workflow_yaml_size == 0) {
+        setError(error, PRAKTOR_ERROR_PHASE_REQUEST,
+                 "Valid source_id, non-empty workflow_yaml, and empty out_plan are required");
+        return PRAKTOR_RESULT_INVALID_ARGUMENT;
+    }
+
+    try {
+        auto compiled = Praktor::Plan::WorkflowPlan::compileInline(
+            request->source_id,
+            std::string(request->workflow_yaml, request->workflow_yaml_size));
+        *out_plan = new praktor_workflow_plan(std::move(compiled));
+        return PRAKTOR_RESULT_SUCCESS;
+    } catch (const std::bad_alloc&) {
+        setError(error, PRAKTOR_ERROR_PHASE_PLAN,
+                 "Out of memory while compiling inline WorkflowPlan");
+        return PRAKTOR_RESULT_OUT_OF_MEMORY;
+    } catch (const std::exception& exception) {
+        setError(error, PRAKTOR_ERROR_PHASE_PLAN, exception.what());
+        return PRAKTOR_RESULT_PLAN_INVALID;
+    }
+}
+
 praktor_result PRAKTOR_CALL praktor_describe_workflow_plan(
     const praktor_workflow_plan* plan,
     praktor_owned_json* output,
@@ -729,6 +785,54 @@ praktor_result PRAKTOR_CALL praktor_describe_workflow_plan(
 }
 
 namespace {
+
+praktor_result executeInlineWorkflowPlan(
+    const praktor_plan_execute_request* request,
+    const praktor_execution_control* control,
+    const praktor_execution_observer* observer,
+    std::shared_ptr<Praktor::Execution::HostToolHost> host_tool_host,
+    praktor_owned_json* output,
+    praktor_error* error) {
+    const auto& inline_workflow = request->plan->value.inlineWorkflow();
+    if (!inline_workflow.has_value()) {
+        setError(error, PRAKTOR_ERROR_PHASE_PLAN,
+                 "Inline WorkflowPlan is missing owned workflow state");
+        return PRAKTOR_RESULT_PLAN_MISMATCH;
+    }
+
+    WorkflowInputs inputs;
+    const auto input_status =
+        decodeInputs(request->input_json, request->input_json_size, inputs, error);
+    if (input_status != PRAKTOR_RESULT_SUCCESS) {
+        return input_status;
+    }
+    const auto contract_status =
+        validateWorkflowInputContract(*inline_workflow, inputs, error);
+    if (contract_status != PRAKTOR_RESULT_SUCCESS) {
+        return contract_status;
+    }
+
+    WorkflowExecutionResult execution;
+    try {
+        CancellationProbeBridge bridge;
+        auto execution_control = makeExecutionControl(control, bridge);
+        auto execution_observer = makeExecutionObserver(observer);
+        WorkflowRunner runner(*inline_workflow, std::move(inputs));
+        execution = runner.executeObservedWithHostTools(
+            std::move(execution_control),
+            std::move(execution_observer),
+            std::move(host_tool_host));
+    } catch (const std::bad_alloc&) {
+        setError(error, PRAKTOR_ERROR_PHASE_EXECUTION,
+                 "Out of memory while executing inline workflow");
+        return PRAKTOR_RESULT_OUT_OF_MEMORY;
+    } catch (const std::exception& exception) {
+        setError(error, PRAKTOR_ERROR_PHASE_EXECUTION, exception.what());
+        return PRAKTOR_RESULT_INTERNAL_ERROR;
+    }
+
+    return finalizeExecutionResult(execution, output, error);
+}
 
 praktor_result executeWorkflowPlanImpl(
     const praktor_plan_execute_request* request,
@@ -774,6 +878,12 @@ praktor_result executeWorkflowPlanImpl(
                 return PRAKTOR_RESULT_HOST_TOOL_REJECTED;
             }
         }
+    }
+
+    if (request->plan->value.isInline()) {
+        return executeInlineWorkflowPlan(
+            request, control, observer, std::move(host_tool_host),
+            output, error);
     }
 
     praktor_execute_request execute_request = PRAKTOR_EXECUTE_REQUEST_INIT;
@@ -845,6 +955,7 @@ const praktor_api* PRAKTOR_CALL praktor_get_api(void) {
         &praktor_release_workflow_plan,
         &executeWorkflowPlanObserved,
         &executeWorkflowPlanHostTools,
+        &compileWorkflowInline,
     };
     return &api;
 }
