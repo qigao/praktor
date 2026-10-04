@@ -33,4 +33,10 @@ target_link_libraries(my_app PRIVATE Praktor::Praktor)
 Praktor 0.4.4 起，Native SDK 公开 reviewed `WorkflowPlan` HostTool ABI（`PRAKTOR_CAPABILITY_HOST_TOOL` / ABI 2.5）。
 HostTool 只提供 backend-neutral validate/invoke boundary；Praktor.Native 不依赖 TurboAgent、TurboWasm 或 RuntimeTools。
 
+Praktor 0.4.5 起，Native SDK 进一步公开 ABI 2.6 的
+`PRAKTOR_CAPABILITY_INLINE_WORKFLOW_PLAN` / `praktor_compile_workflow_inline()`。
+该入口面向 compiler-generated finite DAG：source bytes 由 plan 拷贝拥有，不创建临时文件，
+第一版只接受无外部依赖的 HostTool-only DAG，并对 include/uses/dotenv/script/process/
+dynamic-each/trigger 等路径 fail-closed。
+
 PR 只做 qualification；不在 master push 上重复跑整套三平台构建。正式 package 只由与当前项目版本匹配的 release tag 发布。
