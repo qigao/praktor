@@ -40,6 +40,23 @@ tasks:
 )";
 }
 
+std::string inlineRetryHostToolWorkflow(std::uint32_t retry_count) {
+    return
+        "input_policy: strict\n"
+        "inputs:\n"
+        "  path:\n"
+        "    type: string\n"
+        "    required: true\n"
+        "tasks:\n"
+        "  - name: inspect\n"
+        "    tool: repo.inspect\n"
+        "    retries:\n"
+        "      count: " + std::to_string(retry_count) + "\n"
+        "    with:\n"
+        "      path: \"{{ variables.path }}\"\n"
+        "      limit: 2\n";
+}
+
 void writeHostToolWorkflow(const std::filesystem::path& path) {
     std::ofstream out(path);
     REQUIRE(out.is_open());
@@ -49,6 +66,8 @@ void writeHostToolWorkflow(const std::filesystem::path& path) {
 struct HostProbe {
     int validate_calls = 0;
     int invoke_calls = 0;
+    int fail_attempts = 0;
+    bool force_timeout = false;
     bool deny = false;
     bool double_sink = false;
     bool saw_control = false;
@@ -59,6 +78,11 @@ struct HostProbe {
 
 int32_t PRAKTOR_CALL neverCancelled(void*) {
     return 0;
+}
+
+int32_t PRAKTOR_CALL cancelAfterFirstInvoke(void* user_data) {
+    auto* probe = static_cast<HostProbe*>(user_data);
+    return probe && probe->invoke_calls >= 1 ? 1 : 0;
 }
 
 int32_t PRAKTOR_CALL validateTool(
@@ -131,6 +155,13 @@ int32_t PRAKTOR_CALL invokeTool(
         std::string_view(observer->run_id) == "run-host" &&
         std::string_view(observer->turn_id) == "turn-host" &&
         std::string_view(observer->tool_call_id) == "call-host";
+
+    if (probe->force_timeout) {
+        return PRAKTOR_HOST_TOOL_TIMED_OUT;
+    }
+    if (probe->invoke_calls <= probe->fail_attempts) {
+        return PRAKTOR_HOST_TOOL_FAILED;
+    }
 
     static const char result[] = "{\"status\":\"ok\",\"source\":\"host\"}";
     if (result_sink(result, sizeof(result) - 1u, result_sink_user_data) != 0) {
