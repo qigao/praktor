@@ -1,6 +1,6 @@
 # Praktor — A YAML Workflow Runtime for Automation and AI Agents
 
-Praktor is a high-performance C++20 workflow runtime for describing deterministic automation in YAML. A workflow is parsed into a dependency graph and executed with explicit inputs, conditions, retries, concurrency, reusable sub-workflows, scripts, system actions, and structured outputs.
+Praktor is a high-performance C++20 workflow runtime for describing deterministic automation in YAML. A workflow is parsed into a dependency graph and executed with explicit inputs, conditions, concurrency, reusable sub-workflows, scripts, system actions, reviewed HostTool retries, and structured outputs.
 
 Praktor can run as a standalone automation engine through the current `praktor` CLI, or it can be embedded through the stable C API and used as a workflow/tool runtime underneath an LLM agent harness such as TurboAgent.
 
@@ -37,7 +37,7 @@ inputs
   ▼
 YAML workflow
   │
-  ├── depends_on / when / each / retries / triggers
+  ├── depends_on / when / each / triggers
   │
   ▼
 DAG scheduler
@@ -73,9 +73,6 @@ tasks:
 
   - name: test
     depends_on: [build]
-    retries:
-      count: 2
-      delay: "2s"
     command: "ctest --preset {{ PRESET }} --output-on-failure"
 
   - name: package
@@ -84,7 +81,7 @@ tasks:
     command: "cmake --build --preset {{ PRESET }} --target package"
 ```
 
-The important property is that **the YAML defines execution policy, not just a list of commands**. Dependencies, branching, retries, parallelism, outputs, error handling, and composition are part of the workflow contract.
+The important property is that **the YAML defines execution policy, not just a list of commands**. Dependencies, branching, parallelism, outputs, error handling, and composition are part of the workflow contract.
 
 ## TurboAgent Integration
 
@@ -129,7 +126,7 @@ For agent-facing use, prefer a trusted workflow registry such as `build`, `test`
     - `depends_on`: Define a Directed Acyclic Graph (DAG) of task dependencies
     - `when`: Use powerful conditional expressions (e.g., `"{{env}} == 'prod' and {{tag}} != 'latest'"`) to control task execution
     - `each`: Loop over lists or matrices and run tasks for each item
-    - `retries`: Automatic retry with configurable delays and backoff
+    - `retries.count`: Finite additional attempts for reviewed `tool:` HostTool tasks
 - **🔌 Integrated Runners**:
     - `command`: Native execution of external programs and shell scripts
     - `actions`: Explicit action orchestration for shell/script driven workflows
@@ -142,7 +139,7 @@ For agent-facing use, prefer a trusted workflow registry such as `build`, `test`
 Praktor has two distinct orchestration levels:
 
 1. **Workflow organization (DAG level)**:
-   flow-level task properties such as `depends_on`, `when`, `each`, `retries`, `triggers`, and `script` organize how a task is scheduled and completed.
+   flow-level task properties such as `depends_on`, `when`, `each`, `triggers`, and `script` organize how a task is scheduled and completed. Reviewed `tool:` tasks additionally support finite `retries.count`.
 2. **Task execution (runner level)**:
    each task chooses one runner to do the actual work.
 
@@ -156,7 +153,8 @@ Common runners include:
 
 Important semantic rule:
 
-- `when`, `each`, `retries`, `triggers`, and `script` are flow-level task properties. They apply to all task kinds, including action tasks.
+- `when`, `each`, `triggers`, and `script` are flow-level task properties.
+- `retries.count` is currently supported only for reviewed `tool:` HostTool tasks; it means additional attempts after the first invocation and has no delay/backoff field.
 - `command` is just a runner for external process execution. It is not part of action grammar.
 - YAML is the only authoring grammar for workflows and action tasks.
 - Action node syntax is task-internal. Action nodes do not have their own DAG-level `when` or `each`.
@@ -165,7 +163,7 @@ Visual summary:
 
 ```text
 Workflow (DAG)
-  ├─ task properties: depends_on / when / each / retries / triggers / script
+  ├─ task properties: depends_on / when / each / triggers / script
   └─ Task
       ├─ runner: command
       ├─ runner: actions
@@ -652,9 +650,6 @@ tasks:
 
   - name: deploy
     command: "./deploy.sh"
-    retries:
-      count: 3
-      delay: "30s"
     triggers:
       on_failure: [rollback, notify_failure]
       on_success: [notify_success]
