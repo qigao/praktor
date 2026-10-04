@@ -123,3 +123,37 @@ This is deliberate: a HostTool workflow must not become `harness_safe` merely
 because Praktor cannot see whether the embedding backend performs filesystem,
 network, process, or external mutations. The embedding compiler/host must
 perform capability/effect admission before providing HostTool authority.
+
+
+## Finite HostTool retries
+
+A reviewed HostTool task may request a finite number of **additional** attempts:
+
+```yaml
+tasks:
+  - name: verify
+    tool: repo.verify
+    retries:
+      count: 2
+    with: {}
+```
+
+`count: 2` means at most three invocations total: the first invocation plus
+two additional attempts.
+
+Retry semantics are intentionally narrow:
+
+- only the `tool:` runner accepts `retries`;
+- only `count` is supported; there is no delay/backoff field;
+- `HostToolStatus::Failed` may consume another admitted attempt;
+- `NotFound`, `Denied`, `Cancelled`, and `TimedOut` are terminal;
+- execution control is checked again before every attempt, so cancellation or
+  deadline expiry stops retry immediately;
+- retries never re-run workflow dependencies or restart the DAG;
+- the retry count participates in task/WorkflowPlan identity and is visible in
+  reviewed HostTool plan metadata.
+
+Praktor schedules only the finite attempts encoded in the reviewed workflow.
+It does not decide whether retry is semantically safe for a particular tool.
+The embedding compiler/host remains responsible for idempotency/policy
+admission before supplying HostTool authority.
