@@ -25,6 +25,7 @@ struct WorkflowHostTool {
     std::string task_name;
     std::string tool_name;
     WorkflowValue argument_template{WorkflowValue::object()};
+    std::uint32_t retry_count = 0;
 };
 
 class WorkflowPlan {
