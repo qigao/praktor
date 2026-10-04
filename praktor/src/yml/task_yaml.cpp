@@ -153,10 +153,11 @@ std::uint32_t parse_retry_count(
         std::from_chars(text.data(), text.data() + text.size(), value);
     if (parsed.ec != std::errc{} ||
         parsed.ptr != text.data() + text.size() ||
-        value > static_cast<std::uint64_t>(
-                    std::numeric_limits<std::uint32_t>::max())) {
+        value > static_cast<std::uint64_t>(kPraktorHostToolMaxRetries)) {
         TaskYamlDetail::throw_parse_error(
-            count_node, "retry count must be a non-negative 32-bit integer");
+            count_node,
+            "retry count must be between 0 and " +
+                std::to_string(kPraktorHostToolMaxRetries));
     }
     return static_cast<std::uint32_t>(value);
 }
