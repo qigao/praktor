@@ -132,6 +132,35 @@ WorkflowContractField parse_contract_field(
     return field;
 }
 
+std::uint32_t parse_retry_count(
+    const TaskYamlDetail::YamlNodeRef& node) {
+    if (!node.is_map()) {
+        TaskYamlDetail::throw_parse_error(
+            node, "'retries' must be a map with a finite count");
+    }
+    static const std::unordered_set<std::string> allowed = {"count"};
+    TaskYamlDetail::check_unknown_keys(node, allowed);
+    if (!node.has_child("count")) {
+        TaskYamlDetail::throw_parse_error(
+            node, "'retries' requires a non-negative integer 'count'");
+    }
+    const auto& count_node = node["count"];
+    const std::string text = TaskYamlDetail::read_scalar_or_throw(
+        count_node, "retry count must be a non-negative integer");
+    std::uint64_t value = 0;
+    const auto parsed =
+        std::from_chars(text.data(), text.data() + text.size(), value);
+    if (parsed.ec != std::errc{} ||
+        parsed.ptr != text.data() + text.size() ||
+        value > static_cast<std::uint64_t>(kPraktorHostToolMaxRetries)) {
+        TaskYamlDetail::throw_parse_error(
+            count_node,
+            "retry count must be between 0 and " +
+                std::to_string(kPraktorHostToolMaxRetries));
+    }
+    return static_cast<std::uint32_t>(value);
+}
+
 WorkflowContractFields parse_contract_fields(
     const TaskYamlDetail::YamlNodeRef& node,
     bool output) {
@@ -177,7 +206,7 @@ Task parse_task(const TaskYamlDetail::YamlNodeRef& node, const std::string& sour
 
     static const std::unordered_set<std::string> allowed_task_keys = {
         "name", "description", "depends_on", "vars", "env", "dotEnv", "when",
-        "each", "timeout", "triggers",
+        "each", "timeout", "retries", "triggers",
         "working_dir", "silent", "sources", "generates", "finally",
         "command", "program", "args", "stdin", "download", "uses", "dynamic_tasks", "output_format",
         "service", "managed_process", "tool", "with",
@@ -244,6 +273,10 @@ Task parse_task(const TaskYamlDetail::YamlNodeRef& node, const std::string& sour
         std::string timeout;
         node["timeout"] >> timeout;
         task.timeout = timeout;
+    }
+
+    if (node.has_child("retries")) {
+        task.retry_count = parse_retry_count(node["retries"]);
     }
 
     if (node.has_child("triggers")) {
@@ -432,6 +465,10 @@ Task parse_task(const TaskYamlDetail::YamlNodeRef& node, const std::string& sour
 
     if (action_count > 1) {
         TaskYamlDetail::throw_parse_error(node, "task '" + task.name + "' declares multiple runners");
+    }
+    if (node.has_child("retries") && task.action != TaskAction::HostTool) {
+        TaskYamlDetail::throw_parse_error(
+            node["retries"], "'retries' is currently supported only with the 'tool' runner");
     }
 
     if (node.has_child("script")) {

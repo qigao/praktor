@@ -230,6 +230,7 @@ std::string computeTaskActionHashImpl(const Task& task) {
     stream << "each=0;";
   }
   appendOptionalString(stream, "timeout", task.timeout);
+  appendField(stream, "retry_count", std::to_string(task.retry_count));
   if (task.triggers) {
     stream << "triggers=1;";
     appendStringList(stream, "triggers.on_success", task.triggers->on_success);

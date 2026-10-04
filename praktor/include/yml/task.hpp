@@ -4,10 +4,13 @@
 #include "dag/dependency_graph.hpp"
 #include "data/workflow_value.hpp"
 
+#include <cstdint>
 #include <map>
 #include <string>
 #include <unordered_map>
 #include <vector>
+
+inline constexpr std::uint32_t kPraktorHostToolMaxRetries = 1024u;
 
 struct Task {
     std::string name;
@@ -22,6 +25,8 @@ struct Task {
     std::optional<std::string> when;
     std::optional<Each> each;
     std::optional<std::string> timeout;
+    /** Additional HostTool attempts after the first invocation. */
+    std::uint32_t retry_count = 0;
     std::optional<Triggers> triggers;
 
     // Execution context
