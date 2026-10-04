@@ -15,6 +15,8 @@
 
 namespace {
 
+static_assert(PRAKTOR_HOST_TOOL_MAX_RETRIES == 1024u);
+
 std::filesystem::path hostToolTempDir() {
     const auto stamp =
         std::chrono::steady_clock::now().time_since_epoch().count();
