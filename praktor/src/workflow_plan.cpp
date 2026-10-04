@@ -401,6 +401,105 @@ private:
     std::vector<WorkflowHostTool> host_tools_;
 };
 
+bool validInlineSourceId(const std::string& source_id) {
+    return !source_id.empty() &&
+           source_id.find('/') == std::string::npos &&
+           source_id.find('\\') == std::string::npos &&
+           source_id != "." && source_id != "..";
+}
+
+void validateInlineWorkflow(const Workflow& workflow) {
+    if (!workflow.dot_env.empty()) {
+        throw std::runtime_error(
+            "Inline WorkflowPlan cannot declare dotenv dependencies");
+    }
+    if (!workflow.env.empty()) {
+        throw std::runtime_error(
+            "Inline WorkflowPlan cannot declare workflow environment overrides");
+    }
+
+    for (const auto& task : workflow.tasks) {
+        if (task.action != TaskAction::HostTool ||
+            !std::holds_alternative<HostToolParams>(task.specifics)) {
+            throw std::runtime_error(
+                "Inline WorkflowPlan supports HostTool tasks only: " + task.name);
+        }
+        if (!task.dot_env.empty() || !task.env.empty() ||
+            !task.sources.empty() || !task.generates.empty() ||
+            task.working_dir.has_value() || task.script.has_value()) {
+            throw std::runtime_error(
+                "Inline HostTool task cannot declare external path/environment/script dependencies: " +
+                task.name);
+        }
+        if (task.each.has_value()) {
+            throw std::runtime_error(
+                "Inline WorkflowPlan cannot expand dynamic each/matrix tasks: " +
+                task.name);
+        }
+        if (task.triggers.has_value() && !task.triggers->empty()) {
+            throw std::runtime_error(
+                "Inline WorkflowPlan cannot declare trigger-driven topology: " +
+                task.name);
+        }
+        const auto& params = std::get<HostToolParams>(task.specifics);
+        if (params.tool.empty()) {
+            throw std::runtime_error(
+                "Inline HostTool task requires a stable tool identity: " +
+                task.name);
+        }
+    }
+}
+
+Praktor::Effects::EffectManifest inlineEffects(const Workflow& workflow) {
+    Praktor::Effects::EffectManifest manifest;
+    for (const auto& task : workflow.tasks) {
+        const auto& params = std::get<HostToolParams>(task.specifics);
+        manifest.add("host_tool");
+        manifest.unknown_effects = true;
+        const std::string reason =
+            "host tool effects resolved by embedding host: " + params.tool;
+        if (std::find(manifest.unknown_reasons.begin(),
+                      manifest.unknown_reasons.end(),
+                      reason) == manifest.unknown_reasons.end()) {
+            manifest.unknown_reasons.push_back(reason);
+        }
+    }
+    return manifest;
+}
+
+std::vector<WorkflowHostTool> inlineHostTools(
+    const Workflow& workflow,
+    const std::string& source_id) {
+    std::vector<WorkflowHostTool> host_tools;
+    host_tools.reserve(workflow.tasks.size());
+    for (const auto& task : workflow.tasks) {
+        const auto& params = std::get<HostToolParams>(task.specifics);
+        WorkflowHostTool host_tool;
+        host_tool.workflow_path = source_id;
+        host_tool.task_name = task.name;
+        host_tool.tool_name = params.tool;
+        host_tool.argument_template = params.arguments;
+        host_tools.push_back(std::move(host_tool));
+    }
+    std::sort(host_tools.begin(), host_tools.end(),
+              [](const WorkflowHostTool& lhs, const WorkflowHostTool& rhs) {
+                  if (lhs.task_name != rhs.task_name)
+                      return lhs.task_name < rhs.task_name;
+                  return lhs.tool_name < rhs.tool_name;
+              });
+    return host_tools;
+}
+
+std::string inlineDigest(const std::string& source_id,
+                         const std::string& source) {
+    std::string identity = "inline";
+    identity.push_back('\0');
+    identity += source_id;
+    identity.push_back('\0');
+    identity += source;
+    return sha256(identity);
+}
+
 std::string manifestDigest(const std::vector<WorkflowDependency>& dependencies) {
     std::string manifest;
     for (const auto& dependency : dependencies) {
@@ -423,8 +522,56 @@ WorkflowPlan WorkflowPlan::compile(const fs::path& workflow_path) {
     return Compiler(workflow_path).build();
 }
 
+WorkflowPlan WorkflowPlan::compileInline(
+    std::string source_id,
+    std::string workflow_source) {
+    if (!validInlineSourceId(source_id)) {
+        throw std::runtime_error(
+            "Inline WorkflowPlan source_id must be a non-path logical identity");
+    }
+    if (workflow_source.empty()) {
+        throw std::runtime_error("Inline WorkflowPlan source cannot be empty");
+    }
+
+    Workflow workflow = TaskParser::parseText(workflow_source, source_id);
+    (void)TaskParser::buildGraph(workflow);
+    validateInlineWorkflow(workflow);
+
+    const auto effects = inlineEffects(workflow);
+    WorkflowValue profiles = WorkflowValue::object();
+    profiles["harness_safe"] =
+        Praktor::Profile::evaluateHarnessSafe(workflow, effects).toValue();
+
+    return WorkflowPlan(
+        {}, {},
+        inlineDigest(source_id, workflow_source),
+        {},
+        Praktor::Contract::inputSchema(workflow),
+        Praktor::Contract::outputSchema(workflow),
+        effects.toValue(),
+        std::move(profiles),
+        inlineHostTools(workflow, source_id),
+        "inline",
+        std::move(source_id),
+        std::move(workflow_source),
+        std::move(workflow));
+}
+
 bool WorkflowPlan::validate(std::string* error_message) const {
     try {
+        if (isInline()) {
+            if (!inline_workflow_.has_value() || !dependencies_.empty() ||
+                inlineDigest(source_id_, inline_source_) != digest_) {
+                if (error_message) {
+                    *error_message = "Inline WorkflowPlan identity is invalid";
+                }
+                return false;
+            }
+            (void)TaskParser::buildGraph(*inline_workflow_);
+            validateInlineWorkflow(*inline_workflow_);
+            return true;
+        }
+
         std::vector<WorkflowDependency> current = dependencies_;
         for (auto& dependency : current) {
             std::error_code error;
@@ -472,6 +619,8 @@ WorkflowValue WorkflowPlan::toValue() const {
     WorkflowValue result = WorkflowValue::object();
     result["root_path"] = root_path_;
     result["root_directory"] = root_directory_;
+    result["source_kind"] = source_kind_;
+    result["source_id"] = source_id_;
     result["digest"] = digest_;
     result["input_schema"] = input_schema_;
     result["output_schema"] = output_schema_;
