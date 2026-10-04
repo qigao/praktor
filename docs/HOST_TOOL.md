@@ -145,6 +145,7 @@ Retry semantics are intentionally narrow:
 
 - only the `tool:` runner accepts `retries`;
 - only `count` is supported; there is no delay/backoff field;
+- `count` is bounded by `PRAKTOR_HOST_TOOL_MAX_RETRIES` (currently 1024);
 - `HostToolStatus::Failed` may consume another admitted attempt;
 - `NotFound`, `Denied`, `Cancelled`, and `TimedOut` are terminal;
 - execution control is checked again before every attempt, so cancellation or
