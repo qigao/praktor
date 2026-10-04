@@ -39,4 +39,10 @@ Praktor 0.4.5 起，Native SDK 进一步公开 ABI 2.6 的
 第一版只接受无外部依赖的 HostTool-only DAG，并对 include/uses/dotenv/script/process/
 dynamic-each/trigger 等路径 fail-closed。
 
+同一 0.4.5 Native SDK 还发布 reviewed HostTool 的有限 retry contract：
+`retries.count` 表示首次 invocation 之后允许的额外尝试次数，公开上限为
+`PRAKTOR_HOST_TOOL_MAX_RETRIES = 1024`。只有 `PRAKTOR_HOST_TOOL_FAILED`
+可重试；NotFound / Denied / Cancelled / TimedOut 都是终态。Praktor 只调度
+compiler 已批准的有限尝试，不判断 tool 的 idempotency 安全性。
+
 PR 只做 qualification；不在 master push 上重复跑整套三平台构建。正式 package 只由与当前项目版本匹配的 release tag 发布。
