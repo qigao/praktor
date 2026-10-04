@@ -1587,7 +1587,21 @@ TEST_CASE("host tool grammar parses finite retries and rejects unsupported retry
         REQUIRE_THROWS_WITH(
             TaskParser::parseFile(wf.string()),
             Catch::Matchers::ContainsSubstring(
-                "retry count must be a non-negative 32-bit integer"));
+                "retry count must be between 0 and 1024"));
+    }
+
+    SECTION("retry count above the hard bound is rejected") {
+        auto wf = writeTempWorkflow("host_tool_retry_too_large.yml",
+            "tasks:\n"
+            "  - name: inspect\n"
+            "    tool: repo.inspect\n"
+            "    retries:\n"
+            "      count: 1025\n");
+
+        REQUIRE_THROWS_WITH(
+            TaskParser::parseFile(wf.string()),
+            Catch::Matchers::ContainsSubstring(
+                "retry count must be between 0 and 1024"));
     }
 
     SECTION("retry count is currently tool-only") {
