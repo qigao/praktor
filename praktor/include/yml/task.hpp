@@ -10,6 +10,8 @@
 #include <unordered_map>
 #include <vector>
 
+inline constexpr std::uint32_t kPraktorHostToolMaxRetries = 1024u;
+
 struct Task {
     std::string name;
     TaskAction action = TaskAction::None;
