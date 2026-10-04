@@ -37,6 +37,9 @@ typedef enum praktor_result {
 #define PRAKTOR_CAPABILITY_HOST_TOOL (UINT64_C(1) << 5)
 #define PRAKTOR_CAPABILITY_INLINE_WORKFLOW_PLAN (UINT64_C(1) << 6)
 
+/** Hard upper bound on additional HostTool attempts encoded by retries.count. */
+#define PRAKTOR_HOST_TOOL_MAX_RETRIES 1024u
+
 typedef enum praktor_error_phase {
     PRAKTOR_ERROR_PHASE_NONE = 0,
     PRAKTOR_ERROR_PHASE_REQUEST = 1,
