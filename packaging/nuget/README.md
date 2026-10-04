@@ -30,4 +30,7 @@ find_package(Praktor CONFIG REQUIRED)
 target_link_libraries(my_app PRIVATE Praktor::Praktor)
 ```
 
+Praktor 0.4.4 起，Native SDK 公开 reviewed `WorkflowPlan` HostTool ABI（`PRAKTOR_CAPABILITY_HOST_TOOL` / ABI 2.5）。
+HostTool 只提供 backend-neutral validate/invoke boundary；Praktor.Native 不依赖 TurboAgent、TurboWasm 或 RuntimeTools。
+
 PR 只做 qualification；不在 master push 上重复跑整套三平台构建。正式 package 只由与当前项目版本匹配的 release tag 发布。
