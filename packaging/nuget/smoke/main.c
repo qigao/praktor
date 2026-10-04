@@ -154,9 +154,10 @@ int main(int argc, char **argv) {
   if (!api->execute_workflow_plan_host_tools) return 10;
   if ((api->capabilities & PRAKTOR_CAPABILITY_INLINE_WORKFLOW_PLAN) == 0) return 11;
   if (!api->compile_workflow_inline) return 12;
-  if (check_inline_plan() != 0) return 13;
-  if (run_one(argv[1], "success") != 0) return 14;
-  if (run_one(argv[2], "42") != 0) return 15;
+  if (PRAKTOR_HOST_TOOL_MAX_RETRIES != 1024u) return 13;
+  if (check_inline_plan() != 0) return 14;
+  if (run_one(argv[1], "success") != 0) return 15;
+  if (run_one(argv[2], "42") != 0) return 16;
   puts("PRAKTOR_SCRIPT_ENABLED_REAL_ABI_OK");
   return 0;
 }
