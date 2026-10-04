@@ -111,16 +111,15 @@ struct PreparedWorkflow {
     std::unique_ptr<WorkflowContext> context;
 };
 
-PreparedWorkflow prepareExecution(
-    const std::string& yaml_path,
-    const std::filesystem::path& base_directory,
+PreparedWorkflow prepareExecutionFromWorkflow(
+    Workflow workflow,
     const WorkflowInputs& input_values,
     const std::unordered_map<std::string, std::string>& base_environment,
     std::shared_ptr<Praktor::Execution::ExecutionControl> execution_control = {},
     std::shared_ptr<Praktor::Execution::ExecutionObserver> execution_observer = {},
     std::shared_ptr<Praktor::Execution::HostToolHost> host_tool_host = {}) {
     PreparedWorkflow prepared;
-    prepared.workflow = TaskParser::parseFileWithIncludes(yaml_path, base_directory.string());
+    prepared.workflow = std::move(workflow);
     const auto normalized_inputs =
         Praktor::Contract::validateAndApplyInputs(prepared.workflow, input_values);
     prepared.runtime_environment = buildRuntimeEnvironment(prepared.workflow, base_environment);
@@ -133,6 +132,20 @@ PreparedWorkflow prepareExecution(
     populateWorkflowEnvironmentContext(*prepared.context, prepared.runtime_environment);
     populateWorkflowVariables(*prepared.context, prepared.workflow, normalized_inputs);
     return prepared;
+}
+
+PreparedWorkflow prepareExecution(
+    const std::string& yaml_path,
+    const std::filesystem::path& base_directory,
+    const WorkflowInputs& input_values,
+    const std::unordered_map<std::string, std::string>& base_environment,
+    std::shared_ptr<Praktor::Execution::ExecutionControl> execution_control = {},
+    std::shared_ptr<Praktor::Execution::ExecutionObserver> execution_observer = {},
+    std::shared_ptr<Praktor::Execution::HostToolHost> host_tool_host = {}) {
+    return prepareExecutionFromWorkflow(
+        TaskParser::parseFileWithIncludes(yaml_path, base_directory.string()),
+        input_values, base_environment, std::move(execution_control),
+        std::move(execution_observer), std::move(host_tool_host));
 }
 
 WorkflowInputs convertStringInputs(
@@ -267,6 +280,18 @@ WorkflowRunner::WorkflowRunner(std::string const& yamlPath,
     , base_directory_(std::filesystem::path(yamlPath).parent_path())
     , max_trigger_depth_(maxTriggerDepth) {}
 
+WorkflowRunner::WorkflowRunner(
+    Workflow workflow,
+    WorkflowInputs inputValues,
+    std::unordered_map<std::string, std::string> baseEnvironment,
+    size_t maxTriggerDepth)
+    : yamlPath_(workflow.source_path)
+    , inputValues_(std::move(inputValues))
+    , baseEnvironment_(std::move(baseEnvironment))
+    , base_directory_()
+    , inline_workflow_(std::move(workflow))
+    , max_trigger_depth_(maxTriggerDepth) {}
+
 WorkflowRunner::~WorkflowRunner() = default;
 
 WorkflowExecutionResult WorkflowRunner::execute(bool useConcurrent, int maxConcurrency) {
@@ -297,10 +322,15 @@ WorkflowExecutionResult WorkflowRunner::executeObservedWithHostTools(
     bool workflow_started = false;
     try {
         TLOG_DEBUGF("Loading workflow from: {}", yamlPath_);
-        auto prepared = prepareExecution(
-            yamlPath_, base_directory_, inputValues_, baseEnvironment_,
-            std::move(executionControl), executionObserver,
-            std::move(hostToolHost));
+        auto prepared = inline_workflow_.has_value()
+            ? prepareExecutionFromWorkflow(
+                  *inline_workflow_, inputValues_, baseEnvironment_,
+                  std::move(executionControl), executionObserver,
+                  std::move(hostToolHost))
+            : prepareExecution(
+                  yamlPath_, base_directory_, inputValues_, baseEnvironment_,
+                  std::move(executionControl), executionObserver,
+                  std::move(hostToolHost));
 
         if (executionObserver) {
             executionObserver->emit(
@@ -363,8 +393,11 @@ bool WorkflowRunner::run(bool useConcurrent, int maxConcurrency) {
 bool WorkflowRunner::runTask(std::string const& taskName, bool useConcurrent, int maxConcurrency) {
     try {
         TLOG_DEBUGF("Loading workflow to run single task: {}", taskName);
-        auto prepared = prepareExecution(
-            yamlPath_, base_directory_, inputValues_, baseEnvironment_);
+        auto prepared = inline_workflow_.has_value()
+            ? prepareExecutionFromWorkflow(
+                  *inline_workflow_, inputValues_, baseEnvironment_)
+            : prepareExecution(
+                  yamlPath_, base_directory_, inputValues_, baseEnvironment_);
 
         auto targetTaskIt = std::find_if(prepared.workflow.tasks.begin(), prepared.workflow.tasks.end(),
             [&](const Task& task) { return task.name == taskName; });
