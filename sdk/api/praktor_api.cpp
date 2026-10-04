@@ -851,6 +851,7 @@ praktor_result executeWorkflowPlanImpl(
                  "Valid WorkflowPlan, execution controls, non-empty input_json, and empty output are required");
         return PRAKTOR_RESULT_INVALID_ARGUMENT;
     }
+    output->size = 0;
 
     std::string validation_error;
     if (!request->plan->value.validate(&validation_error)) {
