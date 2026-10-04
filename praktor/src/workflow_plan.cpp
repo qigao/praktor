@@ -379,6 +379,7 @@ private:
                 host_tool.task_name = task.name;
                 host_tool.tool_name = params.tool;
                 host_tool.argument_template = params.arguments;
+                host_tool.retry_count = task.retry_count;
                 host_tools_.push_back(std::move(host_tool));
             }
 
@@ -479,6 +480,7 @@ std::vector<WorkflowHostTool> inlineHostTools(
         host_tool.task_name = task.name;
         host_tool.tool_name = params.tool;
         host_tool.argument_template = params.arguments;
+        host_tool.retry_count = task.retry_count;
         host_tools.push_back(std::move(host_tool));
     }
     std::sort(host_tools.begin(), host_tools.end(),
@@ -640,6 +642,7 @@ WorkflowValue WorkflowPlan::toValue() const {
         item["task_name"] = host_tool.task_name;
         item["tool"] = host_tool.tool_name;
         item["arguments"] = host_tool.argument_template;
+        item["retry_count"] = static_cast<std::int64_t>(host_tool.retry_count);
         host_tools.push_back(std::move(item));
     }
     result["host_tools"] = std::move(host_tools);
