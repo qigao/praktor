@@ -127,52 +127,74 @@ TaskResult HostToolTaskExecutor::execute(const Task& task,
             params->tool, "invalid_arguments");
     }
 
-    HostToolResult host_result = host->invoke(
-        params->tool, arguments, control, context.getExecutionObserver());
+    const std::uint64_t total_attempts =
+        static_cast<std::uint64_t>(task.retry_count) + 1u;
+    for (std::uint64_t attempt = 0; attempt < total_attempts; ++attempt) {
+        if (control && control->stopRequested()) {
+            const auto reason = control->stopReason();
+            return failedResult(
+                reason == ExecutionControl::StopReason::DeadlineExceeded
+                    ? TaskErrorCode::Timeout
+                    : TaskErrorCode::Cancelled,
+                reason == ExecutionControl::StopReason::DeadlineExceeded
+                    ? "HostTool execution deadline exceeded before retry invocation"
+                    : "HostTool execution cancelled before retry invocation",
+                params->tool,
+                reason == ExecutionControl::StopReason::DeadlineExceeded
+                    ? "timed_out"
+                    : "cancelled");
+        }
 
-    switch (host_result.status) {
-    case HostToolStatus::Ok:
-        context.setCurrentTaskOutput("result", host_result.value);
-        return TaskResult(true);
-    case HostToolStatus::NotFound:
-        return failedResult(
-            TaskErrorCode::ResourceNotFound,
-            host_result.error_message.empty()
-                ? "HostTool identity is no longer available"
-                : std::move(host_result.error_message),
-            params->tool, "not_found");
-    case HostToolStatus::Denied:
-        return failedResult(
-            TaskErrorCode::HostToolDenied,
-            host_result.error_message.empty()
-                ? "HostTool invocation was denied by the embedding host"
-                : std::move(host_result.error_message),
-            params->tool, "denied");
-    case HostToolStatus::Cancelled:
-        return failedResult(
-            TaskErrorCode::Cancelled,
-            host_result.error_message.empty()
-                ? "HostTool invocation was cancelled"
-                : std::move(host_result.error_message),
-            params->tool, "cancelled");
-    case HostToolStatus::TimedOut:
-        return failedResult(
-            TaskErrorCode::Timeout,
-            host_result.error_message.empty()
-                ? "HostTool invocation exceeded its deadline"
-                : std::move(host_result.error_message),
-            params->tool, "timed_out");
-    case HostToolStatus::Failed:
-        return failedResult(
-            TaskErrorCode::HostToolFailed,
-            host_result.error_message.empty()
-                ? "HostTool invocation failed"
-                : std::move(host_result.error_message),
-            params->tool, "failed");
+        HostToolResult host_result = host->invoke(
+            params->tool, arguments, control, context.getExecutionObserver());
+
+        switch (host_result.status) {
+        case HostToolStatus::Ok:
+            context.setCurrentTaskOutput("result", host_result.value);
+            return TaskResult(true);
+        case HostToolStatus::NotFound:
+            return failedResult(
+                TaskErrorCode::ResourceNotFound,
+                host_result.error_message.empty()
+                    ? "HostTool identity is no longer available"
+                    : std::move(host_result.error_message),
+                params->tool, "not_found");
+        case HostToolStatus::Denied:
+            return failedResult(
+                TaskErrorCode::HostToolDenied,
+                host_result.error_message.empty()
+                    ? "HostTool invocation was denied by the embedding host"
+                    : std::move(host_result.error_message),
+                params->tool, "denied");
+        case HostToolStatus::Cancelled:
+            return failedResult(
+                TaskErrorCode::Cancelled,
+                host_result.error_message.empty()
+                    ? "HostTool invocation was cancelled"
+                    : std::move(host_result.error_message),
+                params->tool, "cancelled");
+        case HostToolStatus::TimedOut:
+            return failedResult(
+                TaskErrorCode::Timeout,
+                host_result.error_message.empty()
+                    ? "HostTool invocation exceeded its deadline"
+                    : std::move(host_result.error_message),
+                params->tool, "timed_out");
+        case HostToolStatus::Failed:
+            if (attempt + 1u < total_attempts) {
+                continue;
+            }
+            return failedResult(
+                TaskErrorCode::HostToolFailed,
+                host_result.error_message.empty()
+                    ? "HostTool invocation failed after finite retries"
+                    : std::move(host_result.error_message),
+                params->tool, "failed");
+        }
     }
 
     return failedResult(TaskErrorCode::HostToolFailed,
-                        "HostTool returned an unknown status",
+                        "HostTool retry state is inconsistent",
                         params->tool, "unknown");
 }
 
