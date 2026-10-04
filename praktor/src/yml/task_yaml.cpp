@@ -466,7 +466,7 @@ Task parse_task(const TaskYamlDetail::YamlNodeRef& node, const std::string& sour
     if (action_count > 1) {
         TaskYamlDetail::throw_parse_error(node, "task '" + task.name + "' declares multiple runners");
     }
-    if (task.retry_count != 0 && task.action != TaskAction::HostTool) {
+    if (node.has_child("retries") && task.action != TaskAction::HostTool) {
         TaskYamlDetail::throw_parse_error(
             node["retries"], "'retries' is currently supported only with the 'tool' runner");
     }
