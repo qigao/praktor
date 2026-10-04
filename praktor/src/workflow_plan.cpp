@@ -542,15 +542,21 @@ WorkflowPlan WorkflowPlan::compileInline(
     profiles["harness_safe"] =
         Praktor::Profile::evaluateHarnessSafe(workflow, effects).toValue();
 
+    const std::string digest = inlineDigest(source_id, workflow_source);
+    auto host_tools = inlineHostTools(workflow, source_id);
+    auto input_schema = Praktor::Contract::inputSchema(workflow);
+    auto output_schema = Praktor::Contract::outputSchema(workflow);
+    auto effect_manifest = effects.toValue();
+
     return WorkflowPlan(
         {}, {},
-        inlineDigest(source_id, workflow_source),
+        digest,
         {},
-        Praktor::Contract::inputSchema(workflow),
-        Praktor::Contract::outputSchema(workflow),
-        effects.toValue(),
+        std::move(input_schema),
+        std::move(output_schema),
+        std::move(effect_manifest),
         std::move(profiles),
-        inlineHostTools(workflow, source_id),
+        std::move(host_tools),
         "inline",
         std::move(source_id),
         std::move(workflow_source),
