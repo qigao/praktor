@@ -1604,6 +1604,20 @@ TEST_CASE("host tool grammar parses finite retries and rejects unsupported retry
                 "'retries' is currently supported only with the 'tool' runner"));
     }
 
+    SECTION("zero retry count is still tool-only grammar") {
+        auto wf = writeTempWorkflow("command_zero_retry_rejected.yml",
+            "tasks:\n"
+            "  - name: inspect\n"
+            "    command: echo inspect\n"
+            "    retries:\n"
+            "      count: 0\n");
+
+        REQUIRE_THROWS_WITH(
+            TaskParser::parseFile(wf.string()),
+            Catch::Matchers::ContainsSubstring(
+                "'retries' is currently supported only with the 'tool' runner"));
+    }
+
     SECTION("retry policy requires count") {
         auto wf = writeTempWorkflow("host_tool_retry_missing_count.yml",
             "tasks:\n"
