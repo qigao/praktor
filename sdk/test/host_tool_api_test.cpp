@@ -4,6 +4,7 @@
 #include <catch2/catch_all.hpp>
 
 #include <chrono>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
@@ -566,5 +567,136 @@ TEST_CASE("inline plan preserves input contract before HostTool invocation",
     CHECK(output.data == nullptr);
     CHECK(probe.invoke_calls == 0);
 
+    praktor_release_workflow_plan(plan);
+}
+
+
+TEST_CASE("inline HostTool retries only the admitted task invocation",
+          "[sdk][plan][inline][host-tool][retry]") {
+    const std::string source = inlineRetryHostToolWorkflow(2u);
+    praktor_workflow_plan* plan =
+        compileInlinePlan("turboagent:plan:retry-success", source);
+
+    praktor_owned_json metadata = PRAKTOR_OWNED_JSON_INIT;
+    praktor_error error = PRAKTOR_ERROR_INIT;
+    REQUIRE(praktor_describe_workflow_plan(plan, &metadata, &error) ==
+            PRAKTOR_RESULT_SUCCESS);
+    const auto description = WorkflowValue::parse(
+        std::string_view(metadata.data, metadata.size));
+    REQUIRE(description.at("host_tools").size() == 1);
+    CHECK(description.at("host_tools").at(0).at("retry_count").as<int>() == 2);
+    praktor_release_json(&metadata);
+
+    HostProbe probe;
+    probe.fail_attempts = 2;
+    auto host = hostExecutor(probe);
+    auto request = executeRequest(plan);
+    praktor_execution_control control = PRAKTOR_EXECUTION_CONTROL_INIT;
+    control.is_cancelled = &neverCancelled;
+    control.timeout_ms = 5000;
+    praktor_owned_json output = PRAKTOR_OWNED_JSON_INIT;
+
+    REQUIRE(praktor_execute_workflow_plan_host_tools(
+                &request, &control, nullptr, &host, &output, &error) ==
+            PRAKTOR_RESULT_SUCCESS);
+    CHECK(probe.validate_calls == 1);
+    CHECK(probe.invoke_calls == 3);
+
+    const auto result = WorkflowValue::parse(
+        std::string_view(output.data, output.size));
+    CHECK(result.at("workflow_status").as<std::string>() == "success");
+    CHECK(result.at("tasks").at("inspect").at("outputs").at("result")
+              .at("status").as<std::string>() == "ok");
+
+    praktor_release_json(&output);
+    praktor_release_workflow_plan(plan);
+}
+
+TEST_CASE("inline HostTool retry exhaustion is finite and deterministic",
+          "[sdk][plan][inline][host-tool][retry]") {
+    const std::string source = inlineRetryHostToolWorkflow(1u);
+    praktor_workflow_plan* plan =
+        compileInlinePlan("turboagent:plan:retry-exhausted", source);
+
+    HostProbe probe;
+    probe.fail_attempts = 4;
+    auto host = hostExecutor(probe);
+    auto request = executeRequest(plan);
+    praktor_owned_json output = PRAKTOR_OWNED_JSON_INIT;
+    praktor_error error = PRAKTOR_ERROR_INIT;
+
+    CHECK(praktor_execute_workflow_plan_host_tools(
+              &request, nullptr, nullptr, &host, &output, &error) ==
+          PRAKTOR_RESULT_EXECUTION_FAILED);
+    CHECK(probe.validate_calls == 1);
+    CHECK(probe.invoke_calls == 2);
+    REQUIRE(output.data != nullptr);
+
+    const auto result = WorkflowValue::parse(
+        std::string_view(output.data, output.size));
+    CHECK(result.at("workflow_status").as<std::string>() == "failed");
+
+    praktor_release_json(&output);
+    praktor_release_workflow_plan(plan);
+}
+
+TEST_CASE("HostTool retry stops before a cancelled next attempt",
+          "[sdk][plan][inline][host-tool][retry][cancel]") {
+    const std::string source = inlineRetryHostToolWorkflow(3u);
+    praktor_workflow_plan* plan =
+        compileInlinePlan("turboagent:plan:retry-cancel", source);
+
+    HostProbe probe;
+    probe.fail_attempts = 4;
+    auto host = hostExecutor(probe);
+    auto request = executeRequest(plan);
+    praktor_execution_control control = PRAKTOR_EXECUTION_CONTROL_INIT;
+    control.user_data = &probe;
+    control.is_cancelled = &cancelAfterFirstInvoke;
+    control.timeout_ms = 5000;
+    praktor_owned_json output = PRAKTOR_OWNED_JSON_INIT;
+    praktor_error error = PRAKTOR_ERROR_INIT;
+
+    CHECK(praktor_execute_workflow_plan_host_tools(
+              &request, &control, nullptr, &host, &output, &error) ==
+          PRAKTOR_RESULT_EXECUTION_FAILED);
+    CHECK(probe.invoke_calls == 1);
+    REQUIRE(output.data != nullptr);
+
+    const auto result = WorkflowValue::parse(
+        std::string_view(output.data, output.size));
+    CHECK(result.at("workflow_status").as<std::string>() == "failed");
+
+    praktor_release_json(&output);
+    praktor_release_workflow_plan(plan);
+}
+
+TEST_CASE("HostTool timeout is terminal and is never retried",
+          "[sdk][plan][inline][host-tool][retry][timeout]") {
+    const std::string source = inlineRetryHostToolWorkflow(3u);
+    praktor_workflow_plan* plan =
+        compileInlinePlan("turboagent:plan:retry-timeout", source);
+
+    HostProbe probe;
+    probe.force_timeout = true;
+    auto host = hostExecutor(probe);
+    auto request = executeRequest(plan);
+    praktor_execution_control control = PRAKTOR_EXECUTION_CONTROL_INIT;
+    control.is_cancelled = &neverCancelled;
+    control.timeout_ms = 5000;
+    praktor_owned_json output = PRAKTOR_OWNED_JSON_INIT;
+    praktor_error error = PRAKTOR_ERROR_INIT;
+
+    CHECK(praktor_execute_workflow_plan_host_tools(
+              &request, &control, nullptr, &host, &output, &error) ==
+          PRAKTOR_RESULT_EXECUTION_FAILED);
+    CHECK(probe.invoke_calls == 1);
+    REQUIRE(output.data != nullptr);
+
+    const auto result = WorkflowValue::parse(
+        std::string_view(output.data, output.size));
+    CHECK(result.at("workflow_status").as<std::string>() == "failed");
+
+    praktor_release_json(&output);
     praktor_release_workflow_plan(plan);
 }
