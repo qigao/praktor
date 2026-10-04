@@ -47,6 +47,7 @@ DAG scheduler
   ├── actions
   ├── service / managed_process
   ├── uses / dynamic_tasks
+  ├── tool (reviewed HostTool execution)
   └── script
   │
   ▼
@@ -151,6 +152,7 @@ Common runners include:
 - **`download`**: stream an HTTPS response to a local file with optional SHA-256 verification.
 - **`actions`**: define internal action control flow for one task.
 - **`uses` / `dynamic_tasks`**: compose or generate more tasks at runtime.
+- **`tool`**: invoke a reviewed, host-supplied typed tool identity through the backend-neutral HostTool ABI. See [HostTool execution](docs/HOST_TOOL.md).
 
 Important semantic rule:
 
@@ -168,7 +170,8 @@ Workflow (DAG)
       ├─ runner: command
       ├─ runner: actions
       ├─ runner: uses
-      └─ runner: dynamic_tasks
+      ├─ runner: dynamic_tasks
+      └─ runner: tool
 
 Inside actions only:
   sequence / fallback / parallel / retry / if / while / switch / shell / parse_*
