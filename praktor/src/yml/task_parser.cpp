@@ -234,6 +234,27 @@ Workflow parseFile(const std::string& filePath) {
     return parseInternal(filePath, ctx);
 }
 
+Workflow parseText(const std::string& source, const std::string& sourceId) {
+    if (source.empty()) {
+        throw std::runtime_error("Inline workflow source cannot be empty");
+    }
+    if (sourceId.empty()) {
+        throw std::runtime_error("Inline workflow source identity cannot be empty");
+    }
+
+    TaskYamlDetail::YamlDocument document(source);
+    auto root = document.root();
+    if (root.has_child("includes")) {
+        TaskYamlDetail::throw_parse_error(
+            root["includes"], "inline workflows cannot declare includes");
+    }
+
+    Workflow workflow = parse_workflow(root, sourceId);
+    workflow.source_path = sourceId;
+    normalizeWorkflow(workflow);
+    return workflow;
+}
+
 DependencyGraph<Task> buildGraph(const Workflow& workflow) {
     DependencyGraph<Task> graph(workflow.name.empty() ? "Workflow" : workflow.name);
 

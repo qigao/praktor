@@ -27,7 +27,7 @@ typedef enum praktor_result {
 } praktor_result;
 
 #define PRAKTOR_ABI_MAJOR 2u
-#define PRAKTOR_ABI_MINOR 5u
+#define PRAKTOR_ABI_MINOR 6u
 
 #define PRAKTOR_CAPABILITY_JSON_WORKFLOW (UINT64_C(1) << 0)
 #define PRAKTOR_CAPABILITY_SCRIPT_ENGINE (UINT64_C(1) << 1)
@@ -35,6 +35,7 @@ typedef enum praktor_result {
 #define PRAKTOR_CAPABILITY_WORKFLOW_PLAN (UINT64_C(1) << 3)
 #define PRAKTOR_CAPABILITY_EXECUTION_EVENTS (UINT64_C(1) << 4)
 #define PRAKTOR_CAPABILITY_HOST_TOOL (UINT64_C(1) << 5)
+#define PRAKTOR_CAPABILITY_INLINE_WORKFLOW_PLAN (UINT64_C(1) << 6)
 
 typedef enum praktor_error_phase {
     PRAKTOR_ERROR_PHASE_NONE = 0,
@@ -75,6 +76,24 @@ typedef struct praktor_compile_request {
     uint32_t struct_size;
     const char* workflow_path;
 } praktor_compile_request;
+
+/**
+ * In-memory reviewed WorkflowPlan compilation request.
+ *
+ * source_id is a logical identity (for example "turboagent:plan:<hash>"), not
+ * a filesystem path. workflow_yaml is borrowed only for this call; the
+ * resulting immutable plan owns its source bytes and parsed HostTool DAG.
+ *
+ * The first inline ABI accepts HostTool-only finite DAGs and rejects includes,
+ * dotenv/filesystem dependencies, scripts, process runners, dynamic each/matrix
+ * expansion, and trigger-driven topology.
+ */
+typedef struct praktor_compile_inline_request {
+    uint32_t struct_size;
+    const char* source_id;
+    const char* workflow_yaml;
+    size_t workflow_yaml_size;
+} praktor_compile_inline_request;
 
 /**
  * WorkflowPlan execution request.
@@ -241,6 +260,7 @@ typedef struct praktor_host_tool_executor {
 
 #define PRAKTOR_EXECUTE_REQUEST_INIT {sizeof(praktor_execute_request), NULL, NULL, 0}
 #define PRAKTOR_COMPILE_REQUEST_INIT {sizeof(praktor_compile_request), NULL}
+#define PRAKTOR_COMPILE_INLINE_REQUEST_INIT {sizeof(praktor_compile_inline_request), NULL, NULL, 0}
 #define PRAKTOR_PLAN_EXECUTE_REQUEST_INIT {sizeof(praktor_plan_execute_request), NULL, NULL, 0}
 #define PRAKTOR_EXECUTION_CONTROL_INIT {sizeof(praktor_execution_control), 0, NULL, NULL, 0, {0, 0, 0, 0}}
 #define PRAKTOR_EXECUTION_OBSERVER_INIT {sizeof(praktor_execution_observer), NULL, NULL, NULL, NULL, NULL, NULL, {0, 0, 0, 0}}
@@ -259,6 +279,10 @@ typedef int32_t (PRAKTOR_CALL *praktor_execute_workflow_controlled_fn)(
     praktor_error* error);
 typedef int32_t (PRAKTOR_CALL *praktor_compile_workflow_fn)(
     const praktor_compile_request* request,
+    praktor_workflow_plan** out_plan,
+    praktor_error* error);
+typedef int32_t (PRAKTOR_CALL *praktor_compile_workflow_inline_fn)(
+    const praktor_compile_inline_request* request,
     praktor_workflow_plan** out_plan,
     praktor_error* error);
 typedef int32_t (PRAKTOR_CALL *praktor_describe_workflow_plan_fn)(
@@ -301,6 +325,7 @@ typedef struct praktor_api {
     praktor_release_workflow_plan_fn release_workflow_plan;
     praktor_execute_workflow_plan_observed_fn execute_workflow_plan_observed;
     praktor_execute_workflow_plan_host_tools_fn execute_workflow_plan_host_tools;
+    praktor_compile_workflow_inline_fn compile_workflow_inline;
 } praktor_api;
 
 typedef const praktor_api* (PRAKTOR_CALL *praktor_get_api_fn)(void);
@@ -345,6 +370,16 @@ PRAKTOR_C_API praktor_result PRAKTOR_CALL praktor_compile_workflow(
 /**
  * Return canonical WorkflowPlan metadata JSON containing root path, root directory,
  * plan digest, and the sorted dependency closure with per-file SHA-256 digests.
+ */
+PRAKTOR_C_API praktor_result PRAKTOR_CALL praktor_compile_workflow_inline(
+    const praktor_compile_inline_request* request,
+    praktor_workflow_plan** out_plan,
+    praktor_error* error);
+
+/**
+ * Return canonical WorkflowPlan metadata JSON. Inline plans additionally
+ * publish source_kind="inline", source_id, an empty dependency closure, and a
+ * digest over the owned logical identity + exact source bytes.
  */
 PRAKTOR_C_API praktor_result PRAKTOR_CALL praktor_describe_workflow_plan(
     const praktor_workflow_plan* plan,

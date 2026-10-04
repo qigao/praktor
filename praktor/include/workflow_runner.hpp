@@ -12,6 +12,7 @@
 #include <filesystem>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <string>
 #include <unordered_map>
 
@@ -30,6 +31,10 @@ public:
                             std::unordered_map<std::string, std::string> baseEnvironment = {},
                             size_t maxTriggerDepth = Praktor::Execution::kMaxTriggerChainDepth);
     WorkflowRunner(std::string const& yamlPath,
+                   WorkflowInputs inputValues,
+                   std::unordered_map<std::string, std::string> baseEnvironment = {},
+                   size_t maxTriggerDepth = Praktor::Execution::kMaxTriggerChainDepth);
+    WorkflowRunner(Workflow workflow,
                    WorkflowInputs inputValues,
                    std::unordered_map<std::string, std::string> baseEnvironment = {},
                    size_t maxTriggerDepth = Praktor::Execution::kMaxTriggerChainDepth);
@@ -56,6 +61,7 @@ private:
     WorkflowInputs inputValues_;
     std::unordered_map<std::string, std::string> baseEnvironment_;
     std::filesystem::path base_directory_; // New: store the base directory for the workflow
+    std::optional<Workflow> inline_workflow_;
     size_t max_trigger_depth_ = Praktor::Execution::kMaxTriggerChainDepth;
 };
 
