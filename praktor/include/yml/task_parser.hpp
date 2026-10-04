@@ -19,6 +19,17 @@ namespace TaskParser {
     Workflow parseFile(const std::string& filePath);
 
     /**
+     * @brief Parses one in-memory YAML workflow without filesystem includes.
+     * @param source UTF-8 YAML source bytes.
+     * @param sourceId Logical source identity used in diagnostics/task metadata.
+     * @return A normalized Workflow object.
+     *
+     * Inline parsing deliberately rejects top-level includes. Higher layers may
+     * further restrict task forms before admitting an executable plan.
+     */
+    Workflow parseText(const std::string& source, const std::string& sourceId);
+
+    /**
      * @brief Builds a task graph from a Workflow object.
      * @param workflow The Workflow object to build the graph from.
      * @return A DependencyGraph representing the task dependencies.
