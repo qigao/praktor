@@ -659,13 +659,13 @@ TEST_CASE("HostTool retry stops before a cancelled next attempt",
 
     CHECK(praktor_execute_workflow_plan_host_tools(
               &request, &control, nullptr, &host, &output, &error) ==
-          PRAKTOR_RESULT_EXECUTION_FAILED);
+          PRAKTOR_RESULT_CANCELLED);
     CHECK(probe.invoke_calls == 1);
     REQUIRE(output.data != nullptr);
 
     const auto result = WorkflowValue::parse(
         std::string_view(output.data, output.size));
-    CHECK(result.at("workflow_status").as<std::string>() == "failed");
+    CHECK(result.at("workflow_status").as<std::string>() == "cancelled");
 
     praktor_release_json(&output);
     praktor_release_workflow_plan(plan);
