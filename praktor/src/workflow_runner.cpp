@@ -70,8 +70,11 @@ void setWorkflowEnvironmentValue(WorkflowContext& context, const std::string& ke
 
 std::unordered_map<std::string, std::string> buildRuntimeEnvironment(
     const Workflow& workflow,
-    const std::unordered_map<std::string, std::string>& base_environment) {
-    auto runtime_environment = Praktor::system::getEnvironmentVariables();
+    const std::unordered_map<std::string, std::string>& base_environment,
+    bool inherit_system_environment = true) {
+    auto runtime_environment = inherit_system_environment
+        ? Praktor::system::getEnvironmentVariables()
+        : std::unordered_map<std::string, std::string>{};
     auto workflow_environment = collectWorkflowEnvironment(workflow);
     mergeEnvironmentOverrides(runtime_environment, workflow_environment);
     mergeEnvironmentOverrides(runtime_environment, base_environment);
@@ -117,12 +120,14 @@ PreparedWorkflow prepareExecutionFromWorkflow(
     const std::unordered_map<std::string, std::string>& base_environment,
     std::shared_ptr<Praktor::Execution::ExecutionControl> execution_control = {},
     std::shared_ptr<Praktor::Execution::ExecutionObserver> execution_observer = {},
-    std::shared_ptr<Praktor::Execution::HostToolHost> host_tool_host = {}) {
+    std::shared_ptr<Praktor::Execution::HostToolHost> host_tool_host = {},
+    bool inherit_system_environment = true) {
     PreparedWorkflow prepared;
     prepared.workflow = std::move(workflow);
     const auto normalized_inputs =
         Praktor::Contract::validateAndApplyInputs(prepared.workflow, input_values);
-    prepared.runtime_environment = buildRuntimeEnvironment(prepared.workflow, base_environment);
+    prepared.runtime_environment = buildRuntimeEnvironment(
+        prepared.workflow, base_environment, inherit_system_environment);
     prepared.graph = TaskParser::buildGraph(prepared.workflow);
     prepared.context = std::make_unique<WorkflowContext>();
     prepared.context->setExecutionControl(std::move(execution_control));
@@ -145,7 +150,7 @@ PreparedWorkflow prepareExecution(
     return prepareExecutionFromWorkflow(
         TaskParser::parseFileWithIncludes(yaml_path, base_directory.string()),
         input_values, base_environment, std::move(execution_control),
-        std::move(execution_observer), std::move(host_tool_host));
+        std::move(execution_observer), std::move(host_tool_host), true);
 }
 
 WorkflowInputs convertStringInputs(
@@ -326,7 +331,7 @@ WorkflowExecutionResult WorkflowRunner::executeObservedWithHostTools(
             ? prepareExecutionFromWorkflow(
                   *inline_workflow_, inputValues_, baseEnvironment_,
                   std::move(executionControl), executionObserver,
-                  std::move(hostToolHost))
+                  std::move(hostToolHost), false)
             : prepareExecution(
                   yamlPath_, base_directory_, inputValues_, baseEnvironment_,
                   std::move(executionControl), executionObserver,
@@ -395,7 +400,8 @@ bool WorkflowRunner::runTask(std::string const& taskName, bool useConcurrent, in
         TLOG_DEBUGF("Loading workflow to run single task: {}", taskName);
         auto prepared = inline_workflow_.has_value()
             ? prepareExecutionFromWorkflow(
-                  *inline_workflow_, inputValues_, baseEnvironment_)
+                  *inline_workflow_, inputValues_, baseEnvironment_,
+                  {}, {}, {}, false)
             : prepareExecution(
                   yamlPath_, base_directory_, inputValues_, baseEnvironment_);
 
