@@ -1,6 +1,6 @@
 #pragma once
 
-#include <salts_fs.h>
+#include <cmeta_fs.h>
 
 #include <array>
 #include <stdexcept>
@@ -13,46 +13,46 @@ public:
   explicit FileException(std::string const& message) : std::runtime_error(message) {}
 };
 
-inline std::string saltsFsErrorToString(int error_code) {
-  return "salts_fs error: " + std::to_string(error_code);
+inline std::string cmetaFsErrorToString(int error_code) {
+  return "cmeta_fs error: " + std::to_string(error_code);
 }
 
 inline bool fileExists(std::string const& filePath) {
-  salts_fs_stat_t stat {};
-  return salts_fs_stat(filePath.c_str(), &stat) == 0;
+  cmeta_fs_stat_t stat {};
+  return cmeta_fs_stat(filePath.c_str(), &stat) == 0;
 }
 
 inline std::string readFile(std::string const& filePath) {
-  salts_fs_buf_t buf {};
-  const int rc = salts_fs_read_file(filePath.c_str(), &buf);
+  cmeta_fs_buf_t buf {};
+  const int rc = cmeta_fs_read_file(filePath.c_str(), &buf);
   if (rc != 0) {
-    throw FileException("Failed to read file: " + filePath + " - " + saltsFsErrorToString(rc));
+    throw FileException("Failed to read file: " + filePath + " - " + cmetaFsErrorToString(rc));
   }
 
   std::string content;
   if (buf.base != nullptr && buf.len > 0) {
     content.assign(buf.base, buf.len);
   }
-  salts_fs_buf_free(&buf);
+  cmeta_fs_buf_free(&buf);
   return content;
 }
 
 inline bool writeFile(std::string const& filePath, std::string const& content) {
-  auto buffer = salts_fs_buf_init(const_cast<char*>(content.data()), content.size());
-  return salts_fs_write_file(filePath.c_str(), &buffer) == 0;
+  auto buffer = cmeta_fs_buf_init(const_cast<char*>(content.data()), content.size());
+  return cmeta_fs_write_file(filePath.c_str(), &buffer) == 0;
 }
 
 inline bool createDirectory(std::string const& dirPath) {
-  salts_fs_stat_t stat {};
-  if (salts_fs_stat(dirPath.c_str(), &stat) == 0) {
+  cmeta_fs_stat_t stat {};
+  if (cmeta_fs_stat(dirPath.c_str(), &stat) == 0) {
     return stat.is_directory;
   }
-  return salts_fs_mkdir(dirPath.c_str(), 0755) == 0;
+  return cmeta_fs_mkdir(dirPath.c_str(), 0755) == 0;
 }
 
 inline std::string getParentDirectory(std::string const& filePath) {
   std::array<char, SALTS_FS_MAX_PATH> buffer {};
-  if (salts_fs_path_dirname(filePath.c_str(), buffer.data(), buffer.size()) != 0) {
+  if (cmeta_fs_path_dirname(filePath.c_str(), buffer.data(), buffer.size()) != 0) {
     return {};
   }
   return std::string(buffer.data());
@@ -60,7 +60,7 @@ inline std::string getParentDirectory(std::string const& filePath) {
 
 inline std::string getFilename(std::string const& filePath) {
   std::array<char, SALTS_FS_MAX_PATH> buffer {};
-  if (salts_fs_path_basename(filePath.c_str(), buffer.data(), buffer.size()) != 0) {
+  if (cmeta_fs_path_basename(filePath.c_str(), buffer.data(), buffer.size()) != 0) {
     return {};
   }
   return std::string(buffer.data());

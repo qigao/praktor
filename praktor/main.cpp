@@ -133,7 +133,7 @@ namespace {
         };
     }
 
-    void writeCompactLog(const salts_log_entry_t* entry, void* /*user_data*/) {
+    void writeCompactLog(const cmeta_log_entry_t* entry, void* /*user_data*/) {
         const char* message_data = entry->message.data ? entry->message.data : "";
         const std::size_t message_len = entry->message.len;
         std::string_view message(message_data, message_len);
@@ -234,24 +234,24 @@ namespace {
             throw std::runtime_error("Failed to create logger");
         }
 
-        salts_log_sink_t* sink = nullptr;
+        cmeta_log_sink_t* sink = nullptr;
         if (verbose) {
-            salts_console_sink_opts_t console_opts = {
+            cmeta_console_sink_opts_t console_opts = {
                 .output = stdout,
                 .use_colors = use_color ? 1 : 0,
                 .pattern = SALTS_LOG_DEFAULT_PATTERN
             };
-            sink = salts_sink_console_create(&console_opts);
+            sink = cmeta_sink_console_create(&console_opts);
         } else {
-            sink = salts_sink_callback_create(writeCompactLog, nullptr);
-            if (sink && salts_sink_set_min_level(sink, SALTS_LOG_LEVEL_INFO) != 0) {
-                salts_sink_destroy(sink);
+            sink = cmeta_sink_callback_create(writeCompactLog, nullptr);
+            if (sink && cmeta_sink_set_min_level(sink, SALTS_LOG_LEVEL_INFO) != 0) {
+                cmeta_sink_destroy(sink);
                 sink = nullptr;
             }
         }
 
         if (!sink || tlog_add_sink(logger, sink) != 0) {
-            salts_sink_destroy(sink);
+            cmeta_sink_destroy(sink);
             tlog_destroy(logger);
             throw std::runtime_error("Failed to configure logger sink");
         }

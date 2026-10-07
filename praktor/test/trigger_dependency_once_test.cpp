@@ -36,6 +36,7 @@ TEST_CASE("inline trigger dependency is not repeated by the regular DAG") {
     REQUIRE(runner.run(concurrent));
     std::ifstream in(output);
     const std::string result((std::istreambuf_iterator<char>(in)), {});
+    in.close();
     const auto first_prepare = result.find("prepare");
     const auto first_notify = result.find("notify");
     REQUIRE(first_prepare != std::string::npos);

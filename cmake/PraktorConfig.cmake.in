@@ -1,12 +1,41 @@
 @PACKAGE_INIT@
 
 include(CMakeFindDependencyMacro)
-find_dependency(Salts CONFIG PATHS "$ENV{SALTS_ROOT}" NO_CMAKE_FIND_ROOT_PATH)
-find_dependency(SaltsUtils CONFIG PATHS "$ENV{SALTS_UTILS_ROOT}" NO_CMAKE_FIND_ROOT_PATH)
-find_dependency(Chttp CONFIG PATHS "$ENV{CHTTP_ROOT}" NO_CMAKE_FIND_ROOT_PATH)
+set(_praktor_dependencies Salts SaltsUtils Chttp)
+set(_praktor_dependency_roots SALTS_ROOT SALTS_UTILS_ROOT CHTTP_ROOT)
 if("@ENABLE_SCRIPT_ENGINE@" STREQUAL "ON")
-    find_dependency(TurboScript CONFIG PATHS "$ENV{TURBOSCRIPT_ROOT}" NO_CMAKE_FIND_ROOT_PATH)
+    list(APPEND _praktor_dependencies TurboScript)
+    list(APPEND _praktor_dependency_roots TURBOSCRIPT_ROOT)
 endif()
+foreach(_root IN LISTS _praktor_dependency_roots)
+    if(NOT DEFINED ENV{${_root}} OR NOT IS_DIRECTORY "$ENV{${_root}}")
+        set(Praktor_FOUND FALSE)
+        set(Praktor_NOT_FOUND_MESSAGE "${_root} must name the matching installed SDK")
+        return()
+    endif()
+    file(TO_CMAKE_PATH "$ENV{${_root}}" _praktor_${_root})
+endforeach()
+foreach(_package IN LISTS _praktor_dependencies)
+    unset(${_package}_DIR CACHE)
+    unset(${_package}_DIR)
+endforeach()
+find_dependency(Salts CONFIG PATHS "${_praktor_SALTS_ROOT}"
+                NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)
+find_dependency(SaltsUtils CONFIG PATHS "${_praktor_SALTS_UTILS_ROOT}"
+                NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)
+find_dependency(Chttp CONFIG PATHS "${_praktor_CHTTP_ROOT}"
+                NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)
+if("@ENABLE_SCRIPT_ENGINE@" STREQUAL "ON")
+    find_dependency(TurboScript CONFIG PATHS "${_praktor_TURBOSCRIPT_ROOT}"
+                    NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)
+endif()
+foreach(_root IN LISTS _praktor_dependency_roots)
+    unset(_praktor_${_root})
+endforeach()
+unset(_praktor_dependencies)
+unset(_praktor_dependency_roots)
+unset(_package)
+unset(_root)
 
 include("${CMAKE_CURRENT_LIST_DIR}/PraktorTargets.cmake")
 
