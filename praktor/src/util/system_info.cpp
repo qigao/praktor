@@ -32,7 +32,7 @@ namespace {
 
 std::string SystemInfoProvider::getOSName() const {
     char value[SALTS_PLATFORM_INFO_MAX] = {0};
-    int result = salts_platform_os_name(value, sizeof(value));
+    int result = cmeta_platform_os_name(value, sizeof(value));
     if (result != 0) {
         TLOG_WARNF("Failed to get OS name via platform API: {}", result);
         return "unknown";
@@ -42,7 +42,7 @@ std::string SystemInfoProvider::getOSName() const {
 
 std::string SystemInfoProvider::getOSVersion() const {
     char value[SALTS_PLATFORM_INFO_MAX] = {0};
-    int result = salts_platform_os_version(value, sizeof(value));
+    int result = cmeta_platform_os_version(value, sizeof(value));
     if (result != 0) {
         TLOG_WARNF("Failed to get OS version via platform API: {}", result);
         return "unknown";
@@ -52,7 +52,7 @@ std::string SystemInfoProvider::getOSVersion() const {
 
 std::string SystemInfoProvider::getArchitecture() const {
     char value[SALTS_PLATFORM_INFO_MAX] = {0};
-    int result = salts_platform_arch(value, sizeof(value));
+    int result = cmeta_platform_arch(value, sizeof(value));
     if (result != 0) {
         TLOG_WARNF("Failed to get architecture via platform API: {}", result);
         return "unknown";
@@ -86,7 +86,7 @@ std::string SystemInfoProvider::getShellName() const {
 
 std::string SystemInfoProvider::getUsername() const {
     char value[SALTS_PLATFORM_INFO_MAX] = {0};
-    int result = salts_platform_username(value, sizeof(value));
+    int result = cmeta_platform_username(value, sizeof(value));
     if (result != 0) {
         TLOG_WARNF("Failed to get username via platform API: {}", result);
         return "unknown";
@@ -96,7 +96,7 @@ std::string SystemInfoProvider::getUsername() const {
 
 std::string SystemInfoProvider::getHostname() const {
     char value[SALTS_PLATFORM_INFO_MAX] = {0};
-    int result = salts_platform_hostname(value, sizeof(value));
+    int result = cmeta_platform_hostname(value, sizeof(value));
     if (result != 0) {
         TLOG_WARNF("Failed to get hostname via platform API: {}", result);
         return "unknown";
@@ -106,8 +106,8 @@ std::string SystemInfoProvider::getHostname() const {
 
 SystemInfoProvider::CPUInfo SystemInfoProvider::getCPUInfo() const {
     CPUInfo info{"unknown", 0, 0.0};
-    salts_platform_cpu_info_t native_info{};
-    int result = salts_platform_cpu_info(&native_info);
+    cmeta_platform_cpu_info_t native_info{};
+    int result = cmeta_platform_cpu_info(&native_info);
     if (result != 0) {
         TLOG_WARNF("Failed to get CPU info via platform API: {}", result);
         return info;
@@ -120,8 +120,8 @@ SystemInfoProvider::CPUInfo SystemInfoProvider::getCPUInfo() const {
 
 SystemInfoProvider::MemoryInfo SystemInfoProvider::getMemoryInfo() const {
     MemoryInfo info{0, 0, 0};
-    salts_platform_memory_info_t native_info{};
-    int result = salts_platform_memory_info(&native_info);
+    cmeta_platform_memory_info_t native_info{};
+    int result = cmeta_platform_memory_info(&native_info);
     if (result != 0) {
         TLOG_WARNF("Failed to get memory info via platform API: {}", result);
         return info;
@@ -134,9 +134,9 @@ SystemInfoProvider::MemoryInfo SystemInfoProvider::getMemoryInfo() const {
 
 std::vector<SystemInfoProvider::NetworkInterface> SystemInfoProvider::getNetworkInterfaces() const {
     std::vector<NetworkInterface> interfaces;
-    salts_platform_network_interface_t native_interfaces[64] = {};
+    cmeta_platform_network_interface_t native_interfaces[64] = {};
     size_t count = 0;
-    int result = salts_platform_network_interfaces(native_interfaces, 64, &count);
+    int result = cmeta_platform_network_interfaces(native_interfaces, 64, &count);
     if (result != 0) {
         TLOG_WARNF("Failed to get network interfaces via platform API: {}", result);
         return interfaces;
@@ -155,8 +155,8 @@ std::vector<SystemInfoProvider::NetworkInterface> SystemInfoProvider::getNetwork
 
 SystemInfoProvider::LoadAverage SystemInfoProvider::getLoadAverage() const {
     LoadAverage load{0.0, 0.0, 0.0};
-    salts_platform_load_average_t native_info{};
-    int result = salts_platform_load_average(&native_info);
+    cmeta_platform_load_average_t native_info{};
+    int result = cmeta_platform_load_average(&native_info);
     if (result != 0) {
         TLOG_WARNF("Failed to get load average via platform API: {}", result);
         return load;

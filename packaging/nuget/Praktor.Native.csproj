@@ -18,7 +18,7 @@
     <PackageReference Include="Salts.Native" Version="*" />
     <PackageReference Include="SaltsUtils.Native" Version="*" />
     <PackageReference Include="CHttp.Native" Version="*" />
-    <PackageReference Include="TurboScript.Native" Version="*" />
+    <PackageReference Include="TurboScript.Native" Version="*" Condition="'$(EnableScriptEngine)' != 'False'" />
     <None Include="README.md" Pack="true" PackagePath="\" />
     <None Include="$(PackageRoot)/sdk/**/*" Pack="true" PackagePath="sdk/" />
   </ItemGroup>

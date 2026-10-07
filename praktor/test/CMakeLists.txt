@@ -9,7 +9,6 @@ if(ENABLE_SCRIPT_ENGINE)
         dynamic_tasks_executor_test.cpp
         expression_evaluator_test.cpp
         graph_test.cpp
-        system_info_test.cpp
         task_parser_test.cpp
         task_registry_test.cpp
         concurrency_test.cpp
@@ -30,7 +29,10 @@ else()
     set(TEST_SOURCES core_only_workflow_test.cpp)
 endif()
 
-list(APPEND TEST_SOURCES trigger_dependency_once_test.cpp)
+list(APPEND TEST_SOURCES
+    system_info_test.cpp
+    trigger_dependency_once_test.cpp
+)
 
 cmake_add_test(
     SOURCES ${TEST_SOURCES}

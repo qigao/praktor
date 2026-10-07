@@ -268,13 +268,49 @@ tasks:
 
 ### 2. Build the project
 
-Praktor uses CMake with vcpkg for dependency management:
+Praktor uses CMake user presets, vcpkg manifest mode, and the latest published
+Salts.Native, SaltsUtils.Native, CHttp.Native, and TurboScript.Native SDKs.
+Release presets read `SALTS_ROOT`, `SALTS_UTILS_ROOT`, `CHTTP_ROOT`, and
+`TURBOSCRIPT_ROOT` from the parent environment. Each root must contain the
+matching platform's installed SDK; stale CMake package locations are discarded.
+
+In PowerShell 7 with the .NET 8 SDK and `GITHUB_TOKEN` (`read:packages`) available,
+restore the current Linux dependency set and build:
+
+```powershell
+./cmake/RestoreNativeSdks.ps1 -Rid linux-x64
+cmake --preset linux-release-user -DENABLE_SCRIPT_ENGINE=ON
+cmake --build --preset linux-release-user
+ctest --preset linux-release-user --output-on-failure
+```
+
+Restore resolves floating versions afresh and sets the four roots in the current
+process only after all SDKs are present. TurboScript.Native 3.0.8 publishes Linux
+x64, macOS arm64, and Android arm64-v8a SDKs, but no Windows SDK. A full Windows
+build requires a separately installed matching TurboScript SDK. Debug presets
+require separately installed matching Debug SDKs.
+
+Android arm64 Release uses the published SDKs and API level 26. After building
+the Windows host `lemon` target, cross-compile from the same developer environment:
+
+```powershell
+./cmake/RestoreNativeSdks.ps1 -Rid android-arm64-v8a
+$env:PRAKTOR_HOST_LEMON_EXECUTABLE = "$PWD/build/Msvc-Release/tools/lemon/lemon.exe"
+cmake --preset android-arm64-v8a-release-win
+cmake --build --preset android-arm64-v8a-release-win
+```
+
+The Android preset keeps its vcpkg installation separate from the Windows host
+installation. Cross-compilation does not run the Android test suite.
 
 For deployments that deliberately do not allow inline workflow scripts, Praktor
 also supports a core-only build:
 
-```bash
-cmake -S . -B build/core -DENABLE_SCRIPT_ENGINE=OFF
+```powershell
+./cmake/RestoreNativeSdks.ps1 -Rid windows-x64 -CoreOnly
+cmake --preset win-release-user -DENABLE_SCRIPT_ENGINE=OFF
+cmake --build --preset win-release-user
+ctest --preset win-release-user --output-on-failure
 ```
 
 Core-only mode removes the TurboScript package dependency while preserving the
@@ -285,12 +321,7 @@ this build capability through `PRAKTOR_CAPABILITY_SCRIPT_ENGINE`.
 
 Windows builds must run in an x64 Visual Studio developer environment. Python 3
 is required when tests are enabled: it runs the schema validation test and the
-temporary HTTP server used by the script engine tests. The default workflow
-also expects these installed SDK directories relative to the repository:
-
-- `../external/pkgs/salts/bin`
-- `../external/pkgs/salts-utils/bin`
-- `../external/pkgs/turbo_script/bin`
+temporary HTTP server used by the script engine tests.
 
 With `praktor` installed or available on `PATH`, configure, build, and run all
 tests with:
@@ -306,7 +337,7 @@ configure -> build -> test -> finish_report
 ```
 
 The selected preset supplies runtime search paths directly from the installed
-Salts, SaltsUtils, and TurboScript package roots. The workflow never copies
+Salts, SaltsUtils, Chttp, and TurboScript package roots. The workflow never copies
 DLLs; a missing runtime dependency fails immediately.
 
 For a Release build, override the preset:

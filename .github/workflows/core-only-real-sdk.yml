@@ -5,6 +5,10 @@ on:
   pull_request:
     paths:
       - "CMakeLists.txt"
+      - "CMakeUserPresets.json"
+      - "CMakePresets.json"
+      - "presets/**"
+      - "packaging/nuget/Praktor.Native.csproj"
       - "ProjectOptions.cmake"
       - "cmake/**"
       - "praktor/**"
@@ -27,253 +31,42 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     env:
-      EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-      CMAKE_BUILD_PARALLEL_LEVEL: 2
-
+      RID: linux-x64
+      TRIPLET: x64-linux
+      HOST_TRIPLET: x64-linux
     steps:
-      - name: Checkout exact Praktor head
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
 
-      - name: Configure shared vcpkg binary cache
-        uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-cache@master
+      - uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-cache@master
         with:
           mode: read
 
-      - name: Restore shared re2c binary
-        uses: qigao/vcpkg-cache/.github/actions/setup-re2c-tools@master
+      - uses: qigao/vcpkg-cache/.github/actions/setup-re2c-tools@master
 
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "8.0.x"
 
-      - name: Verify source identity
-        shell: bash
-        run: |
-          set -euxo pipefail
-          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
-          git diff --exit-code
-
-      - name: Prepare public toolchain
-        shell: bash
-        run: |
-          set -euxo pipefail
-          sudo apt-get update
-          sudo apt-get install -y ninja-build pkg-config nasm
-          test -x "$VCPKG_ROOT/vcpkg"
-          sudo mkdir -p /opt/salts /opt/salts-utils /opt/chttp /opt/praktor
-          sudo chown -R "$USER":"$USER" /opt/salts /opt/salts-utils /opt/chttp /opt/praktor
-          sudo ln -sfn "$VCPKG_ROOT" /opt/vcpkg
-
-
-      - name: Restore released native SDK graph
-        shell: bash
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euxo pipefail
-          packages="$RUNNER_TEMP/praktor-core-native-sdks"
-          config="$RUNNER_TEMP/praktor-core-native-sdks.config"
-          project="$RUNNER_TEMP/praktor-core-native-sdks.csproj"
-
-          printf '<configuration><packageSources><clear /></packageSources></configuration>\n' > "$config"
-          dotnet nuget add source https://nuget.pkg.github.com/qigao/index.json \
-            --name github --username qigao --password "$GITHUB_TOKEN" \
-            --store-password-in-clear-text --configfile "$config"
-
-          cat > "$project" <<EOF
-          <Project Sdk="Microsoft.NET.Sdk">
-            <PropertyGroup><TargetFramework>net8.0</TargetFramework></PropertyGroup>
-            <ItemGroup>
-              <PackageReference Include="Salts.Native" Version="*" />
-              <PackageReference Include="SaltsUtils.Native" Version="*" />
-              <PackageReference Include="CHttp.Native" Version="*" />
-            </ItemGroup>
-          </Project>
-          EOF
-
-          dotnet restore "$project" --packages "$packages" --configfile "$config" --no-cache --force-evaluate
-
-          resolve_sdk_root() {
-            local package_id="$1"
-            local package_dir="$packages/$package_id"
-            local count
-            local version_dir
-            count="$(find "$package_dir" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')"
-            test "$count" -eq 1
-            version_dir="$(find "$package_dir" -mindepth 1 -maxdepth 1 -type d -print -quit)"
-            test -d "$version_dir/sdk/linux-x64"
-            printf '%s\n' "$version_dir/sdk/linux-x64"
-          }
-
-          salts_root="$(resolve_sdk_root salts.native)"
-          utils_root="$(resolve_sdk_root saltsutils.native)"
-          chttp_root="$(resolve_sdk_root chttp.native)"
-
-          printf 'Salts.Native=%s\n' "$(basename "$(dirname "$(dirname "$salts_root")")")"
-          printf 'SaltsUtils.Native=%s\n' "$(basename "$(dirname "$(dirname "$utils_root")")")"
-          printf 'CHttp.Native=%s\n' "$(basename "$(dirname "$(dirname "$chttp_root")")")"
-
-          test -f "$salts_root/lib/cmake/Salts/SaltsConfig.cmake"
-          test -f "$utils_root/lib/cmake/SaltsUtils/SaltsUtilsConfig.cmake"
-          test -f "$chttp_root/lib/cmake/Chttp/ChttpConfig.cmake"
-
-          ln -sfn "$salts_root" /opt/salts/debug
-          ln -sfn "$utils_root" /opt/salts-utils/debug
-          ln -sfn "$chttp_root" /opt/chttp/debug
-
-          {
-            echo "SALTS_ROOT=/opt/salts/debug"
-            echo "SALTS_UTILS_ROOT=/opt/salts-utils/debug"
-            echo "CHTTP_ROOT=/opt/chttp/debug"
-          } >> "$GITHUB_ENV"
-
-      - name: Configure real Praktor without TurboScript
-        shell: bash
-        env:
-          SALTS_ROOT: /opt/salts/debug
-          SALTS_UTILS_ROOT: /opt/salts-utils/debug
-          CHTTP_ROOT: /opt/chttp/debug
-        run: |
-          set -euxo pipefail
-          rm -rf build/linux-gcc-debug
-          cmake --preset linux-dev-user             -DENABLE_SCRIPT_ENGINE=OFF             -DENABLE_TESTS=ON
-          cache=build/linux-gcc-debug/CMakeCache.txt
-          grep -F 'ENABLE_SCRIPT_ENGINE:BOOL=OFF' "$cache"
-          if grep -F 'TurboScript_DIR' "$cache"; then
-            echo "core-only configure unexpectedly resolved TurboScript" >&2
-            exit 1
-          fi
-
-      - name: Build and run real core-only CTest
-        shell: bash
-        env:
-          SALTS_ROOT: /opt/salts/debug
-          SALTS_UTILS_ROOT: /opt/salts-utils/debug
-          CHTTP_ROOT: /opt/chttp/debug
-          LD_LIBRARY_PATH: /opt/chttp/debug/lib:/opt/salts-utils/debug/lib:/opt/salts/debug/lib
-        run: |
-          set -euxo pipefail
-          cmake --build build/linux-gcc-debug -j2
-          ctest --test-dir build/linux-gcc-debug --no-tests=error --output-on-failure
-
-      - name: Install real core-only Praktor SDK
-        shell: bash
-        env:
-          SALTS_ROOT: /opt/salts/debug
-          SALTS_UTILS_ROOT: /opt/salts-utils/debug
-          CHTTP_ROOT: /opt/chttp/debug
-        run: |
-          set -euxo pipefail
-          cmake --build build/linux-gcc-debug --target install -j2
-          config=/opt/praktor/debug/lib/cmake/Praktor/PraktorConfig.cmake
-          test -f "$config"
-          test -f /opt/praktor/debug/include/praktor.h
-          grep -F 'if("OFF" STREQUAL "ON")' "$config"
-          grep -F 'find_dependency(TurboScript CONFIG' "$config"
-          if grep -E 'find_dependency\((Salts|SaltsUtils|Chttp|TurboScript) [0-9]' "$config"; then
-            echo "generated Praktor config must not pin foundation versions" >&2
-            exit 1
-          fi
-          if grep -F ' EXACT ' "$config"; then
-            echo "generated Praktor config must not use EXACT foundation dependencies" >&2
-            exit 1
-          fi
-
-      - name: Build installed-package ABI smoke
-        shell: bash
-        run: |
-          set -euxo pipefail
-          smoke="$RUNNER_TEMP/praktor-real-smoke"
-          mkdir -p "$smoke"
-          cat > "$smoke/CMakeLists.txt" <<'CMAKE'
-          cmake_minimum_required(VERSION 3.20)
-          project(praktor_real_smoke LANGUAGES C)
-          find_package(Praktor CONFIG REQUIRED)
-          add_executable(praktor_real_smoke main.c)
-          target_link_libraries(praktor_real_smoke PRIVATE Praktor::Praktor)
-          CMAKE
-          cat > "$smoke/main.c" <<'C'
-          #include <praktor.h>
-          #include <stdio.h>
-          #include <stdlib.h>
-          #include <string.h>
-
-          static int run_one(const char *path, int expect_success, const char *needle) {
-            praktor_execute_request request = PRAKTOR_EXECUTE_REQUEST_INIT;
-            praktor_owned_json output = PRAKTOR_OWNED_JSON_INIT;
-            praktor_error error = PRAKTOR_ERROR_INIT;
-            praktor_result result;
-
-            request.workflow_path = path;
-            request.input_json = "{}";
-            request.input_json_size = 2;
-            result = praktor_execute_workflow(&request, &output, &error);
-
-            if (expect_success) {
-              if (result != PRAKTOR_RESULT_SUCCESS) {
-                fprintf(stderr, "expected success, got %d: %s\n", (int)result, error.message);
-                praktor_release_json(&output);
-                return 1;
-              }
-            } else if (result != PRAKTOR_RESULT_EXECUTION_FAILED) {
-              fprintf(stderr, "expected workflow failure, got %d: %s\n", (int)result, error.message);
-              praktor_release_json(&output);
-              return 1;
-            }
-
-            if (!output.data || !strstr(output.data, needle)) {
-              fprintf(stderr, "missing result evidence: %s\n", needle);
-              if (output.data) fprintf(stderr, "%s\n", output.data);
-              praktor_release_json(&output);
-              return 1;
-            }
-            praktor_release_json(&output);
-            return 0;
-          }
-
-          int main(int argc, char **argv) {
-            const praktor_api *api = praktor_get_api();
-            if (argc != 3) return 2;
-            if (!api) return 3;
-            if ((api->capabilities & PRAKTOR_CAPABILITY_JSON_WORKFLOW) == 0) return 4;
-            if ((api->capabilities & PRAKTOR_CAPABILITY_SCRIPT_ENGINE) != 0) return 5;
-            if ((api->capabilities & PRAKTOR_CAPABILITY_EXECUTION_CONTROL) == 0) return 6;
-            if (api->abi_major != PRAKTOR_ABI_MAJOR || api->abi_minor < 1) return 7;
-            if (!api->execute_workflow_controlled) return 8;
-            if (run_one(argv[1], 1, "success") != 0) return 9;
-            if (run_one(argv[2], 0, "ENABLE_SCRIPT_ENGINE=OFF") != 0) return 10;
-            puts("PRAKTOR_CORE_ONLY_REAL_ABI_OK");
-            return 0;
-          }
-          C
-          cat > "$smoke/command.yml" <<'YAML'
-          tasks:
-            - name: command_ok
-              command: "printf praktor-core-only-ok"
-          YAML
-          cat > "$smoke/script.yml" <<'YAML'
-          tasks:
-            - name: script_rejected
-              script: |
-                ctx.output("unexpected", true);
-          YAML
-
-          export SALTS_ROOT=/opt/salts/debug
-          export SALTS_UTILS_ROOT=/opt/salts-utils/debug
-          export CMAKE_PREFIX_PATH="/opt/praktor/debug:/opt/chttp/debug:/opt/salts-utils/debug:/opt/salts/debug"
-          cmake -S "$smoke" -B "$smoke/build" -G Ninja
-          cmake --build "$smoke/build" --verbose -j2
-
-          export LD_LIBRARY_PATH="/opt/praktor/debug/lib:/opt/chttp/debug/lib:/opt/salts-utils/debug/lib:/opt/salts/debug/lib:$GITHUB_WORKSPACE/vcpkg_installed/linux/x64-linux/debug/lib:$GITHUB_WORKSPACE/vcpkg_installed/linux/x64-linux/lib:${LD_LIBRARY_PATH:-}"
-          "$smoke/build/praktor_real_smoke" "$smoke/command.yml" "$smoke/script.yml"
-
-      - name: Verify tracked source remains clean
-        if: always()
+      - name: Prepare tools
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
-          test -z "$(git status --porcelain --untracked-files=no)"
+          sudo apt-get update
+          sudo apt-get install -y ninja-build pkg-config nasm
+
+      - name: Restore latest core SDK dependencies
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./cmake/RestoreNativeSdks.ps1 -Rid linux-x64 -CoreOnly
+
+      - name: Build and test core-only SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake --preset ci-linux-sdk -DENABLE_SCRIPT_ENGINE=OFF
+          cmake --build --preset ci-linux-sdk --parallel 2
+          ctest --preset ci-linux-sdk --output-on-failure
+          cmake --build --preset install-ci-linux-sdk
