@@ -3,8 +3,8 @@
 Praktor 的 script-enabled native SDK，由 `qigao/praktor` 自己构建、验证和发布。
 
 正式依赖不在 Praktor 中固定版本。NuGet restore 使用 floating dependency，
-由发布/消费时可用的最新 Native SDK 决定。`Salts.Native` 和
-`SaltsUtils.Native` 使用 `*-*`，包含 RC 等预发布版本；`CHttp.Native` 和
+由发布/消费时可用的最新 Native SDK 决定。`Salts.Native`、
+`SaltsUtils.Native` 和 `CHttp.Native` 使用 `*-*`，包含 RC 等预发布版本；
 `TurboScript.Native` 使用 `*`，选择最新稳定版本：
 
 - `Salts.Native`
@@ -14,6 +14,11 @@ Praktor 的 script-enabled native SDK，由 `qigao/praktor` 自己构建、验�
 
 其中 TurboScript 负责 Praktor 的脚本执行能力（MIR interpreter/JIT 和 native modules）。
 `ENABLE_SCRIPT_ENGINE=OFF` 的 core-only Praktor 不依赖 TurboScript。
+
+CHttp 也需要参与 RC 解析：2.0.0 的 Unix 动态库依赖 Salts `.so.2` /
+`.2.dylib`，与 Salts 2.3 SDK 的 `.so.2.3` / `.2.3.dylib` 不匹配；
+2.1.0-rc.1 已针对 Salts 2.3 / SaltsUtils 4.3 构建。CI 用真实安装包执行
+完整 CTest，验证 floating restore 得到的依赖组合。
 
 SDK 平台：
 
