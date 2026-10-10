@@ -58,7 +58,8 @@ Other SDK dependencies retain their latest-prerelease resolution. The existing
 native SDK workflow covers script-enabled builds and Android cross compilation.
 
 Both workflows use `ccache` for C/C++ compilation, with persistent caches
-separated by platform, profile and SDK channel, and report cache statistics.
+separated by platform, profile and SDK channel, and report per-run cache
+statistics. Completed compilations are saved even when a later test fails.
 The shared vcpkg binary cache remains read-only. CTest results and configure
 diagnostics are uploaded by the core matrix, including on failure. Run it with:
 
