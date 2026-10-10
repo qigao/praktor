@@ -21,7 +21,7 @@ target_link_libraries(
         $<LINK_ONLY:Threads::Threads>
         $<LINK_ONLY:Salts::Core>
         $<LINK_ONLY:Salts::JsonParser>
-        $<LINK_ONLY:Salts::CYaml>
+        $<LINK_ONLY:Salts::YamlParser>
         $<LINK_ONLY:Salts::CYamlJsonAdapter>
         $<LINK_ONLY:Salts::XmlParser>
         $<LINK_ONLY:Salts::CsvParser>

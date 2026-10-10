@@ -22,6 +22,13 @@ existing workflow data and avoids inventing an opaque IDL type. The runtime
 input/output JSON Schema API still describes each workflow's user-defined
 contract; this file describes the workflow authoring language.
 
+The runtime YAML parser is linked as `Salts::YamlParser`. For the supported
+SaltsUtils 4.3.0-rc.2 SDK, Praktor supplies a CMake alias to its published
+`Salts::CYaml` target. SDKs that export `Salts::YamlParser` use it directly.
+This compatibility bridge is shared by source builds and the installed Praktor
+package, and can be removed when the minimum SDK provides the canonical name.
+It does not introduce another parser or change the `cyaml.h` API.
+
 The SDK compiler's OpenAPI projection targets service contracts. A small editor
 projection over public metadata is used here because the workflow grammar also
 needs YAML unions and cross-field rules. Moving those rules into annotations or

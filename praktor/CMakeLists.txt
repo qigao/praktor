@@ -64,7 +64,7 @@ target_link_libraries(
     PUBLIC Threads::Threads
            Salts::Core
            Salts::JsonParser
-           Salts::CYaml
+           Salts::YamlParser
            Salts::CYamlJsonAdapter
            Salts::XmlParser
            Salts::CsvParser

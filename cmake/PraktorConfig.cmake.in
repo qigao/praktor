@@ -23,6 +23,7 @@ find_dependency(Salts CONFIG PATHS "${_praktor_SALTS_ROOT}"
                 NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)
 find_dependency(SaltsUtils CONFIG PATHS "${_praktor_SALTS_UTILS_ROOT}"
                 NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)
+include("${CMAKE_CURRENT_LIST_DIR}/PraktorYamlTarget.cmake")
 find_dependency(Chttp CONFIG PATHS "${_praktor_CHTTP_ROOT}"
                 NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)
 if("@ENABLE_SCRIPT_ENGINE@" STREQUAL "ON")

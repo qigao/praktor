@@ -70,6 +70,7 @@ find_package(Salts CONFIG REQUIRED
              PATHS "${_praktor_SALTS_ROOT}" NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)
 find_package(SaltsUtils CONFIG REQUIRED
              PATHS "${_praktor_SALTS_UTILS_ROOT}" NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)
+include(PraktorYamlTarget)
 find_package(Chttp CONFIG REQUIRED
              PATHS "${_praktor_CHTTP_ROOT}" NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)
 if(ENABLE_SCRIPT_ENGINE)
@@ -114,6 +115,7 @@ install(
     FILES
         "${CMAKE_CURRENT_BINARY_DIR}/PraktorConfig.cmake"
         "${CMAKE_CURRENT_BINARY_DIR}/PraktorConfigVersion.cmake"
+        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/PraktorYamlTarget.cmake"
     DESTINATION "${PRAKTOR_INSTALL_CMAKEDIR}"
 )
 
