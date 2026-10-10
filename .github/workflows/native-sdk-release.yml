@@ -2,6 +2,11 @@ name: Praktor native SDK
 
 on:
   workflow_dispatch:
+    inputs:
+      turboscript_ci_run:
+        description: Successful TurboScript SDK workflow run to qualify (blank uses the released package)
+        type: string
+        default: ""
   pull_request:
     paths:
       - "CMakeLists.txt"
@@ -174,6 +179,49 @@ jobs:
           printf 'SaltsUtils.Native=%s\n' "$SALTS_UTILS_NATIVE_VERSION"
           printf 'CHttp.Native=%s\n' "$CHTTP_NATIVE_VERSION"
           printf 'TurboScript.Native=%s\n' "$TURBOSCRIPT_NATIVE_VERSION"
+
+      - name: Check candidate SDK provenance
+        if: inputs.turboscript_ci_run != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_RUN: ${{ inputs.turboscript_ci_run }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$CANDIDATE_RUN" =~ ^[0-9]+$ ]]
+          gh api "repos/qigao/TurboScript/actions/runs/$CANDIDATE_RUN" > "$RUNNER_TEMP/turboscript-run.json"
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          run = json.loads((Path(os.environ['RUNNER_TEMP']) / 'turboscript-run.json').read_text())
+          if (run['status'] != 'completed' or run['conclusion'] != 'success'
+                  or run['path'] != '.github/workflows/native-sdk-release.yml'):
+              raise SystemExit('Candidate must come from a successful TurboScript native SDK workflow')
+          print(f"Candidate TurboScript source: {run['head_sha']} ({run['html_url']})")
+          PY
+
+      - uses: actions/download-artifact@v4
+        if: inputs.turboscript_ci_run != ''
+        with:
+          repository: qigao/TurboScript
+          run-id: ${{ inputs.turboscript_ci_run }}
+          github-token: ${{ github.token }}
+          name: turboscript-sdk-${{ matrix.rid }}
+          path: build/turboscript-candidate
+
+      - name: Select candidate SDK
+        if: inputs.turboscript_ci_run != ''
+        env:
+          CANDIDATE_RUN: ${{ inputs.turboscript_ci_run }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="$GITHUB_WORKSPACE/build/turboscript-candidate"
+          tar -xzf "$root/turboscript-$RID.tar.gz" -C "$root"
+          test -f "$root/$RID/lib/cmake/TurboScript/TurboScriptConfig.cmake"
+          echo "TURBOSCRIPT_ROOT=$root/$RID" >> "$GITHUB_ENV"
+          echo "TURBOSCRIPT_NATIVE_VERSION=ci-run-$CANDIDATE_RUN" >> "$GITHUB_ENV"
+          cat "$root/$RID/turboscript-sdk-manifest.txt"
 
       - name: Build script-enabled Praktor SDK
         shell: bash

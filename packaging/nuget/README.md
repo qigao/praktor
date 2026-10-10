@@ -20,6 +20,15 @@ CHttp 也需要参与 RC 解析：2.0.0 的 Unix 动态库依赖 Salts `.so.2` /
 2.1.0-rc.1 已针对 Salts 2.3 / SaltsUtils 4.3 构建。CI 用真实安装包执行
 完整 CTest，验证 floating restore 得到的依赖组合。
 
+验证尚未发布的 TurboScript 修复时，可以手动运行 `native-sdk-release.yml`，
+提供 `turboscript_ci_run`。该输入只接受 TurboScript 原有 native SDK workflow
+的成功 run，按 RID 下载其 SDK artifact 并运行 Praktor 正式测试；不提供该输入
+时仍使用 NuGet 最新稳定版。手动运行不会发布 Praktor 包。
+
+```sh
+gh workflow run native-sdk-release.yml --repo qigao/praktor --ref master -f turboscript_ci_run=<successful-run-id>
+```
+
 SDK 平台：
 
 - `sdk/linux-x64`
