@@ -32,7 +32,25 @@
         "VCPKG_TARGET_TRIPLET": "$penv{TRIPLET}",
         "VCPKG_HOST_TRIPLET": "$penv{HOST_TRIPLET}",
         "CMAKE_PREFIX_PATH": "$env{VCPKG_INSTALLED_DIR}/$penv{TRIPLET}",
-        "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/$penv{RID}"
+        "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/$penv{RID}",
+        "CMAKE_C_COMPILER_LAUNCHER": "ccache",
+        "CMAKE_CXX_COMPILER_LAUNCHER": "ccache"
+      }
+    },
+    {
+      "name": "ci-windows-sdk",
+      "inherits": [
+        "ci-sdk-base",
+        "Msvc",
+        "flags-msvc"
+      ],
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      },
+      "environment": {
+        "PATH": "$env{RE2C_ROOT}/bin${pathListSep}${sourceDir}/build/ci-sdk/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/$penv{TRIPLET}/bin${pathListSep}$env{SALTS_ROOT}/bin${pathListSep}$env{SALTS_UTILS_ROOT}/bin${pathListSep}$env{CHTTP_ROOT}/bin${pathListSep}$penv{PATH}"
       }
     },
     {
@@ -517,6 +535,17 @@
       "targets": [
         "install"
       ]
+    },
+    {
+      "name": "ci-windows-sdk",
+      "configurePreset": "ci-windows-sdk"
+    },
+    {
+      "name": "install-ci-windows-sdk",
+      "configurePreset": "ci-windows-sdk",
+      "targets": [
+        "install"
+      ]
     }
   ],
   "testPresets": [
@@ -549,6 +578,11 @@
       "name": "ci-macos-sdk",
       "inherits": "base-test",
       "configurePreset": "ci-macos-sdk"
+    },
+    {
+      "name": "ci-windows-sdk",
+      "inherits": "base-test",
+      "configurePreset": "ci-windows-sdk"
     }
   ]
 }

@@ -49,6 +49,23 @@ CI runs this test through its ordinary native build/test graph. Cross builds
 consume the committed artifact and do not build or execute the maintenance tool.
 The tool and its dependencies are not added to the installed Praktor API.
 
+The `core-only-real-sdk.yml` workflow runs the full Release/core-only build,
+CTest suite and installation on Linux x64, Windows x64 and macOS arm64. Each
+platform tests both the published SaltsUtils 4.3.0-rc.2 compatibility bridge and
+a source-built SDK exporting `Salts::YamlParser`. The candidate defaults to a
+pinned revision and can be selected with the `salts_utils_ref` dispatch input.
+Other SDK dependencies retain their latest-prerelease resolution. The existing
+native SDK workflow covers script-enabled builds and Android cross compilation.
+
+Both workflows use `ccache` for C/C++ compilation, with persistent caches
+separated by platform, profile and SDK channel, and report cache statistics.
+The shared vcpkg binary cache remains read-only. CTest results and configure
+diagnostics are uploaded by the core matrix, including on failure. Run it with:
+
+```sh
+gh workflow run core-only-real-sdk.yml --repo qigao/praktor --ref master
+```
+
 For a new typed field, add its IDL declaration and put only editor policy in the
 corresponding JSON property. IDL message names map to `$defs`; `Workflow` maps
 to the document root. This projection currently supports messages, their field

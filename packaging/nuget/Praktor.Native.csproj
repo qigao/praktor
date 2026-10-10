@@ -13,10 +13,11 @@
     <RepositoryUrl>https://github.com/qigao/praktor</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <NoWarn>$(NoWarn);NU5128</NoWarn>
+    <SaltsUtilsVersion Condition="'$(SaltsUtilsVersion)' == ''">*-*</SaltsUtilsVersion>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Salts.Native" Version="*-*" />
-    <PackageReference Include="SaltsUtils.Native" Version="*-*" />
+    <PackageReference Include="SaltsUtils.Native" Version="$(SaltsUtilsVersion)" />
     <PackageReference Include="CHttp.Native" Version="*" />
     <PackageReference Include="TurboScript.Native" Version="*" Condition="'$(EnableScriptEngine)' != 'False'" />
     <None Include="README.md" Pack="true" PackagePath="\" />

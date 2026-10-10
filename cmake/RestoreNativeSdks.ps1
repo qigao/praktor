@@ -2,7 +2,9 @@ param(
     [Parameter(Mandatory = $true)]
     [ValidateSet('windows-x64', 'linux-x64', 'macos-arm64', 'android-arm64-v8a')]
     [string]$Rid,
-    [switch]$CoreOnly
+    [switch]$CoreOnly,
+    [ValidatePattern('^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$')]
+    [string]$SaltsUtilsVersion
 )
 
 $ErrorActionPreference = 'Stop'
@@ -14,9 +16,11 @@ $repositoryRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $packages = Join-Path $repositoryRoot 'build/native-sdk/packages'
 $intermediate = Join-Path $repositoryRoot 'build/native-sdk/obj/'
 $project = Join-Path $repositoryRoot 'packaging/nuget/Praktor.Native.csproj'
+$versionArguments = @()
+if ($SaltsUtilsVersion) { $versionArguments += "-p:SaltsUtilsVersion=$SaltsUtilsVersion" }
 dotnet restore $project --packages $packages `
     --configfile "$repositoryRoot/cmake/vcpkg-cache.nuget.config" --no-cache --force-evaluate `
-    "-p:BaseIntermediateOutputPath=$intermediate" "-p:EnableScriptEngine=$(!$CoreOnly)"
+    "-p:BaseIntermediateOutputPath=$intermediate" "-p:EnableScriptEngine=$(!$CoreOnly)" @versionArguments
 if ($LASTEXITCODE -ne 0) { throw 'Failed to restore the latest native SDKs' }
 
 $assets = Get-Content -LiteralPath "${intermediate}project.assets.json" -Raw |

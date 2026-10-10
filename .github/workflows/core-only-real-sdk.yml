@@ -2,6 +2,11 @@ name: Core-only real SDK integration
 
 on:
   workflow_dispatch:
+    inputs:
+      salts_utils_ref:
+        description: SaltsUtils candidate revision exporting Salts::YamlParser
+        type: string
+        default: dfea1ec404e025f206eae333e8786fbf3d172989
   pull_request:
     paths:
       - "CMakeLists.txt"
@@ -15,6 +20,9 @@ on:
       - "actions/**"
       - "sdk/**"
       - "shared/**"
+      - "schema/**"
+      - "grammar.schema.json"
+      - "tools/**"
       - "vcpkg.json"
       - ".github/workflows/core-only-real-sdk.yml"
 
@@ -27,13 +35,30 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  linux:
-    runs-on: ubuntu-24.04
+  integration:
+    name: ${{ matrix.rid }} / ${{ matrix.sdk }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [linux, windows, macos]
+        sdk: [rc2, yaml-parser]
+        include:
+          - {platform: linux, runner: ubuntu-24.04, rid: linux-x64, triplet: x64-linux, preset: ci-linux-sdk, producer: ci-sdk-release-user}
+          - {platform: windows, runner: windows-2025, rid: windows-x64, triplet: x64-windows, preset: ci-windows-sdk, producer: ci-win-sdk-release-user}
+          - {platform: macos, runner: macos-15, rid: macos-arm64, triplet: arm64-osx, preset: ci-macos-sdk, producer: ci-sdk-release-user}
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
     env:
-      RID: linux-x64
-      TRIPLET: x64-linux
-      HOST_TRIPLET: x64-linux
+      RID: ${{ matrix.rid }}
+      TRIPLET: ${{ matrix.triplet }}
+      HOST_TRIPLET: ${{ matrix.triplet }}
+      CMAKE_PRESET: ${{ matrix.preset }}
+      PRODUCER_PRESET: ${{ matrix.producer }}
+      SALTS_UTILS_SOURCE_REF: ${{ inputs.salts_utils_ref || 'dfea1ec404e025f206eae333e8786fbf3d172989' }}
+      CCACHE_DIR: ${{ github.workspace }}/.cache/ccache
+      CCACHE_BASEDIR: ${{ github.workspace }}
+      CCACHE_COMPILERCHECK: content
+      CCACHE_MAXSIZE: 1G
     steps:
       - uses: actions/checkout@v4
         with:
@@ -49,24 +74,132 @@ jobs:
         with:
           dotnet-version: "8.0.x"
 
-      - name: Prepare tools
+      - uses: actions/cache@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: praktor-ccache-v1-${{ matrix.rid }}-release-core-${{ matrix.sdk }}-${{ hashFiles('CMakeUserPresets.json', 'vcpkg.json') }}-${{ github.sha }}-${{ github.run_attempt }}
+          restore-keys: |
+            praktor-ccache-v1-${{ matrix.rid }}-release-core-${{ matrix.sdk }}-${{ hashFiles('CMakeUserPresets.json', 'vcpkg.json') }}-
+
+      - name: Prepare Unix tools
+        if: runner.os != 'Windows'
         shell: bash
         run: |
           set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y ninja-build pkg-config nasm
+          if [[ "$RUNNER_OS" == Linux ]]; then
+            sudo apt-get update
+            sudo apt-get install -y ccache ninja-build pkg-config nasm libudev-dev
+          else
+            brew install ccache ninja nasm autoconf automake autoconf-archive libtool
+            test "$(uname -m)" = arm64
+          fi
 
-      - name: Restore latest core SDK dependencies
+      - name: Prepare Windows tools
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install ccache ninja nasm --yes --no-progress
+          if ($LASTEXITCODE -ne 0) { throw 'Tool installation failed' }
+          $vswhere = "${env:ProgramFiles(x86)}/Microsoft Visual Studio/Installer/vswhere.exe"
+          $vs = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (-not $vs) { throw 'MSVC installation was not found' }
+          if (-not $env:QIGAO_VCPKG_WINDOWS_TRIPLET) { throw 'Shared cache did not select a Windows triplet' }
+          "VSINSTALL=$vs" >> $env:GITHUB_ENV
+          "TRIPLET=$env:QIGAO_VCPKG_WINDOWS_TRIPLET" >> $env:GITHUB_ENV
+          "HOST_TRIPLET=$env:QIGAO_VCPKG_WINDOWS_TRIPLET" >> $env:GITHUB_ENV
+          "QIGAO_VCPKG_ROOT=$env:VCPKG_ROOT" >> $env:GITHUB_ENV
+
+      - name: Restore published core SDK baseline
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: ./cmake/RestoreNativeSdks.ps1 -Rid linux-x64 -CoreOnly
+        run: ./cmake/RestoreNativeSdks.ps1 -Rid $env:RID -CoreOnly -SaltsUtilsVersion 4.3.0-rc.2
 
-      - name: Build and test core-only SDK
+      - name: Checkout canonical YAML target candidate
+        if: matrix.sdk == 'yaml-parser'
+        uses: actions/checkout@v4
+        with:
+          repository: qigao/salts-utils
+          ref: ${{ env.SALTS_UTILS_SOURCE_REF }}
+          path: build/salts-utils-source
+          persist-credentials: false
+
+      - name: Select candidate build environment
+        if: matrix.sdk == 'yaml-parser'
+        shell: pwsh
+        run: |
+          "QIGAO_SDK_RID=$env:RID" >> $env:GITHUB_ENV
+          "QIGAO_TARGET_TRIPLET=$env:TRIPLET" >> $env:GITHUB_ENV
+
+      - name: Build candidate SDK on Unix
+        if: matrix.sdk == 'yaml-parser' && runner.os != 'Windows'
+        working-directory: build/salts-utils-source
         shell: bash
         run: |
           set -euo pipefail
-          cmake --preset ci-linux-sdk -DENABLE_SCRIPT_ENGINE=OFF
-          cmake --build --preset ci-linux-sdk --parallel 2
-          ctest --preset ci-linux-sdk --output-on-failure
-          cmake --build --preset install-ci-linux-sdk
+          cmake --preset "$PRODUCER_PRESET"
+          cmake --build --preset "$PRODUCER_PRESET" --parallel 2
+          cmake --build --preset "install-$PRODUCER_PRESET" --parallel 2
+
+      - name: Build candidate SDK on Windows
+        if: matrix.sdk == 'yaml-parser' && runner.os == 'Windows'
+        working-directory: build/salts-utils-source
+        shell: cmd
+        run: |
+          call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64
+          if errorlevel 1 exit /b 1
+          cmake --preset "%PRODUCER_PRESET%"
+          if errorlevel 1 exit /b 1
+          cmake --build --preset "%PRODUCER_PRESET%" --parallel 2
+          if errorlevel 1 exit /b 1
+          cmake --build --preset "install-%PRODUCER_PRESET%" --parallel 2
+          if errorlevel 1 exit /b 1
+
+      - name: Select installed candidate SDK
+        if: matrix.sdk == 'yaml-parser'
+        shell: pwsh
+        run: |
+          $root = Join-Path $env:GITHUB_WORKSPACE "build/salts-utils-source/stage/sdk/$env:RID"
+          "SALTS_UTILS_ROOT=$root" >> $env:GITHUB_ENV
+
+      - name: Build and test core-only SDK on Unix
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake --preset "$CMAKE_PRESET" -DENABLE_SCRIPT_ENGINE=OFF
+          cmake --build --preset "$CMAKE_PRESET" --parallel 2
+          ctest --preset "$CMAKE_PRESET" --output-on-failure --output-junit build/ci-sdk/ctest.xml
+          cmake --build --preset "install-$CMAKE_PRESET" --parallel 2
+
+      - name: Build and test core-only SDK on Windows
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: |
+          call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64
+          if errorlevel 1 exit /b 1
+          cmake --preset "%CMAKE_PRESET%" -DENABLE_SCRIPT_ENGINE=OFF
+          if errorlevel 1 exit /b 1
+          cmake --build --preset "%CMAKE_PRESET%" --parallel 2
+          if errorlevel 1 exit /b 1
+          ctest --preset "%CMAKE_PRESET%" --output-on-failure --output-junit build/ci-sdk/ctest.xml
+          if errorlevel 1 exit /b 1
+          cmake --build --preset "install-%CMAKE_PRESET%" --parallel 2
+          if errorlevel 1 exit /b 1
+
+      - name: Report compiler cache statistics
+        if: always()
+        shell: pwsh
+        run: |
+          if (Get-Command ccache -ErrorAction SilentlyContinue) { ccache --show-stats }
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: core-diagnostics-${{ matrix.rid }}-${{ matrix.sdk }}
+          path: |
+            build/ci-sdk/ctest.xml
+            build/ci-sdk/Testing/Temporary/LastTest.log
+            build/ci-sdk/CMakeFiles/CMakeConfigureLog.yaml
+            build/salts-utils-source/build/ci-sdk/**/CMakeFiles/CMakeConfigureLog.yaml
+          if-no-files-found: ignore
