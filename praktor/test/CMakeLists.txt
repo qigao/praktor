@@ -105,6 +105,7 @@ if(ENABLE_SCRIPT_ENGINE)
         target_compile_definitions(
             workflow_runner_test.${TARGET_NAME_LIB}
             PRIVATE PRAKTOR_MANAGED_PROCESS_FIXTURE="$<TARGET_FILE:managed_process_fixture>"
+                    PRAKTOR_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
         )
         set_tests_properties(
             managed_process_executor_test.${TARGET_NAME_LIB}

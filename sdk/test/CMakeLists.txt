@@ -23,3 +23,9 @@ cmake_add_test(
     TARGET_SUFFIX ".${TARGET_NAME_SDK}"
     FOLDER "sdk/test"
 )
+
+if(ENABLE_SCRIPT_ENGINE)
+    target_compile_definitions(template_contract_test.${TARGET_NAME_SDK} PRIVATE
+        PRAKTOR_SDK_SOURCE_DIR="${PROJECT_SOURCE_DIR}/sdk"
+    )
+endif()

@@ -1299,7 +1299,7 @@ tasks:
 TEST_CASE("system actions execute through WorkflowRunner and preserve failure metadata")
 {
 #ifdef _WIN32
-    const auto workflow_path = std::filesystem::path(__FILE__).parent_path()
+    const auto workflow_path = std::filesystem::path(PRAKTOR_TEST_SOURCE_DIR)
         / "workflows" / "system-actions.yml";
     const auto fixture_path = std::filesystem::path(PRAKTOR_MANAGED_PROCESS_FIXTURE);
     REQUIRE(std::filesystem::exists(workflow_path));

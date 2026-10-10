@@ -68,7 +68,7 @@ bool isTruthy(const WorkflowValue& value)
 
 std::filesystem::path sdkDir()
 {
-    return std::filesystem::path(__FILE__).parent_path().parent_path();
+    return std::filesystem::path(PRAKTOR_SDK_SOURCE_DIR);
 }
 
 std::vector<std::filesystem::path> collectYamlFiles(const std::filesystem::path& root)
