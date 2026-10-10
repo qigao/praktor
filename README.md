@@ -326,8 +326,9 @@ C embedding API. A workflow containing `script:` is rejected when its
 this build capability through `PRAKTOR_CAPABILITY_SCRIPT_ENGINE`.
 
 Windows builds must run in an x64 Visual Studio developer environment. Python 3
-is required when tests are enabled: it runs the schema validation test and the
-temporary HTTP server used by the script engine tests.
+is required for the script engine tests' temporary HTTP server. The workflow
+editor schema is projected from Salts IDL and Schema and checked by the native
+test suite; see [schema maintenance](schema/README.md).
 
 With `praktor` installed or available on `PATH`, configure, build, and run all
 tests with:

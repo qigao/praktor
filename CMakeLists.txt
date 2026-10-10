@@ -87,6 +87,7 @@ add_subdirectory(shared)
 add_subdirectory(praktor)
 add_subdirectory(actions)
 add_subdirectory(sdk)
+add_subdirectory(tools/schema)
 
 set(PRAKTOR_INSTALL_CMAKEDIR "${CMAKE_INSTALL_LIBDIR}/cmake/Praktor")
 

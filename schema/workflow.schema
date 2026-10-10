@@ -1,0 +1,125 @@
+// Logical field shapes. YAML unions and cross-field rules live in workflow.editor.json.
+schema PraktorWorkflow [version(1)];
+
+message Workflow {
+    optional string name;
+    optional string description;
+    optional string input_policy default "allow_extra";
+}
+
+message workflowInputField {
+    [name("type")] string type_field;
+    optional [name("required")] bool required_field default false;
+    optional string description;
+}
+
+message workflowOutputField {
+    [name("type")] string type_field;
+    optional [name("required")] bool required_field default false;
+    optional string description;
+    optional [name("value")] string value_field;
+}
+
+message eachBlock {
+    optional string as;
+    optional string index_variable;
+}
+
+message serviceAction {
+    @Size(min = 1) string name;
+    optional @Size(min = 1) string profile;
+    optional list<string> arguments;
+    optional @Min(1) int64 timeout_ms;
+    optional @Min(1) int64 poll_interval_ms;
+}
+
+message managedProcessAction {
+    optional string executable;
+    optional list<string> arguments;
+    optional @Size(min = 1) string working_directory;
+    optional @Min(1) int64 startup_timeout_ms;
+    optional @Min(1) int64 stop_timeout_ms;
+}
+
+message taskDefinition {
+    @Size(min = 1) string name;
+    optional string description;
+    optional string when;
+    optional eachBlock each;
+    optional string working_dir;
+    optional bool silent default false;
+    optional @Size(min = 1) string finally;
+    optional @Size(min = 1) string program;
+    optional serviceAction service;
+    optional managedProcessAction managed_process;
+    optional @Size(min = 1) string tool;
+    optional list<string> args;
+    optional string stdin;
+    optional @Size(min = 1) string script;
+    optional @Size(min = 1) string uses;
+    optional string consume_queue;
+    optional string entry_updated;
+    optional orchestrationWaitEventNode wait_event;
+    optional string set_variable;
+    optional string from;
+    optional string subtree;
+}
+
+message commandParseJsonNode {
+    string path;
+    string output_key;
+}
+
+message commandParseRegexNode {
+    string pattern;
+    string output_key;
+}
+
+message commandParseLinesNode {
+    optional string filter;
+    string output_key;
+}
+
+message commandParseKeyValueNode {
+    optional string delimiter;
+    optional string line_separator;
+    string output_key;
+}
+
+message orchestrationParseJsonNode {
+    string input_key;
+    optional string path;
+    optional string output_key;
+}
+
+message orchestrationParseRegexNode {
+    string input_key;
+    string pattern;
+    optional string output_key;
+}
+
+message orchestrationParseLinesNode {
+    string input_key;
+    optional string filter;
+    optional string output_key;
+}
+
+message orchestrationParseKeyValueNode {
+    string input_key;
+    optional string delimiter;
+    optional string line_separator;
+    optional string output_key;
+}
+
+message orchestrationWaitEventNode {
+    string event;
+}
+
+message orchestrationSetVariableNode {
+    string set_variable;
+    optional string from;
+}
+
+message orchestrationSubTreeNode {
+    string subtree;
+}

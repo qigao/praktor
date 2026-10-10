@@ -4,21 +4,17 @@
   "description": "A schema for defining Praktor DSL (v9.0) workflow files.",
   "properties": {
     "name": {
-      "description": "Human-readable workflow identifier.",
-      "type": "string"
+      "description": "Human-readable workflow identifier."
     },
     "description": {
-      "description": "Optional workflow summary.",
-      "type": "string"
+      "description": "Optional workflow summary."
     },
     "input_policy": {
       "enum": [
         "allow_extra",
         "strict"
       ],
-      "description": "Controls whether undeclared workflow inputs are accepted.",
-      "type": "string",
-      "default": "allow_extra"
+      "description": "Controls whether undeclared workflow inputs are accepted."
     },
     "inputs": {
       "$ref": "#/$defs/workflowInputContract",
@@ -177,27 +173,17 @@
             "number",
             "array",
             "object"
-          ],
-          "type": "string"
+          ]
         },
-        "required": {
-          "type": "boolean",
-          "default": false
-        },
+        "required": {},
         "default": {},
         "enum": {
           "type": "array",
           "minItems": 1
         },
-        "description": {
-          "type": "string"
-        }
+        "description": {}
       },
-      "additionalProperties": false,
-      "type": "object",
-      "required": [
-        "type"
-      ]
+      "additionalProperties": false
     },
     "workflowOutputField": {
       "allOf": [
@@ -214,30 +200,18 @@
             "number",
             "array",
             "object"
-          ],
-          "type": "string"
+          ]
         },
-        "required": {
-          "type": "boolean",
-          "default": false
-        },
+        "required": {},
         "default": {},
         "enum": {
           "type": "array",
           "minItems": 1
         },
-        "description": {
-          "type": "string"
-        },
-        "value": {
-          "type": "string"
-        }
+        "description": {},
+        "value": {}
       },
-      "additionalProperties": false,
-      "type": "object",
-      "required": [
-        "type"
-      ]
+      "additionalProperties": false
     },
     "workflowInputContract": {
       "type": "object",
@@ -371,12 +345,8 @@
             ]
           }
         },
-        "as": {
-          "type": "string"
-        },
-        "index_variable": {
-          "type": "string"
-        }
+        "as": {},
+        "index_variable": {}
       },
       "oneOf": [
         {
@@ -390,8 +360,7 @@
           ]
         }
       ],
-      "additionalProperties": false,
-      "type": "object"
+      "additionalProperties": false
     },
     "systemOperation": {
       "type": "string",
@@ -407,53 +376,22 @@
         "operation": {
           "$ref": "#/$defs/systemOperation"
         },
-        "name": {
-          "type": "string",
-          "minLength": 1
-        },
-        "profile": {
-          "type": "string",
-          "minLength": 1
-        },
-        "arguments": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "timeout_ms": {
-          "type": "integer",
-          "minimum": 1
-        },
-        "poll_interval_ms": {
-          "type": "integer",
-          "minimum": 1
-        }
+        "name": {},
+        "profile": {},
+        "arguments": {},
+        "timeout_ms": {},
+        "poll_interval_ms": {}
       },
-      "additionalProperties": false,
-      "type": "object",
-      "required": [
-        "name"
-      ]
+      "additionalProperties": false
     },
     "managedProcessAction": {
       "properties": {
         "operation": {
           "$ref": "#/$defs/systemOperation"
         },
-        "executable": {
-          "type": "string"
-        },
-        "arguments": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "working_directory": {
-          "type": "string",
-          "minLength": 1
-        },
+        "executable": {},
+        "arguments": {},
+        "working_directory": {},
         "identity": {
           "type": "object",
           "properties": {
@@ -467,14 +405,8 @@
           ],
           "additionalProperties": false
         },
-        "startup_timeout_ms": {
-          "type": "integer",
-          "minimum": 1
-        },
-        "stop_timeout_ms": {
-          "type": "integer",
-          "minimum": 1
-        },
+        "startup_timeout_ms": {},
+        "stop_timeout_ms": {},
         "force_terminate": {
           "oneOf": [
             {
@@ -525,18 +457,12 @@
           }
         }
       ],
-      "additionalProperties": false,
-      "type": "object"
+      "additionalProperties": false
     },
     "taskDefinition": {
       "properties": {
-        "name": {
-          "type": "string",
-          "minLength": 1
-        },
-        "description": {
-          "type": "string"
-        },
+        "name": {},
+        "description": {},
         "depends_on": {
           "$ref": "#/$defs/stringOrStringArray"
         },
@@ -559,23 +485,16 @@
             }
           ]
         },
-        "when": {
-          "type": "string"
-        },
-        "each": {
-          "$ref": "#/$defs/eachBlock"
-        },
+        "when": {},
+        "each": {},
         "triggers": {
           "$ref": "#/$defs/triggersBlock"
         },
         "working_dir": {
-          "description": "Working directory for command execution.",
-          "type": "string"
+          "description": "Working directory for command execution."
         },
         "silent": {
-          "description": "Suppress command output.",
-          "type": "boolean",
-          "default": false
+          "description": "Suppress command output."
         },
         "sources": {
           "$ref": "#/$defs/stringOrStringArray",
@@ -586,17 +505,13 @@
           "description": "Output files produced by the task."
         },
         "finally": {
-          "description": "Task invoked through the on_complete trigger lifecycle.",
-          "type": "string",
-          "minLength": 1
+          "description": "Task invoked through the on_complete trigger lifecycle."
         },
         "command": {
           "$ref": "#/$defs/nonEmptyStringOrStringArray"
         },
         "program": {
-          "description": "Executable path or program name for raw process execution. Does not invoke a shell.",
-          "type": "string",
-          "minLength": 1
+          "description": "Executable path or program name for raw process execution. Does not invoke a shell."
         },
         "download": {
           "type": "object",
@@ -629,16 +544,10 @@
           ],
           "additionalProperties": false
         },
-        "service": {
-          "$ref": "#/$defs/serviceAction"
-        },
-        "managed_process": {
-          "$ref": "#/$defs/managedProcessAction"
-        },
+        "service": {},
+        "managed_process": {},
         "tool": {
-          "description": "Stable identity of a tool supplied by the host.",
-          "type": "string",
-          "minLength": 1
+          "description": "Stable identity of a tool supplied by the host."
         },
         "with": {
           "type": "object",
@@ -668,15 +577,10 @@
           "additionalProperties": false
         },
         "args": {
-          "description": "Argument vector passed to program without shell parsing.",
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
+          "description": "Argument vector passed to program without shell parsing."
         },
         "stdin": {
-          "description": "Standard input passed to program.",
-          "type": "string"
+          "description": "Standard input passed to program."
         },
         "output_format": {
           "enum": [
@@ -685,14 +589,9 @@
           ]
         },
         "script": {
-          "description": "Post-processing script executed after the task action completes. Uses the built-in scripting language with access to ctx, json, dll, http, and log modules.",
-          "type": "string",
-          "minLength": 1
+          "description": "Post-processing script executed after the task action completes. Uses the built-in scripting language with access to ctx, json, dll, http, and log modules."
         },
-        "uses": {
-          "type": "string",
-          "minLength": 1
-        },
+        "uses": {},
         "dynamic_tasks": {
           "type": "object",
           "description": "Generate and execute tasks dynamically at runtime.",
@@ -813,15 +712,11 @@
             }
           ]
         },
-        "consume_queue": {
-          "type": "string"
-        },
+        "consume_queue": {},
         "precondition": {
           "$ref": "#/$defs/orchestrationConditionScalar"
         },
-        "entry_updated": {
-          "type": "string"
-        },
+        "entry_updated": {},
         "if": {
           "$ref": "#/$defs/orchestrationConditionValue"
         },
@@ -913,28 +808,21 @@
         "check_exit_code": {
           "$ref": "#/$defs/orchestrationCheckExitCodeNode"
         },
-        "wait_event": {
-          "$ref": "#/$defs/orchestrationWaitEventNode"
-        },
+        "wait_event": {},
         "file_exists": {
           "$ref": "#/$defs/orchestrationFileExistsNode"
         },
         "sleep": {
           "$ref": "#/$defs/orchestrationSleepNode"
         },
-        "set_variable": {
-          "type": "string"
-        },
+        "set_variable": {},
         "value": {
           "description": "Sibling value for flat set_variable syntax"
         },
         "from": {
-          "description": "Sibling source key for flat set_variable syntax",
-          "type": "string"
+          "description": "Sibling source key for flat set_variable syntax"
         },
-        "subtree": {
-          "type": "string"
-        }
+        "subtree": {}
       },
       "dependencies": {
         "with": [
@@ -1701,11 +1589,7 @@
           }
         }
       ],
-      "additionalProperties": false,
-      "type": "object",
-      "required": [
-        "name"
-      ]
+      "additionalProperties": false
     },
     "orchestrationNode": {
       "oneOf": [
@@ -2382,26 +2266,18 @@
     "commandParseJsonNode": {
       "properties": {
         "path": {
-          "description": "JSONPath expression",
-          "type": "string"
+          "description": "JSONPath expression"
         },
         "output_key": {
-          "description": "Task output key for extracted data",
-          "type": "string"
+          "description": "Task output key for extracted data"
         }
       },
-      "additionalProperties": false,
-      "type": "object",
-      "required": [
-        "path",
-        "output_key"
-      ]
+      "additionalProperties": false
     },
     "commandParseRegexNode": {
       "properties": {
         "pattern": {
-          "description": "Regular expression pattern",
-          "type": "string"
+          "description": "Regular expression pattern"
         },
         "capture_group": {
           "oneOf": [
@@ -2415,85 +2291,57 @@
           "description": "Capture group to extract (default: 1)"
         },
         "output_key": {
-          "description": "Task output key for extracted data",
-          "type": "string"
+          "description": "Task output key for extracted data"
         }
       },
-      "additionalProperties": false,
-      "type": "object",
-      "required": [
-        "pattern",
-        "output_key"
-      ]
+      "additionalProperties": false
     },
     "commandParseLinesNode": {
       "properties": {
         "filter": {
-          "description": "Optional regex filter for matching lines",
-          "type": "string"
+          "description": "Optional regex filter for matching lines"
         },
         "output_key": {
-          "description": "Task output key for extracted lines",
-          "type": "string"
+          "description": "Task output key for extracted lines"
         }
       },
-      "additionalProperties": false,
-      "type": "object",
-      "required": [
-        "output_key"
-      ]
+      "additionalProperties": false
     },
     "commandParseKeyValueNode": {
       "properties": {
         "delimiter": {
-          "description": "Key/value delimiter",
-          "type": "string"
+          "description": "Key/value delimiter"
         },
         "line_separator": {
-          "description": "Line separator",
-          "type": "string"
+          "description": "Line separator"
         },
         "output_key": {
-          "description": "Task output key for parsed key/value data",
-          "type": "string"
+          "description": "Task output key for parsed key/value data"
         }
       },
-      "additionalProperties": false,
-      "type": "object",
-      "required": [
-        "output_key"
-      ]
+      "additionalProperties": false
     },
     "orchestrationParseJsonNode": {
       "properties": {
         "input_key": {
-          "description": "Blackboard key containing JSON data",
-          "type": "string"
+          "description": "Blackboard key containing JSON data"
         },
         "path": {
-          "description": "JSONPath expression to extract data",
-          "type": "string"
+          "description": "JSONPath expression to extract data"
         },
         "output_key": {
-          "description": "Blackboard key to store extracted data",
-          "type": "string"
+          "description": "Blackboard key to store extracted data"
         }
       },
-      "additionalProperties": false,
-      "type": "object",
-      "required": [
-        "input_key"
-      ]
+      "additionalProperties": false
     },
     "orchestrationParseRegexNode": {
       "properties": {
         "input_key": {
-          "description": "Blackboard key containing text data",
-          "type": "string"
+          "description": "Blackboard key containing text data"
         },
         "pattern": {
-          "description": "Regular expression pattern",
-          "type": "string"
+          "description": "Regular expression pattern"
         },
         "capture_group": {
           "oneOf": [
@@ -2507,62 +2355,41 @@
           "description": "Capture group to extract (default: 0)"
         },
         "output_key": {
-          "description": "Blackboard key to store extracted data",
-          "type": "string"
+          "description": "Blackboard key to store extracted data"
         }
       },
-      "additionalProperties": false,
-      "type": "object",
-      "required": [
-        "input_key",
-        "pattern"
-      ]
+      "additionalProperties": false
     },
     "orchestrationParseLinesNode": {
       "properties": {
         "input_key": {
-          "description": "Blackboard key containing text data",
-          "type": "string"
+          "description": "Blackboard key containing text data"
         },
         "filter": {
-          "description": "Optional regex filter for matching lines",
-          "type": "string"
+          "description": "Optional regex filter for matching lines"
         },
         "output_key": {
-          "description": "Blackboard key to store extracted lines",
-          "type": "string"
+          "description": "Blackboard key to store extracted lines"
         }
       },
-      "additionalProperties": false,
-      "type": "object",
-      "required": [
-        "input_key"
-      ]
+      "additionalProperties": false
     },
     "orchestrationParseKeyValueNode": {
       "properties": {
         "input_key": {
-          "description": "Blackboard key containing key/value text",
-          "type": "string"
+          "description": "Blackboard key containing key/value text"
         },
         "delimiter": {
-          "description": "Key/value delimiter",
-          "type": "string"
+          "description": "Key/value delimiter"
         },
         "line_separator": {
-          "description": "Line separator",
-          "type": "string"
+          "description": "Line separator"
         },
         "output_key": {
-          "description": "Blackboard key to store parsed key/value data",
-          "type": "string"
+          "description": "Blackboard key to store parsed key/value data"
         }
       },
-      "additionalProperties": false,
-      "type": "object",
-      "required": [
-        "input_key"
-      ]
+      "additionalProperties": false
     },
     "orchestrationCheckExitCodeNode": {
       "oneOf": [
@@ -2603,8 +2430,7 @@
     "orchestrationWaitEventNode": {
       "properties": {
         "event": {
-          "description": "Event name to wait for",
-          "type": "string"
+          "description": "Event name to wait for"
         },
         "timeout": {
           "oneOf": [
@@ -2618,11 +2444,7 @@
           "description": "Wait timeout"
         }
       },
-      "additionalProperties": false,
-      "type": "object",
-      "required": [
-        "event"
-      ]
+      "additionalProperties": false
     },
     "orchestrationFileExistsNode": {
       "oneOf": [
@@ -2695,15 +2517,13 @@
     "orchestrationSetVariableNode": {
       "properties": {
         "set_variable": {
-          "description": "Blackboard key to set",
-          "type": "string"
+          "description": "Blackboard key to set"
         },
         "value": {
           "description": "Value to set (supports {ctx.*} syntax)"
         },
         "from": {
-          "description": "Alternative: copy value from another blackboard key",
-          "type": "string"
+          "description": "Alternative: copy value from another blackboard key"
         }
       },
       "oneOf": [
@@ -2720,26 +2540,16 @@
           ]
         }
       ],
-      "additionalProperties": false,
-      "type": "object",
-      "required": [
-        "set_variable"
-      ]
+      "additionalProperties": false
     },
     "orchestrationSubTreeNode": {
       "properties": {
         "subtree": {
-          "description": "Registered subtree identifier",
-          "type": "string"
+          "description": "Registered subtree identifier"
         }
       },
-      "additionalProperties": false,
-      "type": "object",
-      "required": [
-        "subtree"
-      ]
+      "additionalProperties": false
     }
   },
-  "$comment": "Generated from schema/workflow.schema and schema/workflow.editor.json; run praktor-schema to update.",
-  "type": "object"
+  "$comment": "Generated from schema/workflow.schema and schema/workflow.editor.json; run praktor-schema to update."
 }
