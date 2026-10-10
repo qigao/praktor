@@ -3,7 +3,9 @@
 Praktor 的 script-enabled native SDK，由 `qigao/praktor` 自己构建、验证和发布。
 
 正式依赖不在 Praktor 中固定版本。NuGet restore 使用 floating dependency，
-由发布/消费时可用的最新兼容 Native SDK 决定：
+由发布/消费时可用的最新 Native SDK 决定。`Salts.Native` 和
+`SaltsUtils.Native` 使用 `*-*`，包含 RC 等预发布版本；`CHttp.Native` 和
+`TurboScript.Native` 使用 `*`，选择最新稳定版本：
 
 - `Salts.Native`
 - `SaltsUtils.Native`

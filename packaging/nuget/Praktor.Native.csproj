@@ -15,8 +15,8 @@
     <NoWarn>$(NoWarn);NU5128</NoWarn>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="Salts.Native" Version="*" />
-    <PackageReference Include="SaltsUtils.Native" Version="*" />
+    <PackageReference Include="Salts.Native" Version="*-*" />
+    <PackageReference Include="SaltsUtils.Native" Version="*-*" />
     <PackageReference Include="CHttp.Native" Version="*" />
     <PackageReference Include="TurboScript.Native" Version="*" Condition="'$(EnableScriptEngine)' != 'False'" />
     <None Include="README.md" Pack="true" PackagePath="\" />

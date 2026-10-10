@@ -274,6 +274,8 @@ tasks:
 
 Praktor uses CMake user presets, vcpkg manifest mode, and the latest published
 Salts.Native, SaltsUtils.Native, CHttp.Native, and TurboScript.Native SDKs.
+Salts.Native and SaltsUtils.Native use `*-*` to include prereleases when selecting
+the latest version; CHttp.Native and TurboScript.Native select stable releases.
 Release presets read `SALTS_ROOT`, `SALTS_UTILS_ROOT`, `CHTTP_ROOT`, and
 `TURBOSCRIPT_ROOT` from the parent environment. Each root must contain the
 matching platform's installed SDK; stale CMake package locations are discarded.
