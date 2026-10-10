@@ -4,22 +4,44 @@
 #include <vector>
 #include <memory>
 #include <cstring>
+#include <optional>
+#include <unordered_set>
 
 namespace Praktor::Util {
 
 struct MustacheNode {
     WorkflowValue value;
     std::string path;
+    bool lookup_context_path = true;
 };
 
 struct MustacheContext {
     const WorkflowContext& workflow_context;
     std::vector<std::unique_ptr<MustacheNode>> nodes;
+    std::optional<std::unordered_set<std::string>> variable_prefixes;
 
-    MustacheNode* createNode(WorkflowValue val, std::string p = "") {
+    bool hasVariablePrefix(const std::string& path) {
+        if (!variable_prefixes) {
+            variable_prefixes.emplace();
+            // Flat keys such as variables.name need intermediate nodes during
+            // Mustache's component-by-component lookup. Derive them once per
+            // render from the context; the context remains the value owner.
+            for (const auto& [key, value] : workflow_context.getAllVisibleValues()) {
+                for (auto dot = key.find('.'); dot != std::string::npos;
+                     dot = key.find('.', dot + 1)) {
+                    variable_prefixes->insert(key.substr(0, dot));
+                }
+            }
+        }
+        return variable_prefixes->contains(path);
+    }
+
+    MustacheNode* createNode(WorkflowValue val, std::string p = "",
+                            bool lookup_context_path = true) {
         auto node = std::make_unique<MustacheNode>();
         node->value = std::move(val);
         node->path = std::move(p);
+        node->lookup_context_path = lookup_context_path;
         MustacheNode* ptr = node.get();
         nodes.push_back(std::move(node));
         return ptr;
@@ -54,10 +76,24 @@ static void *bridge_get_child_by_name(void *node_ptr, const char *name, size_t s
     std::string new_path = node->path.empty() ? key : node->path + "." + key;
     logdf("bridge_get_child_by_name: key='{}', node->path='{}' -> new_path='{}'", key, node->path, new_path);
 
-    WorkflowValue val = ctx->workflow_context.getValueByPath(new_path);
+    // Prefer exact flat keys, then traverse the value carried by this node.
+    // Virtual namespaces and array items need no reconstructed path lookup.
+    WorkflowValue val = node->lookup_context_path &&
+            (node->path.empty() || ctx->workflow_context.hasKey(new_path))
+        ? ctx->workflow_context.getValueByPath(new_path) : WorkflowValue::null();
     if (!val.is_null()) {
-        // TLOG_INFOF("mustache: found path='{}', val='{}'", new_path, val.to_string());
-        return ctx->createNode(val, new_path);
+        return ctx->createNode(std::move(val), new_path);
+    }
+
+    if (node->value.is_object() && node->value.contains(key)) {
+        WorkflowValue child = node->value.at(key);
+        if (!child.is_null()) {
+            return ctx->createNode(std::move(child), new_path, node->lookup_context_path);
+        }
+    }
+
+    if (node->lookup_context_path && ctx->hasVariablePrefix(new_path)) {
+        return ctx->createNode(WorkflowValue::object(), new_path);
     }
     
     // Mustache search behavior: if not found relative to current scope, try root
@@ -78,12 +114,18 @@ static void* bridge_get_child_by_index(void* node_ptr, unsigned index, void* pro
     MustacheContext* ctx = static_cast<MustacheContext*>(provider_data);
     MustacheNode* node = static_cast<MustacheNode*>(node_ptr);
 
-    if (node && node->value.is_array() && index < node->value.size()) {
-        return ctx->createNode(node->value.at(index), node->path + "[" + std::to_string(index) + "]");
+    if (!node || node->value.is_null() ||
+        (node->value.is_bool() && !node->value.as<bool>())) {
+        return nullptr;
+    }
+
+    if (node->value.is_array()) {
+        if (index >= node->value.size()) return nullptr;
+        return ctx->createNode(node->value.at(index), node->path + "[" + std::to_string(index) + "]", false);
     }
     
     // Mustache spec: single values are iterable once
-    if (node && index == 0 && !node->value.is_null()) {
+    if (index == 0) {
         return node;
     }
 

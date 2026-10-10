@@ -7,6 +7,18 @@ Use it for:
 - call workflows through the C API in `api/`
 - learn and run BT-native operational workflows from `examples/`
 
+Workflow contracts use `input_policy: strict` to reject undeclared input keys,
+including workflows with no `inputs` declaration or with `inputs: {}`. The
+default `allow_extra` policy accepts extra keys. Input contract failures return
+`PRAKTOR_RESULT_INPUT_CONTRACT` before task invocation for file and inline plans.
+
+A declared output whose `value` is a single `{{ path }}` retains the resolved
+JSON type. Composite templates such as `"{{ variables.first }} + {{ variables.second }}"`
+produce strings through normal interpolation.
+Interpolation resolves flat namespaces such as `variables.name` and `env.NAME`,
+as well as object fields within array sections. Sections skip `false`, `null`,
+and empty arrays; inverted sections render for those values.
+
 ## Layout
 
 - `api/`

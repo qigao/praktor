@@ -48,6 +48,9 @@ generateMatrixCombinations(const std::unordered_map<std::string, StrList> &matri
   std::vector<std::string> keys;
   std::vector<StrList> values;
   for (const auto &[key, list] : matrix) {
+    if (list.empty()) {
+      throw std::runtime_error("each.matrix dimension '" + key + "' must not be empty");
+    }
     keys.push_back(key);
     values.push_back(list);
   }
@@ -271,6 +274,14 @@ std::string computeTaskActionHashImpl(const Task& task) {
     appendField(stream, "program.input", params.input);
     appendField(stream, "program.output_format",
                 params.output_format == CommandOutputFormat::Json ? "json" : "text");
+  } else if (std::holds_alternative<DownloadParams>(task.specifics)) {
+    const auto& params = std::get<DownloadParams>(task.specifics);
+    appendField(stream, "specifics", "download");
+    appendField(stream, "download.url", params.url);
+    appendField(stream, "download.path", params.path);
+    appendField(stream, "download.sha256", params.sha256);
+    appendField(stream, "download.overwrite", params.overwrite ? "1" : "0");
+    appendField(stream, "download.timeout_ms", std::to_string(params.timeout_ms));
   } else if (std::holds_alternative<ServiceParams>(task.specifics)) {
     const auto& params = std::get<ServiceParams>(task.specifics);
     appendField(stream, "specifics", "service");
@@ -394,6 +405,14 @@ WorkflowExecutor::WorkflowExecutor(DependencyGraph<Task> &graph,
 #endif
 
   for (const auto& task : all_tasks_) {
+    if (task.each) {
+      for (const auto& [key, values] : task.each->matrix) {
+        if (values.empty()) {
+          throw std::runtime_error("Task '" + task.name +
+                                   "': each.matrix dimension '" + key + "' must not be empty");
+        }
+      }
+    }
     all_task_lookup_[task.name] = task;
   }
 
@@ -442,6 +461,14 @@ void WorkflowExecutor::execute(WorkflowContext &context, std::optional<std::stri
   auto nodes = graph_.getNodes();
   if (nodes.empty()) return;
 
+  if (alias && all_task_lookup_.contains(*alias)) {
+    throw std::runtime_error("Workflow alias '" + *alias + "' collides with a task name");
+  }
+  workflow_alias_ = alias;
+  if (alias) {
+    context.setTaskStatus(*alias, "running");
+  }
+
   {
     std::lock_guard<std::mutex> lock(execution_mutex_);
     scheduled_task_runs_.clear();
@@ -457,18 +484,25 @@ void WorkflowExecutor::execute(WorkflowContext &context, std::optional<std::stri
     state.should_stop = true;
   } else {
     // Schedule initial ready tasks.
-    for (const auto &task : getReadyTasks(state)) {
-      scheduleTask(task, context, state, alias);
-    }
+    scheduleTasks(getReadyTasks(state), context, state, alias);
   }
 
-  // Wait for active work to observe the stop at a task boundary and drain.
-  if (!state.isFinished()) {
+  // A pool worker executing `uses` must help its nested run rather than occupy
+  // a worker indefinitely while that run's tasks wait in the same pool.
+  {
     std::unique_lock<std::mutex> lock(execution_mutex_);
-    execution_cv_.wait(lock, [&]() { return state.isFinished(); });
-
-    if (state.hasPendingWork()) {
-      execution_cv_.wait(lock, [&]() { return !state.hasPendingWork(); });
+    if (use_shared_pool_ && Praktor::SharedThreadPool::instance().isWorkerThread()) {
+      auto& pool = Praktor::SharedThreadPool::instance();
+      while (!state.isFinished()) {
+        lock.unlock();
+        pool.tryRunOneFor(&state);
+        lock.lock();
+        execution_cv_.wait(lock, [&]() {
+          return state.isFinished() || pool.hasQueuedWorkFor(&state);
+        });
+      }
+    } else {
+      execution_cv_.wait(lock, [&]() { return state.isFinished(); });
     }
   }
 
@@ -477,6 +511,35 @@ void WorkflowExecutor::execute(WorkflowContext &context, std::optional<std::stri
   }
 
   context.setValue("workflow_status", std::string(workflowStatusFor(state.terminal_reason)));
+  if (alias) {
+    if (state.terminal_reason == WorkflowTerminalReason::None) {
+      context.addCompletedTask(*alias);
+    } else {
+      std::optional<TaskFailureContext> failure;
+      for (const auto& task : all_tasks_) {
+        failure = context.getTaskFailureSnapshot(task.name);
+        if (failure) break;
+      }
+      if (failure) {
+        context.addFailedTask(*alias, *failure);
+      } else {
+        context.addFailedTask(*alias,
+            "Nested workflow ended with status '" +
+                std::string(workflowStatusFor(state.terminal_reason)) + "'");
+      }
+    }
+  }
+  if (state.exception) {
+    // All submitted work has drained. Preserve standard exceptions and turn
+    // an unknown backend exception into the runner's existing error contract.
+    try {
+      std::rethrow_exception(state.exception);
+    } catch (const std::exception&) {
+      throw;
+    } catch (...) {
+      throw std::runtime_error("Workflow task raised a non-standard exception");
+    }
+  }
   if (state.terminal_reason != WorkflowTerminalReason::Cancelled &&
       state.terminal_reason != WorkflowTerminalReason::DeadlineExceeded) {
     saveCache();
@@ -589,25 +652,43 @@ std::vector<Task> WorkflowExecutor::onTaskCompleted(
     state.should_stop = true;
   }
 
-  if (!state.should_stop) {
-    for (const auto &neighbor : graph_.getEdges(task)) {
-      auto it = state.in_degree.find(neighbor);
-      if (it != state.in_degree.end()) {
-        it->second--;
+  try {
+    if (!state.should_stop) {
+      for (const auto &neighbor : graph_.getEdges(task)) {
+        auto it = state.in_degree.find(neighbor);
+        if (it != state.in_degree.end()) {
+          it->second--;
+        }
+      }
+
+      const size_t capacity =
+          max_concurrency_ > state.active ? max_concurrency_ - state.active : 0;
+      for (const auto &[candidate, degree] : state.in_degree) {
+        if (ready.size() >= capacity) {
+          break;
+        }
+        if (degree == 0 && state.scheduled.find(candidate.name) == state.scheduled.end()) {
+          ready.push_back(candidate);
+          try {
+            state.scheduled.insert(candidate.name);
+          } catch (...) {
+            ready.pop_back();
+            throw;
+          }
+          state.active++;
+        }
       }
     }
-
-    const size_t capacity =
-        max_concurrency_ > state.active ? max_concurrency_ - state.active : 0;
-    for (const auto &[candidate, degree] : state.in_degree) {
-      if (ready.size() >= capacity) {
-        break;
-      }
-      if (degree == 0 && state.scheduled.find(candidate.name) == state.scheduled.end()) {
-        state.scheduled.insert(candidate.name);
-        state.active++;
-        ready.push_back(candidate);
-      }
+  } catch (...) {
+    // Roll back reservations from this completion before stopping the run.
+    // Other submitted tasks still own their active counts and must drain.
+    state.active -= ready.size();
+    for (const auto& candidate : ready) state.scheduled.erase(candidate.name);
+    ready.clear();
+    if (!state.exception) state.exception = std::current_exception();
+    state.should_stop = true;
+    if (state.terminal_reason == WorkflowTerminalReason::None) {
+      state.terminal_reason = WorkflowTerminalReason::Failed;
     }
   }
 
@@ -666,29 +747,63 @@ void WorkflowExecutor::scheduleTask(const Task &task, WorkflowContext &context,
     WorkflowContext *ctx_ptr = &context;
     std::unique_ptr<WorkflowContext> task_context;
 
-    if (use_shared_pool_) {
-      task_context = context.fork();
-      ctx_ptr = task_context.get();
-    }
-
     bool success = true;
-    if (requestedTerminalReason(*ctx_ptr) == WorkflowTerminalReason::None) {
-      success = executeScheduledTaskOnce(task, *ctx_ptr, alias);
-    }
-    if (task_context) {
-      mergeForkedContext(context, *task_context);
+    try {
+      if (use_shared_pool_) {
+        task_context = context.fork();
+        ctx_ptr = task_context.get();
+      }
+      if (requestedTerminalReason(*ctx_ptr) == WorkflowTerminalReason::None) {
+        success = executeScheduledTaskOnce(task, *ctx_ptr, alias);
+      }
+      if (task_context) {
+        mergeForkedContext(context, *task_context);
+      }
+    } catch (...) {
+      success = false;
+      failExecution(state, std::current_exception());
     }
     auto ready = onTaskCompleted(state, task, success, *ctx_ptr);
-
-    for (const auto &next : ready) {
-      scheduleTask(next, context, state, alias);
-    }
+    // A final completion may let execute() return and destroy this executor.
+    // Empty ready lists require no further access to the executor or run.
+    if (!ready.empty()) scheduleTasks(ready, context, state, alias);
   };
 
   if (use_shared_pool_) {
-    Praktor::SharedThreadPool::instance().enqueue(std::move(runTask));
+    // Publish and notify under the run lock: a nested waiter cannot miss the
+    // queue transition, and the run cannot finish before publication returns.
+    std::lock_guard<std::mutex> lock(execution_mutex_);
+    Praktor::SharedThreadPool::instance().enqueueFor(&state, std::move(runTask));
+    execution_cv_.notify_all();
   } else {
     runTask();
+  }
+}
+
+void WorkflowExecutor::failExecution(ExecutionState& state,
+                                     std::exception_ptr exception,
+                                     size_t unsubmitted_tasks) {
+  std::lock_guard<std::mutex> lock(execution_mutex_);
+  state.active -= unsubmitted_tasks;
+  if (!state.exception) state.exception = std::move(exception);
+  state.should_stop = true;
+  if (state.terminal_reason == WorkflowTerminalReason::None) {
+    state.terminal_reason = WorkflowTerminalReason::Failed;
+  }
+  execution_cv_.notify_all();
+}
+
+void WorkflowExecutor::scheduleTasks(const std::vector<Task>& tasks,
+                                     WorkflowContext& context,
+                                     ExecutionState& state,
+                                     const std::optional<std::string>& alias) {
+  for (size_t index = 0; index < tasks.size(); ++index) {
+    try {
+      scheduleTask(tasks[index], context, state, alias);
+    } catch (...) {
+      failExecution(state, std::current_exception(), tasks.size() - index);
+      break;
+    }
   }
 }
 
@@ -746,11 +861,15 @@ bool WorkflowExecutor::checkSkipTask(const Task &task, WorkflowContext &context)
     return false;
   }
 
-  auto it = cache_.find(task.name);
-  if (it == cache_.end())
-    return false;
+  TaskCacheState cached;
+  {
+    std::lock_guard<std::mutex> lock(execution_mutex_);
+    auto it = cache_.find(task.name);
+    if (it == cache_.end()) return false;
+    cached = it->second;
+  }
 
-  if (it->second.action_hash !=
+  if (cached.action_hash !=
       Praktor::Execution::Internal::computeTaskActionHash(task)) {
     return false;
   }
@@ -766,8 +885,8 @@ bool WorkflowExecutor::checkSkipTask(const Task &task, WorkflowContext &context)
   for (const auto &src : task.sources) {
     auto path = Praktor::util::resolveRelativePath(task.source_path, src);
     auto current_hash = Praktor::Util::computeFileHash(path);
-    auto cached_it = it->second.source_hashes.find(path.string());
-    if (cached_it == it->second.source_hashes.end() || cached_it->second != current_hash) {
+    auto cached_it = cached.source_hashes.find(path.string());
+    if (cached_it == cached.source_hashes.end() || cached_it->second != current_hash) {
       return false;
     }
   }
@@ -928,7 +1047,7 @@ void WorkflowExecutor::setTaskExecutionStatus(const Task& task, WorkflowContext&
   };
 
   apply_status(task.name);
-  if (alias && alias.value() != task.name) {
+  if (alias && alias.value() != task.name && alias != workflow_alias_) {
     apply_status(alias.value());
   }
 }
@@ -936,7 +1055,7 @@ void WorkflowExecutor::setTaskExecutionStatus(const Task& task, WorkflowContext&
 void WorkflowExecutor::clearTaskExecutionOutputs(const Task& task, WorkflowContext& context,
                                                  std::optional<std::string> alias) const {
   context.clearTaskOutputs(task.name);
-  if (alias && alias.value() != task.name) {
+  if (alias && alias.value() != task.name && alias != workflow_alias_) {
     context.clearTaskOutputs(alias.value());
   }
 }
@@ -979,6 +1098,10 @@ WorkflowExecutor::TaskExecutionOutcome WorkflowExecutor::executeTaskInternal(
   logdf("Executing task: {} (action={}, ignore_when={})", task.name, static_cast<int>(task.action),
        ignore_when);
   context.pushTaskScope(task.name, alias);
+  struct TaskScope {
+    WorkflowContext& context;
+    ~TaskScope() { context.popTaskScope(); }
+  } task_scope{context};
   ScopedVariables scoped_vars(context, task.vars);
 
   TaskExecutionOutcome outcome;
@@ -1055,8 +1178,6 @@ WorkflowExecutor::TaskExecutionOutcome WorkflowExecutor::executeTaskInternal(
 
   outcome.result = std::move(last_result);
   outcome.has_task_result = has_task_result;
-  context.popTaskScope();
-
   return outcome;
 }
 

@@ -1,19 +1,19 @@
 #include "executors/download_executor.hpp"
+#include "download_executor_internal.hpp"
 
 #include "util/path_utils.hpp"
 #include "util/variable_substitution.hpp"
 
 #include <http_client/http.h>
-#include <s3/s3_signer.h>
+#include <cmeta_crypto.h>
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <filesystem>
 #include <fstream>
-#include <iomanip>
-#include <sstream>
+#include <memory>
 #include <string_view>
-#include <vector>
 
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
@@ -112,25 +112,53 @@ std::string lowerTrim(std::string value) {
   return value;
 }
 
-std::string sha256File(const std::filesystem::path& path, std::string* error) {
+}  // namespace
+
+std::string Internal::sha256File(const std::filesystem::path& path, std::string* error) {
   std::ifstream input(path, std::ios::binary);
   if (!input) {
     *error = "failed to open downloaded file for SHA-256 verification";
     return {};
   }
 
-  std::vector<char> bytes((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
-  if (!input.eof()) {
-    *error = "failed to read downloaded file for SHA-256 verification";
+  cmeta_sha256_stream* stream = nullptr;
+  if (cmeta_sha256_stream_create(&stream) != SALTS_OK) {
+    *error = "failed to initialize SHA-256 verification";
     return {};
   }
-  char digest[S3_SIGNER_SHA256_HEX_SIZE + 1]{};
-  if (s3_signer_sha256_hex(bytes.data(), bytes.size(), digest) != SALTS_OK) {
+  const std::unique_ptr<cmeta_sha256_stream, decltype(&cmeta_sha256_stream_destroy)>
+      owner(stream, &cmeta_sha256_stream_destroy);
+  constexpr std::size_t kChecksumChunkBytes = 64u * 1024u;
+  std::array<char, kChecksumChunkBytes> bytes;
+  for (;;) {
+    input.read(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+    const auto count = input.gcount();
+    if (count > 0 &&
+        cmeta_sha256_stream_update(stream, bytes.data(), static_cast<std::size_t>(count)) != SALTS_OK) {
+      *error = "failed to calculate SHA-256 verification";
+      return {};
+    }
+    if (input.bad() || (input.fail() && !input.eof())) {
+      *error = "failed to read downloaded file for SHA-256 verification";
+      return {};
+    }
+    if (input.eof()) break;
+  }
+  std::array<std::uint8_t, SALTS_SHA256_DIGEST_BYTES> digest{};
+  if (cmeta_sha256_stream_finish(stream, digest.data()) != SALTS_OK) {
     *error = "failed to calculate SHA-256 verification";
     return {};
   }
-  return std::string(digest);
+  constexpr char kHexDigits[] = "0123456789abcdef";
+  std::string result(digest.size() * 2, '0');
+  for (std::size_t index = 0; index < digest.size(); ++index) {
+    result[index * 2] = kHexDigits[digest[index] >> 4];
+    result[index * 2 + 1] = kHexDigits[digest[index] & 0x0f];
+  }
+  return result;
 }
+
+namespace {
 
 bool replaceFile(const std::filesystem::path& source,
                  const std::filesystem::path& destination,
@@ -234,7 +262,7 @@ TaskResult DownloadExecutor::execute(const Task& task, WorkflowContext& context)
     error = "download.sha256 must be a 64-character hexadecimal digest";
   }
   if (error.empty() && !expected_sha256.empty()) {
-    const std::string actual_sha256 = sha256File(temporary, &error);
+    const std::string actual_sha256 = Internal::sha256File(temporary, &error);
     if (error.empty() && actual_sha256 != expected_sha256) {
       error = "download SHA-256 mismatch";
     }

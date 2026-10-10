@@ -20,7 +20,6 @@ if(ENABLE_SCRIPT_ENGINE)
         matrix_test.cpp
         script_engine_test.cpp
         declarative_tree_executor_test.cpp
-        download_executor_test.cpp
         service_executor_test.cpp
         managed_process_executor_test.cpp
         structured_document_query_test.cpp
@@ -30,6 +29,8 @@ else()
 endif()
 
 list(APPEND TEST_SOURCES
+    download_executor_test.cpp
+    workflow_execution_regression_test.cpp
     system_info_test.cpp
     trigger_dependency_once_test.cpp
 )
@@ -41,6 +42,13 @@ cmake_add_test(
     FOLDER "${folder_name}/test"
     OUT_TARGETS PRAKTOR_TEST_TARGETS
 )
+
+target_include_directories(download_executor_test.${TARGET_NAME_LIB}
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../src)
+target_include_directories(workflow_execution_regression_test.${TARGET_NAME_LIB}
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../src)
+set_tests_properties(workflow_execution_regression_test.${TARGET_NAME_LIB}
+    PROPERTIES TIMEOUT 60)
 
 if(ENABLE_SCRIPT_ENGINE)
     target_compile_definitions(script_engine_test.${TARGET_NAME_LIB} PRIVATE

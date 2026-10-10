@@ -572,6 +572,43 @@ TEST_CASE("inline plan preserves input contract before HostTool invocation",
     praktor_release_workflow_plan(plan);
 }
 
+TEST_CASE("inline strict plans with no input fields reject unknown inputs before invocation",
+          "[sdk][plan][inline][contract]") {
+    const std::string policy = GENERATE("strict", "allow_extra");
+    const bool explicit_empty = GENERATE(false, true);
+    const std::string source = "input_policy: " + policy + "\n" +
+        (explicit_empty ? "inputs: {}\n" : "") +
+        "tasks:\n  - name: inspect\n    tool: repo.inspect\n    with: {}\n";
+    praktor_workflow_plan* plan =
+        compileInlinePlan("turboagent:plan:empty-input-contract", source);
+
+    HostProbe probe;
+    auto host = hostExecutor(probe);
+    const std::string input = GENERATE(std::string("{}"),
+                                      std::string(R"({"extra":true})"));
+    const bool rejects = policy == "strict" && input != "{}";
+    praktor_plan_execute_request request = PRAKTOR_PLAN_EXECUTE_REQUEST_INIT;
+    request.plan = plan;
+    request.input_json = input.data();
+    request.input_json_size = input.size();
+    praktor_owned_json output = PRAKTOR_OWNED_JSON_INIT;
+    praktor_error error = PRAKTOR_ERROR_INIT;
+    CHECK(praktor_execute_workflow_plan_host_tools(
+              &request, nullptr, nullptr, &host, &output, &error) ==
+          (rejects ? PRAKTOR_RESULT_INPUT_CONTRACT : PRAKTOR_RESULT_SUCCESS));
+    CHECK(probe.invoke_calls == (rejects ? 0 : 1));
+    if (rejects) {
+        CHECK(error.phase == PRAKTOR_ERROR_PHASE_INPUT_CONTRACT);
+        CHECK(output.data == nullptr);
+        CHECK(output.size == 0);
+    } else {
+        CHECK(WorkflowValue::parse(std::string_view(output.data, output.size))
+                  .at("workflow_status").as<std::string>() == "success");
+    }
+    praktor_release_json(&output);
+    praktor_release_workflow_plan(plan);
+}
+
 
 TEST_CASE("inline HostTool retries only the admitted task invocation",
           "[sdk][plan][inline][host-tool][retry]") {

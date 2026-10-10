@@ -76,7 +76,8 @@ WorkflowValue resolveOutputValue(const std::string& name,
         expression.rfind("{{", 0) == 0 &&
         expression.substr(expression.size() - 2) == "}}") {
         std::string path = trim(expression.substr(2, expression.size() - 4));
-        if (!path.empty()) {
+        if (!path.empty() && path.find("{{") == std::string::npos &&
+            path.find("}}") == std::string::npos) {
             return context.getValueByPath(path);
         }
     }
@@ -98,10 +99,6 @@ bool valueMatchesType(const WorkflowValue& value, const std::string& type) {
 
 InputValues validateAndApplyInputs(const Workflow& workflow,
                                    const InputValues& inputs) {
-    if (workflow.inputs.empty()) {
-        return inputs;
-    }
-
     if (workflow.strict_inputs) {
         for (const auto& [name, _] : inputs) {
             if (workflow.inputs.find(name) == workflow.inputs.end()) {

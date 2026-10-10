@@ -211,6 +211,9 @@ tasks:
 
 `download` accepts only absolute `https://` URLs. It streams to a temporary file and
 atomically replaces `path` only after the response and optional checksum validation succeed.
+SHA-256 verification reads the file in bounded chunks. When `sources` or
+`generates` enable task caching, changing any download parameter invalidates
+the cached task.
 
 In the example above:
 
@@ -222,6 +225,7 @@ In the example above:
 - `repeat` in Praktor must use a finite `num_cycles`; the synchronous runner intentionally rejects unbounded loops.
 - `timeout` now fails overruns reliably; if it wraps an immediate `shell`, the time budget is also pushed into the shell runner for real process timeout.
 - `switch` resolves to a zero-based case index and may be a numeric literal, a `{blackboard_key}` reference, or a bare blackboard key name.
+- Every `each.matrix` dimension must contain at least one value. Empty dimensions are rejected before tasks are scheduled.
 
 ## Technology Stack
 
@@ -436,6 +440,19 @@ tasks:
 - ✅ **Context Inheritance**: Inherit variables and environment from the calling task
 - ✅ **Namespaced Outputs**: Module results available via `{{ tasks.<task_name>.outputs.<key> }}`
 - ✅ **Clean Pipelines**: Keep your main workflow high-level and readable
+
+Concurrent reusable workflows share the bounded worker pool. A worker waiting
+for a nested workflow can execute queued tasks belonging to that nested run,
+so nesting keeps making progress when the pool is full. Task concurrency limits
+still apply, and the caller waits for active nested tasks to drain on failure
+or cancellation.
+
+The nested run owns its aggregate output alias. Child tasks can write while the
+run is active; the alias is finalized after every admitted child has finished.
+Output keys are merged, with later writes replacing the same key. Use
+`tasks.<uses_task>.outputs.nested_tasks.<child>.outputs` to keep child results
+separate. Unexpected task exceptions stop successor scheduling, drain admitted
+work, and then propagate to the workflow's error boundary.
 
 ## System Actions
 

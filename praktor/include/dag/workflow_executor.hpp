@@ -9,6 +9,7 @@
 
 #include <memory>
 #include <future>
+#include <exception>
 #include <thread>
 #include <map>
 #include <mutex>
@@ -90,6 +91,9 @@ private:
     };
     // Shared by DAG scheduling and inline trigger dependencies for this run.
     std::unordered_map<std::string, ScheduledTaskRun> scheduled_task_runs_;
+    // The workflow run owns this aggregate alias; individual tasks only write
+    // its outputs and must not restart or finalize its registry state.
+    std::optional<std::string> workflow_alias_;
 
     // Caching
     struct TaskCacheState {
@@ -121,8 +125,11 @@ private:
         size_t active = 0;
         WorkflowTerminalReason terminal_reason = WorkflowTerminalReason::None;
         bool should_stop = false;
+        std::exception_ptr exception;
 
-        bool isFinished() const { return (should_stop && active == 0) || (completed == total_tasks); }
+        // No active or reserved work remains. execute() rejects unfinished
+        // nodes below instead of waiting forever on an unreachable graph.
+        bool isFinished() const { return active == 0; }
         bool hasPendingWork() const { return active > 0; }
     };
 
@@ -135,6 +142,10 @@ private:
     static std::string_view workflowStatusFor(WorkflowTerminalReason reason);
     void scheduleTask(const Task& task, WorkflowContext& context,
                       ExecutionState& state, std::optional<std::string> alias);
+    void scheduleTasks(const std::vector<Task>& tasks, WorkflowContext& context,
+                       ExecutionState& state, const std::optional<std::string>& alias);
+    void failExecution(ExecutionState& state, std::exception_ptr exception,
+                       size_t unsubmitted_tasks = 0);
     void mergeForkedContext(WorkflowContext& target, const WorkflowContext& child);
 
     std::vector<Task> all_tasks_;

@@ -152,6 +152,10 @@ Each parse_each(const TaskYamlDetail::YamlNodeRef& node) {
         for (const auto& child : matrix_node) {
             std::string key = child.key();
             each.matrix[key] = node_to_string_vector(child);
+            if (each.matrix[key].empty()) {
+                TaskYamlDetail::throw_parse_error(
+                    child, "each.matrix dimension '" + key + "' must not be empty");
+            }
         }
     }
 
