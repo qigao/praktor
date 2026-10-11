@@ -20,6 +20,10 @@ CHttp 也需要参与 RC 解析：2.0.0 的 Unix 动态库依赖 Salts `.so.2` /
 2.1.0-rc.1 已针对 Salts 2.3 / SaltsUtils 4.3 构建。CI 用真实安装包执行
 完整 CTest，验证 floating restore 得到的依赖组合。
 
+0.4.7 重新构建并发布上述浮动依赖组合，更新 Native SDK 的动态库链接闭包。
+旧的 0.4.6 发布包仍链接迁移前的 Salts/CHttp SONAME，不能与新的 SDK 混用；
+消费者应恢复最新完整 SDK 集，不使用旧 SONAME 的手工别名。
+
 验证尚未发布的 TurboScript 修复时，可以手动运行 `native-sdk-release.yml`，
 提供 `turboscript_ci_run`。该输入只接受 TurboScript 原有 native SDK workflow
 的成功 run，按 RID 下载其 SDK artifact 并运行 Praktor 正式测试；不提供该输入
