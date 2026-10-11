@@ -1,7 +1,8 @@
 {
     "name": "vcpkg-example",
-    "version-semver": "0.4.7",
+    "version-semver": "0.4.8",
     "dependencies": [
+        "gmssl",
         {
             "name": "catch2",
             "version>=": "3.7.1"
