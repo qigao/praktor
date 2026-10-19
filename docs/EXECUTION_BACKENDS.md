@@ -26,6 +26,23 @@ This adds execution backends; it does not replace the backend-neutral `tool:` Ho
 
 Praktor core must not become a second native loader, open arbitrary native/Wasm module paths supplied by workflow data, or silently fall back from a denied/missing runtime module to shell execution.
 
+## CFlow boundary and the TurboFlow precedent
+
+CFlow is not a fourth user-facing runner and must not become a replacement for Praktor's workflow semantics by default.
+
+TurboFlow is the useful precedent: its compiler owns the `.flow` language, product policy, provider/resource binding, durability, settlement, and immutable ExecutionPlan. It uses CFlow for eligible executable graph regions; it explicitly rejects one giant CFlow plan for the entire product. See [TurboFlow architecture #192](https://github.com/qigao/turbo-flow/issues/192) and [provider boundary #63](https://github.com/qigao/turbo-flow/issues/63). Praktor's existing [TurboFlow orchestration decision #58](https://github.com/qigao/praktor/issues/58) likewise says Praktor owns operational workflow semantics and calls TurboFlow's stable control API without parsing or reinterpreting `.flow`.
+
+Apply the same ownership discipline here:
+
+- **Praktor remains the workflow control plane**: YAML interpretation, `uses`, `dynamic_tasks`, `when`, `each`, triggers, retry policy, HostTool admission, external process lifetime, task events, cancellation/deadline propagation, task status and structured outputs.
+- **CFlow may be an internal execution substrate for a bounded eligible region** when the work has stable typed callable contracts and its effects, data dependencies, cancellation, error propagation, and ownership can be represented without weakening Praktor's semantics.
+- **Do not translate the whole workflow into CFlow merely to claim reuse.** Shell processes, host calls, nested workflows, runtime-generated tasks and operational control actions remain explicit Praktor boundaries unless a concrete, qualified CFlow projection fully preserves their existing contract.
+- **Do not execute the same node graph under two schedulers.** A selected region must have one execution owner. Praktor schedules the workflow-level task; if a task delegates an explicitly admitted internal graph to CFlow, CFlow owns that region's execution and terminal settlement. Praktor consumes its bounded result.
+- **Do not move TurboFlow's `.flow` language or immutable ExecutionPlan into Praktor.** To orchestrate a TurboFlow deployment, continue using the TurboFlow Control API; CFlow details remain TurboFlow-owned.
+- **Prove value before expanding the boundary.** Start with a narrow typed/pure graph region and measure overhead, allocations, latency, cancellation and error semantics against the current executor. If CFlow adds indirection without a demonstrated benefit, retain the existing executor.
+
+Therefore Shell, Wasm and TurboScript remain the three explicit execution modes. CFlow is a potential internal graph-execution mechanism, not another module format or runner selected by workflow authors.
+
 ## YAML direction
 
 The exact accepted spelling must be implemented with strict parsing. The examples below define the intended shape, not current behavior.
