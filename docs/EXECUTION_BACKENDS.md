@@ -17,7 +17,8 @@ This adds execution backends; it does not replace the backend-neutral `tool:` Ho
 | Concern | Owner |
 | --- | --- |
 | Workflow parse/plan, DAG scheduling, task states/events, structured results | Praktor |
-| Process launch, exit code, stdout/stderr and process termination | Praktor's existing process executors |
+| Workflow-to-process invocation policy and task-result mapping | Praktor adapter |
+| Process launch, bounded async stdio, terminal state and process termination | SaltsUtils `Salts::Process` (`cflow-process` over Core + CFlow/NativeIO) |
 | Wasm admission, validation, instance/guest lifecycle, fuel, memory and execution | TurboWasm |
 | Script compilation/execution, script modules, session state and script memory limits | TurboScript |
 | Native DSO load, canonical Plugin ABI, leases and quiescent unload | Salts::Plugin |
@@ -25,6 +26,12 @@ This adds execution backends; it does not replace the backend-neutral `tool:` Ho
 | Approved module IDs, adapter provisioning, backend policy and shared runtime instances | Embedding host |
 
 Praktor core must not become a second native loader, open arbitrary native/Wasm module paths supplied by workflow data, or silently fall back from a denied/missing runtime module to shell execution.
+
+## Process substrate
+
+Praktor must reuse the installed SaltsUtils `Salts::Process` API for command/program and managed-process work. It already owns the C11 subprocess and bounded asynchronous standard-stream integration; Praktor should adapt workflow fields, execution control and terminal results to that API instead of maintaining a parallel process owner. Adapter parity tests must cover arguments, environment, working directory, stdout/stderr, output limits, exit/signal state, timeout, cancellation, process-tree termination and reap behavior.
+
+The process layer is not a fourth user-facing execution mode. It is the substrate for the existing Shell/process mode; Wasm and TurboScript continue through their own host adapters.
 
 ## CFlow boundary and the TurboFlow precedent
 
