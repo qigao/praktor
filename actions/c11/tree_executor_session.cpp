@@ -597,12 +597,12 @@ struct TreeExecutorSession::Impl {
         std::string input_key = "pipeline_input";
         const auto input = source->params.find("input_key");
         if (input != source->params.end()) {
-          input_key = executor.resolveParam(input->second, blackboard);
+          input_key = resolveStringValue(input->second, blackboard);
         }
         state.output_key = "pipeline_result";
         const auto output = source->params.find("output_key");
         if (output != source->params.end()) {
-          state.output_key = executor.resolveParam(output->second, blackboard);
+          state.output_key = resolveStringValue(output->second, blackboard);
         }
         state.data = blackboard.has(input_key) ? blackboard.get(input_key) : "";
         state.initialized = true;
@@ -674,7 +674,7 @@ struct TreeExecutorSession::Impl {
         last_error = "EntryUpdated requires parameter 'watch_key'";
         return SALTS_EINVAL;
       }
-      const std::string key = executor.resolveParam(key_it->second, blackboard);
+      const std::string key = resolveStringValue(key_it->second, blackboard);
       const std::string current = blackboard.has(key) ? blackboard.get(key) : "";
       auto& state = entry_updated_states[node];
       *changed = !state.observed || current != state.value;
@@ -703,7 +703,7 @@ struct TreeExecutorSession::Impl {
       std::string queue_key = "task_queue";
       const auto queue_key_it = source->params.find("queue_key");
       if (queue_key_it != source->params.end()) {
-        queue_key = executor.resolveParam(queue_key_it->second, blackboard);
+        queue_key = resolveStringValue(queue_key_it->second, blackboard);
       }
       if (!blackboard.has(queue_key)) {
         *has_item = false;
@@ -722,7 +722,7 @@ struct TreeExecutorSession::Impl {
       std::string item_key = "current_item";
       const auto item_key_it = source->params.find("item_key");
       if (item_key_it != source->params.end()) {
-        item_key = executor.resolveParam(item_key_it->second, blackboard);
+        item_key = resolveStringValue(item_key_it->second, blackboard);
       }
 
       // Match the legacy Executor: dequeue and publish the current item before
