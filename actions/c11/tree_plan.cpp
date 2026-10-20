@@ -135,6 +135,57 @@ uint64_t millisecondsToNanoseconds(int64_t milliseconds, const Node &node,
   return value * kNsPerMs;
 }
 
+void validateNodeArity(const Node &node, salts_bt_node_kind kind) {
+  const size_t count = node.children.size();
+  const bool scalar_condition = findParam(node, "condition") != nullptr;
+  switch (kind) {
+  case SALTS_BT_NODE_INVERTER:
+  case SALTS_BT_NODE_FORCE_SUCCESS:
+  case SALTS_BT_NODE_FORCE_FAILURE:
+  case SALTS_BT_NODE_REPEAT:
+  case SALTS_BT_NODE_TIMEOUT:
+  case SALTS_BT_NODE_DELAY:
+  case SALTS_BT_NODE_RUN_ONCE:
+  case SALTS_BT_NODE_KEEP_RUNNING_UNTIL_FAILURE:
+  case SALTS_BT_NODE_ENTRY_UPDATED:
+  case SALTS_BT_NODE_CONSUME_QUEUE:
+    if (count != 1u) {
+      throw std::invalid_argument("Node '" + node.id +
+                                  "' must have exactly one child");
+    }
+    break;
+  case SALTS_BT_NODE_IF_THEN_ELSE:
+    if (scalar_condition ? (count < 1u || count > 2u)
+                         : (count < 2u || count > 3u)) {
+      throw std::invalid_argument(
+          "IfThenElse must have 1-2 children with a scalar condition, or 2-3 with an in-tree condition");
+    }
+    break;
+  case SALTS_BT_NODE_PRECONDITION:
+    if (count != 1u) {
+      throw std::invalid_argument("Precondition must have exactly one child");
+    }
+    break;
+  case SALTS_BT_NODE_WHILE_DO:
+    if (count != (scalar_condition ? 1u : 2u)) {
+      throw std::invalid_argument(
+          "WhileDo must have one child with a scalar condition, or two with an in-tree condition");
+    }
+    break;
+  case SALTS_BT_NODE_PARALLEL:
+  case SALTS_BT_NODE_REACTIVE_SEQUENCE:
+  case SALTS_BT_NODE_REACTIVE_FALLBACK:
+  case SALTS_BT_NODE_SWITCH:
+    if (count == 0u) {
+      throw std::invalid_argument("Node '" + node.id +
+                                  "' requires at least one child in the C11 runtime");
+    }
+    break;
+  default:
+    break;
+  }
+}
+
 salts_bt_node_kind mapNodeKind(const Node &node) {
   if (node.id == "Sequence") return SALTS_BT_NODE_SEQUENCE;
   if (node.id == "Fallback" || node.id == "Selector")
@@ -185,6 +236,7 @@ void appendNode(TreePlan &plan, const Node &node, size_t parent_index,
 
   const size_t node_index = plan.nodes.size();
   const salts_bt_node_kind kind = mapNodeKind(node);
+  validateNodeArity(node, kind);
   praktor_c11_bt_node_desc desc{};
   bool skip_children = false;
   TreePlanTerminalAction terminal_action = TreePlanTerminalAction::Runtime;

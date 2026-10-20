@@ -198,6 +198,30 @@ int testRejectsInvalidInputs() {
   }
   {
     Tree tree;
+    tree.root.id = "Repeat";
+    tree.root.params.emplace("num_cycles", Value{2.0});
+    CHECK(expectInvalid(tree, blackboard) == 0);
+  }
+  {
+    Tree tree;
+    tree.root.id = "Precondition";
+    tree.root.params.emplace("condition", Value{true});
+    Node first;
+    first.id = "Task";
+    Node second;
+    second.id = "Extra";
+    tree.root.children.push_back(first);
+    tree.root.children.push_back(second);
+    CHECK(expectInvalid(tree, blackboard) == 0);
+  }
+  {
+    Tree tree;
+    tree.root.id = "Switch";
+    tree.root.params.emplace("variable", Value{0.0});
+    CHECK(expectInvalid(tree, blackboard) == 0);
+  }
+  {
+    Tree tree;
     tree.root.id = "SubTree";
     CHECK(expectInvalid(tree, blackboard) == 0);
   }
