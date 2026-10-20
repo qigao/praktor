@@ -24,16 +24,18 @@ namespace actions::c11 {
 enum class TreePlanTerminalAction : unsigned char {
   Runtime = 0,
   Success = 1,
-  Failure = 2
+  Failure = 2,
+  SwitchFailure = 3
 };
 
 struct TreePlan {
   std::vector<praktor_c11_bt_node_desc> nodes;
   std::vector<const actions::Node *> source_nodes;
   /*
-   * TerminalAction != Runtime means the source control node is a constant
-   * no-op under the compiled parameter snapshot, lowered to a leaf because
-   * the C runtime's typed constructor rejects its zero iteration limit.
+   * TerminalAction != Runtime lowers a source control node to a terminal
+   * leaf when the legacy Executor defines a zero-budget/no-child outcome that
+   * the typed C runtime cannot represent directly. SwitchFailure still parses
+   * the source selector at tick time before returning FAILURE.
    */
   std::vector<TreePlanTerminalAction> terminal_actions;
 };
