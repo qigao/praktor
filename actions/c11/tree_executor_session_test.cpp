@@ -371,6 +371,43 @@ int testBuiltInPipelineSequenceHooks() {
   return 0;
 }
 
+int testBuiltInConsumeQueue() {
+  actions::Tree tree;
+  tree.root.id = "ConsumeQueue";
+  tree.root.params.emplace("queue_key", actions::Value{std::string("queue")});
+  tree.root.params.emplace("item_key", actions::Value{std::string("item")});
+  actions::Node child;
+  child.id = "ProcessItem";
+  tree.root.children.push_back(child);
+
+  actions::Executor executor;
+  int calls = 0;
+  std::string last_item;
+  executor.registerTask("ProcessItem", [&calls, &last_item](const auto&,
+                                                            actions::Blackboard& bb) {
+    ++calls;
+    last_item = bb.get("item");
+    return actions::NodeStatus::SUCCESS;
+  });
+  actions::Blackboard blackboard;
+  blackboard.set("queue", "[\"one\",\"two\"]");
+  actions::ExecutionContext context;
+  actions::c11::TreeExecutorSession session(tree, executor, blackboard,
+                                            context, limits());
+  salts_bt_node_status status = SALTS_BT_FAILURE;
+  CHECK(session.tick(&status) == SALTS_OK);
+  CHECK(status == SALTS_BT_RUNNING);
+  CHECK(calls == 1);
+  CHECK(last_item == "\"one\"");
+  CHECK(blackboard.get("queue") == "[\"two\"]");
+  CHECK(session.tick(&status) == SALTS_OK);
+  CHECK(status == SALTS_BT_SUCCESS);
+  CHECK(calls == 2);
+  CHECK(last_item == "\"two\"");
+  CHECK(blackboard.get("queue") == "[]");
+  return 0;
+}
+
 int testBuiltInEntryUpdatedHook() {
   actions::Tree tree;
   tree.root.id = "EntryUpdated";
@@ -465,6 +502,7 @@ int main() {
   if (testScalarConditionAndSwitchUseBlackboard() != 0) return 1;
   if (testSubTreeExpansionAndCycleRejection() != 0) return 1;
   if (testBuiltInPipelineSequenceHooks() != 0) return 1;
+  if (testBuiltInConsumeQueue() != 0) return 1;
   if (testBuiltInEntryUpdatedHook() != 0) return 1;
   if (testHostExceptionsStayInsideCAbi() != 0) return 1;
   return 0;

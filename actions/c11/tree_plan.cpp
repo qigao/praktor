@@ -256,9 +256,7 @@ void appendNode(TreePlan &plan, const Node &node, size_t parent_index,
     }
     break;
   case SALTS_BT_NODE_CONSUME_QUEUE:
-    if (findParam(node, "queue_key") == nullptr) {
-      throw std::invalid_argument("ConsumeQueue requires parameter 'queue_key'");
-    }
+    /* queue_key defaults to "task_queue", matching actions::Executor. */
     break;
   default:
     break;

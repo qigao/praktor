@@ -1,11 +1,15 @@
 #include "tree_executor_session.hpp"
 
+#include <json_parser.h>
+
 #include <algorithm>
 #include <cctype>
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <memory>
 #include <stdexcept>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -86,6 +90,56 @@ long long parseInteger(const std::string& raw) {
   }
 }
 
+
+struct JsonValueDeleter {
+  void operator()(json_value_t* value) const noexcept {
+    if (value != nullptr) json_free(value);
+  }
+};
+
+struct JsonTextDeleter {
+  void operator()(char* value) const noexcept {
+    if (value != nullptr) json_serialize_free(value);
+  }
+};
+
+using OwnedJsonValue = std::unique_ptr<json_value_t, JsonValueDeleter>;
+using OwnedJsonText = std::unique_ptr<char, JsonTextDeleter>;
+
+std::string serializeJsonValue(const json_value_t* value) {
+  size_t length = 0u;
+  OwnedJsonText serialized(json_serialize(value, &length));
+  if (!serialized) throw std::runtime_error("JSON serialization failed");
+  return std::string(serialized.get(), length);
+}
+
+bool consumeJsonArrayFront(std::string_view input, std::string& item,
+                           std::string& remaining, bool& has_more) {
+  json_value_t* parsed = json_parse(input.data(), input.size());
+  if (parsed == nullptr) return false;
+  OwnedJsonValue document(parsed);
+  if (json_type(document.get()) != JSON_ARRAY ||
+      json_array_size(document.get()) == 0u) {
+    return false;
+  }
+
+  item = serializeJsonValue(json_array_get(document.get(), 0u));
+  OwnedJsonValue tail(json_create_array());
+  if (!tail) throw std::bad_alloc();
+
+  const size_t count = json_array_size(document.get());
+  for (size_t index = 1u; index < count; ++index) {
+    OwnedJsonValue child(json_clone(json_array_get(document.get(), index)));
+    if (!child || !json_array_add_checked(tail.get(), child.get())) {
+      throw std::runtime_error("failed to build remaining JSON queue");
+    }
+    (void)child.release();
+  }
+
+  has_more = json_array_size(tail.get()) != 0u;
+  remaining = serializeJsonValue(tail.get());
+  return true;
+}
 
 std::string resolveSubTreeName(const actions::Node& node,
                                const actions::Blackboard& blackboard) {
@@ -201,10 +255,15 @@ struct TreeExecutorSession::Impl {
     bool observed = false;
     std::string value;
   };
+  struct QueueState {
+    bool active = false;
+    bool has_more = false;
+  };
 
   std::vector<unsigned char> custom_leaf_active;
   std::vector<PipelineState> pipeline_states;
   std::vector<EntryUpdatedState> entry_updated_states;
+  std::vector<QueueState> queue_states;
   std::string last_error;
 
   Impl(const actions::Tree& source_tree,
@@ -226,6 +285,7 @@ struct TreeExecutorSession::Impl {
     custom_leaf_active.assign(compiled_plan.nodes.size(), 0u);
     pipeline_states.resize(compiled_plan.nodes.size());
     entry_updated_states.resize(compiled_plan.nodes.size());
+    queue_states.resize(compiled_plan.nodes.size());
 
     runtime_host.tick_leaf = &onTickLeaf;
     runtime_host.halt_leaf = &onHaltLeaf;
@@ -295,18 +355,29 @@ struct TreeExecutorSession::Impl {
       }
       if (desc.kind == SALTS_BT_NODE_PARALLEL && desc.parallel_hooks &&
           (hooks.parallel_enter == nullptr || hooks.parallel_step == nullptr ||
-           hooks.parallel_join == nullptr || hooks.parallel_finish == nullptr)) {
+           hooks.parallel_join == nullptr || hooks.parallel_finish == nullptr ||
+           hooks.parallel_abort == nullptr)) {
         throw std::invalid_argument(
-            "C11 Parallel requires host enter/step/join/finish hooks");
+            "C11 Parallel requires enter/step/join/finish/abort hooks");
       }
       if (desc.kind == SALTS_BT_NODE_PIPELINE_SEQUENCE) {
         const bool has_prepare = hooks.pipeline_prepare != nullptr;
         const bool has_complete = hooks.pipeline_complete != nullptr;
         const bool has_abort = hooks.pipeline_abort != nullptr;
         const bool has_custom_pipeline = has_prepare || has_complete || has_abort;
-        if (has_custom_pipeline && (!has_prepare || !has_complete)) {
+        if (has_custom_pipeline && (!has_prepare || !has_complete || !has_abort)) {
           throw std::invalid_argument(
-              "Custom PipelineSequence hooks must provide prepare and complete together");
+              "Custom PipelineSequence hooks must provide prepare/complete/abort together");
+        }
+      }
+      if (desc.kind == SALTS_BT_NODE_CONSUME_QUEUE) {
+        const bool has_begin = hooks.queue_begin != nullptr;
+        const bool has_finish = hooks.queue_finish != nullptr;
+        const bool has_abort = hooks.queue_abort != nullptr;
+        const bool has_custom_queue = has_begin || has_finish || has_abort;
+        if (has_custom_queue && (!has_begin || !has_finish || !has_abort)) {
+          throw std::invalid_argument(
+              "Custom ConsumeQueue hooks must provide begin/finish/abort together");
         }
       }
       if (desc.kind == SALTS_BT_NODE_CONSUME_QUEUE &&
@@ -619,22 +690,82 @@ struct TreeExecutorSession::Impl {
     }
   }
   int queueBegin(size_t node, bool* has_item) noexcept {
-    if (hooks.queue_begin == nullptr) return SALTS_ENOTSUP;
-    return safeHostStatus("C11 ConsumeQueue begin hook failed", [&] {
-      return hooks.queue_begin(hooks.user, node, has_item);
-    });
+    if (has_item == nullptr) return SALTS_EINVAL;
+    if (hooks.queue_begin != nullptr) {
+      return safeHostStatus("C11 ConsumeQueue begin hook failed", [&] {
+        return hooks.queue_begin(hooks.user, node, has_item);
+      });
+    }
+
+    try {
+      const auto* source = nodeAt(node);
+      if (source == nullptr || node >= queue_states.size()) return SALTS_EINVAL;
+      auto& state = queue_states[node];
+      state = QueueState{};
+
+      std::string queue_key = "task_queue";
+      const auto queue_key_it = source->params.find("queue_key");
+      if (queue_key_it != source->params.end()) {
+        queue_key = executor.resolveParam(queue_key_it->second, blackboard);
+      }
+      if (!blackboard.has(queue_key)) {
+        *has_item = false;
+        return SALTS_OK;
+      }
+
+      std::string item;
+      std::string remaining;
+      bool has_more = false;
+      if (!consumeJsonArrayFront(blackboard.get(queue_key), item, remaining,
+                                 has_more)) {
+        *has_item = false;
+        return SALTS_OK;
+      }
+
+      std::string item_key = "current_item";
+      const auto item_key_it = source->params.find("item_key");
+      if (item_key_it != source->params.end()) {
+        item_key = executor.resolveParam(item_key_it->second, blackboard);
+      }
+
+      // Match the legacy Executor: dequeue and publish the current item before
+      // invoking the child, including when that child later fails or is halted.
+      blackboard.set(queue_key, remaining);
+      blackboard.set(item_key, item);
+      state.active = true;
+      state.has_more = has_more;
+      *has_item = true;
+      return SALTS_OK;
+    } catch (...) {
+      rememberCurrentException("C11 ConsumeQueue begin failed");
+      return SALTS_EIO;
+    }
   }
+
   int queueFinish(size_t node, bool* has_more) noexcept {
-    if (hooks.queue_finish == nullptr) return SALTS_ENOTSUP;
-    return safeHostStatus("C11 ConsumeQueue finish hook failed", [&] {
-      return hooks.queue_finish(hooks.user, node, has_more);
-    });
+    if (has_more == nullptr) return SALTS_EINVAL;
+    if (hooks.queue_finish != nullptr) {
+      return safeHostStatus("C11 ConsumeQueue finish hook failed", [&] {
+        return hooks.queue_finish(hooks.user, node, has_more);
+      });
+    }
+    if (node >= queue_states.size() || !queue_states[node].active) {
+      last_error = "ConsumeQueue finish called without an active queue item";
+      return SALTS_EINVAL;
+    }
+    *has_more = queue_states[node].has_more;
+    queue_states[node] = QueueState{};
+    return SALTS_OK;
   }
+
   void queueAbort(size_t node) noexcept {
-    if (hooks.queue_abort == nullptr) return;
-    safeHostVoid("C11 ConsumeQueue abort hook failed", [&] {
-      hooks.queue_abort(hooks.user, node);
-    });
+    if (hooks.queue_abort != nullptr) {
+      safeHostVoid("C11 ConsumeQueue abort hook failed", [&] {
+        hooks.queue_abort(hooks.user, node);
+      });
+      return;
+    }
+    if (node < queue_states.size()) queue_states[node] = QueueState{};
   }
 
   static Impl* self(void* user) noexcept { return static_cast<Impl*>(user); }
@@ -735,8 +866,9 @@ int TreeExecutorSession::reset() {
     std::fill(impl_->custom_leaf_active.begin(), impl_->custom_leaf_active.end(), 0u);
     std::fill(impl_->pipeline_states.begin(), impl_->pipeline_states.end(), Impl::PipelineState{});
     std::fill(impl_->entry_updated_states.begin(), impl_->entry_updated_states.end(), Impl::EntryUpdatedState{});
+    std::fill(impl_->queue_states.begin(), impl_->queue_states.end(), Impl::QueueState{});
   } else {
-    impl_->last_error = "C11 behavior tree reset failed with status " +
+    impl_->last_error = "C11 behavior tree reset failed with status "
                         std::to_string(status);
   }
   return status;
@@ -750,6 +882,7 @@ int TreeExecutorSession::cancel() {
     std::fill(impl_->custom_leaf_active.begin(), impl_->custom_leaf_active.end(), 0u);
     std::fill(impl_->pipeline_states.begin(), impl_->pipeline_states.end(), Impl::PipelineState{});
     std::fill(impl_->entry_updated_states.begin(), impl_->entry_updated_states.end(), Impl::EntryUpdatedState{});
+    std::fill(impl_->queue_states.begin(), impl_->queue_states.end(), Impl::QueueState{});
   } else {
     impl_->last_error = "C11 behavior tree cancel failed with status " +
                         std::to_string(status);
