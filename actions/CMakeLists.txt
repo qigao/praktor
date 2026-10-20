@@ -60,11 +60,13 @@ if(PRAKTOR_ENABLE_C11_ACTIONS)
     add_library(praktor_actions_c11 STATIC
         c11/tree_adapter.c
         c11/tree_adapter.h
+        c11/tree_plan.cpp
+        c11/tree_plan.hpp
     )
     target_include_directories(praktor_actions_c11
         PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/c11>
     )
-    target_link_libraries(praktor_actions_c11 PUBLIC Salts::BehaviorTree)
+    target_link_libraries(praktor_actions_c11 PUBLIC Salts::BehaviorTree PRIVATE actions)
     target_compile_features(praktor_actions_c11 PUBLIC c_std_11)
     set_target_properties(praktor_actions_c11 PROPERTIES
         C_STANDARD 11
