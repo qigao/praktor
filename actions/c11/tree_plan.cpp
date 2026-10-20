@@ -200,14 +200,19 @@ void appendNode(TreePlan &plan, const Node &node, size_t parent_index,
     }
     desc.condition_callback = true;
     break;
-  case SALTS_BT_NODE_WHILE_DO:
+  case SALTS_BT_NODE_WHILE_DO: {
     desc.condition_callback = findParam(node, "condition") != nullptr;
-    desc.limit = static_cast<size_t>(
-        readIntegerParam(node, blackboard, "max_iterations", 100));
-    if (desc.limit == 0u || desc.limit > limits.max_control_iterations) {
-      throw std::invalid_argument("WhileDo max_iterations must be positive and within the tree limit");
+    const int64_t iterations =
+        readIntegerParam(node, blackboard, "max_iterations", 100);
+    if (iterations < 0 ||
+        static_cast<uint64_t>(iterations) > limits.max_control_iterations) {
+      throw std::invalid_argument(
+          "WhileDo max_iterations must be non-negative and within the tree limit");
     }
+    /* A zero budget succeeds without evaluating condition or body. */
+    desc.limit = static_cast<size_t>(iterations);
     break;
+  }
   case SALTS_BT_NODE_SWITCH:
     if (findParam(node, "variable") == nullptr) {
       throw std::invalid_argument("Switch requires parameter 'variable'");
