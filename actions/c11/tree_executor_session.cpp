@@ -192,7 +192,19 @@ struct TreeExecutorSession::Impl {
   praktor_c11_bt_host hooks{};
   praktor_c11_bt_host runtime_host{};
   praktor_c11_bt_tree runtime{};
+  struct PipelineState {
+    bool initialized = false;
+    std::string data;
+    std::string output_key = "pipeline_result";
+  };
+  struct EntryUpdatedState {
+    bool observed = false;
+    std::string value;
+  };
+
   std::vector<unsigned char> custom_leaf_active;
+  std::vector<PipelineState> pipeline_states;
+  std::vector<EntryUpdatedState> entry_updated_states;
   std::string last_error;
 
   Impl(const actions::Tree& source_tree,
@@ -212,6 +224,8 @@ struct TreeExecutorSession::Impl {
 
     validateHostContracts();
     custom_leaf_active.assign(compiled_plan.nodes.size(), 0u);
+    pipeline_states.resize(compiled_plan.nodes.size());
+    entry_updated_states.resize(compiled_plan.nodes.size());
 
     runtime_host.tick_leaf = &onTickLeaf;
     runtime_host.halt_leaf = &onHaltLeaf;
@@ -286,13 +300,10 @@ struct TreeExecutorSession::Impl {
             "C11 Parallel requires host enter/step/join/finish hooks");
       }
       if (desc.kind == SALTS_BT_NODE_PIPELINE_SEQUENCE &&
-          (hooks.pipeline_prepare == nullptr || hooks.pipeline_complete == nullptr)) {
+          ((hooks.pipeline_prepare == nullptr) !=
+           (hooks.pipeline_complete == nullptr))) {
         throw std::invalid_argument(
-            "C11 PipelineSequence requires host prepare/complete hooks");
-      }
-      if (desc.kind == SALTS_BT_NODE_ENTRY_UPDATED &&
-          hooks.entry_changed == nullptr) {
-        throw std::invalid_argument("C11 EntryUpdated requires a host entry_changed hook");
+            "Custom PipelineSequence hooks must provide prepare and complete together");
       }
       if (desc.kind == SALTS_BT_NODE_CONSUME_QUEUE &&
           (hooks.queue_begin == nullptr || hooks.queue_finish == nullptr)) {
@@ -477,29 +488,109 @@ struct TreeExecutorSession::Impl {
     });
   }
   int pipelinePrepare(size_t node, size_t child) noexcept {
-    if (hooks.pipeline_prepare == nullptr) return SALTS_ENOTSUP;
-    return safeHostStatus("C11 PipelineSequence prepare hook failed", [&] {
-      return hooks.pipeline_prepare(hooks.user, node, child);
-    });
+    if (hooks.pipeline_prepare != nullptr) {
+      return safeHostStatus("C11 PipelineSequence prepare hook failed", [&] {
+        return hooks.pipeline_prepare(hooks.user, node, child);
+      });
+    }
+
+    try {
+      const auto* source = nodeAt(node);
+      if (source == nullptr || node >= pipeline_states.size() ||
+          child >= source->children.size()) return SALTS_EINVAL;
+      auto& state = pipeline_states[node];
+      if (!state.initialized) {
+        std::string input_key = "pipeline_input";
+        const auto input = source->params.find("input_key");
+        if (input != source->params.end()) {
+          input_key = executor.resolveParam(input->second, blackboard);
+        }
+        state.output_key = "pipeline_result";
+        const auto output = source->params.find("output_key");
+        if (output != source->params.end()) {
+          state.output_key = executor.resolveParam(output->second, blackboard);
+        }
+        state.data = blackboard.has(input_key) ? blackboard.get(input_key) : "";
+        state.initialized = true;
+      }
+      blackboard.set("pipeline_input", state.data);
+      return SALTS_OK;
+    } catch (...) {
+      rememberCurrentException("C11 PipelineSequence prepare failed");
+      return SALTS_EINVAL;
+    }
   }
+
   int pipelineComplete(size_t node, size_t child,
                        salts_bt_node_status status) noexcept {
-    if (hooks.pipeline_complete == nullptr) return SALTS_ENOTSUP;
-    return safeHostStatus("C11 PipelineSequence complete hook failed", [&] {
-      return hooks.pipeline_complete(hooks.user, node, child, status);
-    });
+    if (hooks.pipeline_complete != nullptr) {
+      return safeHostStatus("C11 PipelineSequence complete hook failed", [&] {
+        return hooks.pipeline_complete(hooks.user, node, child, status);
+      });
+    }
+
+    try {
+      const auto* source = nodeAt(node);
+      if (source == nullptr || node >= pipeline_states.size() ||
+          child >= source->children.size()) return SALTS_EINVAL;
+      auto& state = pipeline_states[node];
+      if (!state.initialized) return SALTS_EINVAL;
+
+      if (status == SALTS_BT_SUCCESS) {
+        if (blackboard.has("pipeline_output")) {
+          state.data = blackboard.get("pipeline_output");
+        }
+        if (child + 1u == source->children.size()) {
+          blackboard.set(state.output_key, state.data);
+          state = PipelineState{};
+        }
+      } else {
+        state = PipelineState{};
+      }
+      return SALTS_OK;
+    } catch (...) {
+      rememberCurrentException("C11 PipelineSequence complete failed");
+      return SALTS_EINVAL;
+    }
   }
+
   void pipelineAbort(size_t node, size_t child) noexcept {
-    if (hooks.pipeline_abort == nullptr) return;
-    safeHostVoid("C11 PipelineSequence abort hook failed", [&] {
-      hooks.pipeline_abort(hooks.user, node, child);
-    });
+    if (hooks.pipeline_abort != nullptr) {
+      safeHostVoid("C11 PipelineSequence abort hook failed", [&] {
+        hooks.pipeline_abort(hooks.user, node, child);
+      });
+      return;
+    }
+    if (node < pipeline_states.size()) pipeline_states[node] = PipelineState{};
   }
+
   int entryChanged(size_t node, bool* changed) noexcept {
-    if (hooks.entry_changed == nullptr) return SALTS_ENOTSUP;
-    return safeHostStatus("C11 EntryUpdated hook failed", [&] {
-      return hooks.entry_changed(hooks.user, node, changed);
-    });
+    if (changed == nullptr) return SALTS_EINVAL;
+    if (hooks.entry_changed != nullptr) {
+      return safeHostStatus("C11 EntryUpdated hook failed", [&] {
+        return hooks.entry_changed(hooks.user, node, changed);
+      });
+    }
+
+    try {
+      const auto* source = nodeAt(node);
+      if (source == nullptr || node >= entry_updated_states.size()) return SALTS_EINVAL;
+      const auto key_it = source->params.find("watch_key");
+      if (key_it == source->params.end()) {
+        last_error = "EntryUpdated requires parameter 'watch_key'";
+        return SALTS_EINVAL;
+      }
+      const std::string key = executor.resolveParam(key_it->second, blackboard);
+      const std::string current = blackboard.has(key) ? blackboard.get(key) : "";
+      auto& state = entry_updated_states[node];
+      *changed = !state.observed || current != state.value;
+      state.value = current;
+      state.observed = true;
+      return SALTS_OK;
+    } catch (...) {
+      rememberCurrentException("C11 EntryUpdated evaluation failed");
+      return SALTS_EINVAL;
+    }
   }
   int queueBegin(size_t node, bool* has_item) noexcept {
     if (hooks.queue_begin == nullptr) return SALTS_ENOTSUP;
@@ -616,8 +707,10 @@ int TreeExecutorSession::reset() {
   const int status = praktor_c11_bt_tree_reset(&impl_->runtime);
   if (status == SALTS_OK) {
     std::fill(impl_->custom_leaf_active.begin(), impl_->custom_leaf_active.end(), 0u);
+    std::fill(impl_->pipeline_states.begin(), impl_->pipeline_states.end(), Impl::PipelineState{});
+    std::fill(impl_->entry_updated_states.begin(), impl_->entry_updated_states.end(), Impl::EntryUpdatedState{});
   } else {
-    impl_->last_error = "C11 behavior tree reset failed with status " +
+    impl_->last_error = "C11 behavior tree reset failed with status +"
                         std::to_string(status);
   }
   return status;
@@ -629,8 +722,10 @@ int TreeExecutorSession::cancel() {
   const int status = praktor_c11_bt_tree_cancel(&impl_->runtime);
   if (status == SALTS_OK) {
     std::fill(impl_->custom_leaf_active.begin(), impl_->custom_leaf_active.end(), 0u);
+    std::fill(impl_->pipeline_states.begin(), impl_->pipeline_states.end(), Impl::PipelineState{});
+    std::fill(impl_->entry_updated_states.begin(), impl_->entry_updated_states.end(), Impl::EntryUpdatedState{});
   } else {
-    impl_->last_error = "C11 behavior tree cancel failed with status " +
+    impl_->last_error = "C11 behavior tree cancel failed with status "
                         std::to_string(status);
   }
   return status;

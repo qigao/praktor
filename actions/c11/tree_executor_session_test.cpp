@@ -312,6 +312,76 @@ int testSubTreeExpansionAndCycleRejection() {
 }
 
 
+int testBuiltInPipelineSequenceHooks() {
+  actions::Tree tree;
+  tree.root.id = "PipelineSequence";
+  tree.root.params.emplace("input_key", actions::Value{std::string("seed")});
+  tree.root.params.emplace("output_key", actions::Value{std::string("result")});
+  actions::Node first;
+  first.id = "PipelineFirst";
+  actions::Node second;
+  second.id = "PipelineSecond";
+  tree.root.children.push_back(first);
+  tree.root.children.push_back(second);
+
+  actions::Executor executor;
+  executor.registerTask("PipelineFirst", [](const auto&, actions::Blackboard& bb) {
+    if (bb.get("pipeline_input") != "start") return actions::NodeStatus::FAILURE;
+    bb.set("pipeline_output", "stage-one");
+    return actions::NodeStatus::SUCCESS;
+  });
+  executor.registerTask("PipelineSecond", [](const auto&, actions::Blackboard& bb) {
+    if (bb.get("pipeline_input") != "stage-one") return actions::NodeStatus::FAILURE;
+    bb.set("pipeline_output", "stage-two");
+    return actions::NodeStatus::SUCCESS;
+  });
+
+  actions::Blackboard blackboard;
+  blackboard.set("seed", "start");
+  actions::ExecutionContext context;
+  actions::c11::TreeExecutorSession session(tree, executor, blackboard,
+                                            context, limits());
+  salts_bt_node_status status = SALTS_BT_FAILURE;
+  CHECK(session.tick(&status) == SALTS_OK);
+  CHECK(status == SALTS_BT_SUCCESS);
+  CHECK(blackboard.get("result") == "stage-two");
+  CHECK(blackboard.get("pipeline_input") == "stage-one");
+  return 0;
+}
+
+int testBuiltInEntryUpdatedHook() {
+  actions::Tree tree;
+  tree.root.id = "EntryUpdated";
+  tree.root.params.emplace("watch_key", actions::Value{std::string("watched")});
+  actions::Node child;
+  child.id = "Observe";
+  tree.root.children.push_back(child);
+
+  actions::Executor executor;
+  int calls = 0;
+  executor.registerTask("Observe", [&calls](const auto&, actions::Blackboard&) {
+    ++calls;
+    return actions::NodeStatus::SUCCESS;
+  });
+  actions::Blackboard blackboard;
+  blackboard.set("watched", "first");
+  actions::ExecutionContext context;
+  actions::c11::TreeExecutorSession session(tree, executor, blackboard,
+                                            context, limits());
+  salts_bt_node_status status = SALTS_BT_FAILURE;
+  CHECK(session.tick(&status) == SALTS_OK);
+  CHECK(status == SALTS_BT_SUCCESS);
+  CHECK(calls == 1);
+  CHECK(session.tick(&status) == SALTS_OK);
+  CHECK(status == SALTS_BT_SUCCESS);
+  CHECK(calls == 1);
+  blackboard.set("watched", "second");
+  CHECK(session.tick(&status) == SALTS_OK);
+  CHECK(status == SALTS_BT_SUCCESS);
+  CHECK(calls == 2);
+  return 0;
+}
+
 int throwingParallelEnter(void*, size_t, size_t, bool) {
   throw std::runtime_error("test parallel enter exception");
 }
@@ -371,6 +441,8 @@ int main() {
   if (testCancelCallsHaltForRegisteredRunningLeaf() != 0) return 1;
   if (testScalarConditionAndSwitchUseBlackboard() != 0) return 1;
   if (testSubTreeExpansionAndCycleRejection() != 0) return 1;
+  if (testBuiltInPipelineSequenceHooks() != 0) return 1;
+  if (testBuiltInEntryUpdatedHook() != 0) return 1;
   if (testHostExceptionsStayInsideCAbi() != 0) return 1;
   return 0;
 }
