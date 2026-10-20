@@ -82,6 +82,50 @@ void customShellHalt(void* user, size_t node_index) {
   if (state != nullptr && node_index == 0u) ++state->halt_calls;
 }
 
+struct HaltHookState {
+  int halt_calls = 0;
+  size_t last_node = static_cast<size_t>(-1);
+};
+
+void countHalt(void* user, size_t node_index) {
+  auto* state = static_cast<HaltHookState*>(user);
+  if (state != nullptr) {
+    ++state->halt_calls;
+    state->last_node = node_index;
+  }
+}
+
+int testCancelCallsHaltForRegisteredRunningLeaf() {
+  actions::Tree tree;
+  tree.root.id = "Sequence";
+  actions::Node step;
+  step.id = "ManagedTask";
+  tree.root.children.push_back(step);
+
+  actions::Executor executor;
+  executor.registerTask("ManagedTask", [](const auto&, actions::Blackboard&) {
+    return actions::NodeStatus::RUNNING;
+  });
+
+  HaltHookState state;
+  praktor_c11_bt_host hooks{};
+  hooks.halt_leaf = &countHalt;
+  hooks.user = &state;
+
+  actions::Blackboard blackboard;
+  actions::ExecutionContext context;
+  actions::c11::TreeExecutorSession session(tree, executor, blackboard,
+                                            context, limits(), &hooks);
+  salts_bt_node_status status = SALTS_BT_FAILURE;
+  CHECK(session.tick(&status) == SALTS_OK);
+  CHECK(status == SALTS_BT_RUNNING);
+  CHECK(state.halt_calls == 0);
+  CHECK(session.cancel() == SALTS_OK);
+  CHECK(state.halt_calls == 1);
+  CHECK(state.last_node == 1u);
+  return 0;
+}
+
 int testShellRequiresExplicitManagedHost() {
   actions::Tree tree;
   tree.root.id = "Shell";
@@ -324,6 +368,7 @@ int testHostExceptionsStayInsideCAbi() {
 int main() {
   if (testRegisteredLeafResumesRunningState() != 0) return 1;
   if (testShellRequiresExplicitManagedHost() != 0) return 1;
+  if (testCancelCallsHaltForRegisteredRunningLeaf() != 0) return 1;
   if (testScalarConditionAndSwitchUseBlackboard() != 0) return 1;
   if (testSubTreeExpansionAndCycleRejection() != 0) return 1;
   if (testHostExceptionsStayInsideCAbi() != 0) return 1;

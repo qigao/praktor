@@ -325,6 +325,11 @@ struct TreeExecutorSession::Impl {
 
       *out_status = toSaltsStatus(executor.execute(*source, blackboard,
                                                    execution_context));
+      // The legacy TaskFunction API has no independent halt slot, but a
+      // session-level halt hook can still clean up a RUNNING registered leaf.
+      // Track activity for every leaf path, not only the custom tick path.
+      custom_leaf_active[index] =
+          (*out_status == SALTS_BT_RUNNING) ? 1u : 0u;
       return SALTS_OK;
     } catch (...) {
       rememberCurrentException("C11 action leaf failed");
