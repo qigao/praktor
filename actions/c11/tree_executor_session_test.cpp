@@ -257,7 +257,8 @@ int testShellUsesSaltsProcessByDefaultAndAllowsExplicitOverride() {
 
     CHECK(status == SALTS_BT_FAILURE);
     CHECK(blackboard.get("shell_exit_code") == "7");
-    CHECK(blackboard.get("shell_error").find("unsuccessfully") != std::string::npos);
+    CHECK(blackboard.get("shell_error").empty());
+    CHECK(session.lastError().find("unsuccessfully") != std::string::npos);
     CHECK(legacy_shell_calls == 0);
   }
 
@@ -527,7 +528,8 @@ int testConsumeQueueRejectsMalformedQueue() {
   actions::c11::TreeExecutorSession session(tree, executor, blackboard,
                                             context, limits());
   salts_bt_node_status status = SALTS_BT_FAILURE;
-  CHECK(session.tick(&status) == SALTS_EIO);
+  CHECK(session.tick(&status) == SALTS_OK);
+  CHECK(status == SALTS_BT_FAILURE);
   CHECK(session.lastError().find("valid JSON") != std::string::npos);
   return 0;
 }

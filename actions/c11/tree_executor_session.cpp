@@ -591,9 +591,9 @@ struct TreeExecutorSession::Impl {
     blackboard.set(state.stderr_key, state.stderr_data);
     blackboard.set(state.exit_code_key, std::to_string(exit_code));
     if (!success) {
-      blackboard.set("shell_error", state.stderr_data.empty()
-                                        ? state.failure_reason
-                                        : state.stderr_data);
+      // Legacy Executor always publishes captured stderr here, even when the
+      // process fails with no stderr output. Keep diagnostics in lastError().
+      blackboard.set("shell_error", state.stderr_data);
     }
   }
 
@@ -1289,6 +1289,13 @@ struct TreeExecutorSession::Impl {
       state.active = true;
       state.has_more = has_more;
       *has_item = true;
+      return SALTS_OK;
+    } catch (const std::invalid_argument& error) {
+      // The existing Executor maps malformed queue payloads to a node
+      // FAILURE rather than a runtime error. Preserve that observable status,
+      // while retaining detail for diagnostics.
+      last_error = std::string("ConsumeQueue payload rejected: ") + error.what();
+      *has_item = false;
       return SALTS_OK;
     } catch (...) {
       rememberCurrentException("C11 ConsumeQueue begin failed");
