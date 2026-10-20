@@ -322,6 +322,32 @@ int testShellUsesSaltsProcessByDefaultAndAllowsExplicitOverride() {
 }
 
 
+int testShellRejectsZeroTimeoutBeforeSpawningProcess() {
+  actions::Tree tree;
+  tree.root.id = "Shell";
+  tree.root.params.emplace("cmd", actions::Value{std::string("echo must-not-run")});
+  tree.root.params.emplace("timeout", actions::Value{0.0});
+  tree.root.params.emplace("stream_output", actions::Value{false});
+
+  actions::Executor executor;
+  int legacy_shell_calls = 0;
+  executor.registerTask("Shell", [&legacy_shell_calls](const auto&, actions::Blackboard&) {
+    ++legacy_shell_calls;
+    return actions::NodeStatus::SUCCESS;
+  });
+  actions::Blackboard blackboard;
+  actions::ExecutionContext context;
+  actions::c11::TreeExecutorSession session(tree, executor, blackboard,
+                                            context, limits());
+  salts_bt_node_status status = SALTS_BT_RUNNING;
+  CHECK(session.tick(&status) == SALTS_OK);
+  CHECK(status == SALTS_BT_FAILURE);
+  CHECK(session.lastError().find("timeout must be positive") != std::string::npos);
+  CHECK(blackboard.get("shell_exit_code") == "-1");
+  CHECK(legacy_shell_calls == 0);
+  return 0;
+}
+
 int testScalarConditionAndSwitchUseBlackboard() {
   {
     actions::Tree tree;
@@ -1011,6 +1037,7 @@ int main() {
   if (testRunningRegisteredLeafRequiresHaltHook() != 0) return 1;
   if (testExecutorOwnedRunningLeafDoesNotReenterDeclinedHook() != 0) return 1;
   if (testShellUsesSaltsProcessByDefaultAndAllowsExplicitOverride() != 0) return 1;
+  if (testShellRejectsZeroTimeoutBeforeSpawningProcess() != 0) return 1;
   if (testShellCancelTerminatesManagedProcess() != 0) return 1;
   if (testCancelCallsHaltForRegisteredRunningLeaf() != 0) return 1;
   if (testScalarConditionAndSwitchUseBlackboard() != 0) return 1;

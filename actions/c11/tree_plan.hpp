@@ -16,9 +16,10 @@ namespace actions::c11 {
  * destroyed.
  *
  * This compiler only describes topology and typed node configuration. It does
- * not execute callbacks, parse YAML, expand SubTree references, or decide
- * Blackboard/Process ownership. SubTree is rejected until the Praktor plan
- * compiler can expand named trees into independent node instances.
+ * not execute callbacks, parse YAML, or decide Blackboard/Process ownership.
+ * compileTreePlan requires SubTree nodes to be expanded already; the
+ * TreeExecutorSession performs registered-tree expansion and cycle checking
+ * before compiling its session-owned AST.
  */
 enum class TreePlanTerminalAction : unsigned char {
   Runtime = 0,

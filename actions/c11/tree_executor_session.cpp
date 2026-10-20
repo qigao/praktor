@@ -759,8 +759,8 @@ struct TreeExecutorSession::Impl {
         timeout_text = resolveStringValue(timeout_it->second, blackboard);
       }
       const int64_t timeout = parseInteger(timeout_text);
-      if (timeout < 0) {
-        state.failure_reason = "Shell timeout must not be negative";
+      if (timeout <= 0) {
+        state.failure_reason = "Shell timeout must be positive";
         return SALTS_EINVAL;
       }
       timeout_ms = static_cast<uint64_t>(timeout);
