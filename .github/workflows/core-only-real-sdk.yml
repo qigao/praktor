@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       salts_utils_ref:
-        description: SaltsUtils candidate revision exporting Salts::YamlParser
+        description: SaltsUtils candidate revision exporting Salts::YamlParser and Salts::BehaviorTree
         type: string
-        default: dfea1ec404e025f206eae333e8786fbf3d172989
+        default: 08cff32bec92863a4a75d209be04f5e122e1c7b2
   pull_request:
     paths:
       - "CMakeLists.txt"
@@ -41,7 +41,7 @@ jobs:
       fail-fast: false
       matrix:
         platform: [linux, windows, macos]
-        sdk: [rc2, yaml-parser]
+        sdk: [rc2, yaml-parser, behavior-tree]
         include:
           - {platform: linux, runner: ubuntu-24.04, rid: linux-x64, triplet: x64-linux, preset: ci-linux-sdk, producer: ci-sdk-release-user}
           - {platform: windows, runner: windows-2025, rid: windows-x64, triplet: x64-windows, preset: ci-windows-sdk, producer: ci-win-sdk-release-user}
@@ -53,8 +53,9 @@ jobs:
       TRIPLET: ${{ matrix.triplet }}
       HOST_TRIPLET: ${{ matrix.triplet }}
       CMAKE_PRESET: ${{ matrix.preset }}
+      SDK_VARIANT: ${{ matrix.sdk }}
       PRODUCER_PRESET: ${{ matrix.producer }}
-      SALTS_UTILS_SOURCE_REF: ${{ inputs.salts_utils_ref || 'dfea1ec404e025f206eae333e8786fbf3d172989' }}
+      SALTS_UTILS_SOURCE_REF: ${{ inputs.salts_utils_ref || '08cff32bec92863a4a75d209be04f5e122e1c7b2' }}
       CCACHE_DIR: ${{ github.workspace }}/.cache/ccache
       CCACHE_BASEDIR: ${{ github.workspace }}
       CCACHE_COMPILERCHECK: content
@@ -121,7 +122,7 @@ jobs:
         run: ./cmake/RestoreNativeSdks.ps1 -Rid $env:RID -CoreOnly -SaltsUtilsVersion 4.3.0-rc.2
 
       - name: Checkout canonical YAML target candidate
-        if: matrix.sdk == 'yaml-parser'
+        if: matrix.sdk != 'rc2'
         uses: actions/checkout@v4
         with:
           repository: qigao/salts-utils
@@ -130,14 +131,14 @@ jobs:
           persist-credentials: false
 
       - name: Select candidate build environment
-        if: matrix.sdk == 'yaml-parser'
+        if: matrix.sdk != 'rc2'
         shell: pwsh
         run: |
           "QIGAO_SDK_RID=$env:RID" >> $env:GITHUB_ENV
           "QIGAO_TARGET_TRIPLET=$env:TRIPLET" >> $env:GITHUB_ENV
 
       - name: Build candidate SDK on Unix
-        if: matrix.sdk == 'yaml-parser' && runner.os != 'Windows'
+        if: matrix.sdk != 'rc2' && runner.os != 'Windows'
         working-directory: build/salts-utils-source
         shell: bash
         run: |
@@ -147,7 +148,7 @@ jobs:
           cmake --build --preset "install-$PRODUCER_PRESET" --parallel 2
 
       - name: Build candidate SDK on Windows
-        if: matrix.sdk == 'yaml-parser' && runner.os == 'Windows'
+        if: matrix.sdk != 'rc2' && runner.os == 'Windows'
         working-directory: build/salts-utils-source
         shell: cmd
         run: |
@@ -161,7 +162,7 @@ jobs:
           if errorlevel 1 exit /b 1
 
       - name: Select installed candidate SDK
-        if: matrix.sdk == 'yaml-parser'
+        if: matrix.sdk != 'rc2'
         shell: pwsh
         run: |
           $root = Join-Path $env:GITHUB_WORKSPACE "build/salts-utils-source/stage/sdk/$env:RID"
@@ -172,7 +173,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cmake --preset "$CMAKE_PRESET" -DENABLE_SCRIPT_ENGINE=OFF
+          if [[ "$SDK_VARIANT" == behavior-tree ]]; then
+            cmake --preset "$CMAKE_PRESET" -DENABLE_SCRIPT_ENGINE=OFF -DPRAKTOR_ENABLE_C11_ACTIONS=ON
+          else
+            cmake --preset "$CMAKE_PRESET" -DENABLE_SCRIPT_ENGINE=OFF
+          fi
           cmake --build --preset "$CMAKE_PRESET" --parallel 2
           ctest --preset "$CMAKE_PRESET" --output-on-failure --output-junit build/ci-sdk/ctest.xml
           cmake --build --preset "install-$CMAKE_PRESET" --parallel 2
@@ -183,7 +188,11 @@ jobs:
         run: |
           call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64
           if errorlevel 1 exit /b 1
-          cmake --preset "%CMAKE_PRESET%" -DENABLE_SCRIPT_ENGINE=OFF
+          if "%SDK_VARIANT%"=="behavior-tree" (
+            cmake --preset "%CMAKE_PRESET%" -DENABLE_SCRIPT_ENGINE=OFF -DPRAKTOR_ENABLE_C11_ACTIONS=ON
+          ) else (
+            cmake --preset "%CMAKE_PRESET%" -DENABLE_SCRIPT_ENGINE=OFF
+          )
           if errorlevel 1 exit /b 1
           cmake --build --preset "%CMAKE_PRESET%" --parallel 2
           if errorlevel 1 exit /b 1
