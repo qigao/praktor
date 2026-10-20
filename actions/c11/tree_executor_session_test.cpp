@@ -1101,8 +1101,10 @@ int testPipelineSequenceRestoresInputBeforeNestedSwitchSelection() {
     actions::Blackboard blackboard;
     blackboard.set("seed", "0");
     actions::ExecutionContext context;
+    praktor_c11_bt_host hooks{};
+    hooks.halt_leaf = &noOpHalt;
     actions::c11::TreeExecutorSession session(
-        tree, executor, blackboard, context, limits());
+        tree, executor, blackboard, context, limits(), &hooks);
     salts_bt_node_status status = SALTS_BT_FAILURE;
     CHECK(session.tick(&status) == SALTS_OK);
     CHECK(status == SALTS_BT_RUNNING);
@@ -1197,8 +1199,10 @@ int testPipelineSequenceResumesActiveStageAndRestoresInput() {
     actions::Blackboard blackboard;
     blackboard.set("seed", "start");
     actions::ExecutionContext context;
+    praktor_c11_bt_host hooks{};
+    hooks.halt_leaf = &noOpHalt;
     actions::c11::TreeExecutorSession session(
-        tree, executor, blackboard, context, limits());
+        tree, executor, blackboard, context, limits(), &hooks);
     salts_bt_node_status status = SALTS_BT_FAILURE;
     const int first_tick_status = session.tick(&status);
     if (first_tick_status != SALTS_OK) {
@@ -1321,8 +1325,10 @@ int testConsumeQueueResumesCurrentItemAcrossRunning() {
     actions::Blackboard blackboard;
     blackboard.set("queue", "[\"one\",\"two\"]");
     actions::ExecutionContext context;
+    praktor_c11_bt_host hooks{};
+    hooks.halt_leaf = &noOpHalt;
     actions::c11::TreeExecutorSession session(
-        tree, executor, blackboard, context, limits());
+        tree, executor, blackboard, context, limits(), &hooks);
     salts_bt_node_status status = SALTS_BT_FAILURE;
     CHECK(session.tick(&status) == SALTS_OK);
     CHECK(status == SALTS_BT_RUNNING);
