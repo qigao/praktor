@@ -322,7 +322,15 @@ int praktor_c11_bt_tree_init(praktor_c11_bt_tree *tree,
 
   if (tree == NULL || tree->impl != NULL || tree_config == NULL ||
       nodes == NULL || node_count == 0u || host == NULL ||
+      node_count > UINT32_MAX ||
       node_count > SIZE_MAX / sizeof(praktor_c11_bt_node))
+    return SALTS_EINVAL;
+  if (tree_config->max_nodes == 0u ||
+      tree_config->max_nodes > UINT32_MAX ||
+      tree_config->max_depth == 0u ||
+      tree_config->max_depth > SALTS_BT_MAX_DEPTH ||
+      tree_config->max_control_iterations == 0u ||
+      tree_config->max_control_iterations > SALTS_BT_MAX_CONTROL_ITERATIONS)
     return SALTS_EINVAL;
   if (tree_config->max_nodes < node_count) return SALTS_ENOBUFS;
   if (nodes[0].parent_index != PRAKTOR_C11_BT_NO_PARENT) return SALTS_EINVAL;
