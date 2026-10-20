@@ -81,9 +81,14 @@ int64_t readIntegerParam(const Node &node, const Blackboard &blackboard,
 
   if (std::holds_alternative<double>(*value)) {
     const double numeric = std::get<double>(*value);
-    if (!std::isfinite(numeric) || std::trunc(numeric) != numeric ||
+    const double fractional = numeric - std::trunc(numeric);
+    // Use an ordered comparison rather than ==/!= on floating-point values:
+    // this project treats -Wfloat-equal as an error.
+    const double upper_exclusive =
+        -static_cast<double>(std::numeric_limits<int64_t>::min());
+    if (!std::isfinite(numeric) || std::abs(fractional) > 0.0 ||
         numeric < static_cast<double>(std::numeric_limits<int64_t>::min()) ||
-        numeric > static_cast<double>(std::numeric_limits<int64_t>::max())) {
+        numeric >= upper_exclusive) {
       throw std::invalid_argument("Parameter '" + std::string(key) +
                                   "' on node '" + node.id +
                                   "' must be an integer");
