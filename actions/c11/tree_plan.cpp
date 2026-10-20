@@ -55,10 +55,26 @@ int64_t parseIntegerText(const std::string &raw, const Node &node,
   try {
     size_t consumed = 0u;
     const long long value = std::stoll(raw, &consumed, 10);
-    if (consumed != raw.size()) {
-      throw std::invalid_argument("trailing data");
+    if (consumed == raw.size()) {
+      return static_cast<int64_t>(value);
     }
-    return static_cast<int64_t>(value);
+  } catch (const std::exception &) {
+    // The legacy Executor also accepts integral floating-point text.
+  }
+
+  try {
+    size_t consumed = 0u;
+    const double numeric = std::stod(raw, &consumed);
+    const double fractional = numeric - std::trunc(numeric);
+    const double upper_exclusive =
+        -static_cast<double>(std::numeric_limits<int64_t>::min());
+    if (consumed != raw.size() || !std::isfinite(numeric) ||
+        std::abs(fractional) > 0.0 ||
+        numeric < static_cast<double>(std::numeric_limits<int64_t>::min()) ||
+        numeric >= upper_exclusive) {
+      throw std::invalid_argument("not an integral number");
+    }
+    return static_cast<int64_t>(numeric);
   } catch (const std::exception &) {
     throw std::invalid_argument("Parameter '" + std::string(key) +
                                 "' on node '" + node.id +

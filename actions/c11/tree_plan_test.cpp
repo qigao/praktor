@@ -75,6 +75,28 @@ int testDurationAndRepeatParameters() {
   return 0;
 }
 
+int testBlackboardIntegralFloatParameters() {
+  Tree tree;
+  tree.root.id = "Sequence";
+
+  Node repeat;
+  repeat.id = "Repeat";
+  repeat.params.emplace("num_cycles", Value{std::string("{cycles}")});
+  Node delay;
+  delay.id = "Delay";
+  delay.params.emplace("delay_ms", Value{std::string("{delay}")});
+  repeat.children.push_back(delay);
+  tree.root.children.push_back(repeat);
+
+  Blackboard blackboard;
+  blackboard.set("cycles", "3.0");
+  blackboard.set("delay", "12.0");
+  const auto plan = compileTreePlan(tree, blackboard, testLimits());
+  CHECK(plan.nodes[1].limit == 3u);
+  CHECK(plan.nodes[2].duration_ns == UINT64_C(12000000));
+  return 0;
+}
+
 int expectInvalid(Tree& tree, Blackboard& blackboard) {
   try {
     (void)compileTreePlan(tree, blackboard, testLimits());
@@ -122,6 +144,7 @@ int testRejectsInvalidInputs() {
 int main() {
   if (testParentFirstSequence() != 0) return 1;
   if (testDurationAndRepeatParameters() != 0) return 1;
+  if (testBlackboardIntegralFloatParameters() != 0) return 1;
   if (testRejectsInvalidInputs() != 0) return 1;
   return 0;
 }
