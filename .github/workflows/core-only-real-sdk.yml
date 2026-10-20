@@ -121,7 +121,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: ./cmake/RestoreNativeSdks.ps1 -Rid $env:RID -CoreOnly -SaltsUtilsVersion 4.3.0-rc.2
 
-      - name: Checkout canonical YAML target candidate
+      - name: Checkout candidate SaltsUtils SDK source
         if: matrix.sdk != 'rc2'
         uses: actions/checkout@v4
         with:
@@ -130,7 +130,7 @@ jobs:
           path: build/salts-utils-source
           persist-credentials: false
 
-      - name: Select candidate build environment
+      - name: Select candidate SDK build environment
         if: matrix.sdk != 'rc2'
         shell: pwsh
         run: |
@@ -161,7 +161,7 @@ jobs:
           cmake --build --preset "install-%PRODUCER_PRESET%" --parallel 2
           if errorlevel 1 exit /b 1
 
-      - name: Select installed candidate SDK
+      - name: Select installed SaltsUtils candidate
         if: matrix.sdk != 'rc2'
         shell: pwsh
         run: |
