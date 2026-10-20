@@ -56,6 +56,10 @@ if(PRAKTOR_ENABLE_C11_ACTIONS)
         message(FATAL_ERROR
             "PRAKTOR_ENABLE_C11_ACTIONS requires an installed SaltsUtils SDK exporting Salts::BehaviorTree")
     endif()
+    if(NOT TARGET Salts::Process)
+        message(FATAL_ERROR
+            "PRAKTOR_ENABLE_C11_ACTIONS requires Salts::Process; Shell execution never falls back to the legacy ShellExecutor")
+    endif()
 
     add_library(praktor_actions_c11 STATIC
         c11/tree_adapter.c
@@ -70,7 +74,7 @@ if(PRAKTOR_ENABLE_C11_ACTIONS)
         PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
     )
     target_link_libraries(praktor_actions_c11 PUBLIC Salts::BehaviorTree actions
-        PRIVATE Salts::JsonParser)
+        PRIVATE Salts::JsonParser Salts::Process)
     target_compile_features(praktor_actions_c11
         PUBLIC c_std_11
         PRIVATE cxx_std_17

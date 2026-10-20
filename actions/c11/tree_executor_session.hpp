@@ -16,14 +16,14 @@ namespace actions::c11 {
  * against the caller-owned Blackboard and ExecutionContext. The session owns
  * a stable copy of the AST because TreePlan's source_nodes refer into it.
  *
- * Shell is deliberately fail-closed: the caller must provide tick_leaf and
- * halt_leaf hooks which route to the chosen managed-process owner. The
- * session never falls back to Executor's legacy ShellExecutor path. A custom
- * leaf hook may return SALTS_ENOTSUP for non-Shell leaves to let the session
- * dispatch those leaves through Executor. A registered Executor leaf that can
- * return RUNNING requires a halt_leaf hook; the session rejects RUNNING from a
- * registered leaf when no cleanup hook exists and never changes ownership path
- * halfway through an active custom-leaf invocation.
+ * Shell runs through Salts::Process by default: the session drives bounded
+ * asynchronous stdin/stdout/stderr operations, retains each borrowed buffer
+ * until its terminal completion, and closes/drains the process owner before
+ * releasing callback state. The session never falls back to the legacy
+ * ShellExecutor path. A custom leaf hook may override Shell; SALTS_ENOTSUP on
+ * an inactive Shell selects the built-in Salts::Process path, but a live host
+ * or Executor activation can never switch owners midway through a tick.
+ * A registered Executor leaf that returns RUNNING requires a halt_leaf hook.
  *
  * PipelineSequence, EntryUpdated and ConsumeQueue have built-in
  * Blackboard-backed hooks (ConsumeQueue uses the shared C JSON parser).

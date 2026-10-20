@@ -1,8 +1,12 @@
 #include "tree_executor_session.hpp"
 
 #include <json_parser.h>
+#include <salts/process.h>
+#include <praktor/shell/shell_executor.hpp>
 
 #include <algorithm>
+#include <array>
+#include <chrono>
 #include <cctype>
 #include <cmath>
 #include <cstdint>
@@ -11,6 +15,7 @@
 #include <new>
 #include <stdexcept>
 #include <string_view>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -269,8 +274,50 @@ struct TreeExecutorSession::Impl {
     bool active = false;
     bool has_more = false;
   };
+  enum class LeafOwner : unsigned char {
+    None,
+    HostHook,
+    Executor,
+    SaltsProcess
+  };
+  struct ShellState {
+    Impl* owner = nullptr;
+    size_t node_index = 0u;
+    cflow_process process{};
+    bool started = false;
+    bool close_requested = false;
+    bool stdin_write_pending = false;
+    bool stdout_read_pending = false;
+    bool stderr_read_pending = false;
+    bool stdin_closed = false;
+    bool stdout_eof = false;
+    bool stderr_eof = false;
+    bool process_terminal = false;
+    bool io_failed = false;
+    bool stream_output = true;
+    uint64_t stdin_lease = 1u;
+    uint64_t stdout_lease = 2u;
+    uint64_t stderr_lease = 3u;
+    size_t input_offset = 0u;
+    std::array<char, 4096> stdin_buffer{};
+    std::array<char, 4096> stdout_buffer{};
+    std::array<char, 4096> stderr_buffer{};
+    std::string command;
+    std::string input;
+    std::string working_dir;
+    std::string output_key = "shell_output";
+    std::string stderr_key = "shell_stderr";
+    std::string exit_code_key = "shell_exit_code";
+    std::string stdout_data;
+    std::string stderr_data;
+    std::string stdout_pending_line;
+    std::string stderr_pending_line;
+    std::string failure_reason;
+    cmeta_process_result_t result{};
+  };
 
-  std::vector<unsigned char> custom_leaf_active;
+  std::vector<LeafOwner> leaf_owners;
+  std::vector<ShellState> shell_states;
   std::vector<PipelineState> pipeline_states;
   std::vector<EntryUpdatedState> entry_updated_states;
   std::vector<QueueState> queue_states;
@@ -292,10 +339,15 @@ struct TreeExecutorSession::Impl {
     }
 
     validateHostContracts();
-    custom_leaf_active.assign(compiled_plan.nodes.size(), 0u);
+    leaf_owners.assign(compiled_plan.nodes.size(), LeafOwner::None);
+    shell_states.resize(compiled_plan.nodes.size());
     pipeline_states.resize(compiled_plan.nodes.size());
     entry_updated_states.resize(compiled_plan.nodes.size());
     queue_states.resize(compiled_plan.nodes.size());
+    for (size_t index = 0u; index < shell_states.size(); ++index) {
+      shell_states[index].owner = this;
+      shell_states[index].node_index = index;
+    }
 
     runtime_host.tick_leaf = &onTickLeaf;
     runtime_host.halt_leaf = &onHaltLeaf;
@@ -328,6 +380,11 @@ struct TreeExecutorSession::Impl {
     if (runtime.impl != nullptr) {
       (void)praktor_c11_bt_tree_destroy(&runtime);
     }
+    for (auto& shell : shell_states) {
+      if (shell.process.impl != nullptr) {
+        (void)closeShellProcess(shell, true);
+      }
+    }
   }
 
   const actions::Node* nodeAt(size_t index) const noexcept {
@@ -353,12 +410,6 @@ struct TreeExecutorSession::Impl {
         throw std::invalid_argument("TreePlan has no source AST node");
       }
 
-      if (source->id == "Shell" &&
-          (hooks.tick_leaf == nullptr || hooks.halt_leaf == nullptr)) {
-        throw std::invalid_argument(
-            "C11 Shell leaves require explicit host tick_leaf and halt_leaf hooks; "
-            "legacy ShellExecutor fallback is disabled");
-      }
       if (hooks.tick_leaf != nullptr && hooks.halt_leaf == nullptr) {
         throw std::invalid_argument(
             "A custom leaf tick hook requires a halt hook to define cancellation cleanup");
@@ -393,35 +444,491 @@ struct TreeExecutorSession::Impl {
     }
   }
 
+  static void emitStreamBytes(std::string& pending_line,
+                              const char* bytes, size_t length,
+                              bool enabled) {
+    if (!enabled) return;
+    for (size_t offset = 0u; offset < length; ++offset) {
+      const char ch = bytes[offset];
+      if (ch == '\r') continue;
+      if (ch == '\n') {
+        Praktor::Shell::ShellExecutor::emitStreamLine(pending_line);
+        pending_line.clear();
+      } else {
+        pending_line.push_back(ch);
+      }
+    }
+  }
+
+  static void flushStreamLine(std::string& pending_line, bool enabled) {
+    if (!enabled || pending_line.empty()) return;
+    Praktor::Shell::ShellExecutor::emitStreamLine(pending_line);
+    pending_line.clear();
+  }
+
+  static void onProcessCompletion(void* user, cflow_io_request_id,
+                                  cflow_io_lease_id, cflow_process_stream stream,
+                                  const cflow_io_completion* completion) noexcept {
+    auto* state = static_cast<ShellState*>(user);
+    if (state == nullptr || completion == nullptr) return;
+    try {
+      if (state->close_requested) {
+        if (stream == CFLOW_PROCESS_STDOUT) {
+          state->stdout_read_pending = false;
+          if (completion->kind == CFLOW_IO_COMPLETION_EOF ||
+              completion->kind == CFLOW_IO_COMPLETION_CANCELLED ||
+              completion->kind == CFLOW_IO_COMPLETION_FAILED)
+            state->stdout_eof = true;
+        } else if (stream == CFLOW_PROCESS_STDERR) {
+          state->stderr_read_pending = false;
+          if (completion->kind == CFLOW_IO_COMPLETION_EOF ||
+              completion->kind == CFLOW_IO_COMPLETION_CANCELLED ||
+              completion->kind == CFLOW_IO_COMPLETION_FAILED)
+            state->stderr_eof = true;
+        } else {
+          state->stdin_write_pending = false;
+        }
+        return;
+      }
+
+      if (stream == CFLOW_PROCESS_STDOUT || stream == CFLOW_PROCESS_STDERR) {
+        const bool is_stdout = stream == CFLOW_PROCESS_STDOUT;
+        auto& pending = is_stdout ? state->stdout_read_pending
+                                  : state->stderr_read_pending;
+        auto& eof = is_stdout ? state->stdout_eof : state->stderr_eof;
+        auto& buffer = is_stdout ? state->stdout_buffer : state->stderr_buffer;
+        auto& output = is_stdout ? state->stdout_data : state->stderr_data;
+        auto& pending_line = is_stdout ? state->stdout_pending_line
+                                       : state->stderr_pending_line;
+        pending = false;
+        if (completion->kind == CFLOW_IO_COMPLETION_OK) {
+          if (completion->bytes > buffer.size() ||
+              state->stdout_data.size() + state->stderr_data.size() >
+                  SALTS_PROCESS_DEFAULT_MAX_OUTPUT_BYTES ||
+              completion->bytes > SALTS_PROCESS_DEFAULT_MAX_OUTPUT_BYTES -
+                  (state->stdout_data.size() + state->stderr_data.size())) {
+            state->io_failed = true;
+            state->failure_reason = "Shell output exceeded the bounded capture limit";
+            return;
+          }
+          output.append(buffer.data(), completion->bytes);
+          emitStreamBytes(pending_line, buffer.data(), completion->bytes,
+                          state->stream_output);
+        } else if (completion->kind == CFLOW_IO_COMPLETION_EOF) {
+          eof = true;
+        } else {
+          eof = true;
+          state->io_failed = true;
+          state->failure_reason = "Shell stream I/O failed (error " +
+                                  std::to_string(completion->error) + ")";
+        }
+        return;
+      }
+
+      state->stdin_write_pending = false;
+      if (completion->kind == CFLOW_IO_COMPLETION_OK) {
+        if (completion->bytes == 0u ||
+            completion->bytes > state->input.size() - state->input_offset) {
+          state->io_failed = true;
+          state->failure_reason = "Shell stdin write made invalid progress";
+          return;
+        }
+        state->input_offset += completion->bytes;
+      } else {
+        state->io_failed = true;
+        state->failure_reason = "Shell stdin I/O failed (error " +
+                                std::to_string(completion->error) + ")";
+      }
+    } catch (...) {
+      state->io_failed = true;
+      state->failure_reason = "Exception while processing a Salts::Process completion";
+    }
+  }
+
+  void clearShellState(ShellState& state) noexcept {
+    Impl* owner = state.owner;
+    const size_t node_index = state.node_index;
+    state = ShellState{};
+    state.owner = owner;
+    state.node_index = node_index;
+  }
+
+  int closeShellProcess(ShellState& state, bool clear_state) noexcept {
+    if (state.process.impl != nullptr) {
+      const int close_status = cflow_process_close(&state.process);
+      state.close_requested = true;
+      if (close_status != SALTS_OK && close_status != SALTS_EBUSY) {
+        state.io_failed = true;
+        if (state.failure_reason.empty()) {
+          state.failure_reason = "Salts::Process close failed with status " +
+                                 std::to_string(close_status);
+        }
+      }
+
+      // close() requests native termination and cancellation. Keep driving until
+      // every admitted I/O lease has reached its terminal callback and the
+      // process adapter is quiescent; destroy must never race completion leases.
+      while (!cflow_process_is_quiescent(&state.process)) {
+        size_t progressed = 0u;
+        (void)cflow_process_run_ready(&state.process, 64u, &progressed);
+        if (progressed == 0u) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+      }
+      const int destroy_status = cflow_process_destroy(&state.process);
+      if (destroy_status != SALTS_OK) {
+        state.io_failed = true;
+        if (state.failure_reason.empty()) {
+          state.failure_reason = "Salts::Process destroy failed with status " +
+                                 std::to_string(destroy_status);
+        }
+      }
+    }
+    if (clear_state) clearShellState(state);
+    return state.io_failed ? SALTS_EIO : SALTS_OK;
+  }
+
+  void publishShellResult(ShellState& state, int exit_code, bool success) {
+    blackboard.set(state.output_key, state.stdout_data);
+    blackboard.set(state.stderr_key, state.stderr_data);
+    blackboard.set(state.exit_code_key, std::to_string(exit_code));
+    if (!success) {
+      blackboard.set("shell_error", state.stderr_data.empty()
+                                        ? state.failure_reason
+                                        : state.stderr_data);
+    }
+  }
+
+  int shellSubmitRead(ShellState& state, bool is_stdout) noexcept {
+    if (state.close_requested ||
+        (is_stdout ? state.stdout_eof : state.stderr_eof) ||
+        (is_stdout ? state.stdout_read_pending : state.stderr_read_pending))
+      return SALTS_OK;
+
+    auto result = is_stdout
+        ? cflow_process_try_read_stdout(&state.process, state.stdout_lease,
+                                        state.stdout_buffer.data(), state.stdout_buffer.size())
+        : cflow_process_try_read_stderr(&state.process, state.stderr_lease,
+                                        state.stderr_buffer.data(), state.stderr_buffer.size());
+    if (result.status == CFLOW_PROCESS_SUBMIT_ACCEPTED) {
+      if (is_stdout) state.stdout_read_pending = true;
+      else state.stderr_read_pending = true;
+      return SALTS_OK;
+    }
+    if (result.status == CFLOW_PROCESS_SUBMIT_FULL) return SALTS_OK;
+    if (result.status == CFLOW_PROCESS_SUBMIT_CLOSED && state.close_requested) {
+      if (is_stdout) state.stdout_eof = true;
+      else state.stderr_eof = true;
+      return SALTS_OK;
+    }
+    state.io_failed = true;
+    state.failure_reason = "Salts::Process read submission failed with status " +
+                           std::to_string(static_cast<int>(result.status));
+    return SALTS_EIO;
+  }
+
+  int shellSubmitInput(ShellState& state) noexcept {
+    if (state.close_requested || state.stdin_closed || state.stdin_write_pending)
+      return SALTS_OK;
+    if (state.input_offset < state.input.size()) {
+      size_t remaining = state.input.size() - state.input_offset;
+      size_t chunk = remaining < state.stdin_buffer.size()
+                         ? remaining : state.stdin_buffer.size();
+      std::copy_n(state.input.data() + state.input_offset, chunk,
+                  state.stdin_buffer.data());
+      auto result = cflow_process_try_write_stdin(
+          &state.process, state.stdin_lease, state.stdin_buffer.data(), chunk);
+      if (result.status == CFLOW_PROCESS_SUBMIT_ACCEPTED) {
+        state.stdin_write_pending = true;
+        return SALTS_OK;
+      }
+      if (result.status == CFLOW_PROCESS_SUBMIT_FULL) return SALTS_OK;
+      state.io_failed = true;
+      state.failure_reason = "Salts::Process stdin submission failed with status " +
+                             std::to_string(static_cast<int>(result.status));
+      return SALTS_EIO;
+    }
+
+    const int status = cflow_process_close_stdin(&state.process);
+    if (status == SALTS_OK) {
+      state.stdin_closed = true;
+      return SALTS_OK;
+    }
+    if (status == SALTS_EBUSY) return SALTS_OK;
+    state.io_failed = true;
+    state.failure_reason = "Salts::Process stdin close failed with status " +
+                           std::to_string(status);
+    return SALTS_EIO;
+  }
+
+  int startShellProcess(size_t index, const actions::Node& source,
+                        ShellState& state) {
+    const auto command_it = source.params.find("cmd");
+    if (command_it == source.params.end()) {
+      state.failure_reason = "Shell requires parameter 'cmd'";
+      return SALTS_EINVAL;
+    }
+
+    state.command = resolveStringValue(command_it->second, blackboard);
+    if (state.command.empty()) {
+      state.failure_reason = "Shell command must not be empty";
+      return SALTS_EINVAL;
+    }
+    state.input.clear();
+    const auto input_it = source.params.find("input");
+    if (input_it != source.params.end()) {
+      state.input = resolveStringValue(input_it->second, blackboard);
+    }
+    state.working_dir.clear();
+    const auto cwd_it = source.params.find("working_dir");
+    if (cwd_it != source.params.end()) {
+      state.working_dir = resolveStringValue(cwd_it->second, blackboard);
+    }
+    state.output_key = "shell_output";
+    state.stderr_key = "shell_stderr";
+    state.exit_code_key = "shell_exit_code";
+    const auto output_it = source.params.find("output_key");
+    if (output_it != source.params.end()) state.output_key = resolveStringValue(output_it->second, blackboard);
+    const auto stderr_it = source.params.find("stderr_key");
+    if (stderr_it != source.params.end()) state.stderr_key = resolveStringValue(stderr_it->second, blackboard);
+    const auto exit_it = source.params.find("exit_code_key");
+    if (exit_it != source.params.end()) state.exit_code_key = resolveStringValue(exit_it->second, blackboard);
+    state.stream_output = true;
+    const auto stream_it = source.params.find("stream_output");
+    if (stream_it != source.params.end()) state.stream_output = conditionValue(stream_it->second, blackboard);
+
+    uint64_t timeout_ms = UINT64_C(30000);
+    const auto timeout_it = source.params.find("timeout");
+    if (timeout_it != source.params.end()) {
+      std::string timeout_text;
+      if (std::holds_alternative<bool>(timeout_it->second)) {
+        state.failure_reason = "Shell timeout must be an integer";
+        return SALTS_EINVAL;
+      }
+      if (std::holds_alternative<double>(timeout_it->second)) {
+        timeout_text = std::to_string(std::get<double>(timeout_it->second));
+      } else {
+        timeout_text = resolveStringValue(timeout_it->second, blackboard);
+      }
+      const int64_t timeout = parseInteger(timeout_text);
+      if (timeout < 0) {
+        state.failure_reason = "Shell timeout must not be negative";
+        return SALTS_EINVAL;
+      }
+      timeout_ms = static_cast<uint64_t>(timeout);
+    }
+
+    std::vector<std::string> env_entries;
+    std::vector<const char*> env;
+    env_entries.reserve(executor.getEnvironment().size());
+    for (const auto& entry : executor.getEnvironment()) {
+      env_entries.push_back(entry.first + "=" + entry.second);
+    }
+    env.reserve(env_entries.size() + 1u);
+    for (const auto& entry : env_entries) env.push_back(entry.c_str());
+    env.push_back(nullptr);
+
+    cmeta_process_options_t options{};
+    cmeta_process_options_init(&options);
+    options.program = state.command.c_str();
+    options.args = nullptr;
+    options.env = env_entries.empty() ? nullptr : env.data();
+    options.cwd = state.working_dir.empty() ? nullptr : state.working_dir.c_str();
+    options.flags = SALTS_PROCESS_SHELL_COMMAND;
+    options.timeout_ms = timeout_ms;
+
+    cflow_process_config config{};
+#if defined(_WIN32)
+    config.backend_kind = CFLOW_IO_NATIVE_IOCP;
+#elif defined(__linux__)
+    config.backend_kind = CFLOW_IO_NATIVE_EPOLL;
+#elif defined(__APPLE__) || defined(__FreeBSD__) || defined(__NetBSD__) || \
+      defined(__OpenBSD__) || defined(__DragonFly__)
+    config.backend_kind = CFLOW_IO_NATIVE_KQUEUE;
+#else
+    state.failure_reason = "Salts::Process has no native pipe backend for this platform";
+    return SALTS_ENOTSUP;
+#endif
+    config.request_capacity = 8u;
+    config.command_capacity = 8u;
+    config.completion_batch_capacity = 8u;
+    config.completion = &onProcessCompletion;
+    config.completion_user = &state;
+
+    const int status = cflow_process_start(&state.process, &options, &config);
+    if (status != SALTS_OK) {
+      state.failure_reason = "Salts::Process start failed with status " +
+                             std::to_string(status);
+      return status;
+    }
+    state.started = true;
+    if (state.stream_output) {
+      Praktor::Shell::ShellExecutor::emitStreamLine("$ " + state.command);
+    }
+    (void)index;
+    return SALTS_OK;
+  }
+
+  int tickShell(size_t index, const actions::Node& source,
+                salts_bt_node_status* out_status) noexcept {
+    if (out_status == nullptr || index >= shell_states.size()) return SALTS_EINVAL;
+    auto& state = shell_states[index];
+    try {
+      if (!state.started && state.process.impl == nullptr) {
+        const int start_status = startShellProcess(index, source, state);
+        if (start_status != SALTS_OK) {
+          last_error = state.failure_reason;
+          publishShellResult(state, -1, false);
+          *out_status = SALTS_BT_FAILURE;
+          clearShellState(state);
+          leaf_owners[index] = LeafOwner::None;
+          return SALTS_OK;
+        }
+      }
+      leaf_owners[index] = LeafOwner::SaltsProcess;
+
+      if (state.io_failed) {
+        const std::string reason = state.failure_reason;
+        (void)closeShellProcess(state, false);
+        if (!reason.empty()) state.failure_reason = reason;
+        publishShellResult(state, -1, false);
+        last_error = state.failure_reason;
+        clearShellState(state);
+        leaf_owners[index] = LeafOwner::None;
+        *out_status = SALTS_BT_FAILURE;
+        return SALTS_OK;
+      }
+
+      (void)shellSubmitRead(state, true);
+      (void)shellSubmitRead(state, false);
+      (void)shellSubmitInput(state);
+      size_t progressed = 0u;
+      const int run_status = cflow_process_run_ready(&state.process, 64u, &progressed);
+      if (run_status != SALTS_OK) {
+        state.io_failed = true;
+        state.failure_reason = "Salts::Process driver failed with status " +
+                               std::to_string(run_status);
+      }
+      if (!state.io_failed) {
+        (void)shellSubmitRead(state, true);
+        (void)shellSubmitRead(state, false);
+        (void)shellSubmitInput(state);
+        progressed = 0u;
+        const int second_run_status =
+            cflow_process_run_ready(&state.process, 64u, &progressed);
+        if (second_run_status != SALTS_OK) {
+          state.io_failed = true;
+          state.failure_reason = "Salts::Process driver failed with status " +
+                                 std::to_string(second_run_status);
+        }
+      }
+
+      if (state.io_failed) {
+        const std::string reason = state.failure_reason;
+        (void)closeShellProcess(state, false);
+        if (!reason.empty()) state.failure_reason = reason;
+        publishShellResult(state, -1, false);
+        last_error = state.failure_reason;
+        clearShellState(state);
+        leaf_owners[index] = LeafOwner::None;
+        *out_status = SALTS_BT_FAILURE;
+        return SALTS_OK;
+      }
+
+      const int poll_status = cflow_process_poll(&state.process, &state.result);
+      if (poll_status == SALTS_OK) {
+        state.process_terminal = true;
+      } else if (poll_status != SALTS_EBUSY) {
+        state.io_failed = true;
+        state.failure_reason = "Salts::Process poll failed with status " +
+                               std::to_string(poll_status);
+        last_error = state.failure_reason;
+        (void)closeShellProcess(state, true);
+        leaf_owners[index] = LeafOwner::None;
+        *out_status = SALTS_BT_FAILURE;
+        return SALTS_OK;
+      }
+
+      if (!state.process_terminal || !state.stdout_eof || !state.stderr_eof ||
+          state.stdin_write_pending || !state.stdin_closed ||
+          state.stdout_read_pending || state.stderr_read_pending) {
+        *out_status = SALTS_BT_RUNNING;
+        return SALTS_OK;
+      }
+
+      flushStreamLine(state.stdout_pending_line, state.stream_output);
+      flushStreamLine(state.stderr_pending_line, state.stream_output);
+      const bool success = state.result.state == SALTS_PROCESS_EXITED &&
+                           state.result.exit_code == 0;
+      const int exit_code = state.result.exit_code;
+      const int cleanup_status = closeShellProcess(state, false);
+      if (cleanup_status != SALTS_OK) {
+        last_error = state.failure_reason.empty()
+                         ? "Salts::Process cleanup failed"
+                         : state.failure_reason;
+      }
+      publishShellResult(state, exit_code, success && cleanup_status == SALTS_OK);
+      if (!success && state.failure_reason.empty()) {
+        state.failure_reason =
+            state.result.state == SALTS_PROCESS_TIMED_OUT
+                ? "Shell command timed out"
+                : "Shell command exited unsuccessfully";
+      }
+      if (!success || cleanup_status != SALTS_OK) {
+        if (!state.failure_reason.empty()) last_error = state.failure_reason;
+      }
+      clearShellState(state);
+      leaf_owners[index] = LeafOwner::None;
+      *out_status = (success && cleanup_status == SALTS_OK)
+                        ? SALTS_BT_SUCCESS : SALTS_BT_FAILURE;
+      return SALTS_OK;
+    } catch (...) {
+      rememberCurrentException("Salts::Process Shell tick failed");
+      if (state.process.impl != nullptr) (void)closeShellProcess(state, true);
+      leaf_owners[index] = LeafOwner::None;
+      *out_status = SALTS_BT_FAILURE;
+      return SALTS_OK;
+    }
+  }
+
   int tickLeaf(size_t index, salts_bt_node_status* out_status) noexcept {
     if (out_status == nullptr || nodeAt(index) == nullptr) return SALTS_EINVAL;
     try {
       const actions::Node* source = nodeAt(index);
+      const LeafOwner previous_owner = leaf_owners[index];
       if (hooks.tick_leaf != nullptr) {
-        const bool was_active = custom_leaf_active[index] != 0u;
         const int host_status = hooks.tick_leaf(hooks.user, index, out_status);
         if (host_status == SALTS_ENOTSUP) {
-          if (was_active) {
-            // Do not switch execution owners midway through a live activation.
+          if (previous_owner == LeafOwner::HostHook ||
+              previous_owner == LeafOwner::Executor) {
             haltLeaf(index);
             last_error = "host leaf hook declined active node '" + source->id +
-                         "'; refusing to switch to the Executor path";
+                         "'; refusing to switch execution owners";
             return SALTS_ENOTSUP;
+          }
+          if (source->id == "Shell") {
+            return tickShell(index, *source, out_status);
           }
         } else if (host_status == SALTS_OK) {
           if (*out_status != SALTS_BT_SUCCESS &&
               *out_status != SALTS_BT_FAILURE &&
               *out_status != SALTS_BT_RUNNING) {
-            if (was_active) haltLeaf(index);
+            if (hooks.halt_leaf != nullptr) {
+              try { hooks.halt_leaf(hooks.user, index); }
+              catch (...) { rememberCurrentException("C11 host leaf halt failed"); }
+            }
+            leaf_owners[index] = LeafOwner::None;
             last_error = "host leaf hook returned an invalid node status for '" +
                          source->id + "'";
             return SALTS_EINVAL;
           }
-          custom_leaf_active[index] =
-              (*out_status == SALTS_BT_RUNNING) ? 1u : 0u;
+          leaf_owners[index] =
+              (*out_status == SALTS_BT_RUNNING) ? LeafOwner::HostHook : LeafOwner::None;
           return SALTS_OK;
         } else {
-          if (was_active) haltLeaf(index);
+          if (hooks.halt_leaf != nullptr) {
+            try { hooks.halt_leaf(hooks.user, index); }
+            catch (...) { rememberCurrentException("C11 host leaf halt failed"); }
+          }
+          leaf_owners[index] = LeafOwner::None;
           last_error = "host leaf hook returned status " + std::to_string(host_status) +
                        " for node '" + source->id + "'";
           return host_status;
@@ -429,8 +936,7 @@ struct TreeExecutorSession::Impl {
       }
 
       if (source->id == "Shell") {
-        last_error = "Shell host hook returned SALTS_ENOTSUP; refusing legacy ShellExecutor fallback";
-        return SALTS_ENOTSUP;
+        return tickShell(index, *source, out_status);
       }
 
       *out_status = toSaltsStatus(executor.execute(*source, blackboard,
@@ -440,10 +946,11 @@ struct TreeExecutorSession::Impl {
       if (*out_status == SALTS_BT_RUNNING && hooks.halt_leaf == nullptr) {
         last_error = "registered action leaf '" + source->id +
                      "' returned RUNNING without a halt_leaf hook";
+        leaf_owners[index] = LeafOwner::None;
         return SALTS_ENOTSUP;
       }
-      custom_leaf_active[index] =
-          (*out_status == SALTS_BT_RUNNING) ? 1u : 0u;
+      leaf_owners[index] =
+          (*out_status == SALTS_BT_RUNNING) ? LeafOwner::Executor : LeafOwner::None;
       return SALTS_OK;
     } catch (...) {
       rememberCurrentException("C11 action leaf failed");
@@ -452,13 +959,22 @@ struct TreeExecutorSession::Impl {
   }
 
   void haltLeaf(size_t index) noexcept {
-    if (index >= custom_leaf_active.size() || custom_leaf_active[index] == 0u) return;
-    custom_leaf_active[index] = 0u;
-    if (hooks.halt_leaf == nullptr) return;
-    try {
-      hooks.halt_leaf(hooks.user, index);
-    } catch (...) {
-      rememberCurrentException("C11 host leaf halt failed");
+    if (index >= leaf_owners.size()) return;
+    const LeafOwner owner = leaf_owners[index];
+    if (owner == LeafOwner::SaltsProcess ||
+        (index < shell_states.size() && shell_states[index].process.impl != nullptr)) {
+      (void)closeShellProcess(shell_states[index], true);
+      leaf_owners[index] = LeafOwner::None;
+      return;
+    }
+    leaf_owners[index] = LeafOwner::None;
+    if ((owner == LeafOwner::HostHook || owner == LeafOwner::Executor) &&
+        hooks.halt_leaf != nullptr) {
+      try {
+        hooks.halt_leaf(hooks.user, index);
+      } catch (...) {
+        rememberCurrentException("C11 host leaf halt failed");
+      }
     }
   }
 
@@ -871,7 +1387,7 @@ int TreeExecutorSession::reset() {
   impl_->last_error.clear();
   const int status = praktor_c11_bt_tree_reset(&impl_->runtime);
   if (status == SALTS_OK) {
-    std::fill(impl_->custom_leaf_active.begin(), impl_->custom_leaf_active.end(), 0u);
+    std::fill(impl_->leaf_owners.begin(), impl_->leaf_owners.end(), Impl::LeafOwner::None);
     std::fill(impl_->pipeline_states.begin(), impl_->pipeline_states.end(), Impl::PipelineState{});
     std::fill(impl_->entry_updated_states.begin(), impl_->entry_updated_states.end(), Impl::EntryUpdatedState{});
     std::fill(impl_->queue_states.begin(), impl_->queue_states.end(), Impl::QueueState{});
@@ -887,7 +1403,7 @@ int TreeExecutorSession::cancel() {
   impl_->last_error.clear();
   const int status = praktor_c11_bt_tree_cancel(&impl_->runtime);
   if (status == SALTS_OK) {
-    std::fill(impl_->custom_leaf_active.begin(), impl_->custom_leaf_active.end(), 0u);
+    std::fill(impl_->leaf_owners.begin(), impl_->leaf_owners.end(), Impl::LeafOwner::None);
     std::fill(impl_->pipeline_states.begin(), impl_->pipeline_states.end(), Impl::PipelineState{});
     std::fill(impl_->entry_updated_states.begin(), impl_->entry_updated_states.end(), Impl::EntryUpdatedState{});
     std::fill(impl_->queue_states.begin(), impl_->queue_states.end(), Impl::QueueState{});

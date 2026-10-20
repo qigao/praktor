@@ -1,7 +1,9 @@
 #include "tree_executor_session.hpp"
 
 #include <cstdio>
+#include <chrono>
 #include <stdexcept>
+#include <thread>
 #include <string>
 
 #define CHECK(expr)                                                            \
@@ -148,35 +150,59 @@ int testCancelCallsHaltForRegisteredRunningLeaf() {
   return 0;
 }
 
-int testShellRequiresExplicitManagedHost() {
-  actions::Tree tree;
-  tree.root.id = "Shell";
-  actions::Executor executor;
-  int legacy_shell_calls = 0;
-  executor.registerTask("Shell", [&legacy_shell_calls](const auto&, actions::Blackboard&) {
-    ++legacy_shell_calls;
-    return actions::NodeStatus::SUCCESS;
-  });
-  actions::Blackboard blackboard;
-  actions::ExecutionContext context;
+int testShellUsesSaltsProcessByDefaultAndAllowsExplicitOverride() {
+  {
+    actions::Tree tree;
+    tree.root.id = "Shell";
+    tree.root.params.emplace("cmd", actions::Value{std::string("echo c11-process")});
+    tree.root.params.emplace("timeout", actions::Value{5000.0});
+    tree.root.params.emplace("stream_output", actions::Value{false});
 
-  bool rejected = false;
-  try {
+    actions::Executor executor;
+    int legacy_shell_calls = 0;
+    executor.registerTask("Shell", [&legacy_shell_calls](const auto&, actions::Blackboard&) {
+      ++legacy_shell_calls;
+      return actions::NodeStatus::SUCCESS;
+    });
+    actions::Blackboard blackboard;
+    actions::ExecutionContext context;
     actions::c11::TreeExecutorSession session(tree, executor, blackboard,
                                               context, limits());
-    (void)session;
-  } catch (const std::invalid_argument&) {
-    rejected = true;
-  }
-  CHECK(rejected);
-  CHECK(legacy_shell_calls == 0);
 
-  HostLeafState state;
-  praktor_c11_bt_host hooks{};
-  hooks.tick_leaf = &customShellTick;
-  hooks.halt_leaf = &customShellHalt;
-  hooks.user = &state;
+    const auto started = std::chrono::steady_clock::now();
+    salts_bt_node_status status = SALTS_BT_RUNNING;
+    do {
+      CHECK(session.tick(&status) == SALTS_OK);
+      if (status == SALTS_BT_RUNNING) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+      }
+      CHECK(std::chrono::steady_clock::now() - started < std::chrono::seconds(5));
+    } while (status == SALTS_BT_RUNNING);
+
+    CHECK(status == SALTS_BT_SUCCESS);
+    CHECK(blackboard.has("shell_output"));
+    CHECK(blackboard.get("shell_output").find("c11-process") != std::string::npos);
+    CHECK(blackboard.get("shell_exit_code") == "0");
+    CHECK(legacy_shell_calls == 0);
+  }
+
   {
+    actions::Tree tree;
+    tree.root.id = "Shell";
+    actions::Executor executor;
+    int legacy_shell_calls = 0;
+    executor.registerTask("Shell", [&legacy_shell_calls](const auto&, actions::Blackboard&) {
+      ++legacy_shell_calls;
+      return actions::NodeStatus::SUCCESS;
+    });
+    actions::Blackboard blackboard;
+    actions::ExecutionContext context;
+    HostLeafState state;
+    praktor_c11_bt_host hooks{};
+    hooks.tick_leaf = &customShellTick;
+    hooks.halt_leaf = &customShellHalt;
+    hooks.user = &state;
+
     actions::c11::TreeExecutorSession session(tree, executor, blackboard,
                                               context, limits(), &hooks);
     salts_bt_node_status status = SALTS_BT_FAILURE;
@@ -524,7 +550,7 @@ int testHostExceptionsStayInsideCAbi() {
 int main() {
   if (testRegisteredLeafResumesRunningState() != 0) return 1;
   if (testRunningRegisteredLeafRequiresHaltHook() != 0) return 1;
-  if (testShellRequiresExplicitManagedHost() != 0) return 1;
+  if (testShellUsesSaltsProcessByDefaultAndAllowsExplicitOverride() != 0) return 1;
   if (testCancelCallsHaltForRegisteredRunningLeaf() != 0) return 1;
   if (testScalarConditionAndSwitchUseBlackboard() != 0) return 1;
   if (testSubTreeExpansionAndCycleRejection() != 0) return 1;
