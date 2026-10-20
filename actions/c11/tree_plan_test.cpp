@@ -62,16 +62,20 @@ int testDurationAndRepeatParameters() {
   Node delay;
   delay.id = "Delay";
   delay.params.emplace("delay_ms", Value{12.0});
+  Node task;
+  task.id = "Task";
+  delay.children.push_back(task);
   repeat.children.push_back(delay);
   tree.root.children.push_back(repeat);
 
   Blackboard blackboard;
   const auto plan = compileTreePlan(tree, blackboard, testLimits());
-  CHECK(plan.nodes.size() == 3u);
+  CHECK(plan.nodes.size() == 4u);
   CHECK(plan.nodes[1].kind == SALTS_BT_NODE_REPEAT);
   CHECK(plan.nodes[1].limit == 3u);
   CHECK(plan.nodes[2].kind == SALTS_BT_NODE_DELAY);
   CHECK(plan.nodes[2].duration_ns == UINT64_C(12000000));
+  CHECK(plan.nodes[3].kind == SALTS_BT_NODE_LEAF);
   return 0;
 }
 
@@ -152,6 +156,9 @@ int testBlackboardIntegralFloatParameters() {
   Node delay;
   delay.id = "Delay";
   delay.params.emplace("delay_ms", Value{std::string("{delay}")});
+  Node task;
+  task.id = "Task";
+  delay.children.push_back(task);
   repeat.children.push_back(delay);
   tree.root.children.push_back(repeat);
 
