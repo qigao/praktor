@@ -160,6 +160,36 @@ void countHalt(void* user, size_t node_index) {
   }
 }
 
+int testShellCancelTerminatesManagedProcess() {
+  actions::Tree tree;
+  tree.root.id = "Shell";
+#if defined(_WIN32)
+  tree.root.params.emplace(
+      "cmd", actions::Value{std::string(
+                 "powershell.exe -NoProfile -Command Start-Sleep -Seconds 30")});
+#else
+  tree.root.params.emplace("cmd", actions::Value{std::string("sleep 30")});
+#endif
+  tree.root.params.emplace("timeout", actions::Value{30000.0});
+  tree.root.params.emplace("stream_output", actions::Value{false});
+
+  actions::Executor executor;
+  actions::Blackboard blackboard;
+  actions::ExecutionContext context;
+  actions::c11::TreeExecutorSession session(tree, executor, blackboard,
+                                            context, limits());
+
+  salts_bt_node_status status = SALTS_BT_FAILURE;
+  CHECK(session.tick(&status) == SALTS_OK);
+  CHECK(status == SALTS_BT_RUNNING);
+
+  const auto started = std::chrono::steady_clock::now();
+  CHECK(session.cancel() == SALTS_OK);
+  CHECK(std::chrono::steady_clock::now() - started < std::chrono::seconds(5));
+  CHECK(session.validate() == SALTS_OK);
+  return 0;
+}
+
 int testCancelCallsHaltForRegisteredRunningLeaf() {
   actions::Tree tree;
   tree.root.id = "Sequence";
@@ -629,6 +659,7 @@ int main() {
   if (testRunningRegisteredLeafRequiresHaltHook() != 0) return 1;
   if (testExecutorOwnedRunningLeafDoesNotReenterDeclinedHook() != 0) return 1;
   if (testShellUsesSaltsProcessByDefaultAndAllowsExplicitOverride() != 0) return 1;
+  if (testShellCancelTerminatesManagedProcess() != 0) return 1;
   if (testCancelCallsHaltForRegisteredRunningLeaf() != 0) return 1;
   if (testScalarConditionAndSwitchUseBlackboard() != 0) return 1;
   if (testSubTreeExpansionAndCycleRejection() != 0) return 1;
