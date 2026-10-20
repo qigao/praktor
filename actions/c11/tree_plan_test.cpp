@@ -120,7 +120,7 @@ int testZeroBudgetControlsStillValidateChildArity() {
     tree.root.id = "WhileDo";
     tree.root.params.emplace("condition", Value{true});
     tree.root.params.emplace("max_iterations", Value{0.0});
-    CHECK(expectInvalid(tree, blackboard) == 1);
+    CHECK(expectInvalid(tree, blackboard) == 0);
   }
   {
     Tree tree;
@@ -129,13 +129,13 @@ int testZeroBudgetControlsStillValidateChildArity() {
     Node only_child;
     only_child.id = "Body";
     tree.root.children.push_back(only_child);
-    CHECK(expectInvalid(tree, blackboard) == 1);
+    CHECK(expectInvalid(tree, blackboard) == 0);
   }
   {
     Tree tree;
     tree.root.id = "KeepRunningUntilFailure";
     tree.root.params.emplace("max_iterations", Value{0.0});
-    CHECK(expectInvalid(tree, blackboard) == 1);
+    CHECK(expectInvalid(tree, blackboard) == 0);
   }
   return 0;
 }
