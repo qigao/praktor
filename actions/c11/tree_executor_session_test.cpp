@@ -391,6 +391,195 @@ int testScalarConditionAndSwitchUseBlackboard() {
   return 0;
 }
 
+int testInTreeIfThenElseConditionMatchesExecutor() {
+  const auto makeTree = [] {
+    actions::Tree tree;
+    tree.root.id = "IfThenElse";
+    actions::Node condition;
+    condition.id = "Condition";
+    actions::Node then_node;
+    then_node.id = "Then";
+    actions::Node else_node;
+    else_node.id = "Else";
+    tree.root.children.push_back(condition);
+    tree.root.children.push_back(then_node);
+    tree.root.children.push_back(else_node);
+    return tree;
+  };
+
+  // SUCCESS condition selects child 1, and the C11 session must agree with
+  // the legacy Executor's in-tree condition form.
+  {
+    actions::Tree tree = makeTree();
+    actions::Executor legacy;
+    int legacy_then = 0;
+    int legacy_else = 0;
+    legacy.registerTask("Condition", [](const auto&, actions::Blackboard&) {
+      return actions::NodeStatus::SUCCESS;
+    });
+    legacy.registerTask("Then", [&legacy_then](const auto&, actions::Blackboard&) {
+      ++legacy_then;
+      return actions::NodeStatus::SUCCESS;
+    });
+    legacy.registerTask("Else", [&legacy_else](const auto&, actions::Blackboard&) {
+      ++legacy_else;
+      return actions::NodeStatus::SUCCESS;
+    });
+    actions::Blackboard legacy_bb;
+    actions::ExecutionContext legacy_context;
+    CHECK(legacy.execute(tree.root, legacy_bb, legacy_context) ==
+          actions::NodeStatus::SUCCESS);
+    CHECK(legacy_then == 1);
+    CHECK(legacy_else == 0);
+
+    actions::Executor c11;
+    int c11_then = 0;
+    int c11_else = 0;
+    c11.registerTask("Condition", [](const auto&, actions::Blackboard&) {
+      return actions::NodeStatus::SUCCESS;
+    });
+    c11.registerTask("Then", [&c11_then](const auto&, actions::Blackboard&) {
+      ++c11_then;
+      return actions::NodeStatus::SUCCESS;
+    });
+    c11.registerTask("Else", [&c11_else](const auto&, actions::Blackboard&) {
+      ++c11_else;
+      return actions::NodeStatus::SUCCESS;
+    });
+    actions::Blackboard c11_bb;
+    actions::ExecutionContext c11_context;
+    actions::c11::TreeExecutorSession session(tree, c11, c11_bb, c11_context,
+                                              limits());
+    salts_bt_node_status status = SALTS_BT_FAILURE;
+    CHECK(session.tick(&status) == SALTS_OK);
+    CHECK(status == SALTS_BT_SUCCESS);
+    CHECK(c11_then == legacy_then);
+    CHECK(c11_else == legacy_else);
+  }
+
+  // FAILURE condition selects the optional else branch.
+  {
+    actions::Tree tree = makeTree();
+    actions::Executor executor;
+    int then_calls = 0;
+    int else_calls = 0;
+    executor.registerTask("Condition", [](const auto&, actions::Blackboard&) {
+      return actions::NodeStatus::FAILURE;
+    });
+    executor.registerTask("Then", [&then_calls](const auto&, actions::Blackboard&) {
+      ++then_calls;
+      return actions::NodeStatus::SUCCESS;
+    });
+    executor.registerTask("Else", [&else_calls](const auto&, actions::Blackboard&) {
+      ++else_calls;
+      return actions::NodeStatus::SUCCESS;
+    });
+    actions::Blackboard blackboard;
+    actions::ExecutionContext context;
+    actions::c11::TreeExecutorSession session(tree, executor, blackboard,
+                                              context, limits());
+    salts_bt_node_status status = SALTS_BT_SUCCESS;
+    CHECK(session.tick(&status) == SALTS_OK);
+    CHECK(status == SALTS_BT_SUCCESS);
+    CHECK(then_calls == 0);
+    CHECK(else_calls == 1);
+  }
+  return 0;
+}
+
+int testWhileDoConditionFormsMatchTerminalEffects() {
+  // Legacy WhileDo evaluates the in-tree condition repeatedly in one call.
+  // The C11 runtime cooperatively yields after each successful body iteration;
+  // its eventual result and observable body effects must match.
+  {
+    actions::Tree tree;
+    tree.root.id = "WhileDo";
+    tree.root.params.emplace("max_iterations", actions::Value{8.0});
+    actions::Node condition;
+    condition.id = "Condition";
+    actions::Node body;
+    body.id = "Body";
+    tree.root.children.push_back(condition);
+    tree.root.children.push_back(body);
+
+    int legacy_condition_calls = 0;
+    int legacy_body_calls = 0;
+    actions::Executor legacy;
+    legacy.registerTask("Condition", [&legacy_condition_calls](
+                                      const auto&, actions::Blackboard&) {
+      ++legacy_condition_calls;
+      return legacy_condition_calls <= 2 ? actions::NodeStatus::SUCCESS
+                                         : actions::NodeStatus::FAILURE;
+    });
+    legacy.registerTask("Body", [&legacy_body_calls](const auto&, actions::Blackboard&) {
+      ++legacy_body_calls;
+      return actions::NodeStatus::SUCCESS;
+    });
+    actions::Blackboard legacy_bb;
+    actions::ExecutionContext legacy_context;
+    CHECK(legacy.execute(tree.root, legacy_bb, legacy_context) ==
+          actions::NodeStatus::SUCCESS);
+    CHECK(legacy_condition_calls == 3);
+    CHECK(legacy_body_calls == 2);
+
+    int c11_condition_calls = 0;
+    int c11_body_calls = 0;
+    actions::Executor c11;
+    c11.registerTask("Condition", [&c11_condition_calls](
+                                   const auto&, actions::Blackboard&) {
+      ++c11_condition_calls;
+      return c11_condition_calls <= 2 ? actions::NodeStatus::SUCCESS
+                                      : actions::NodeStatus::FAILURE;
+    });
+    c11.registerTask("Body", [&c11_body_calls](const auto&, actions::Blackboard&) {
+      ++c11_body_calls;
+      return actions::NodeStatus::SUCCESS;
+    });
+    actions::Blackboard c11_bb;
+    actions::ExecutionContext c11_context;
+    actions::c11::TreeExecutorSession session(tree, c11, c11_bb, c11_context,
+                                              limits());
+    salts_bt_node_status status = SALTS_BT_FAILURE;
+    CHECK(session.tick(&status) == SALTS_OK);
+    CHECK(status == SALTS_BT_RUNNING);
+    CHECK(session.tick(&status) == SALTS_OK);
+    CHECK(status == SALTS_BT_RUNNING);
+    CHECK(session.tick(&status) == SALTS_OK);
+    CHECK(status == SALTS_BT_SUCCESS);
+    CHECK(c11_condition_calls == legacy_condition_calls);
+    CHECK(c11_body_calls == legacy_body_calls);
+  }
+
+  // Scalar condition form counts iterations against the configured budget.
+  {
+    actions::Tree tree;
+    tree.root.id = "WhileDo";
+    tree.root.params.emplace("condition", actions::Value{true});
+    tree.root.params.emplace("max_iterations", actions::Value{2.0});
+    actions::Node body;
+    body.id = "Body";
+    tree.root.children.push_back(body);
+
+    actions::Executor executor;
+    int body_calls = 0;
+    executor.registerTask("Body", [&body_calls](const auto&, actions::Blackboard&) {
+      ++body_calls;
+      return actions::NodeStatus::SUCCESS;
+    });
+    actions::Blackboard blackboard;
+    actions::ExecutionContext context;
+    actions::c11::TreeExecutorSession session(tree, executor, blackboard,
+                                              context, limits());
+    salts_bt_node_status status = SALTS_BT_FAILURE;
+    CHECK(session.tick(&status) == SALTS_OK);
+    CHECK(status == SALTS_BT_RUNNING);
+    CHECK(session.tick(&status) == SALTS_OK);
+    CHECK(status == SALTS_BT_SUCCESS);
+    CHECK(body_calls == 2);
+  }
+  return 0;
+}
+
 int testSubTreeExpansionAndCycleRejection() {
   {
     actions::Tree registered;
@@ -662,6 +851,8 @@ int main() {
   if (testShellCancelTerminatesManagedProcess() != 0) return 1;
   if (testCancelCallsHaltForRegisteredRunningLeaf() != 0) return 1;
   if (testScalarConditionAndSwitchUseBlackboard() != 0) return 1;
+  if (testInTreeIfThenElseConditionMatchesExecutor() != 0) return 1;
+  if (testWhileDoConditionFormsMatchTerminalEffects() != 0) return 1;
   if (testSubTreeExpansionAndCycleRejection() != 0) return 1;
   if (testBuiltInPipelineSequenceHooks() != 0) return 1;
   if (testBuiltInConsumeQueue() != 0) return 1;
