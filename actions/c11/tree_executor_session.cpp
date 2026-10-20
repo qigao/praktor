@@ -112,6 +112,37 @@ long long parseInteger(const std::string& raw) {
   }
 }
 
+int resolveSwitchValue(const actions::Node& source,
+                       const actions::Blackboard& blackboard) {
+  const auto it = source.params.find("variable");
+  if (it == source.params.end()) {
+    throw std::invalid_argument("Switch requires parameter 'variable'");
+  }
+
+  if (std::holds_alternative<std::string>(it->second)) {
+    const std::string& original = std::get<std::string>(it->second);
+    std::string raw = resolveStringValue(it->second, blackboard);
+    // The legacy Executor accepts a bare Blackboard key as well as {key}.
+    if (raw == original && blackboard.has(raw)) {
+      raw = blackboard.get(raw);
+    }
+    return static_cast<int>(parseInteger(raw));
+  }
+
+  if (std::holds_alternative<double>(it->second)) {
+    const double number = std::get<double>(it->second);
+    const double fractional = number - std::trunc(number);
+    if (!std::isfinite(number) || std::abs(fractional) > 0.0 ||
+        number < static_cast<double>((std::numeric_limits<int>::min)()) ||
+        number > static_cast<double>((std::numeric_limits<int>::max)())) {
+      throw std::invalid_argument("Switch variable must resolve to a 32-bit integer");
+    }
+    return static_cast<int>(number);
+  }
+
+  throw std::invalid_argument("Switch variable must be an integer, not a boolean");
+}
+
 
 struct JsonValueDeleter {
   void operator()(json_value_t* value) const noexcept {
@@ -946,6 +977,20 @@ struct TreeExecutorSession::Impl {
         *out_status = SALTS_BT_FAILURE;
         return SALTS_OK;
       }
+      if (action == TreePlanTerminalAction::SwitchFailure) {
+        try {
+          const auto* source = nodeAt(index);
+          if (source == nullptr) return SALTS_EINVAL;
+          // Preserve legacy ordering: validate the selector before concluding
+          // that an empty Switch has no child and therefore fails.
+          (void)resolveSwitchValue(*source, blackboard);
+          *out_status = SALTS_BT_FAILURE;
+          return SALTS_OK;
+        } catch (...) {
+          rememberCurrentException("C11 empty Switch selector failed");
+          return SALTS_EINVAL;
+        }
+      }
     }
     try {
       const actions::Node* source = nodeAt(index);
@@ -1107,47 +1152,9 @@ struct TreeExecutorSession::Impl {
       }
       const auto* source = nodeAt(index);
       if (source == nullptr) return SALTS_EINVAL;
-      const auto it = source->params.find("variable");
-      if (it == source->params.end()) {
-        last_error = "Switch requires parameter 'variable'";
-        return SALTS_EINVAL;
-      }
-
-      std::string raw;
-      if (std::holds_alternative<std::string>(it->second)) {
-        raw = resolveStringValue(it->second, blackboard);
-        if (raw == std::get<std::string>(it->second) && blackboard.has(raw)) {
-          raw = blackboard.get(raw);
-        }
-      } else if (std::holds_alternative<double>(it->second)) {
-        const double number = std::get<double>(it->second);
-        const double fractional = number - std::trunc(number);
-        if (!std::isfinite(number) || std::abs(fractional) > 0.0 ||
-            number < static_cast<double>((std::numeric_limits<int>::min)()) ||
-            number > static_cast<double>((std::numeric_limits<int>::max)())) {
-          last_error = "Switch variable must resolve to an integer";
-          return SALTS_EINVAL;
-        }
-        const auto parsed = static_cast<long long>(number);
-        *out_child_index = parsed < 0 ? source->children.size()
-                                      : static_cast<unsigned long long>(parsed) >
-                                                static_cast<unsigned long long>(
-                                                    (std::numeric_limits<size_t>::max)())
-                                            ? source->children.size()
-                                            : static_cast<size_t>(parsed);
-        return SALTS_OK;
-      } else {
-        last_error = "Switch variable must not be a boolean";
-        return SALTS_EINVAL;
-      }
-
-      const long long parsed = parseInteger(raw);
+      const int parsed = resolveSwitchValue(*source, blackboard);
       *out_child_index = parsed < 0 ? source->children.size()
-                                    : static_cast<unsigned long long>(parsed) >
-                                              static_cast<unsigned long long>(
-                                                  (std::numeric_limits<size_t>::max)())
-                                          ? source->children.size()
-                                          : static_cast<size_t>(parsed);
+                                    : static_cast<size_t>(parsed);
       return SALTS_OK;
     } catch (...) {
       rememberCurrentException("C11 Switch selector failed");
