@@ -1,8 +1,8 @@
 #ifndef PRAKTOR_ACTIONS_C11_TREE_PLAN_HPP
 #define PRAKTOR_ACTIONS_C11_TREE_PLAN_HPP
 
-#include "actions/core/ast.hpp"
-#include "actions/core/executor.hpp"
+#include "core/ast.hpp"
+#include "core/executor.hpp"
 #include "tree_adapter.h"
 
 #include <vector>
