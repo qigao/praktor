@@ -683,6 +683,94 @@ int testWhileDoConditionFormsMatchTerminalEffects() {
   return 0;
 }
 
+int testRunOnceAndKeepRunningStateMatchExecutor() {
+  {
+    actions::Tree tree;
+    tree.root.id = "RunOnce";
+    actions::Node child;
+    child.id = "CachedFailure";
+    tree.root.children.push_back(child);
+
+    actions::Executor legacy;
+    int legacy_calls = 0;
+    legacy.registerTask("CachedFailure", [&legacy_calls](const auto&,
+                                                          actions::Blackboard&) {
+      ++legacy_calls;
+      return actions::NodeStatus::FAILURE;
+    });
+    actions::Blackboard legacy_bb;
+    actions::ExecutionContext legacy_context;
+    CHECK(legacy.execute(tree.root, legacy_bb, legacy_context) ==
+          actions::NodeStatus::FAILURE);
+    CHECK(legacy.execute(tree.root, legacy_bb, legacy_context) ==
+          actions::NodeStatus::FAILURE);
+    CHECK(legacy_calls == 1);
+
+    actions::Executor c11;
+    int c11_calls = 0;
+    c11.registerTask("CachedFailure", [&c11_calls](const auto&,
+                                                    actions::Blackboard&) {
+      ++c11_calls;
+      return actions::NodeStatus::FAILURE;
+    });
+    actions::Blackboard c11_bb;
+    actions::ExecutionContext c11_context;
+    actions::c11::TreeExecutorSession session(tree, c11, c11_bb, c11_context,
+                                              limits());
+    salts_bt_node_status status = SALTS_BT_SUCCESS;
+    CHECK(session.tick(&status) == SALTS_OK);
+    CHECK(status == SALTS_BT_FAILURE);
+    CHECK(session.tick(&status) == SALTS_OK);
+    CHECK(status == SALTS_BT_FAILURE);
+    CHECK(c11_calls == legacy_calls);
+  }
+
+  {
+    actions::Tree tree;
+    tree.root.id = "KeepRunningUntilFailure";
+    tree.root.params.emplace("max_iterations", actions::Value{3.0});
+    actions::Node child;
+    child.id = "RepeatUntilFailure";
+    tree.root.children.push_back(child);
+
+    actions::Executor legacy;
+    int legacy_calls = 0;
+    legacy.registerTask("RepeatUntilFailure", [&legacy_calls](const auto&,
+                                                               actions::Blackboard&) {
+      ++legacy_calls;
+      return legacy_calls < 3 ? actions::NodeStatus::SUCCESS
+                              : actions::NodeStatus::FAILURE;
+    });
+    actions::Blackboard legacy_bb;
+    actions::ExecutionContext legacy_context;
+    CHECK(legacy.execute(tree.root, legacy_bb, legacy_context) ==
+          actions::NodeStatus::SUCCESS);
+    CHECK(legacy_calls == 3);
+
+    actions::Executor c11;
+    int c11_calls = 0;
+    c11.registerTask("RepeatUntilFailure", [&c11_calls](const auto&,
+                                                         actions::Blackboard&) {
+      ++c11_calls;
+      return c11_calls < 3 ? actions::NodeStatus::SUCCESS
+                           : actions::NodeStatus::FAILURE;
+    });
+    actions::Blackboard c11_bb;
+    actions::ExecutionContext c11_context;
+    actions::c11::TreeExecutorSession session(tree, c11, c11_bb, c11_context,
+                                              limits());
+    salts_bt_node_status status = SALTS_BT_FAILURE;
+    CHECK(session.tick(&status) == SALTS_OK);
+    CHECK(status == SALTS_BT_RUNNING);
+    CHECK(session.tick(&status) == SALTS_OK);
+    CHECK(status == SALTS_BT_RUNNING);
+    CHECK(session.tick(&status) == SALTS_OK);
+    CHECK(status == SALTS_BT_SUCCESS);
+    CHECK(c11_calls == legacy_calls);
+  }
+  return 0;
+}
+
 int testSubTreeExpansionAndCycleRejection() {
   {
     actions::Tree registered;
@@ -1043,6 +1131,7 @@ int main() {
   if (testScalarConditionAndSwitchUseBlackboard() != 0) return 1;
   if (testInTreeIfThenElseConditionMatchesExecutor() != 0) return 1;
   if (testWhileDoConditionFormsMatchTerminalEffects() != 0) return 1;
+  if (testRunOnceAndKeepRunningStateMatchExecutor() != 0) return 1;
   if (testSubTreeExpansionAndCycleRejection() != 0) return 1;
   if (testBuiltInPipelineSequenceHooks() != 0) return 1;
   if (testBuiltInConsumeQueue() != 0) return 1;
