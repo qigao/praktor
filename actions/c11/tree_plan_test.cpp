@@ -243,6 +243,16 @@ int testRejectsInvalidInputs() {
     Tree tree;
     tree.root.id = "Switch";
     tree.root.params.emplace("variable", Value{0.0});
+    const auto plan = compileTreePlan(tree, blackboard, testLimits());
+    CHECK(plan.nodes.size() == 1u);
+    CHECK(plan.nodes[0].kind == SALTS_BT_NODE_LEAF);
+    CHECK(plan.terminal_actions.size() == 1u);
+    CHECK(plan.terminal_actions[0] ==
+          actions::c11::TreePlanTerminalAction::SwitchFailure);
+  }
+  {
+    Tree tree;
+    tree.root.id = "Switch";
     CHECK(expectInvalid(tree, blackboard) == 0);
   }
   {
