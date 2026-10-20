@@ -203,6 +203,12 @@ void appendNode(TreePlan &plan, const Node &node, size_t parent_index,
     desc.condition_callback = true;
     break;
   case SALTS_BT_NODE_WHILE_DO: {
+    const bool scalar_condition = findParam(node, "condition") != nullptr;
+    const size_t expected_children = scalar_condition ? 1u : 2u;
+    if (node.children.size() != expected_children) {
+      throw std::invalid_argument(
+          "WhileDo must have exactly 1 child with a scalar condition, or 2 children with an in-tree condition");
+    }
     const int64_t iterations =
         readIntegerParam(node, blackboard, "max_iterations", 100);
     if (iterations < 0 ||
@@ -213,15 +219,14 @@ void appendNode(TreePlan &plan, const Node &node, size_t parent_index,
     if (iterations == 0) {
       /*
        * Salts rejects a zero-limit WhileDo constructor, but the legacy
-       * Executor returns SUCCESS without evaluating either condition or body.
-       * Lower that constant no-op into a synthetic SUCCESS leaf; the session
-       * recognizes it through succeed_without_tick and never invokes the user.
+       * Executor validates child arity and then returns SUCCESS without
+       * evaluating condition or body. Lower that no-op into a synthetic leaf.
        */
       desc.kind = SALTS_BT_NODE_LEAF;
       skip_children = true;
       terminal_action = TreePlanTerminalAction::Success;
     } else {
-      desc.condition_callback = findParam(node, "condition") != nullptr;
+      desc.condition_callback = scalar_condition;
       desc.limit = static_cast<size_t>(iterations);
     }
     break;
@@ -245,6 +250,10 @@ void appendNode(TreePlan &plan, const Node &node, size_t parent_index,
     break;
   }
   case SALTS_BT_NODE_KEEP_RUNNING_UNTIL_FAILURE: {
+    if (node.children.size() != 1u) {
+      throw std::invalid_argument(
+          "KeepRunningUntilFailure must have exactly 1 child");
+    }
     const int64_t count =
         readIntegerParam(node, blackboard, "max_iterations", 1000);
     if (count < 0 ||
@@ -252,7 +261,7 @@ void appendNode(TreePlan &plan, const Node &node, size_t parent_index,
       throw std::invalid_argument("KeepRunningUntilFailure max_iterations must be non-negative and within the tree limit");
     }
     if (count == 0) {
-      /* The legacy executor runs zero iterations and returns FAILURE. */
+      /* The legacy executor validates one child, runs zero iterations and returns FAILURE. */
       desc.kind = SALTS_BT_NODE_LEAF;
       skip_children = true;
       terminal_action = TreePlanTerminalAction::Failure;

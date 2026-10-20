@@ -113,6 +113,33 @@ int testZeroBudgetKeepRunningLowersToNoOpFailureLeaf() {
   return 0;
 }
 
+int testZeroBudgetControlsStillValidateChildArity() {
+  Blackboard blackboard;
+  {
+    Tree tree;
+    tree.root.id = "WhileDo";
+    tree.root.params.emplace("condition", Value{true});
+    tree.root.params.emplace("max_iterations", Value{0.0});
+    CHECK(expectInvalid(tree, blackboard) == 1);
+  }
+  {
+    Tree tree;
+    tree.root.id = "WhileDo";
+    tree.root.params.emplace("max_iterations", Value{0.0});
+    Node only_child;
+    only_child.id = "Body";
+    tree.root.children.push_back(only_child);
+    CHECK(expectInvalid(tree, blackboard) == 1);
+  }
+  {
+    Tree tree;
+    tree.root.id = "KeepRunningUntilFailure";
+    tree.root.params.emplace("max_iterations", Value{0.0});
+    CHECK(expectInvalid(tree, blackboard) == 1);
+  }
+  return 0;
+}
+
 int testBlackboardIntegralFloatParameters() {
   Tree tree;
   tree.root.id = "Sequence";
@@ -190,6 +217,7 @@ int main() {
   if (testDurationAndRepeatParameters() != 0) return 1;
   if (testZeroBudgetWhileDoLowersToNoOpLeaf() != 0) return 1;
   if (testZeroBudgetKeepRunningLowersToNoOpFailureLeaf() != 0) return 1;
+  if (testZeroBudgetControlsStillValidateChildArity() != 0) return 1;
   if (testBlackboardIntegralFloatParameters() != 0) return 1;
   if (testRejectsInvalidInputs() != 0) return 1;
   return 0;
