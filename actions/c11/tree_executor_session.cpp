@@ -59,12 +59,30 @@ bool conditionValue(const actions::Value& value,
 }
 
 long long parseInteger(const std::string& raw) {
-  size_t consumed = 0u;
-  const long long value = std::stoll(raw, &consumed, 10);
-  if (consumed != raw.size()) {
+  try {
+    size_t consumed = 0u;
+    const long long integer = std::stoll(raw, &consumed, 10);
+    if (consumed == raw.size()) return integer;
+  } catch (const std::exception&) {
+    // Try the legacy executor's integral floating-point string form below.
+  }
+
+  try {
+    size_t consumed = 0u;
+    const double number = std::stod(raw, &consumed);
+    const double fractional = number - std::trunc(number);
+    const double upper_exclusive =
+        -static_cast<double>(std::numeric_limits<long long>::min());
+    if (consumed != raw.size() || !std::isfinite(number) ||
+        std::abs(fractional) > 0.0 ||
+        number < static_cast<double>(std::numeric_limits<long long>::min()) ||
+        number >= upper_exclusive) {
+      throw std::invalid_argument("not an integral number");
+    }
+    return static_cast<long long>(number);
+  } catch (const std::exception&) {
     throw std::invalid_argument("switch variable is not an integer: " + raw);
   }
-  return value;
 }
 
 } // namespace

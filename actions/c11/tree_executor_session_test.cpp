@@ -122,10 +122,134 @@ int testShellRequiresExplicitManagedHost() {
   return 0;
 }
 
+
+int testScalarConditionAndSwitchUseBlackboard() {
+  {
+    actions::Tree tree;
+    tree.root.id = "IfThenElse";
+    tree.root.params.emplace("condition", actions::Value{true});
+    actions::Node then_node;
+    then_node.id = "Then";
+    actions::Node else_node;
+    else_node.id = "Else";
+    tree.root.children.push_back(then_node);
+    tree.root.children.push_back(else_node);
+
+    actions::Executor executor;
+    int then_calls = 0;
+    int else_calls = 0;
+    executor.registerTask("Then", [&then_calls](const auto&, actions::Blackboard&) {
+      ++then_calls;
+      return actions::NodeStatus::SUCCESS;
+    });
+    executor.registerTask("Else", [&else_calls](const auto&, actions::Blackboard&) {
+      ++else_calls;
+      return actions::NodeStatus::SUCCESS;
+    });
+    actions::Blackboard blackboard;
+    actions::ExecutionContext context;
+    actions::c11::TreeExecutorSession session(tree, executor, blackboard,
+                                              context, limits());
+    salts_bt_node_status status = SALTS_BT_FAILURE;
+    CHECK(session.tick(&status) == SALTS_OK);
+    CHECK(status == SALTS_BT_SUCCESS);
+    CHECK(then_calls == 1);
+    CHECK(else_calls == 0);
+  }
+
+  {
+    actions::Tree tree;
+    tree.root.id = "Switch";
+    tree.root.params.emplace("variable", actions::Value{std::string("{choice}")});
+    actions::Node first;
+    first.id = "First";
+    actions::Node second;
+    second.id = "Second";
+    tree.root.children.push_back(first);
+    tree.root.children.push_back(second);
+
+    actions::Executor executor;
+    int first_calls = 0;
+    int second_calls = 0;
+    executor.registerTask("First", [&first_calls](const auto&, actions::Blackboard&) {
+      ++first_calls;
+      return actions::NodeStatus::SUCCESS;
+    });
+    executor.registerTask("Second", [&second_calls](const auto&, actions::Blackboard&) {
+      ++second_calls;
+      return actions::NodeStatus::SUCCESS;
+    });
+    actions::Blackboard blackboard;
+    blackboard.set("choice", "1.0");
+    actions::ExecutionContext context;
+    actions::c11::TreeExecutorSession session(tree, executor, blackboard,
+                                              context, limits());
+    salts_bt_node_status status = SALTS_BT_FAILURE;
+    CHECK(session.tick(&status) == SALTS_OK);
+    CHECK(status == SALTS_BT_SUCCESS);
+    CHECK(first_calls == 0);
+    CHECK(second_calls == 1);
+  }
+  return 0;
+}
+
+int throwingParallelEnter(void*, size_t, size_t, bool) {
+  throw std::runtime_error("test parallel enter exception");
+}
+
+int noOpParallelStep(void*, size_t, size_t, salts_bt_node_status) {
+  return SALTS_OK;
+}
+
+int noOpParallelJoin(void*, size_t, salts_bt_node_status) {
+  return SALTS_OK;
+}
+
+int noOpParallelFinish(void*, size_t, size_t, salts_bt_node_status) {
+  return SALTS_OK;
+}
+
+int testHostExceptionsStayInsideCAbi() {
+  actions::Tree tree;
+  tree.root.id = "Parallel";
+  actions::Node first;
+  first.id = "First";
+  actions::Node second;
+  second.id = "Second";
+  tree.root.children.push_back(first);
+  tree.root.children.push_back(second);
+
+  actions::Executor executor;
+  executor.registerTask("First", [](const auto&, actions::Blackboard&) {
+    return actions::NodeStatus::SUCCESS;
+  });
+  executor.registerTask("Second", [](const auto&, actions::Blackboard&) {
+    return actions::NodeStatus::SUCCESS;
+  });
+
+  praktor_c11_bt_host hooks{};
+  hooks.parallel_enter = &throwingParallelEnter;
+  hooks.parallel_step = &noOpParallelStep;
+  hooks.parallel_join = &noOpParallelJoin;
+  hooks.parallel_finish = &noOpParallelFinish;
+  actions::Blackboard blackboard;
+  actions::ExecutionContext context;
+  actions::c11::TreeExecutorSession session(tree, executor, blackboard,
+                                            context, limits(), &hooks);
+
+  salts_bt_node_status status = SALTS_BT_FAILURE;
+  CHECK(session.tick(&status) != SALTS_OK);
+  CHECK(session.lastError().find("Parallel enter hook failed") != std::string::npos);
+  return 0;
+}
+
+
 } // namespace
 
 int main() {
   if (testRegisteredLeafResumesRunningState() != 0) return 1;
   if (testShellRequiresExplicitManagedHost() != 0) return 1;
+  if (testScalarConditionAndSwitchUseBlackboard() != 0) return 1;
+  if (testHostExceptionsStayInsideCAbi() != 0) return 1;
   return 0;
 }
