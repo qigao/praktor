@@ -20,11 +20,21 @@ namespace actions::c11 {
  * Blackboard/Process ownership. SubTree is rejected until the Praktor plan
  * compiler can expand named trees into independent node instances.
  */
+enum class TreePlanTerminalAction : unsigned char {
+  Runtime = 0,
+  Success = 1,
+  Failure = 2
+};
+
 struct TreePlan {
   std::vector<praktor_c11_bt_node_desc> nodes;
   std::vector<const actions::Node *> source_nodes;
-  /* True for legacy no-op controls lowered to synthetic SUCCESS leaves. */
-  std::vector<unsigned char> succeed_without_tick;
+  /*
+   * TerminalAction != Runtime means the source control node is a constant
+   * no-op under the compiled parameter snapshot, lowered to a leaf because
+   * the C runtime's typed constructor rejects its zero iteration limit.
+   */
+  std::vector<TreePlanTerminalAction> terminal_actions;
 };
 
 /*

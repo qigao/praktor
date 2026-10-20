@@ -925,10 +925,16 @@ struct TreeExecutorSession::Impl {
 
   int tickLeaf(size_t index, salts_bt_node_status* out_status) noexcept {
     if (out_status == nullptr || nodeAt(index) == nullptr) return SALTS_EINVAL;
-    if (index < compiled_plan.succeed_without_tick.size() &&
-        compiled_plan.succeed_without_tick[index] != 0u) {
-      *out_status = SALTS_BT_SUCCESS;
-      return SALTS_OK;
+    if (index < compiled_plan.terminal_actions.size()) {
+      const TreePlanTerminalAction action = compiled_plan.terminal_actions[index];
+      if (action == TreePlanTerminalAction::Success) {
+        *out_status = SALTS_BT_SUCCESS;
+        return SALTS_OK;
+      }
+      if (action == TreePlanTerminalAction::Failure) {
+        *out_status = SALTS_BT_FAILURE;
+        return SALTS_OK;
+      }
     }
     try {
       const actions::Node* source = nodeAt(index);

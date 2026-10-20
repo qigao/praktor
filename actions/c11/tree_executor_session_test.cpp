@@ -590,6 +590,43 @@ int testWhileDoConditionFormsMatchTerminalEffects() {
     CHECK(c11_body_calls == 0);
   }
 
+  // Zero-budget KeepRunningUntilFailure returns FAILURE without ticking body.
+  {
+    actions::Tree tree;
+    tree.root.id = "KeepRunningUntilFailure";
+    tree.root.params.emplace("max_iterations", actions::Value{0.0});
+    actions::Node body;
+    body.id = "Body";
+    tree.root.children.push_back(body);
+
+    actions::Executor legacy;
+    int legacy_body_calls = 0;
+    legacy.registerTask("Body", [&legacy_body_calls](const auto&, actions::Blackboard&) {
+      ++legacy_body_calls;
+      return actions::NodeStatus::SUCCESS;
+    });
+    actions::Blackboard legacy_bb;
+    actions::ExecutionContext legacy_context;
+    CHECK(legacy.execute(tree.root, legacy_bb, legacy_context) ==
+          actions::NodeStatus::FAILURE);
+    CHECK(legacy_body_calls == 0);
+
+    actions::Executor c11;
+    int c11_body_calls = 0;
+    c11.registerTask("Body", [&c11_body_calls](const auto&, actions::Blackboard&) {
+      ++c11_body_calls;
+      return actions::NodeStatus::SUCCESS;
+    });
+    actions::Blackboard c11_bb;
+    actions::ExecutionContext c11_context;
+    actions::c11::TreeExecutorSession session(tree, c11, c11_bb, c11_context,
+                                              limits());
+    salts_bt_node_status status = SALTS_BT_SUCCESS;
+    CHECK(session.tick(&status) == SALTS_OK);
+    CHECK(status == SALTS_BT_FAILURE);
+    CHECK(c11_body_calls == 0);
+  }
+
   // Scalar condition form counts iterations against the configured budget.
   {
     actions::Tree tree;

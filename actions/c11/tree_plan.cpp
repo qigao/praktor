@@ -187,7 +187,7 @@ void appendNode(TreePlan &plan, const Node &node, size_t parent_index,
   const salts_bt_node_kind kind = mapNodeKind(node);
   praktor_c11_bt_node_desc desc{};
   bool skip_children = false;
-  bool succeed_without_tick = false;
+  TreePlanTerminalAction terminal_action = TreePlanTerminalAction::Runtime;
   desc.parent_index = parent_index;
   desc.kind = kind;
 
@@ -219,7 +219,7 @@ void appendNode(TreePlan &plan, const Node &node, size_t parent_index,
        */
       desc.kind = SALTS_BT_NODE_LEAF;
       skip_children = true;
-      succeed_without_tick = true;
+      terminal_action = TreePlanTerminalAction::Success;
     } else {
       desc.condition_callback = findParam(node, "condition") != nullptr;
       desc.limit = static_cast<size_t>(iterations);
@@ -247,11 +247,18 @@ void appendNode(TreePlan &plan, const Node &node, size_t parent_index,
   case SALTS_BT_NODE_KEEP_RUNNING_UNTIL_FAILURE: {
     const int64_t count =
         readIntegerParam(node, blackboard, "max_iterations", 1000);
-    if (count <= 0 ||
+    if (count < 0 ||
         static_cast<uint64_t>(count) > limits.max_control_iterations) {
-      throw std::invalid_argument("KeepRunningUntilFailure max_iterations must be positive and within the tree limit");
+      throw std::invalid_argument("KeepRunningUntilFailure max_iterations must be non-negative and within the tree limit");
     }
-    desc.limit = static_cast<size_t>(count);
+    if (count == 0) {
+      /* The legacy executor runs zero iterations and returns FAILURE. */
+      desc.kind = SALTS_BT_NODE_LEAF;
+      skip_children = true;
+      terminal_action = TreePlanTerminalAction::Failure;
+    } else {
+      desc.limit = static_cast<size_t>(count);
+    }
     break;
   }
   case SALTS_BT_NODE_TIMEOUT:
@@ -280,7 +287,7 @@ void appendNode(TreePlan &plan, const Node &node, size_t parent_index,
 
   plan.nodes.push_back(desc);
   plan.source_nodes.push_back(&node);
-  plan.succeed_without_tick.push_back(succeed_without_tick ? 1u : 0u);
+  plan.terminal_actions.push_back(terminal_action);
 
   if (skip_children) return;
   for (const Node &child : node.children) {
