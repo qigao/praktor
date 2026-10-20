@@ -613,7 +613,9 @@ struct TreeExecutorSession::Impl {
       else state.stderr_read_pending = true;
       return SALTS_OK;
     }
-    if (result.status == CFLOW_PROCESS_SUBMIT_FULL) return SALTS_OK;
+    if (result.status == CFLOW_PROCESS_SUBMIT_FULL ||
+        result.status == CFLOW_PROCESS_SUBMIT_LEASE_IN_USE)
+      return SALTS_OK;
     if (result.status == CFLOW_PROCESS_SUBMIT_CLOSED && state.close_requested) {
       if (is_stdout) state.stdout_eof = true;
       else state.stderr_eof = true;
@@ -859,6 +861,12 @@ struct TreeExecutorSession::Impl {
       const bool success = state.result.state == SALTS_PROCESS_EXITED &&
                            state.result.exit_code == 0;
       const int exit_code = state.result.exit_code;
+      if (!success && state.failure_reason.empty()) {
+        state.failure_reason =
+            state.result.state == SALTS_PROCESS_TIMED_OUT
+                ? "Shell command timed out"
+                : "Shell command exited unsuccessfully";
+      }
       const int cleanup_status = closeShellProcess(state, false);
       if (cleanup_status != SALTS_OK) {
         last_error = state.failure_reason.empty()
@@ -866,12 +874,6 @@ struct TreeExecutorSession::Impl {
                          : state.failure_reason;
       }
       publishShellResult(state, exit_code, success && cleanup_status == SALTS_OK);
-      if (!success && state.failure_reason.empty()) {
-        state.failure_reason =
-            state.result.state == SALTS_PROCESS_TIMED_OUT
-                ? "Shell command timed out"
-                : "Shell command exited unsuccessfully";
-      }
       if (!success || cleanup_status != SALTS_OK) {
         if (!state.failure_reason.empty()) last_error = state.failure_reason;
       }
@@ -893,29 +895,64 @@ struct TreeExecutorSession::Impl {
     if (out_status == nullptr || nodeAt(index) == nullptr) return SALTS_EINVAL;
     try {
       const actions::Node* source = nodeAt(index);
-      const LeafOwner previous_owner = leaf_owners[index];
+      const LeafOwner owner = leaf_owners[index];
+
+      // Once a leaf is RUNNING, keep the selected execution owner. In
+      // particular, do not re-call a dispatcher hook and accidentally move
+      // an Executor leaf into a host-owned activation (or vice versa).
+      if (owner == LeafOwner::SaltsProcess) {
+        return tickShell(index, *source, out_status);
+      }
+      if (owner == LeafOwner::Executor) {
+        *out_status = toSaltsStatus(executor.execute(*source, blackboard,
+                                                     execution_context));
+        if (*out_status == SALTS_BT_RUNNING && hooks.halt_leaf == nullptr) {
+          last_error = "registered action leaf '" + source->id +
+                       "' returned RUNNING without a halt_leaf hook";
+          leaf_owners[index] = LeafOwner::None;
+          return SALTS_ENOTSUP;
+        }
+        leaf_owners[index] =
+            (*out_status == SALTS_BT_RUNNING) ? LeafOwner::Executor : LeafOwner::None;
+        return SALTS_OK;
+      }
+      if (owner == LeafOwner::HostHook) {
+        const int host_status = hooks.tick_leaf == nullptr
+            ? SALTS_ENOTSUP
+            : hooks.tick_leaf(hooks.user, index, out_status);
+        if (host_status == SALTS_ENOTSUP) {
+          haltLeaf(index);
+          last_error = "host leaf hook declined active node '" + source->id +
+                       "'; refusing to switch execution owners";
+          return SALTS_ENOTSUP;
+        }
+        if (host_status != SALTS_OK) {
+          haltLeaf(index);
+          last_error = "host leaf hook returned status " + std::to_string(host_status) +
+                       " for node '" + source->id + "'";
+          return host_status;
+        }
+        if (*out_status != SALTS_BT_SUCCESS &&
+            *out_status != SALTS_BT_FAILURE &&
+            *out_status != SALTS_BT_RUNNING) {
+          haltLeaf(index);
+          last_error = "host leaf hook returned an invalid node status for '" +
+                       source->id + "'";
+          return SALTS_EINVAL;
+        }
+        leaf_owners[index] =
+            (*out_status == SALTS_BT_RUNNING) ? LeafOwner::HostHook : LeafOwner::None;
+        return SALTS_OK;
+      }
+
+      // An inactive leaf may be claimed by the optional host hook. ENOTSUP
+      // means "not mine"; other errors are authoritative and never fall back.
       if (hooks.tick_leaf != nullptr) {
         const int host_status = hooks.tick_leaf(hooks.user, index, out_status);
-        if (host_status == SALTS_ENOTSUP) {
-          if (previous_owner == LeafOwner::HostHook ||
-              previous_owner == LeafOwner::Executor) {
-            haltLeaf(index);
-            last_error = "host leaf hook declined active node '" + source->id +
-                         "'; refusing to switch execution owners";
-            return SALTS_ENOTSUP;
-          }
-          if (source->id == "Shell") {
-            return tickShell(index, *source, out_status);
-          }
-        } else if (host_status == SALTS_OK) {
+        if (host_status == SALTS_OK) {
           if (*out_status != SALTS_BT_SUCCESS &&
               *out_status != SALTS_BT_FAILURE &&
               *out_status != SALTS_BT_RUNNING) {
-            if (hooks.halt_leaf != nullptr) {
-              try { hooks.halt_leaf(hooks.user, index); }
-              catch (...) { rememberCurrentException("C11 host leaf halt failed"); }
-            }
-            leaf_owners[index] = LeafOwner::None;
             last_error = "host leaf hook returned an invalid node status for '" +
                          source->id + "'";
             return SALTS_EINVAL;
@@ -923,12 +960,8 @@ struct TreeExecutorSession::Impl {
           leaf_owners[index] =
               (*out_status == SALTS_BT_RUNNING) ? LeafOwner::HostHook : LeafOwner::None;
           return SALTS_OK;
-        } else {
-          if (hooks.halt_leaf != nullptr) {
-            try { hooks.halt_leaf(hooks.user, index); }
-            catch (...) { rememberCurrentException("C11 host leaf halt failed"); }
-          }
-          leaf_owners[index] = LeafOwner::None;
+        }
+        if (host_status != SALTS_ENOTSUP) {
           last_error = "host leaf hook returned status " + std::to_string(host_status) +
                        " for node '" + source->id + "'";
           return host_status;
@@ -941,12 +974,9 @@ struct TreeExecutorSession::Impl {
 
       *out_status = toSaltsStatus(executor.execute(*source, blackboard,
                                                    execution_context));
-      // The legacy TaskFunction API has no independent halt slot. A caller
-      // must opt into a halt hook before allowing any registered leaf to RUN.
       if (*out_status == SALTS_BT_RUNNING && hooks.halt_leaf == nullptr) {
         last_error = "registered action leaf '" + source->id +
                      "' returned RUNNING without a halt_leaf hook";
-        leaf_owners[index] = LeafOwner::None;
         return SALTS_ENOTSUP;
       }
       leaf_owners[index] =
