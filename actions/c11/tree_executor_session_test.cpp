@@ -408,6 +408,29 @@ int testBuiltInConsumeQueue() {
   return 0;
 }
 
+int testConsumeQueueRejectsMalformedQueue() {
+  actions::Tree tree;
+  tree.root.id = "ConsumeQueue";
+  tree.root.params.emplace("queue_key", actions::Value{std::string("queue")});
+  actions::Node child;
+  child.id = "ProcessItem";
+  tree.root.children.push_back(child);
+
+  actions::Executor executor;
+  executor.registerTask("ProcessItem", [](const auto&, actions::Blackboard&) {
+    return actions::NodeStatus::SUCCESS;
+  });
+  actions::Blackboard blackboard;
+  blackboard.set("queue", "{not-an-array}");
+  actions::ExecutionContext context;
+  actions::c11::TreeExecutorSession session(tree, executor, blackboard,
+                                            context, limits());
+  salts_bt_node_status status = SALTS_BT_FAILURE;
+  CHECK(session.tick(&status) == SALTS_EIO);
+  CHECK(session.lastError().find("valid JSON") != std::string::npos);
+  return 0;
+}
+
 int testBuiltInEntryUpdatedHook() {
   actions::Tree tree;
   tree.root.id = "EntryUpdated";
@@ -507,6 +530,7 @@ int main() {
   if (testSubTreeExpansionAndCycleRejection() != 0) return 1;
   if (testBuiltInPipelineSequenceHooks() != 0) return 1;
   if (testBuiltInConsumeQueue() != 0) return 1;
+  if (testConsumeQueueRejectsMalformedQueue() != 0) return 1;
   if (testBuiltInEntryUpdatedHook() != 0) return 1;
   if (testHostExceptionsStayInsideCAbi() != 0) return 1;
   return 0;

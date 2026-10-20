@@ -78,10 +78,10 @@ long long parseInteger(const std::string& raw) {
     const double number = std::stod(raw, &consumed);
     const double fractional = number - std::trunc(number);
     const double upper_exclusive =
-        -static_cast<double>(std::numeric_limits<long long>::min());
+        -static_cast<double>((std::numeric_limits<long long>::min)());
     if (consumed != raw.size() || !std::isfinite(number) ||
         std::abs(fractional) > 0.0 ||
-        number < static_cast<double>(std::numeric_limits<long long>::min()) ||
+        number < static_cast<double>((std::numeric_limits<long long>::min)()) ||
         number >= upper_exclusive) {
       throw std::invalid_argument("not an integral number");
     }
@@ -115,12 +115,20 @@ std::string serializeJsonValue(const json_value_t* value) {
 }
 
 bool consumeJsonArrayFront(std::string_view input, std::string& item,
-                           std::string& remaining, bool& has_more) {
+                           std::string& remaining, bool& has_more,
+                           bool& queue_is_empty) {
   json_value_t* parsed = json_parse(input.data(), input.size());
-  if (parsed == nullptr) return false;
+  if (parsed == nullptr) {
+    throw std::invalid_argument("ConsumeQueue payload is not valid JSON");
+  }
   OwnedJsonValue document(parsed);
-  if (json_type(document.get()) != JSON_ARRAY ||
-      json_array_size(document.get()) == 0u) {
+  if (json_type(document.get()) != JSON_ARRAY) {
+    throw std::invalid_argument("ConsumeQueue payload must be a JSON array");
+  }
+  if (json_array_size(document.get()) == 0u) {
+    queue_is_empty = true;
+    has_more = false;
+    remaining = "[]";
     return false;
   }
 
@@ -139,6 +147,7 @@ bool consumeJsonArrayFront(std::string_view input, std::string& item,
 
   has_more = json_array_size(tail.get()) != 0u;
   remaining = serializeJsonValue(tail.get());
+  queue_is_empty = false;
   return true;
 }
 
@@ -500,8 +509,8 @@ struct TreeExecutorSession::Impl {
         const double number = std::get<double>(it->second);
         const double fractional = number - std::trunc(number);
         if (!std::isfinite(number) || std::abs(fractional) > 0.0 ||
-            number < static_cast<double>(std::numeric_limits<long long>::min()) ||
-            number >= -static_cast<double>(std::numeric_limits<long long>::min())) {
+            number < static_cast<double>((std::numeric_limits<long long>::min)()) ||
+            number >= -static_cast<double>((std::numeric_limits<long long>::min)())) {
           last_error = "Switch variable must resolve to an integer";
           return SALTS_EINVAL;
         }
@@ -509,7 +518,7 @@ struct TreeExecutorSession::Impl {
         *out_child_index = parsed < 0 ? source->children.size()
                                       : static_cast<unsigned long long>(parsed) >
                                                 static_cast<unsigned long long>(
-                                                    std::numeric_limits<size_t>::max())
+                                                    (std::numeric_limits<size_t>::max)())
                                             ? source->children.size()
                                             : static_cast<size_t>(parsed);
         return SALTS_OK;
@@ -522,7 +531,7 @@ struct TreeExecutorSession::Impl {
       *out_child_index = parsed < 0 ? source->children.size()
                                     : static_cast<unsigned long long>(parsed) >
                                               static_cast<unsigned long long>(
-                                                  std::numeric_limits<size_t>::max())
+                                                  (std::numeric_limits<size_t>::max)())
                                           ? source->children.size()
                                           : static_cast<size_t>(parsed);
       return SALTS_OK;
@@ -713,8 +722,10 @@ struct TreeExecutorSession::Impl {
       std::string item;
       std::string remaining;
       bool has_more = false;
+      bool queue_is_empty = false;
       if (!consumeJsonArrayFront(blackboard.get(queue_key), item, remaining,
-                                 has_more)) {
+                                 has_more, queue_is_empty)) {
+        if (!queue_is_empty) return SALTS_EIO;
         *has_item = false;
         return SALTS_OK;
       }
