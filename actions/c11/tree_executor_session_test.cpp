@@ -1036,6 +1036,85 @@ int testSubTreeExpansionAndCycleRejection() {
 }
 
 
+int testPipelineSequenceRestoresInputBeforeNestedSwitchSelection() {
+  const auto makeTree = [] {
+    actions::Tree tree;
+    tree.root.id = "PipelineSequence";
+    tree.root.params.emplace("input_key", actions::Value{std::string("seed")});
+    tree.root.params.emplace("output_key", actions::Value{std::string("result")});
+    actions::Node selector;
+    selector.id = "Switch";
+    selector.params.emplace("variable",
+                            actions::Value{std::string("{pipeline_input}")});
+    actions::Node selected;
+    selected.id = "SelectedRunningBranch";
+    actions::Node unselected;
+    unselected.id = "UnselectedBranch";
+    selector.children.push_back(selected);
+    selector.children.push_back(unselected);
+    tree.root.children.push_back(selector);
+    return tree;
+  };
+  const auto registerTasks = [](actions::Executor& executor, int& selected_calls,
+                                int& unselected_calls) {
+    executor.registerTask("SelectedRunningBranch", [&selected_calls](
+        const auto&, actions::Blackboard& bb) {
+      ++selected_calls;
+      if (bb.get("pipeline_input") != "0")
+        return actions::NodeStatus::FAILURE;
+      if (selected_calls == 1) {
+        bb.set("pipeline_input", "corrupted");
+        return actions::NodeStatus::RUNNING;
+      }
+      bb.set("pipeline_output", "done");
+      return actions::NodeStatus::SUCCESS;
+    });
+    executor.registerTask("UnselectedBranch", [&unselected_calls](
+        const auto&, actions::Blackboard&) {
+      ++unselected_calls;
+      return actions::NodeStatus::SUCCESS;
+    });
+  };
+
+  {
+    auto tree = makeTree();
+    actions::Executor executor;
+    int selected_calls = 0, unselected_calls = 0;
+    registerTasks(executor, selected_calls, unselected_calls);
+    actions::Blackboard blackboard;
+    blackboard.set("seed", "0");
+    actions::ExecutionContext context;
+    CHECK(executor.execute(tree.root, blackboard, context) ==
+          actions::NodeStatus::RUNNING);
+    CHECK(executor.execute(tree.root, blackboard, context) ==
+          actions::NodeStatus::SUCCESS);
+    CHECK(selected_calls == 2);
+    CHECK(unselected_calls == 0);
+    CHECK(blackboard.get("result") == "done");
+  }
+
+  {
+    auto tree = makeTree();
+    actions::Executor executor;
+    int selected_calls = 0, unselected_calls = 0;
+    registerTasks(executor, selected_calls, unselected_calls);
+    actions::Blackboard blackboard;
+    blackboard.set("seed", "0");
+    actions::ExecutionContext context;
+    actions::c11::TreeExecutorSession session(
+        tree, executor, blackboard, context, limits());
+    salts_bt_node_status status = SALTS_BT_FAILURE;
+    CHECK(session.tick(&status) == SALTS_OK);
+    CHECK(status == SALTS_BT_RUNNING);
+    CHECK(session.tick(&status) == SALTS_OK);
+    CHECK(status == SALTS_BT_SUCCESS);
+    CHECK(selected_calls == 2);
+    CHECK(unselected_calls == 0);
+    CHECK(blackboard.get("result") == "done");
+  }
+  return 0;
+}
+
 int testPipelineSequenceResumesActiveStageAndRestoresInput() {
   const auto makeTree = [] {
     actions::Tree tree;
@@ -1166,6 +1245,89 @@ int testBuiltInPipelineSequenceHooks() {
   CHECK(status == SALTS_BT_SUCCESS);
   CHECK(blackboard.get("result") == "stage-two");
   CHECK(blackboard.get("pipeline_input") == "stage-one");
+  return 0;
+}
+
+int testConsumeQueueResumesCurrentItemAcrossRunning() {
+  const auto makeTree = [] {
+    actions::Tree tree;
+    tree.root.id = "ConsumeQueue";
+    tree.root.params.emplace("queue_key", actions::Value{std::string("queue")});
+    tree.root.params.emplace("item_key", actions::Value{std::string("item")});
+    actions::Node child;
+    child.id = "ProcessItem";
+    tree.root.children.push_back(child);
+    return tree;
+  };
+  const auto install = [](actions::Executor& executor, int& calls,
+                          std::string& first, std::string& second,
+                          std::string& third) {
+    executor.registerTask("ProcessItem", [&calls, &first, &second, &third](
+        const auto&, actions::Blackboard& bb) {
+      ++calls;
+      if (calls == 1) {
+        first = bb.get("item");
+        return actions::NodeStatus::RUNNING;
+      }
+      if (calls == 2) {
+        second = bb.get("item");
+        return actions::NodeStatus::SUCCESS;
+      }
+      third = bb.get("item");
+      return actions::NodeStatus::SUCCESS;
+    });
+  };
+
+  {
+    auto tree = makeTree();
+    actions::Executor executor;
+    int calls = 0;
+    std::string first, second, third;
+    install(executor, calls, first, second, third);
+    actions::Blackboard blackboard;
+    blackboard.set("queue", "[\"one\",\"two\"]");
+    actions::ExecutionContext context;
+    CHECK(executor.execute(tree.root, blackboard, context) ==
+          actions::NodeStatus::RUNNING);
+    CHECK(blackboard.get("queue") == "[\"two\"]");
+    CHECK(executor.execute(tree.root, blackboard, context) ==
+          actions::NodeStatus::RUNNING);
+    CHECK(blackboard.get("queue") == "[\"two\"]");
+    CHECK(executor.execute(tree.root, blackboard, context) ==
+          actions::NodeStatus::SUCCESS);
+    CHECK(calls == 3);
+    CHECK(first == "\"one\"");
+    CHECK(second == "\"one\"");
+    CHECK(third == "\"two\"");
+    CHECK(blackboard.get("queue") == "[]");
+  }
+
+  {
+    auto tree = makeTree();
+    actions::Executor executor;
+    int calls = 0;
+    std::string first, second, third;
+    install(executor, calls, first, second, third);
+    actions::Blackboard blackboard;
+    blackboard.set("queue", "[\"one\",\"two\"]");
+    actions::ExecutionContext context;
+    actions::c11::TreeExecutorSession session(
+        tree, executor, blackboard, context, limits());
+    salts_bt_node_status status = SALTS_BT_FAILURE;
+    CHECK(session.tick(&status) == SALTS_OK);
+    CHECK(status == SALTS_BT_RUNNING);
+    CHECK(blackboard.get("queue") == "[\"two\"]");
+    CHECK(session.tick(&status) == SALTS_OK);
+    CHECK(status == SALTS_BT_RUNNING);
+    CHECK(blackboard.get("queue") == "[\"two\"]");
+    CHECK(session.tick(&status) == SALTS_OK);
+    CHECK(status == SALTS_BT_SUCCESS);
+    CHECK(calls == 3);
+    CHECK(first == "\"one\"");
+    CHECK(second == "\"one\"");
+    CHECK(third == "\"two\"");
+    CHECK(blackboard.get("queue") == "[]");
+  }
   return 0;
 }
 
@@ -1424,7 +1586,9 @@ int main() {
   if (testRunOnceAndKeepRunningStateMatchExecutor() != 0) return 1;
   if (testSubTreeExpansionAndCycleRejection() != 0) return 1;
   if (testPipelineSequenceResumesActiveStageAndRestoresInput() != 0) return 1;
+  if (testPipelineSequenceRestoresInputBeforeNestedSwitchSelection() != 0) return 1;
   if (testBuiltInPipelineSequenceHooks() != 0) return 1;
+  if (testConsumeQueueResumesCurrentItemAcrossRunning() != 0) return 1;
   if (testBuiltInConsumeQueue() != 0) return 1;
   if (testConsumeQueueRejectsMalformedQueue() != 0) return 1;
   if (testBuiltInEntryUpdatedHook() != 0) return 1;

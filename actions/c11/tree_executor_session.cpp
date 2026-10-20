@@ -966,7 +966,7 @@ struct TreeExecutorSession::Impl {
     }
   }
 
-  void restorePipelineInputForLeaf(size_t index) {
+  void restorePipelineInputForNode(size_t index) {
     if (index >= compiled_plan.nodes.size()) return;
     size_t descendant = index;
     size_t parent = compiled_plan.nodes[index].parent_index;
@@ -1028,7 +1028,7 @@ struct TreeExecutorSession::Impl {
     }
     try {
       const actions::Node* source = nodeAt(index);
-      restorePipelineInputForLeaf(index);
+      restorePipelineInputForNode(index);
       const LeafOwner owner = leaf_owners[index];
 
       // Once a leaf is RUNNING, keep the selected execution owner. In
@@ -1159,6 +1159,7 @@ struct TreeExecutorSession::Impl {
   int condition(size_t index, salts_bt_node_status* out_status) noexcept {
     if (out_status == nullptr) return SALTS_EINVAL;
     try {
+      restorePipelineInputForNode(index);
       if (hooks.condition != nullptr) {
         return hooks.condition(hooks.user, index, out_status);
       }
@@ -1182,6 +1183,7 @@ struct TreeExecutorSession::Impl {
   int selectChild(size_t index, size_t* out_child_index) noexcept {
     if (out_child_index == nullptr) return SALTS_EINVAL;
     try {
+      restorePipelineInputForNode(index);
       if (hooks.select_child != nullptr) {
         return hooks.select_child(hooks.user, index, out_child_index);
       }
@@ -1254,6 +1256,7 @@ struct TreeExecutorSession::Impl {
     }
 
     try {
+      restorePipelineInputForNode(node);
       const auto* source = nodeAt(node);
       if (source == nullptr || node >= pipeline_states.size() ||
           child >= source->children.size()) return SALTS_EINVAL;
@@ -1328,11 +1331,13 @@ struct TreeExecutorSession::Impl {
     if (changed == nullptr) return SALTS_EINVAL;
     if (hooks.entry_changed != nullptr) {
       return safeHostStatus("C11 EntryUpdated hook failed", [&] {
+        restorePipelineInputForNode(node);
         return hooks.entry_changed(hooks.user, node, changed);
       });
     }
 
     try {
+      restorePipelineInputForNode(node);
       const auto* source = nodeAt(node);
       if (source == nullptr || node >= entry_updated_states.size()) return SALTS_EINVAL;
       const auto key_it = source->params.find("watch_key");
@@ -1356,11 +1361,13 @@ struct TreeExecutorSession::Impl {
     if (has_item == nullptr) return SALTS_EINVAL;
     if (hooks.queue_begin != nullptr) {
       return safeHostStatus("C11 ConsumeQueue begin hook failed", [&] {
+        restorePipelineInputForNode(node);
         return hooks.queue_begin(hooks.user, node, has_item);
       });
     }
 
     try {
+      restorePipelineInputForNode(node);
       const auto* source = nodeAt(node);
       if (source == nullptr || node >= queue_states.size()) return SALTS_EINVAL;
       auto& state = queue_states[node];

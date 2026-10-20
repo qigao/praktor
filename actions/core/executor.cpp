@@ -1631,36 +1631,46 @@ NodeStatus Executor::executeConsumeQueue(const Node& node, Blackboard& bb, Execu
     throw std::runtime_error("ConsumeQueue must have exactly 1 child");
   }
 
-  std::string queue_key = getTaskStringParam(node.params, bb, "queue_key", "task_queue");
-
-  if (!bb.has(queue_key)) {
-    return NodeStatus::FAILURE;
-  }
-
-  std::string queue_data = bb.get(queue_key);
-
+  const std::string node_id =
+      "ConsumeQueue_" + std::to_string(reinterpret_cast<uintptr_t>(&node));
+  NodeState& state = ctx.getState(node_id);
   try {
-    std::string item;
-    std::string remaining;
-    bool has_more = false;
-    if (!consumeJsonArrayFront(queue_data, item, remaining, has_more)) {
-      return NodeStatus::FAILURE;
+    if (!state.has_run) {
+      const std::string queue_key =
+          getTaskStringParam(node.params, bb, "queue_key", "task_queue");
+      if (!bb.has(queue_key)) {
+        ctx.reset(node_id);
+        return NodeStatus::FAILURE;
+      }
+
+      std::string item;
+      std::string remaining;
+      bool has_more = false;
+      if (!consumeJsonArrayFront(bb.get(queue_key), item, remaining, has_more)) {
+        ctx.reset(node_id);
+        return NodeStatus::FAILURE;
+      }
+
+      const std::string item_key =
+          getTaskStringParam(node.params, bb, "item_key", "current_item");
+      // Commit the dequeue before invoking the child, as the C11 runtime does.
+      bb.set(queue_key, remaining);
+      bb.set(item_key, item);
+      state.retry_count = has_more ? 1 : 0;
+      state.has_run = true;
     }
 
-    bb.set(queue_key, remaining);
+    const NodeStatus status = execute(node.children[0], bb, ctx);
+    if (status == NodeStatus::RUNNING) return NodeStatus::RUNNING;
 
-    std::string item_key = getTaskStringParam(node.params, bb, "item_key", "current_item");
-    bb.set(item_key, item);
-
-    NodeStatus status = execute(node.children[0], bb, ctx);
-
+    const bool has_more = state.retry_count != 0;
+    ctx.reset(node_id);
     if (status == NodeStatus::SUCCESS && has_more) {
       return NodeStatus::RUNNING;
     }
-
     return status;
-
   } catch (const std::exception&) {
+    ctx.reset(node_id);
     return NodeStatus::FAILURE;
   }
 }
