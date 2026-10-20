@@ -174,6 +174,8 @@ void validateNodeArity(const Node &node, salts_bt_node_kind kind) {
     break;
   case SALTS_BT_NODE_PARALLEL:
   case SALTS_BT_NODE_REACTIVE_SEQUENCE:
+    /* The legacy Executor defines these empty controls as SUCCESS no-ops. */
+    break;
   case SALTS_BT_NODE_REACTIVE_FALLBACK:
   case SALTS_BT_NODE_SWITCH:
     if (count == 0u) {
@@ -289,7 +291,22 @@ void appendNode(TreePlan &plan, const Node &node, size_t parent_index,
     }
     break;
   case SALTS_BT_NODE_PARALLEL:
-    desc.parallel_hooks = true;
+    if (node.children.empty()) {
+      /* Legacy Parallel with no branches completes successfully. */
+      desc.kind = SALTS_BT_NODE_LEAF;
+      skip_children = true;
+      terminal_action = TreePlanTerminalAction::Success;
+    } else {
+      desc.parallel_hooks = true;
+    }
+    break;
+  case SALTS_BT_NODE_REACTIVE_SEQUENCE:
+    if (node.children.empty()) {
+      /* Legacy ReactiveSequence with no children completes successfully. */
+      desc.kind = SALTS_BT_NODE_LEAF;
+      skip_children = true;
+      terminal_action = TreePlanTerminalAction::Success;
+    }
     break;
   case SALTS_BT_NODE_REPEAT: {
     const int64_t count =

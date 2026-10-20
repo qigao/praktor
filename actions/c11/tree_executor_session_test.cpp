@@ -683,6 +683,31 @@ int testWhileDoConditionFormsMatchTerminalEffects() {
   return 0;
 }
 
+int testEmptyParallelAndReactiveSequenceMatchExecutor() {
+  const char* const node_kinds[] = {"Parallel", "ReactiveSequence"};
+  for (const char* node_kind : node_kinds) {
+    actions::Tree tree;
+    tree.root.id = node_kind;
+
+    actions::Executor legacy;
+    actions::Blackboard legacy_blackboard;
+    actions::ExecutionContext legacy_context;
+    CHECK(legacy.execute(tree.root, legacy_blackboard, legacy_context) ==
+          actions::NodeStatus::SUCCESS);
+
+    actions::Executor c11;
+    actions::Blackboard c11_blackboard;
+    actions::ExecutionContext c11_context;
+    actions::c11::TreeExecutorSession session(
+        tree, c11, c11_blackboard, c11_context, limits());
+    CHECK(session.validate() == SALTS_OK);
+    salts_bt_node_status status = SALTS_BT_FAILURE;
+    CHECK(session.tick(&status) == SALTS_OK);
+    CHECK(status == SALTS_BT_SUCCESS);
+  }
+  return 0;
+}
+
 int testRunOnceAndKeepRunningStateMatchExecutor() {
   {
     actions::Tree tree;
@@ -1131,6 +1156,7 @@ int main() {
   if (testScalarConditionAndSwitchUseBlackboard() != 0) return 1;
   if (testInTreeIfThenElseConditionMatchesExecutor() != 0) return 1;
   if (testWhileDoConditionFormsMatchTerminalEffects() != 0) return 1;
+  if (testEmptyParallelAndReactiveSequenceMatchExecutor() != 0) return 1;
   if (testRunOnceAndKeepRunningStateMatchExecutor() != 0) return 1;
   if (testSubTreeExpansionAndCycleRejection() != 0) return 1;
   if (testBuiltInPipelineSequenceHooks() != 0) return 1;
