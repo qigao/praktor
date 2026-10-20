@@ -1,0 +1,500 @@
+#include "tree_executor_session.hpp"
+
+#include <algorithm>
+#include <cctype>
+#include <cmath>
+#include <cstdint>
+#include <limits>
+#include <stdexcept>
+#include <utility>
+
+namespace actions::c11 {
+namespace {
+
+salts_bt_node_status toSaltsStatus(actions::NodeStatus status) {
+  switch (status) {
+  case actions::NodeStatus::SUCCESS: return SALTS_BT_SUCCESS;
+  case actions::NodeStatus::FAILURE: return SALTS_BT_FAILURE;
+  case actions::NodeStatus::RUNNING: return SALTS_BT_RUNNING;
+  }
+  return SALTS_BT_FAILURE;
+}
+
+std::string resolveStringValue(const actions::Value& value,
+                               const actions::Blackboard& blackboard) {
+  if (!std::holds_alternative<std::string>(value)) {
+    if (std::holds_alternative<double>(value)) {
+      const double number = std::get<double>(value);
+      if (!std::isfinite(number)) {
+        throw std::invalid_argument("numeric value is not finite");
+      }
+      return std::to_string(number);
+    }
+    return std::get<bool>(value) ? "true" : "false";
+  }
+
+  const std::string& raw = std::get<std::string>(value);
+  if (raw.size() >= 3u && raw.front() == '{' && raw.back() == '}') {
+    return blackboard.get(raw.substr(1u, raw.size() - 2u));
+  }
+  return raw;
+}
+
+bool conditionValue(const actions::Value& value,
+                    const actions::Blackboard& blackboard) {
+  if (std::holds_alternative<bool>(value)) {
+    return std::get<bool>(value);
+  }
+  if (std::holds_alternative<double>(value)) {
+    return std::fpclassify(std::get<double>(value)) != FP_ZERO;
+  }
+
+  std::string raw = resolveStringValue(value, blackboard);
+  std::transform(raw.begin(), raw.end(), raw.begin(),
+                 [](unsigned char ch) {
+                   return static_cast<char>(std::tolower(ch));
+                 });
+  return !(raw.empty() || raw == "0" || raw == "false" || raw == "no" ||
+           raw == "off" || raw == "null");
+}
+
+long long parseInteger(const std::string& raw) {
+  size_t consumed = 0u;
+  const long long value = std::stoll(raw, &consumed, 10);
+  if (consumed != raw.size()) {
+    throw std::invalid_argument("switch variable is not an integer: " + raw);
+  }
+  return value;
+}
+
+} // namespace
+
+struct TreeExecutorSession::Impl {
+  actions::Tree tree;
+  TreePlan compiled_plan;
+  actions::Executor& executor;
+  actions::Blackboard& blackboard;
+  actions::ExecutionContext& execution_context;
+  praktor_c11_bt_host hooks{};
+  praktor_c11_bt_host runtime_host{};
+  praktor_c11_bt_tree runtime{};
+  std::vector<unsigned char> custom_leaf_active;
+  std::string last_error;
+
+  Impl(const actions::Tree& source_tree,
+       actions::Executor& source_executor,
+       actions::Blackboard& source_blackboard,
+       actions::ExecutionContext& source_execution_context,
+       const salts_bt_tree_config& limits,
+       const praktor_c11_bt_host* supplied_hooks)
+      : tree(source_tree),
+        compiled_plan(compileTreePlan(tree, source_blackboard, limits)),
+        executor(source_executor),
+        blackboard(source_blackboard),
+        execution_context(source_execution_context) {
+    if (supplied_hooks != nullptr) {
+      hooks = *supplied_hooks;
+    }
+
+    validateHostContracts();
+    custom_leaf_active.assign(compiled_plan.nodes.size(), 0u);
+
+    runtime_host.tick_leaf = &onTickLeaf;
+    runtime_host.halt_leaf = &onHaltLeaf;
+    runtime_host.condition = &onCondition;
+    runtime_host.select_child = &onSelectChild;
+    runtime_host.parallel_enter = &onParallelEnter;
+    runtime_host.parallel_step = &onParallelStep;
+    runtime_host.parallel_join = &onParallelJoin;
+    runtime_host.parallel_finish = &onParallelFinish;
+    runtime_host.parallel_abort = &onParallelAbort;
+    runtime_host.pipeline_prepare = &onPipelinePrepare;
+    runtime_host.pipeline_complete = &onPipelineComplete;
+    runtime_host.pipeline_abort = &onPipelineAbort;
+    runtime_host.entry_changed = &onEntryChanged;
+    runtime_host.queue_begin = &onQueueBegin;
+    runtime_host.queue_finish = &onQueueFinish;
+    runtime_host.queue_abort = &onQueueAbort;
+    runtime_host.user = this;
+
+    const int status = praktor_c11_bt_tree_init(
+        &runtime, &limits, compiled_plan.nodes.data(),
+        compiled_plan.nodes.size(), &runtime_host);
+    if (status != SALTS_OK) {
+      throw std::runtime_error("C11 behavior tree initialization failed with status " +
+                               std::to_string(status));
+    }
+  }
+
+  ~Impl() {
+    if (runtime.impl != nullptr) {
+      (void)praktor_c11_bt_tree_destroy(&runtime);
+    }
+  }
+
+  const actions::Node* nodeAt(size_t index) const noexcept {
+    if (index >= compiled_plan.source_nodes.size()) return nullptr;
+    return compiled_plan.source_nodes[index];
+  }
+
+  void rememberCurrentException(const char* where) noexcept {
+    try {
+      throw;
+    } catch (const std::exception& error) {
+      last_error = std::string(where) + ": " + error.what();
+    } catch (...) {
+      last_error = std::string(where) + ": unknown C++ exception";
+    }
+  }
+
+  void validateHostContracts() const {
+    for (size_t i = 0u; i < compiled_plan.nodes.size(); ++i) {
+      const auto& desc = compiled_plan.nodes[i];
+      const auto* source = nodeAt(i);
+      if (source == nullptr) {
+        throw std::invalid_argument("TreePlan has no source AST node");
+      }
+
+      if (source->id == "Shell" &&
+          (hooks.tick_leaf == nullptr || hooks.halt_leaf == nullptr)) {
+        throw std::invalid_argument(
+            "C11 Shell leaves require explicit host tick_leaf and halt_leaf hooks; "
+            "legacy ShellExecutor fallback is disabled");
+      }
+      if (hooks.tick_leaf != nullptr && hooks.halt_leaf == nullptr) {
+        throw std::invalid_argument(
+            "A custom leaf tick hook requires a halt hook to define cancellation cleanup");
+      }
+      if (desc.kind == SALTS_BT_NODE_PARALLEL && desc.parallel_hooks &&
+          (hooks.parallel_enter == nullptr || hooks.parallel_step == nullptr ||
+           hooks.parallel_join == nullptr || hooks.parallel_finish == nullptr)) {
+        throw std::invalid_argument(
+            "C11 Parallel requires host enter/step/join/finish hooks");
+      }
+      if (desc.kind == SALTS_BT_NODE_PIPELINE_SEQUENCE &&
+          (hooks.pipeline_prepare == nullptr || hooks.pipeline_complete == nullptr)) {
+        throw std::invalid_argument(
+            "C11 PipelineSequence requires host prepare/complete hooks");
+      }
+      if (desc.kind == SALTS_BT_NODE_ENTRY_UPDATED &&
+          hooks.entry_changed == nullptr) {
+        throw std::invalid_argument("C11 EntryUpdated requires a host entry_changed hook");
+      }
+      if (desc.kind == SALTS_BT_NODE_CONSUME_QUEUE &&
+          (hooks.queue_begin == nullptr || hooks.queue_finish == nullptr)) {
+        throw std::invalid_argument("C11 ConsumeQueue requires host queue_begin/queue_finish hooks");
+      }
+    }
+  }
+
+  int tickLeaf(size_t index, salts_bt_node_status* out_status) noexcept {
+    if (out_status == nullptr || nodeAt(index) == nullptr) return SALTS_EINVAL;
+    try {
+      const actions::Node* source = nodeAt(index);
+      if (hooks.tick_leaf != nullptr) {
+        const int host_status = hooks.tick_leaf(hooks.user, index, out_status);
+        if (host_status != SALTS_ENOTSUP) {
+          if (host_status == SALTS_OK) {
+            custom_leaf_active[index] = (*out_status == SALTS_BT_RUNNING) ? 1u : 0u;
+          } else {
+            last_error = "host leaf hook returned status " + std::to_string(host_status) +
+                         " for node '" + source->id + "'";
+          }
+          return host_status;
+        }
+      }
+
+      if (source->id == "Shell") {
+        last_error = "Shell host hook returned SALTS_ENOTSUP; refusing legacy ShellExecutor fallback";
+        return SALTS_ENOTSUP;
+      }
+
+      *out_status = toSaltsStatus(executor.execute(*source, blackboard,
+                                                   execution_context));
+      return SALTS_OK;
+    } catch (...) {
+      rememberCurrentException("C11 action leaf failed");
+      return SALTS_EIO;
+    }
+  }
+
+  void haltLeaf(size_t index) noexcept {
+    if (index >= custom_leaf_active.size() || custom_leaf_active[index] == 0u) return;
+    custom_leaf_active[index] = 0u;
+    if (hooks.halt_leaf == nullptr) return;
+    try {
+      hooks.halt_leaf(hooks.user, index);
+    } catch (...) {
+      rememberCurrentException("C11 host leaf halt failed");
+    }
+  }
+
+  int condition(size_t index, salts_bt_node_status* out_status) noexcept {
+    if (out_status == nullptr) return SALTS_EINVAL;
+    try {
+      if (hooks.condition != nullptr) {
+        return hooks.condition(hooks.user, index, out_status);
+      }
+      const auto* source = nodeAt(index);
+      if (source == nullptr) return SALTS_EINVAL;
+      const auto it = source->params.find("condition");
+      if (it == source->params.end()) {
+        last_error = "condition callback requested without scalar condition parameter";
+        return SALTS_EINVAL;
+      }
+      *out_status = conditionValue(it->second, blackboard)
+                        ? SALTS_BT_SUCCESS
+                        : SALTS_BT_FAILURE;
+      return SALTS_OK;
+    } catch (...) {
+      rememberCurrentException("C11 condition evaluation failed");
+      return SALTS_EINVAL;
+    }
+  }
+
+  int selectChild(size_t index, size_t* out_child_index) noexcept {
+    if (out_child_index == nullptr) return SALTS_EINVAL;
+    try {
+      if (hooks.select_child != nullptr) {
+        return hooks.select_child(hooks.user, index, out_child_index);
+      }
+      const auto* source = nodeAt(index);
+      if (source == nullptr) return SALTS_EINVAL;
+      const auto it = source->params.find("variable");
+      if (it == source->params.end()) {
+        last_error = "Switch requires parameter 'variable'";
+        return SALTS_EINVAL;
+      }
+
+      std::string raw;
+      if (std::holds_alternative<std::string>(it->second)) {
+        raw = resolveStringValue(it->second, blackboard);
+        if (raw == std::get<std::string>(it->second) && blackboard.has(raw)) {
+          raw = blackboard.get(raw);
+        }
+      } else if (std::holds_alternative<double>(it->second)) {
+        const double number = std::get<double>(it->second);
+        const double fractional = number - std::trunc(number);
+        if (!std::isfinite(number) || std::abs(fractional) > 0.0 ||
+            number < static_cast<double>(std::numeric_limits<long long>::min()) ||
+            number >= -static_cast<double>(std::numeric_limits<long long>::min())) {
+          last_error = "Switch variable must resolve to an integer";
+          return SALTS_EINVAL;
+        }
+        const auto parsed = static_cast<long long>(number);
+        *out_child_index = parsed < 0 ? source->children.size()
+                                      : static_cast<unsigned long long>(parsed) >
+                                                static_cast<unsigned long long>(
+                                                    std::numeric_limits<size_t>::max())
+                                            ? source->children.size()
+                                            : static_cast<size_t>(parsed);
+        return SALTS_OK;
+      } else {
+        last_error = "Switch variable must not be a boolean";
+        return SALTS_EINVAL;
+      }
+
+      const long long parsed = parseInteger(raw);
+      *out_child_index = parsed < 0 ? source->children.size()
+                                    : static_cast<unsigned long long>(parsed) >
+                                              static_cast<unsigned long long>(
+                                                  std::numeric_limits<size_t>::max())
+                                          ? source->children.size()
+                                          : static_cast<size_t>(parsed);
+      return SALTS_OK;
+    } catch (...) {
+      rememberCurrentException("C11 Switch selector failed");
+      return SALTS_EINVAL;
+    }
+  }
+
+  int parallelEnter(size_t node, size_t child, bool first) noexcept {
+    return hooks.parallel_enter == nullptr
+               ? SALTS_ENOTSUP
+               : hooks.parallel_enter(hooks.user, node, child, first);
+  }
+  int parallelStep(size_t node, size_t child, salts_bt_node_status status) noexcept {
+    return hooks.parallel_step == nullptr
+               ? SALTS_ENOTSUP
+               : hooks.parallel_step(hooks.user, node, child, status);
+  }
+  int parallelJoin(size_t node, salts_bt_node_status status) noexcept {
+    return hooks.parallel_join == nullptr
+               ? SALTS_ENOTSUP
+               : hooks.parallel_join(hooks.user, node, status);
+  }
+  int parallelFinish(size_t node, size_t child, salts_bt_node_status status) noexcept {
+    return hooks.parallel_finish == nullptr
+               ? SALTS_ENOTSUP
+               : hooks.parallel_finish(hooks.user, node, child, status);
+  }
+  void parallelAbort(size_t node, size_t child) noexcept {
+    if (hooks.parallel_abort != nullptr) hooks.parallel_abort(hooks.user, node, child);
+  }
+  int pipelinePrepare(size_t node, size_t child) noexcept {
+    return hooks.pipeline_prepare == nullptr
+               ? SALTS_ENOTSUP
+               : hooks.pipeline_prepare(hooks.user, node, child);
+  }
+  int pipelineComplete(size_t node, size_t child,
+                       salts_bt_node_status status) noexcept {
+    return hooks.pipeline_complete == nullptr
+               ? SALTS_ENOTSUP
+               : hooks.pipeline_complete(hooks.user, node, child, status);
+  }
+  void pipelineAbort(size_t node, size_t child) noexcept {
+    if (hooks.pipeline_abort != nullptr) hooks.pipeline_abort(hooks.user, node, child);
+  }
+  int entryChanged(size_t node, bool* changed) noexcept {
+    return hooks.entry_changed == nullptr
+               ? SALTS_ENOTSUP
+               : hooks.entry_changed(hooks.user, node, changed);
+  }
+  int queueBegin(size_t node, bool* has_item) noexcept {
+    return hooks.queue_begin == nullptr
+               ? SALTS_ENOTSUP
+               : hooks.queue_begin(hooks.user, node, has_item);
+  }
+  int queueFinish(size_t node, bool* has_more) noexcept {
+    return hooks.queue_finish == nullptr
+               ? SALTS_ENOTSUP
+               : hooks.queue_finish(hooks.user, node, has_more);
+  }
+  void queueAbort(size_t node) noexcept {
+    if (hooks.queue_abort != nullptr) hooks.queue_abort(hooks.user, node);
+  }
+
+  static Impl* self(void* user) noexcept { return static_cast<Impl*>(user); }
+  static int onTickLeaf(void* user, size_t index,
+                        salts_bt_node_status* out_status) {
+    auto* impl = self(user);
+    return impl == nullptr ? SALTS_EINVAL : impl->tickLeaf(index, out_status);
+  }
+  static void onHaltLeaf(void* user, size_t index) {
+    if (auto* impl = self(user)) impl->haltLeaf(index);
+  }
+  static int onCondition(void* user, size_t index,
+                         salts_bt_node_status* out_status) {
+    auto* impl = self(user);
+    return impl == nullptr ? SALTS_EINVAL : impl->condition(index, out_status);
+  }
+  static int onSelectChild(void* user, size_t index, size_t* out_index) {
+    auto* impl = self(user);
+    return impl == nullptr ? SALTS_EINVAL : impl->selectChild(index, out_index);
+  }
+  static int onParallelEnter(void* user, size_t node, size_t child, bool first) {
+    auto* impl = self(user);
+    return impl == nullptr ? SALTS_EINVAL : impl->parallelEnter(node, child, first);
+  }
+  static int onParallelStep(void* user, size_t node, size_t child,
+                            salts_bt_node_status status) {
+    auto* impl = self(user);
+    return impl == nullptr ? SALTS_EINVAL : impl->parallelStep(node, child, status);
+  }
+  static int onParallelJoin(void* user, size_t node, salts_bt_node_status status) {
+    auto* impl = self(user);
+    return impl == nullptr ? SALTS_EINVAL : impl->parallelJoin(node, status);
+  }
+  static int onParallelFinish(void* user, size_t node, size_t child,
+                              salts_bt_node_status status) {
+    auto* impl = self(user);
+    return impl == nullptr ? SALTS_EINVAL : impl->parallelFinish(node, child, status);
+  }
+  static void onParallelAbort(void* user, size_t node, size_t child) {
+    if (auto* impl = self(user)) impl->parallelAbort(node, child);
+  }
+  static int onPipelinePrepare(void* user, size_t node, size_t child) {
+    auto* impl = self(user);
+    return impl == nullptr ? SALTS_EINVAL : impl->pipelinePrepare(node, child);
+  }
+  static int onPipelineComplete(void* user, size_t node, size_t child,
+                                salts_bt_node_status status) {
+    auto* impl = self(user);
+    return impl == nullptr ? SALTS_EINVAL : impl->pipelineComplete(node, child, status);
+  }
+  static void onPipelineAbort(void* user, size_t node, size_t child) {
+    if (auto* impl = self(user)) impl->pipelineAbort(node, child);
+  }
+  static int onEntryChanged(void* user, size_t node, bool* changed) {
+    auto* impl = self(user);
+    return impl == nullptr ? SALTS_EINVAL : impl->entryChanged(node, changed);
+  }
+  static int onQueueBegin(void* user, size_t node, bool* has_item) {
+    auto* impl = self(user);
+    return impl == nullptr ? SALTS_EINVAL : impl->queueBegin(node, has_item);
+  }
+  static int onQueueFinish(void* user, size_t node, bool* has_more) {
+    auto* impl = self(user);
+    return impl == nullptr ? SALTS_EINVAL : impl->queueFinish(node, has_more);
+  }
+  static void onQueueAbort(void* user, size_t node) {
+    if (auto* impl = self(user)) impl->queueAbort(node);
+  }
+};
+
+TreeExecutorSession::TreeExecutorSession(
+    const actions::Tree& tree, actions::Executor& executor,
+    actions::Blackboard& blackboard,
+    actions::ExecutionContext& execution_context,
+    const salts_bt_tree_config& limits,
+    const praktor_c11_bt_host* host_hooks)
+    : impl_(std::make_unique<Impl>(tree, executor, blackboard,
+                                  execution_context, limits, host_hooks)) {}
+
+TreeExecutorSession::~TreeExecutorSession() = default;
+
+int TreeExecutorSession::tick(salts_bt_node_status* out_status) {
+  if (!impl_) return SALTS_EINVAL;
+  impl_->last_error.clear();
+  const int status = praktor_c11_bt_tree_tick(&impl_->runtime, out_status);
+  if (status != SALTS_OK && impl_->last_error.empty()) {
+    impl_->last_error = "C11 behavior tree tick failed with status " +
+                        std::to_string(status);
+  }
+  return status;
+}
+
+int TreeExecutorSession::reset() {
+  if (!impl_) return SALTS_EINVAL;
+  impl_->last_error.clear();
+  const int status = praktor_c11_bt_tree_reset(&impl_->runtime);
+  if (status == SALTS_OK) {
+    std::fill(impl_->custom_leaf_active.begin(), impl_->custom_leaf_active.end(), 0u);
+  } else {
+    impl_->last_error = "C11 behavior tree reset failed with status " +
+                        std::to_string(status);
+  }
+  return status;
+}
+
+int TreeExecutorSession::cancel() {
+  if (!impl_) return SALTS_EINVAL;
+  impl_->last_error.clear();
+  const int status = praktor_c11_bt_tree_cancel(&impl_->runtime);
+  if (status == SALTS_OK) {
+    std::fill(impl_->custom_leaf_active.begin(), impl_->custom_leaf_active.end(), 0u);
+  } else {
+    impl_->last_error = "C11 behavior tree cancel failed with status " +
+                        std::to_string(status);
+  }
+  return status;
+}
+
+int TreeExecutorSession::validate() const {
+  return impl_ ? praktor_c11_bt_tree_validate(&impl_->runtime) : SALTS_EINVAL;
+}
+
+const actions::Node* TreeExecutorSession::sourceNode(size_t node_index) const noexcept {
+  return impl_ ? impl_->nodeAt(node_index) : nullptr;
+}
+
+const TreePlan& TreeExecutorSession::plan() const noexcept {
+  return impl_->compiled_plan;
+}
+
+const std::string& TreeExecutorSession::lastError() const noexcept {
+  static const std::string empty;
+  return impl_ ? impl_->last_error : empty;
+}
+
+} // namespace actions::c11

@@ -1,6 +1,6 @@
 #include "tree_plan.hpp"
 
-#include <cassert>
+#include <cstdio>
 #include <stdexcept>
 #include <string>
 
@@ -8,8 +8,15 @@ using actions::Blackboard;
 using actions::Node;
 using actions::Tree;
 using actions::Value;
-using actions::c11::TreePlan;
 using actions::c11::compileTreePlan;
+
+#define CHECK(expr)                                                            \
+  do {                                                                         \
+    if (!(expr)) {                                                             \
+      std::fprintf(stderr, "CHECK failed at %s:%d: %s\n", __FILE__, __LINE__, #expr); \
+      return 1;                                                                \
+    }                                                                          \
+  } while (0)
 
 namespace {
 
@@ -22,7 +29,7 @@ salts_bt_tree_config testLimits() {
   return limits;
 }
 
-void testParentFirstSequence() {
+int testParentFirstSequence() {
   Tree tree;
   tree.root.id = "Sequence";
   Node first;
@@ -34,17 +41,18 @@ void testParentFirstSequence() {
 
   Blackboard blackboard;
   const auto plan = compileTreePlan(tree, blackboard, testLimits());
-  assert(plan.nodes.size() == 3u);
-  assert(plan.source_nodes.size() == 3u);
-  assert(plan.nodes[0].parent_index == PRAKTOR_C11_BT_NO_PARENT);
-  assert(plan.nodes[0].kind == SALTS_BT_NODE_SEQUENCE);
-  assert(plan.nodes[1].parent_index == 0u);
-  assert(plan.nodes[2].parent_index == 0u);
-  assert(plan.source_nodes[1] == &tree.root.children[0]);
-  assert(plan.source_nodes[2] == &tree.root.children[1]);
+  CHECK(plan.nodes.size() == 3u);
+  CHECK(plan.source_nodes.size() == 3u);
+  CHECK(plan.nodes[0].parent_index == PRAKTOR_C11_BT_NO_PARENT);
+  CHECK(plan.nodes[0].kind == SALTS_BT_NODE_SEQUENCE);
+  CHECK(plan.nodes[1].parent_index == 0u);
+  CHECK(plan.nodes[2].parent_index == 0u);
+  CHECK(plan.source_nodes[1] == &tree.root.children[0]);
+  CHECK(plan.source_nodes[2] == &tree.root.children[1]);
+  return 0;
 }
 
-void testDurationAndRepeatParameters() {
+int testDurationAndRepeatParameters() {
   Tree tree;
   tree.root.id = "Sequence";
 
@@ -59,31 +67,44 @@ void testDurationAndRepeatParameters() {
 
   Blackboard blackboard;
   const auto plan = compileTreePlan(tree, blackboard, testLimits());
-  assert(plan.nodes.size() == 3u);
-  assert(plan.nodes[1].kind == SALTS_BT_NODE_REPEAT);
-  assert(plan.nodes[1].limit == 3u);
-  assert(plan.nodes[2].kind == SALTS_BT_NODE_DELAY);
-  assert(plan.nodes[2].duration_ns == UINT64_C(12000000));
+  CHECK(plan.nodes.size() == 3u);
+  CHECK(plan.nodes[1].kind == SALTS_BT_NODE_REPEAT);
+  CHECK(plan.nodes[1].limit == 3u);
+  CHECK(plan.nodes[2].kind == SALTS_BT_NODE_DELAY);
+  CHECK(plan.nodes[2].duration_ns == UINT64_C(12000000));
+  return 0;
 }
 
-void testRejectsInvalidInputs() {
+int expectInvalid(Tree& tree, Blackboard& blackboard) {
+  try {
+    (void)compileTreePlan(tree, blackboard, testLimits());
+  } catch (const std::invalid_argument&) {
+    return 0;
+  } catch (const std::length_error&) {
+    return 0;
+  }
+  std::fprintf(stderr, "expected invalid tree plan to be rejected\n");
+  return 1;
+}
+
+int testRejectsInvalidInputs() {
   Blackboard blackboard;
   {
     Tree tree;
     tree.root.id = "Repeat";
     tree.root.params.emplace("num_cycles", Value{-1.0});
-    bool rejected = false;
-    try { (void)compileTreePlan(tree, blackboard, testLimits()); }
-    catch (const std::invalid_argument &) { rejected = true; }
-    assert(rejected);
+    CHECK(expectInvalid(tree, blackboard) == 0);
+  }
+  {
+    Tree tree;
+    tree.root.id = "Repeat";
+    tree.root.params.emplace("num_cycles", Value{1.5});
+    CHECK(expectInvalid(tree, blackboard) == 0);
   }
   {
     Tree tree;
     tree.root.id = "SubTree";
-    bool rejected = false;
-    try { (void)compileTreePlan(tree, blackboard, testLimits()); }
-    catch (const std::invalid_argument &) { rejected = true; }
-    assert(rejected);
+    CHECK(expectInvalid(tree, blackboard) == 0);
   }
   {
     Tree tree;
@@ -91,18 +112,16 @@ void testRejectsInvalidInputs() {
     Node child;
     child.id = "Task";
     tree.root.children.push_back(child);
-    bool rejected = false;
-    try { (void)compileTreePlan(tree, blackboard, testLimits()); }
-    catch (const std::invalid_argument &) { rejected = true; }
-    assert(rejected);
+    CHECK(expectInvalid(tree, blackboard) == 0);
   }
+  return 0;
 }
 
 } // namespace
 
 int main() {
-  testParentFirstSequence();
-  testDurationAndRepeatParameters();
-  testRejectsInvalidInputs();
+  if (testParentFirstSequence() != 0) return 1;
+  if (testDurationAndRepeatParameters() != 0) return 1;
+  if (testRejectsInvalidInputs() != 0) return 1;
   return 0;
 }

@@ -62,12 +62,14 @@ if(PRAKTOR_ENABLE_C11_ACTIONS)
         c11/tree_adapter.h
         c11/tree_plan.cpp
         c11/tree_plan.hpp
+        c11/tree_executor_session.cpp
+        c11/tree_executor_session.hpp
     )
     target_include_directories(praktor_actions_c11
         PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/c11>
         PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
     )
-    target_link_libraries(praktor_actions_c11 PUBLIC Salts::BehaviorTree PRIVATE actions)
+    target_link_libraries(praktor_actions_c11 PUBLIC Salts::BehaviorTree actions)
     target_compile_features(praktor_actions_c11
         PUBLIC c_std_11
         PRIVATE cxx_std_17
@@ -103,6 +105,17 @@ if(PRAKTOR_ENABLE_C11_ACTIONS)
             FOLDER "actions/c11/tests"
         )
         add_test(NAME actions_c11_tree_plan_test COMMAND actions_c11_tree_plan_test)
+
+        add_executable(actions_c11_tree_executor_session_test c11/tree_executor_session_test.cpp)
+        target_link_libraries(actions_c11_tree_executor_session_test PRIVATE praktor_actions_c11)
+        target_compile_features(actions_c11_tree_executor_session_test PRIVATE cxx_std_17)
+        set_target_properties(actions_c11_tree_executor_session_test PROPERTIES
+            CXX_STANDARD 17
+            CXX_STANDARD_REQUIRED ON
+            CXX_EXTENSIONS OFF
+            FOLDER "actions/c11/tests"
+        )
+        add_test(NAME actions_c11_tree_executor_session_test COMMAND actions_c11_tree_executor_session_test)
     endif()
 endif()
 
