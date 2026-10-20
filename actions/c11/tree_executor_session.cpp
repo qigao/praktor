@@ -570,6 +570,7 @@ struct TreeExecutorSession::Impl {
   }
 
   int closeShellProcess(ShellState& state, bool clear_state) noexcept {
+    int result = SALTS_OK;
     if (state.process.impl != nullptr) {
       const int close_status = cflow_process_close(&state.process);
       state.close_requested = true;
@@ -586,8 +587,17 @@ struct TreeExecutorSession::Impl {
       // process adapter is quiescent; destroy must never race completion leases.
       while (!cflow_process_is_quiescent(&state.process)) {
         size_t progressed = 0u;
-        (void)cflow_process_run_ready(&state.process, 64u, &progressed);
-        if (progressed == 0u) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        const int drive_status =
+            cflow_process_run_ready(&state.process, 64u, &progressed);
+        if (drive_status != SALTS_OK && drive_status != SALTS_EBUSY) {
+          state.io_failed = true;
+          if (state.failure_reason.empty()) {
+            state.failure_reason = "Salts::Process drain failed with status " +
+                                   std::to_string(drive_status);
+          }
+        }
+        if (progressed == 0u)
+          std::this_thread::sleep_for(std::chrono::milliseconds(1));
       }
       const int destroy_status = cflow_process_destroy(&state.process);
       if (destroy_status != SALTS_OK) {
@@ -598,8 +608,14 @@ struct TreeExecutorSession::Impl {
         }
       }
     }
+
+    if (state.io_failed) result = SALTS_EIO;
+    const std::string failure = state.failure_reason;
     if (clear_state) clearShellState(state);
-    return state.io_failed ? SALTS_EIO : SALTS_OK;
+    if (result != SALTS_OK && last_error.empty()) {
+      last_error = failure.empty() ? "Salts::Process cleanup failed" : failure;
+    }
+    return result;
   }
 
   void publishShellResult(ShellState& state, int exit_code, bool success) {

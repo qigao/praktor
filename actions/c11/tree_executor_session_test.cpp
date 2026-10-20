@@ -187,6 +187,7 @@ int testShellCancelTerminatesManagedProcess() {
   CHECK(session.cancel() == SALTS_OK);
   CHECK(std::chrono::steady_clock::now() - started < std::chrono::seconds(5));
   CHECK(session.validate() == SALTS_OK);
+  CHECK(session.lastError().empty());
   return 0;
 }
 
