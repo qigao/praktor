@@ -177,10 +177,7 @@ void validateNodeArity(const Node &node, salts_bt_node_kind kind) {
     /* The legacy Executor defines these empty controls as SUCCESS no-ops. */
     break;
   case SALTS_BT_NODE_REACTIVE_FALLBACK:
-    if (count == 0u) {
-      throw std::invalid_argument("Node '" + node.id +
-                                  "' requires at least one child in the C11 runtime");
-    }
+    /* The legacy Executor defines an empty ReactiveFallback as FAILURE. */
     break;
   case SALTS_BT_NODE_SWITCH:
     /* Empty Switch still resolves variable before returning FAILURE. */
@@ -287,6 +284,14 @@ void appendNode(TreePlan &plan, const Node &node, size_t parent_index,
     }
     break;
   }
+  case SALTS_BT_NODE_REACTIVE_FALLBACK:
+    if (node.children.empty()) {
+      /* Legacy ReactiveFallback returns FAILURE when no child can succeed. */
+      desc.kind = SALTS_BT_NODE_LEAF;
+      skip_children = true;
+      terminal_action = TreePlanTerminalAction::Failure;
+    }
+    break;
   case SALTS_BT_NODE_SWITCH:
     if (findParam(node, "variable") == nullptr) {
       throw std::invalid_argument("Switch requires parameter 'variable'");
