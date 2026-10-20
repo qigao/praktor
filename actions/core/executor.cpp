@@ -1773,37 +1773,48 @@ NodeStatus Executor::executePipelineSequence(const Node& node, Blackboard& bb) {
 }
 
 NodeStatus Executor::executePipelineSequence(const Node& node, Blackboard& bb, ExecutionContext& ctx) {
+  const std::string node_id =
+      "PipelineSequence_" +
+      std::to_string(reinterpret_cast<uintptr_t>(&node));
   if (node.children.empty()) {
+    ctx.reset(node_id);
     return NodeStatus::SUCCESS;
   }
 
+  NodeState& state = ctx.getState(node_id);
   std::string pipeline_data;
-  std::string input_key = getTaskStringParam(node.params, bb, "input_key", "pipeline_input");
-  if (bb.has(input_key)) {
-    pipeline_data = bb.get(input_key);
+  if (state.has_run) {
+    // Preserve the input of the currently running stage, not an output it
+    // may have partially published before yielding.
+    pipeline_data = state.last_value;
+  } else {
+    const std::string input_key =
+        getTaskStringParam(node.params, bb, "input_key", "pipeline_input");
+    if (bb.has(input_key)) pipeline_data = bb.get(input_key);
   }
 
-  for (size_t i = 0; i < node.children.size(); ++i) {
+  for (size_t i = state.current_child; i < node.children.size(); ++i) {
     bb.set("pipeline_input", pipeline_data);
-
-    NodeStatus status = execute(node.children[i], bb, ctx);
+    const NodeStatus status = execute(node.children[i], bb, ctx);
 
     if (status == NodeStatus::FAILURE) {
+      ctx.reset(node_id);
       return NodeStatus::FAILURE;
     }
-
     if (status == NodeStatus::RUNNING) {
+      state.current_child = i;
+      state.last_value = pipeline_data;
+      state.has_run = true;
       return NodeStatus::RUNNING;
     }
 
-    if (bb.has("pipeline_output")) {
-      pipeline_data = bb.get("pipeline_output");
-    }
+    if (bb.has("pipeline_output")) pipeline_data = bb.get("pipeline_output");
   }
 
-  std::string output_key = getTaskStringParam(node.params, bb, "output_key", "pipeline_result");
+  const std::string output_key =
+      getTaskStringParam(node.params, bb, "output_key", "pipeline_result");
   bb.set(output_key, pipeline_data);
-
+  ctx.reset(node_id);
   return NodeStatus::SUCCESS;
 }
 

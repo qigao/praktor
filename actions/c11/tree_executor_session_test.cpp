@@ -947,6 +947,102 @@ int testSubTreeExpansionAndCycleRejection() {
 }
 
 
+int testPipelineSequenceResumesActiveStageAndRestoresInput() {
+  const auto makeTree = [] {
+    actions::Tree tree;
+    tree.root.id = "PipelineSequence";
+    tree.root.params.emplace("input_key", actions::Value{std::string("seed")});
+    tree.root.params.emplace("output_key", actions::Value{std::string("result")});
+    actions::Node first;
+    first.id = "FirstStage";
+    actions::Node second;
+    second.id = "RunningStage";
+    tree.root.children.push_back(first);
+    tree.root.children.push_back(second);
+    return tree;
+  };
+
+  {
+    auto tree = makeTree();
+    actions::Executor executor;
+    int first_calls = 0;
+    int second_calls = 0;
+    executor.registerTask("FirstStage", [&first_calls](
+        const auto&, actions::Blackboard& bb) {
+      ++first_calls;
+      if (bb.get("pipeline_input") != "start")
+        return actions::NodeStatus::FAILURE;
+      bb.set("pipeline_output", "stage-one");
+      return actions::NodeStatus::SUCCESS;
+    });
+    executor.registerTask("RunningStage", [&second_calls](
+        const auto&, actions::Blackboard& bb) {
+      ++second_calls;
+      if (bb.get("pipeline_input") != "stage-one")
+        return actions::NodeStatus::FAILURE;
+      if (second_calls == 1) {
+        bb.set("pipeline_input", "corrupted");
+        bb.set("pipeline_output", "intermediate");
+        return actions::NodeStatus::RUNNING;
+      }
+      bb.set("pipeline_output", "stage-two");
+      return actions::NodeStatus::SUCCESS;
+    });
+    actions::Blackboard blackboard;
+    blackboard.set("seed", "start");
+    actions::ExecutionContext context;
+    CHECK(executor.execute(tree.root, blackboard, context) ==
+          actions::NodeStatus::RUNNING);
+    CHECK(executor.execute(tree.root, blackboard, context) ==
+          actions::NodeStatus::SUCCESS);
+    CHECK(first_calls == 1);
+    CHECK(second_calls == 2);
+    CHECK(blackboard.get("result") == "stage-two");
+  }
+
+  {
+    auto tree = makeTree();
+    actions::Executor executor;
+    int first_calls = 0;
+    int second_calls = 0;
+    executor.registerTask("FirstStage", [&first_calls](
+        const auto&, actions::Blackboard& bb) {
+      ++first_calls;
+      if (bb.get("pipeline_input") != "start")
+        return actions::NodeStatus::FAILURE;
+      bb.set("pipeline_output", "stage-one");
+      return actions::NodeStatus::SUCCESS;
+    });
+    executor.registerTask("RunningStage", [&second_calls](
+        const auto&, actions::Blackboard& bb) {
+      ++second_calls;
+      if (bb.get("pipeline_input") != "stage-one")
+        return actions::NodeStatus::FAILURE;
+      if (second_calls == 1) {
+        bb.set("pipeline_input", "corrupted");
+        bb.set("pipeline_output", "intermediate");
+        return actions::NodeStatus::RUNNING;
+      }
+      bb.set("pipeline_output", "stage-two");
+      return actions::NodeStatus::SUCCESS;
+    });
+    actions::Blackboard blackboard;
+    blackboard.set("seed", "start");
+    actions::ExecutionContext context;
+    actions::c11::TreeExecutorSession session(
+        tree, executor, blackboard, context, limits());
+    salts_bt_node_status status = SALTS_BT_FAILURE;
+    CHECK(session.tick(&status) == SALTS_OK);
+    CHECK(status == SALTS_BT_RUNNING);
+    CHECK(session.tick(&status) == SALTS_OK);
+    CHECK(status == SALTS_BT_SUCCESS);
+    CHECK(first_calls == 1);
+    CHECK(second_calls == 2);
+    CHECK(blackboard.get("result") == "stage-two");
+  }
+  return 0;
+}
+
 int testBuiltInPipelineSequenceHooks() {
   actions::Tree tree;
   tree.root.id = "PipelineSequence";
@@ -1236,6 +1332,7 @@ int main() {
   if (testEmptyParallelAndReactiveSequenceMatchExecutor() != 0) return 1;
   if (testRunOnceAndKeepRunningStateMatchExecutor() != 0) return 1;
   if (testSubTreeExpansionAndCycleRejection() != 0) return 1;
+  if (testPipelineSequenceResumesActiveStageAndRestoresInput() != 0) return 1;
   if (testBuiltInPipelineSequenceHooks() != 0) return 1;
   if (testBuiltInConsumeQueue() != 0) return 1;
   if (testConsumeQueueRejectsMalformedQueue() != 0) return 1;

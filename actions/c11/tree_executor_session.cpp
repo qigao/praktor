@@ -310,6 +310,7 @@ struct TreeExecutorSession::Impl {
   praktor_c11_bt_tree runtime{};
   struct PipelineState {
     bool initialized = false;
+    size_t active_child = 0u;
     std::string data;
     std::string output_key = "pipeline_result";
   };
@@ -965,6 +966,39 @@ struct TreeExecutorSession::Impl {
     }
   }
 
+  void restorePipelineInputForLeaf(size_t index) {
+    if (index >= compiled_plan.nodes.size()) return;
+    size_t descendant = index;
+    size_t parent = compiled_plan.nodes[index].parent_index;
+
+    while (parent != PRAKTOR_C11_BT_NO_PARENT &&
+           parent < compiled_plan.nodes.size()) {
+      if (compiled_plan.nodes[parent].kind == SALTS_BT_NODE_PIPELINE_SEQUENCE &&
+          parent < pipeline_states.size()) {
+        const auto& state = pipeline_states[parent];
+        const auto* pipeline = nodeAt(parent);
+        if (state.initialized && pipeline != nullptr &&
+            state.active_child < pipeline->children.size()) {
+          const auto* active_stage = &pipeline->children[state.active_child];
+          size_t active_stage_index = compiled_plan.source_nodes.size();
+          for (size_t candidate = 0u;
+               candidate < compiled_plan.source_nodes.size(); ++candidate) {
+            if (compiled_plan.source_nodes[candidate] == active_stage) {
+              active_stage_index = candidate;
+              break;
+            }
+          }
+          if (active_stage_index == descendant) {
+            blackboard.set("pipeline_input", state.data);
+            return;
+          }
+        }
+      }
+      descendant = parent;
+      parent = compiled_plan.nodes[parent].parent_index;
+    }
+  }
+
   int tickLeaf(size_t index, salts_bt_node_status* out_status) noexcept {
     if (out_status == nullptr || nodeAt(index) == nullptr) return SALTS_EINVAL;
     if (index < compiled_plan.terminal_actions.size()) {
@@ -994,6 +1028,7 @@ struct TreeExecutorSession::Impl {
     }
     try {
       const actions::Node* source = nodeAt(index);
+      restorePipelineInputForLeaf(index);
       const LeafOwner owner = leaf_owners[index];
 
       // Once a leaf is RUNNING, keep the selected execution owner. In
@@ -1237,6 +1272,7 @@ struct TreeExecutorSession::Impl {
         state.data = blackboard.has(input_key) ? blackboard.get(input_key) : "";
         state.initialized = true;
       }
+      state.active_child = child;
       blackboard.set("pipeline_input", state.data);
       return SALTS_OK;
     } catch (...) {
