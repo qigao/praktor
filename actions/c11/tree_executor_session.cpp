@@ -889,7 +889,6 @@ struct TreeExecutorSession::Impl {
                                std::to_string(poll_status);
         last_error = state.failure_reason;
         (void)closeShellProcess(state, true);
-        leaf_owners[index] = LeafOwner::None;
         *out_status = SALTS_BT_FAILURE;
         return SALTS_OK;
       }
@@ -929,7 +928,7 @@ struct TreeExecutorSession::Impl {
     } catch (...) {
       rememberCurrentException("Salts::Process Shell tick failed");
       if (state.process.impl != nullptr) (void)closeShellProcess(state, true);
-      leaf_owners[index] = LeafOwner::None;
+      finalizeShellState(state);
       *out_status = SALTS_BT_FAILURE;
       return SALTS_OK;
     }
@@ -1064,7 +1063,6 @@ struct TreeExecutorSession::Impl {
     if (owner == LeafOwner::SaltsProcess ||
         (index < shell_states.size() && shell_states[index].process.impl != nullptr)) {
       (void)closeShellProcess(shell_states[index], true);
-      finalizeShellState(shell_states[index]);
       return;
     }
     leaf_owners[index] = LeafOwner::None;
