@@ -729,7 +729,7 @@ int TreeExecutorSession::cancel() {
     std::fill(impl_->pipeline_states.begin(), impl_->pipeline_states.end(), Impl::PipelineState{});
     std::fill(impl_->entry_updated_states.begin(), impl_->entry_updated_states.end(), Impl::EntryUpdatedState{});
   } else {
-    impl_->last_error = "C11 behavior tree cancel failed with status "
+    impl_->last_error = "C11 behavior tree cancel failed with status " +
                         std::to_string(status);
   }
   return status;
