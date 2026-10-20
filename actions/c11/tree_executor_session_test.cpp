@@ -683,6 +683,82 @@ int testWhileDoConditionFormsMatchTerminalEffects() {
   return 0;
 }
 
+int testEmptySwitchResolvesSelectorThenFails() {
+  {
+    actions::Tree tree;
+    tree.root.id = "Switch";
+    tree.root.params.emplace("variable", actions::Value{0.0});
+
+    actions::Executor legacy;
+    actions::Blackboard legacy_blackboard;
+    actions::ExecutionContext legacy_context;
+    CHECK(legacy.execute(tree.root, legacy_blackboard, legacy_context) ==
+          actions::NodeStatus::FAILURE);
+
+    actions::Executor c11;
+    actions::Blackboard c11_blackboard;
+    actions::ExecutionContext c11_context;
+    actions::c11::TreeExecutorSession session(tree, c11, c11_blackboard,
+                                              c11_context, limits());
+    salts_bt_node_status status = SALTS_BT_SUCCESS;
+    CHECK(session.tick(&status) == SALTS_OK);
+    CHECK(status == SALTS_BT_FAILURE);
+  }
+
+  {
+    actions::Tree tree;
+    tree.root.id = "Switch";
+    tree.root.params.emplace("variable",
+                             actions::Value{std::string("{choice}")});
+
+    actions::Executor legacy;
+    actions::Blackboard legacy_blackboard;
+    legacy_blackboard.set("choice", "0.0");
+    actions::ExecutionContext legacy_context;
+    CHECK(legacy.execute(tree.root, legacy_blackboard, legacy_context) ==
+          actions::NodeStatus::FAILURE);
+
+    actions::Executor c11;
+    actions::Blackboard c11_blackboard;
+    c11_blackboard.set("choice", "0.0");
+    actions::ExecutionContext c11_context;
+    actions::c11::TreeExecutorSession session(tree, c11, c11_blackboard,
+                                              c11_context, limits());
+    salts_bt_node_status status = SALTS_BT_SUCCESS;
+    CHECK(session.tick(&status) == SALTS_OK);
+    CHECK(status == SALTS_BT_FAILURE);
+  }
+
+  {
+    actions::Tree tree;
+    tree.root.id = "Switch";
+    tree.root.params.emplace("variable",
+                             actions::Value{std::string("{missing}")});
+
+    actions::Executor legacy;
+    actions::Blackboard legacy_blackboard;
+    actions::ExecutionContext legacy_context;
+    bool legacy_threw = false;
+    try {
+      (void)legacy.execute(tree.root, legacy_blackboard, legacy_context);
+    } catch (const std::exception&) {
+      legacy_threw = true;
+    }
+    CHECK(legacy_threw);
+
+    actions::Executor c11;
+    actions::Blackboard c11_blackboard;
+    actions::ExecutionContext c11_context;
+    actions::c11::TreeExecutorSession session(tree, c11, c11_blackboard,
+                                              c11_context, limits());
+    salts_bt_node_status status = SALTS_BT_SUCCESS;
+    CHECK(session.tick(&status) != SALTS_OK);
+    CHECK(session.lastError().find("empty Switch selector failed") !=
+          std::string::npos);
+  }
+  return 0;
+}
+
 int testEmptyParallelAndReactiveSequenceMatchExecutor() {
   const char* const node_kinds[] = {"Parallel", "ReactiveSequence"};
   for (const char* node_kind : node_kinds) {
@@ -1156,6 +1232,7 @@ int main() {
   if (testScalarConditionAndSwitchUseBlackboard() != 0) return 1;
   if (testInTreeIfThenElseConditionMatchesExecutor() != 0) return 1;
   if (testWhileDoConditionFormsMatchTerminalEffects() != 0) return 1;
+  if (testEmptySwitchResolvesSelectorThenFails() != 0) return 1;
   if (testEmptyParallelAndReactiveSequenceMatchExecutor() != 0) return 1;
   if (testRunOnceAndKeepRunningStateMatchExecutor() != 0) return 1;
   if (testSubTreeExpansionAndCycleRejection() != 0) return 1;
