@@ -25,10 +25,13 @@ namespace actions::c11 {
  * registered leaf when no cleanup hook exists and never changes ownership path
  * halfway through an active custom-leaf invocation.
  *
- * PipelineSequence and EntryUpdated have built-in Blackboard-backed hooks.
- * Parallel requires all four branch lifecycle hooks, and ConsumeQueue requires
- * queue_begin/queue_finish hooks, because those nodes need host-defined state
- * and commit/abort policy.
+ * PipelineSequence, EntryUpdated and ConsumeQueue have built-in
+ * Blackboard-backed hooks (ConsumeQueue uses the shared C JSON parser).
+ * Parallel currently requires host-supplied enter/step/join/finish/abort hooks,
+ * because its branch-local Blackboard/ExecutionContext isolation and commit
+ * policy are still host-defined. Custom PipelineSequence and ConsumeQueue hook
+ * groups must provide their prepare/begin, completion/finish and abort callbacks
+ * together so cancellation has an explicit cleanup path.
  *
  * The tree and all callbacks are single-driver and synchronous. The caller
  * must keep Executor, Blackboard, ExecutionContext, hook user data and any

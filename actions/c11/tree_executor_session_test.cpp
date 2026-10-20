@@ -457,6 +457,9 @@ int noOpParallelFinish(void*, size_t, size_t, salts_bt_node_status) {
   return SALTS_OK;
 }
 
+void noOpParallelAbort(void*, size_t, size_t) {}
+
+
 int testHostExceptionsStayInsideCAbi() {
   actions::Tree tree;
   tree.root.id = "Parallel";
@@ -480,6 +483,7 @@ int testHostExceptionsStayInsideCAbi() {
   hooks.parallel_step = &noOpParallelStep;
   hooks.parallel_join = &noOpParallelJoin;
   hooks.parallel_finish = &noOpParallelFinish;
+  hooks.parallel_abort = &noOpParallelAbort;
   actions::Blackboard blackboard;
   actions::ExecutionContext context;
   actions::c11::TreeExecutorSession session(tree, executor, blackboard,
