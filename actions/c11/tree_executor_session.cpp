@@ -299,11 +299,15 @@ struct TreeExecutorSession::Impl {
         throw std::invalid_argument(
             "C11 Parallel requires host enter/step/join/finish hooks");
       }
-      if (desc.kind == SALTS_BT_NODE_PIPELINE_SEQUENCE &&
-          ((hooks.pipeline_prepare == nullptr) !=
-           (hooks.pipeline_complete == nullptr))) {
-        throw std::invalid_argument(
-            "Custom PipelineSequence hooks must provide prepare and complete together");
+      if (desc.kind == SALTS_BT_NODE_PIPELINE_SEQUENCE) {
+        const bool has_prepare = hooks.pipeline_prepare != nullptr;
+        const bool has_complete = hooks.pipeline_complete != nullptr;
+        const bool has_abort = hooks.pipeline_abort != nullptr;
+        const bool has_custom_pipeline = has_prepare || has_complete || has_abort;
+        if (has_custom_pipeline && (!has_prepare || !has_complete)) {
+          throw std::invalid_argument(
+              "Custom PipelineSequence hooks must provide prepare and complete together");
+        }
       }
       if (desc.kind == SALTS_BT_NODE_CONSUME_QUEUE &&
           (hooks.queue_begin == nullptr || hooks.queue_finish == nullptr)) {
@@ -710,7 +714,7 @@ int TreeExecutorSession::reset() {
     std::fill(impl_->pipeline_states.begin(), impl_->pipeline_states.end(), Impl::PipelineState{});
     std::fill(impl_->entry_updated_states.begin(), impl_->entry_updated_states.end(), Impl::EntryUpdatedState{});
   } else {
-    impl_->last_error = "C11 behavior tree reset failed with status +"
+    impl_->last_error = "C11 behavior tree reset failed with status " +
                         std::to_string(status);
   }
   return status;
