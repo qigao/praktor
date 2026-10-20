@@ -23,6 +23,8 @@ salts_bt_tree_config limits() {
   return value;
 }
 
+void noOpHalt(void*, size_t) {}
+
 int testRegisteredLeafResumesRunningState() {
   actions::Tree tree;
   tree.root.id = "Sequence";
@@ -41,8 +43,10 @@ int testRegisteredLeafResumesRunningState() {
 
   actions::Blackboard blackboard;
   actions::ExecutionContext context;
+  praktor_c11_bt_host hooks{};
+  hooks.halt_leaf = &noOpHalt;
   actions::c11::TreeExecutorSession session(tree, executor, blackboard, context,
-                                            limits());
+                                            limits(), &hooks);
   CHECK(session.validate() == SALTS_OK);
   CHECK(session.plan().nodes.size() == 2u);
   CHECK(session.sourceNode(1u) != nullptr);
@@ -80,6 +84,24 @@ int customShellTick(void* user, size_t node_index,
 void customShellHalt(void* user, size_t node_index) {
   auto* state = static_cast<HostLeafState*>(user);
   if (state != nullptr && node_index == 0u) ++state->halt_calls;
+}
+
+
+int testRunningRegisteredLeafRequiresHaltHook() {
+  actions::Tree tree;
+  tree.root.id = "Work";
+  actions::Executor executor;
+  executor.registerTask("Work", [](const auto&, actions::Blackboard&) {
+    return actions::NodeStatus::RUNNING;
+  });
+  actions::Blackboard blackboard;
+  actions::ExecutionContext context;
+  actions::c11::TreeExecutorSession session(tree, executor, blackboard,
+                                            context, limits());
+  salts_bt_node_status status = SALTS_BT_FAILURE;
+  CHECK(session.tick(&status) == SALTS_ENOTSUP);
+  CHECK(session.lastError().find("without a halt_leaf hook") != std::string::npos);
+  return 0;
 }
 
 struct HaltHookState {
@@ -437,6 +459,7 @@ int testHostExceptionsStayInsideCAbi() {
 
 int main() {
   if (testRegisteredLeafResumesRunningState() != 0) return 1;
+  if (testRunningRegisteredLeafRequiresHaltHook() != 0) return 1;
   if (testShellRequiresExplicitManagedHost() != 0) return 1;
   if (testCancelCallsHaltForRegisteredRunningLeaf() != 0) return 1;
   if (testScalarConditionAndSwitchUseBlackboard() != 0) return 1;

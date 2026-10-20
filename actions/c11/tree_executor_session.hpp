@@ -20,7 +20,15 @@ namespace actions::c11 {
  * halt_leaf hooks which route to the chosen managed-process owner. The
  * session never falls back to Executor's legacy ShellExecutor path. A custom
  * leaf hook may return SALTS_ENOTSUP for non-Shell leaves to let the session
- * dispatch those leaves through Executor.
+ * dispatch those leaves through Executor. A registered Executor leaf that can
+ * return RUNNING requires a halt_leaf hook; the session rejects RUNNING from a
+ * registered leaf when no cleanup hook exists and never changes ownership path
+ * halfway through an active custom-leaf invocation.
+ *
+ * PipelineSequence and EntryUpdated have built-in Blackboard-backed hooks.
+ * Parallel requires all four branch lifecycle hooks, and ConsumeQueue requires
+ * queue_begin/queue_finish hooks, because those nodes need host-defined state
+ * and commit/abort policy.
  *
  * The tree and all callbacks are single-driver and synchronous. The caller
  * must keep Executor, Blackboard, ExecutionContext, hook user data and any

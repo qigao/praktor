@@ -321,14 +321,32 @@ struct TreeExecutorSession::Impl {
     try {
       const actions::Node* source = nodeAt(index);
       if (hooks.tick_leaf != nullptr) {
+        const bool was_active = custom_leaf_active[index] != 0u;
         const int host_status = hooks.tick_leaf(hooks.user, index, out_status);
-        if (host_status != SALTS_ENOTSUP) {
-          if (host_status == SALTS_OK) {
-            custom_leaf_active[index] = (*out_status == SALTS_BT_RUNNING) ? 1u : 0u;
-          } else {
-            last_error = "host leaf hook returned status " + std::to_string(host_status) +
-                         " for node '" + source->id + "'";
+        if (host_status == SALTS_ENOTSUP) {
+          if (was_active) {
+            // Do not switch execution owners midway through a live activation.
+            haltLeaf(index);
+            last_error = "host leaf hook declined active node '" + source->id +
+                         "'; refusing to switch to the Executor path";
+            return SALTS_ENOTSUP;
           }
+        } else if (host_status == SALTS_OK) {
+          if (*out_status != SALTS_BT_SUCCESS &&
+              *out_status != SALTS_BT_FAILURE &&
+              *out_status != SALTS_BT_RUNNING) {
+            if (was_active) haltLeaf(index);
+            last_error = "host leaf hook returned an invalid node status for '" +
+                         source->id + "'";
+            return SALTS_EINVAL;
+          }
+          custom_leaf_active[index] =
+              (*out_status == SALTS_BT_RUNNING) ? 1u : 0u;
+          return SALTS_OK;
+        } else {
+          if (was_active) haltLeaf(index);
+          last_error = "host leaf hook returned status " + std::to_string(host_status) +
+                       " for node '" + source->id + "'";
           return host_status;
         }
       }
@@ -340,9 +358,13 @@ struct TreeExecutorSession::Impl {
 
       *out_status = toSaltsStatus(executor.execute(*source, blackboard,
                                                    execution_context));
-      // The legacy TaskFunction API has no independent halt slot, but a
-      // session-level halt hook can still clean up a RUNNING registered leaf.
-      // Track activity for every leaf path, not only the custom tick path.
+      // The legacy TaskFunction API has no independent halt slot. A caller
+      // must opt into a halt hook before allowing any registered leaf to RUN.
+      if (*out_status == SALTS_BT_RUNNING && hooks.halt_leaf == nullptr) {
+        last_error = "registered action leaf '" + source->id +
+                     "' returned RUNNING without a halt_leaf hook";
+        return SALTS_ENOTSUP;
+      }
       custom_leaf_active[index] =
           (*out_status == SALTS_BT_RUNNING) ? 1u : 0u;
       return SALTS_OK;
