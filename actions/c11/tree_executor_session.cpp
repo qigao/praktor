@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <new>
 #include <stdexcept>
 #include <string_view>
 #include <utility>
@@ -379,10 +380,6 @@ struct TreeExecutorSession::Impl {
           throw std::invalid_argument(
               "Custom ConsumeQueue hooks must provide begin/finish/abort together");
         }
-      }
-      if (desc.kind == SALTS_BT_NODE_CONSUME_QUEUE &&
-          (hooks.queue_begin == nullptr || hooks.queue_finish == nullptr)) {
-        throw std::invalid_argument("C11 ConsumeQueue requires host queue_begin/queue_finish hooks");
       }
     }
   }
@@ -868,7 +865,7 @@ int TreeExecutorSession::reset() {
     std::fill(impl_->entry_updated_states.begin(), impl_->entry_updated_states.end(), Impl::EntryUpdatedState{});
     std::fill(impl_->queue_states.begin(), impl_->queue_states.end(), Impl::QueueState{});
   } else {
-    impl_->last_error = "C11 behavior tree reset failed with status "
+    impl_->last_error = "C11 behavior tree reset failed with status " +
                         std::to_string(status);
   }
   return status;
