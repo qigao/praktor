@@ -320,6 +320,9 @@ void Executor::registerBuiltins() {
   dispatch_["ReactiveSequence"] = [this](const Node& node, Blackboard& bb) {
     return executeReactiveSequence(node, bb);
   };
+  dispatch_["ReactiveFallback"] = [this](const Node& node, Blackboard& bb) {
+    return executeReactiveFallback(node, bb);
+  };
   dispatch_["PipelineSequence"] = [this](const Node& node, Blackboard& bb) {
     return executePipelineSequence(node, bb);
   };
@@ -376,6 +379,9 @@ void Executor::registerBuiltins() {
   stateful_dispatch_["ReactiveSequence"] = [this](const Node& node, Blackboard& bb, ExecutionContext& ctx) {
     return executeReactiveSequence(node, bb, ctx);
   };
+  stateful_dispatch_["ReactiveFallback"] = [this](const Node& node, Blackboard& bb, ExecutionContext& ctx) {
+    return executeReactiveFallback(node, bb, ctx);
+  };
   stateful_dispatch_["PipelineSequence"] = [this](const Node& node, Blackboard& bb, ExecutionContext& ctx) {
     return executePipelineSequence(node, bb, ctx);
   };
@@ -431,6 +437,7 @@ void Executor::registerBuiltins() {
   tasks_["Selector"] = nullptr;
   tasks_["Parallel"] = nullptr;
   tasks_["ReactiveSequence"] = nullptr;
+  tasks_["ReactiveFallback"] = nullptr;
   tasks_["Switch"] = nullptr;
   tasks_["WhileDo"] = nullptr;
   tasks_["IfThenElse"] = nullptr;
@@ -996,6 +1003,35 @@ NodeStatus Executor::executeReactiveSequence(const Node& node, Blackboard& bb, E
     }
   }
   return NodeStatus::SUCCESS;
+}
+
+NodeStatus Executor::executeReactiveFallback(const Node& node, Blackboard& bb) {
+  // Re-evaluate priorities from the first child on every execution.
+  for (const auto& child : node.children) {
+    NodeStatus status = execute(child, bb);
+    if (status == NodeStatus::SUCCESS) {
+      return NodeStatus::SUCCESS;
+    }
+    if (status == NodeStatus::RUNNING) {
+      return NodeStatus::RUNNING;
+    }
+  }
+  return NodeStatus::FAILURE;
+}
+
+NodeStatus Executor::executeReactiveFallback(const Node& node, Blackboard& bb,
+                                             ExecutionContext& ctx) {
+  // Do not retain the failed-child cursor from Fallback: priority is reactive.
+  for (const auto& child : node.children) {
+    NodeStatus status = execute(child, bb, ctx);
+    if (status == NodeStatus::SUCCESS) {
+      return NodeStatus::SUCCESS;
+    }
+    if (status == NodeStatus::RUNNING) {
+      return NodeStatus::RUNNING;
+    }
+  }
+  return NodeStatus::FAILURE;
 }
 
 // ============ Decorators ============
