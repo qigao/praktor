@@ -193,6 +193,81 @@ int testScalarConditionAndSwitchUseBlackboard() {
   return 0;
 }
 
+int testSubTreeExpansionAndCycleRejection() {
+  {
+    actions::Tree registered;
+    registered.name = "inner";
+    registered.root.id = "InnerTask";
+
+    actions::Tree outer;
+    outer.name = "outer";
+    outer.root.id = "Sequence";
+    actions::Node subtree;
+    subtree.id = "SubTree";
+    subtree.params.emplace("tree", actions::Value{std::string("inner")});
+    actions::Node after;
+    after.id = "AfterSubTree";
+    outer.root.children.push_back(subtree);
+    outer.root.children.push_back(after);
+
+    actions::Executor executor;
+    executor.registerTree(registered);
+    int inner_calls = 0;
+    int after_calls = 0;
+    executor.registerTask("InnerTask", [&inner_calls](const auto&, actions::Blackboard&) {
+      ++inner_calls;
+      return actions::NodeStatus::SUCCESS;
+    });
+    executor.registerTask("AfterSubTree", [&after_calls](const auto&, actions::Blackboard&) {
+      ++after_calls;
+      return actions::NodeStatus::SUCCESS;
+    });
+
+    actions::Blackboard blackboard;
+    actions::ExecutionContext context;
+    actions::c11::TreeExecutorSession session(outer, executor, blackboard,
+                                              context, limits());
+    CHECK(session.plan().nodes.size() == 3u);
+    CHECK(session.sourceNode(1u)->id == "InnerTask");
+    CHECK(session.sourceNode(2u)->id == "AfterSubTree");
+    salts_bt_node_status status = SALTS_BT_FAILURE;
+    CHECK(session.tick(&status) == SALTS_OK);
+    CHECK(status == SALTS_BT_SUCCESS);
+    CHECK(inner_calls == 1);
+    CHECK(after_calls == 1);
+  }
+
+  {
+    actions::Tree recursive;
+    recursive.name = "loop";
+    recursive.root.id = "Sequence";
+    actions::Node self;
+    self.id = "SubTree";
+    self.params.emplace("tree", actions::Value{std::string("loop")});
+    recursive.root.children.push_back(self);
+
+    actions::Tree outer;
+    outer.root.id = "SubTree";
+    outer.root.params.emplace("tree", actions::Value{std::string("loop")});
+
+    actions::Executor executor;
+    executor.registerTree(recursive);
+    actions::Blackboard blackboard;
+    actions::ExecutionContext context;
+    bool rejected = false;
+    try {
+      actions::c11::TreeExecutorSession session(outer, executor, blackboard,
+                                                context, limits());
+      (void)session;
+    } catch (const std::invalid_argument&) {
+      rejected = true;
+    }
+    CHECK(rejected);
+  }
+  return 0;
+}
+
+
 int throwingParallelEnter(void*, size_t, size_t, bool) {
   throw std::runtime_error("test parallel enter exception");
 }
@@ -250,6 +325,7 @@ int main() {
   if (testRegisteredLeafResumesRunningState() != 0) return 1;
   if (testShellRequiresExplicitManagedHost() != 0) return 1;
   if (testScalarConditionAndSwitchUseBlackboard() != 0) return 1;
+  if (testSubTreeExpansionAndCycleRejection() != 0) return 1;
   if (testHostExceptionsStayInsideCAbi() != 0) return 1;
   return 0;
 }

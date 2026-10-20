@@ -7,6 +7,7 @@
 #include <limits>
 #include <stdexcept>
 #include <utility>
+#include <vector>
 
 namespace actions::c11 {
 namespace {
@@ -85,6 +86,101 @@ long long parseInteger(const std::string& raw) {
   }
 }
 
+
+std::string resolveSubTreeName(const actions::Node& node,
+                               const actions::Blackboard& blackboard) {
+  const auto it = node.params.find("tree");
+  if (it == node.params.end()) {
+    throw std::invalid_argument("SubTree requires 'tree' parameter");
+  }
+  if (std::holds_alternative<std::string>(it->second)) {
+    const std::string& raw = std::get<std::string>(it->second);
+    if (raw.size() >= 3u && raw.front() == '{' && raw.back() == '}') {
+      return blackboard.get(raw.substr(1u, raw.size() - 2u));
+    }
+    return raw;
+  }
+  if (std::holds_alternative<double>(it->second)) {
+    return std::to_string(std::get<double>(it->second));
+  }
+  return std::get<bool>(it->second) ? "true" : "false";
+}
+
+actions::Node expandSubTreeNode(
+    const actions::Node& source,
+    const actions::Executor& executor,
+    const actions::Blackboard& blackboard,
+    const salts_bt_tree_config& limits,
+    size_t source_depth,
+    size_t subtree_depth,
+    size_t& expanded_node_count,
+    std::vector<std::string>& active_subtrees) {
+  if (source_depth > limits.max_depth) {
+    throw std::length_error("SubTree expansion exceeds the configured tree depth");
+  }
+
+  if (source.id == "SubTree") {
+    if (subtree_depth >= limits.max_depth) {
+      throw std::length_error("SubTree expansion exceeds the configured nesting depth");
+    }
+    const std::string name = resolveSubTreeName(source, blackboard);
+    if (std::find(active_subtrees.begin(), active_subtrees.end(), name) !=
+        active_subtrees.end()) {
+      throw std::invalid_argument("recursive SubTree reference: " + name);
+    }
+    const actions::Tree* registered = executor.getTree(name);
+    if (registered == nullptr) {
+      throw std::invalid_argument("SubTree not found: " + name);
+    }
+
+    active_subtrees.push_back(name);
+    try {
+      actions::Node expanded = expandSubTreeNode(
+          registered->root, executor, blackboard, limits, source_depth,
+          subtree_depth + 1u, expanded_node_count, active_subtrees);
+      active_subtrees.pop_back();
+      return expanded;
+    } catch (...) {
+      active_subtrees.pop_back();
+      throw;
+    }
+  }
+
+  if (expanded_node_count >= limits.max_nodes) {
+    throw std::length_error("SubTree expansion exceeds the configured node count");
+  }
+  ++expanded_node_count;
+
+  actions::Node expanded = source;
+  expanded.children.clear();
+  for (const auto& child : source.children) {
+    expanded.children.push_back(expandSubTreeNode(
+        child, executor, blackboard, limits, source_depth + 1u,
+        subtree_depth, expanded_node_count, active_subtrees));
+  }
+  return expanded;
+}
+
+actions::Tree expandSubTrees(const actions::Tree& source,
+                             const actions::Executor& executor,
+                             const actions::Blackboard& blackboard,
+                             const salts_bt_tree_config& limits) {
+  if (limits.max_nodes == 0u || limits.max_nodes > UINT32_MAX ||
+      limits.max_depth == 0u || limits.max_depth > SALTS_BT_MAX_DEPTH ||
+      limits.max_control_iterations == 0u ||
+      limits.max_control_iterations > SALTS_BT_MAX_CONTROL_ITERATIONS) {
+    throw std::invalid_argument("invalid C11 behavior-tree limits");
+  }
+
+  actions::Tree expanded;
+  expanded.name = source.name;
+  size_t expanded_node_count = 0u;
+  std::vector<std::string> active_subtrees;
+  expanded.root = expandSubTreeNode(source.root, executor, blackboard, limits,
+                                    1u, 0u, expanded_node_count, active_subtrees);
+  return expanded;
+}
+
 } // namespace
 
 struct TreeExecutorSession::Impl {
@@ -105,7 +201,7 @@ struct TreeExecutorSession::Impl {
        actions::ExecutionContext& source_execution_context,
        const salts_bt_tree_config& limits,
        const praktor_c11_bt_host* supplied_hooks)
-      : tree(source_tree),
+      : tree(expandSubTrees(source_tree, source_executor, source_blackboard, limits)),
         compiled_plan(compileTreePlan(tree, source_blackboard, limits)),
         executor(source_executor),
         blackboard(source_blackboard),
