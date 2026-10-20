@@ -113,6 +113,8 @@ int testZeroBudgetKeepRunningLowersToNoOpFailureLeaf() {
   return 0;
 }
 
+int expectInvalid(Tree& tree, Blackboard& blackboard);
+
 int testZeroBudgetControlsStillValidateChildArity() {
   Blackboard blackboard;
   {
