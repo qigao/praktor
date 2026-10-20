@@ -186,6 +186,8 @@ void appendNode(TreePlan &plan, const Node &node, size_t parent_index,
   const size_t node_index = plan.nodes.size();
   const salts_bt_node_kind kind = mapNodeKind(node);
   praktor_c11_bt_node_desc desc{};
+  bool skip_children = false;
+  bool succeed_without_tick = false;
   desc.parent_index = parent_index;
   desc.kind = kind;
 
@@ -201,7 +203,6 @@ void appendNode(TreePlan &plan, const Node &node, size_t parent_index,
     desc.condition_callback = true;
     break;
   case SALTS_BT_NODE_WHILE_DO: {
-    desc.condition_callback = findParam(node, "condition") != nullptr;
     const int64_t iterations =
         readIntegerParam(node, blackboard, "max_iterations", 100);
     if (iterations < 0 ||
@@ -209,8 +210,20 @@ void appendNode(TreePlan &plan, const Node &node, size_t parent_index,
       throw std::invalid_argument(
           "WhileDo max_iterations must be non-negative and within the tree limit");
     }
-    /* A zero budget succeeds without evaluating condition or body. */
-    desc.limit = static_cast<size_t>(iterations);
+    if (iterations == 0) {
+      /*
+       * Salts rejects a zero-limit WhileDo constructor, but the legacy
+       * Executor returns SUCCESS without evaluating either condition or body.
+       * Lower that constant no-op into a synthetic SUCCESS leaf; the session
+       * recognizes it through succeed_without_tick and never invokes the user.
+       */
+      desc.kind = SALTS_BT_NODE_LEAF;
+      skip_children = true;
+      succeed_without_tick = true;
+    } else {
+      desc.condition_callback = findParam(node, "condition") != nullptr;
+      desc.limit = static_cast<size_t>(iterations);
+    }
     break;
   }
   case SALTS_BT_NODE_SWITCH:
@@ -267,7 +280,9 @@ void appendNode(TreePlan &plan, const Node &node, size_t parent_index,
 
   plan.nodes.push_back(desc);
   plan.source_nodes.push_back(&node);
+  plan.succeed_without_tick.push_back(succeed_without_tick ? 1u : 0u);
 
+  if (skip_children) return;
   for (const Node &child : node.children) {
     appendNode(plan, child, node_index, depth + 1u, blackboard, limits);
   }

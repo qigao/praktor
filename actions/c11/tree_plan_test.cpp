@@ -75,6 +75,26 @@ int testDurationAndRepeatParameters() {
   return 0;
 }
 
+int testZeroBudgetWhileDoLowersToNoOpLeaf() {
+  Tree tree;
+  tree.root.id = "WhileDo";
+  tree.root.params.emplace("condition", Value{true});
+  tree.root.params.emplace("max_iterations", Value{0.0});
+  Node body;
+  body.id = "Body";
+  tree.root.children.push_back(body);
+
+  Blackboard blackboard;
+  const auto plan = compileTreePlan(tree, blackboard, testLimits());
+  CHECK(plan.nodes.size() == 1u);
+  CHECK(plan.source_nodes.size() == 1u);
+  CHECK(plan.succeed_without_tick.size() == 1u);
+  CHECK(plan.succeed_without_tick[0] != 0u);
+  CHECK(plan.nodes[0].kind == SALTS_BT_NODE_LEAF);
+  CHECK(plan.nodes[0].parent_index == PRAKTOR_C11_BT_NO_PARENT);
+  return 0;
+}
+
 int testBlackboardIntegralFloatParameters() {
   Tree tree;
   tree.root.id = "Sequence";
@@ -150,6 +170,7 @@ int testRejectsInvalidInputs() {
 int main() {
   if (testParentFirstSequence() != 0) return 1;
   if (testDurationAndRepeatParameters() != 0) return 1;
+  if (testZeroBudgetWhileDoLowersToNoOpLeaf() != 0) return 1;
   if (testBlackboardIntegralFloatParameters() != 0) return 1;
   if (testRejectsInvalidInputs() != 0) return 1;
   return 0;

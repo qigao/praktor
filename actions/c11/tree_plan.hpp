@@ -23,6 +23,8 @@ namespace actions::c11 {
 struct TreePlan {
   std::vector<praktor_c11_bt_node_desc> nodes;
   std::vector<const actions::Node *> source_nodes;
+  /* True for legacy no-op controls lowered to synthetic SUCCESS leaves. */
+  std::vector<unsigned char> succeed_without_tick;
 };
 
 /*
