@@ -1200,9 +1200,19 @@ int testPipelineSequenceResumesActiveStageAndRestoresInput() {
     actions::c11::TreeExecutorSession session(
         tree, executor, blackboard, context, limits());
     salts_bt_node_status status = SALTS_BT_FAILURE;
-    CHECK(session.tick(&status) == SALTS_OK);
+    const int first_tick_status = session.tick(&status);
+    if (first_tick_status != SALTS_OK) {
+      std::fprintf(stderr, "PipelineSequence first tick failed with status %d: %s\\n",
+                   first_tick_status, session.lastError().c_str());
+    }
+    CHECK(first_tick_status == SALTS_OK);
     CHECK(status == SALTS_BT_RUNNING);
-    CHECK(session.tick(&status) == SALTS_OK);
+    const int second_tick_status = session.tick(&status);
+    if (second_tick_status != SALTS_OK) {
+      std::fprintf(stderr, "PipelineSequence second tick failed with status %d: %s\\n",
+                   second_tick_status, session.lastError().c_str());
+    }
+    CHECK(second_tick_status == SALTS_OK);
     CHECK(status == SALTS_BT_SUCCESS);
     CHECK(first_calls == 1);
     CHECK(second_calls == 2);
