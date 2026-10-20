@@ -20,6 +20,10 @@ typedef struct test_host_state {
   size_t tick_calls[TEST_MAX_NODES];
   size_t halt_calls[TEST_MAX_NODES];
   int leaf_error_once[TEST_MAX_NODES];
+  salts_bt_node_status condition_steps[TEST_MAX_NODES][TEST_MAX_STEPS];
+  size_t condition_step_count[TEST_MAX_NODES];
+  size_t condition_next_step[TEST_MAX_NODES];
+  size_t condition_calls[TEST_MAX_NODES];
 
   size_t enter_calls[TEST_MAX_NODES][TEST_MAX_NODES];
   size_t first_calls[TEST_MAX_NODES][TEST_MAX_NODES];
@@ -53,6 +57,24 @@ static int test_tick_leaf(void *user, size_t node_index,
   *out_status = state->steps[node_index][step];
   if (state->next_step[node_index] < state->step_count[node_index])
     ++state->next_step[node_index];
+  return SALTS_OK;
+}
+
+static int test_condition(void *user, size_t node_index,
+                          salts_bt_node_status *out_status) {
+  test_host_state *state = (test_host_state *)user;
+  size_t step;
+  if (state == NULL || out_status == NULL || node_index >= TEST_MAX_NODES ||
+      state->condition_step_count[node_index] == 0u)
+    return SALTS_EINVAL;
+
+  ++state->condition_calls[node_index];
+  step = state->condition_next_step[node_index];
+  if (step >= state->condition_step_count[node_index])
+    step = state->condition_step_count[node_index] - 1u;
+  *out_status = state->condition_steps[node_index][step];
+  if (state->condition_next_step[node_index] < state->condition_step_count[node_index])
+    ++state->condition_next_step[node_index];
   return SALTS_OK;
 }
 
@@ -122,10 +144,19 @@ static void set_steps(test_host_state *state, size_t node_index,
   for (i = 0u; i < count; ++i) state->steps[node_index][i] = steps[i];
 }
 
+static void set_conditions(test_host_state *state, size_t node_index,
+                           const salts_bt_node_status *steps, size_t count) {
+  size_t i;
+  state->condition_step_count[node_index] = count;
+  for (i = 0u; i < count; ++i)
+    state->condition_steps[node_index][i] = steps[i];
+}
+
 static void set_host(praktor_c11_bt_host *host, test_host_state *state) {
   memset(host, 0, sizeof(*host));
   host->tick_leaf = test_tick_leaf;
   host->halt_leaf = test_halt_leaf;
+  host->condition = test_condition;
   host->parallel_enter = test_parallel_enter;
   host->parallel_step = test_parallel_step;
   host->parallel_join = test_parallel_join;
@@ -170,6 +201,74 @@ static int test_sequence_preserves_running_child_state(void) {
   CHECK(state.halt_calls[1] == 0u);
   CHECK(praktor_c11_bt_tree_destroy(&tree) == SALTS_OK);
   CHECK(tree.impl == NULL);
+  return 0;
+}
+
+static int test_if_then_else_condition_child_is_halted_on_cancel(void) {
+  praktor_c11_bt_tree tree = {0};
+  salts_bt_tree_config config;
+  praktor_c11_bt_node_desc nodes[4] = {
+      {PRAKTOR_C11_BT_NO_PARENT, SALTS_BT_NODE_IF_THEN_ELSE, 0u, 0u, false, false},
+      {0u, SALTS_BT_NODE_LEAF, 0u, 0u, false, false},
+      {0u, SALTS_BT_NODE_LEAF, 0u, 0u, false, false},
+      {0u, SALTS_BT_NODE_LEAF, 0u, 0u, false, false}};
+  const salts_bt_node_status condition[] = {SALTS_BT_RUNNING, SALTS_BT_SUCCESS};
+  const salts_bt_node_status success[] = {SALTS_BT_SUCCESS};
+  test_host_state state = {0};
+  praktor_c11_bt_host host;
+  salts_bt_node_status result = SALTS_BT_FAILURE;
+
+  default_tree_config(&config);
+  set_steps(&state, 1u, condition, 2u);
+  set_steps(&state, 2u, success, 1u);
+  set_steps(&state, 3u, success, 1u);
+  set_host(&host, &state);
+  CHECK(praktor_c11_bt_tree_init(&tree, &config, nodes, 4u, &host) == SALTS_OK);
+  CHECK(praktor_c11_bt_tree_tick(&tree, &result) == SALTS_OK);
+  CHECK(result == SALTS_BT_RUNNING);
+  CHECK(state.tick_calls[1] == 1u);
+  CHECK(state.tick_calls[2] == 0u);
+  CHECK(state.tick_calls[3] == 0u);
+  CHECK(praktor_c11_bt_tree_cancel(&tree) == SALTS_OK);
+  CHECK(state.halt_calls[1] == 1u);
+  CHECK(state.halt_calls[2] == 0u);
+  CHECK(state.halt_calls[3] == 0u);
+  CHECK(praktor_c11_bt_tree_destroy(&tree) == SALTS_OK);
+  CHECK(state.halt_calls[1] == 1u);
+  return 0;
+}
+
+static int test_callback_if_then_else_preserves_condition_status(void) {
+  praktor_c11_bt_tree tree = {0};
+  salts_bt_tree_config config;
+  praktor_c11_bt_node_desc nodes[3] = {
+      {PRAKTOR_C11_BT_NO_PARENT, SALTS_BT_NODE_IF_THEN_ELSE, 0u, 0u, true, false},
+      {0u, SALTS_BT_NODE_LEAF, 0u, 0u, false, false},
+      {0u, SALTS_BT_NODE_LEAF, 0u, 0u, false, false}};
+  const salts_bt_node_status conditions[] = {SALTS_BT_RUNNING, SALTS_BT_SUCCESS};
+  const salts_bt_node_status success[] = {SALTS_BT_SUCCESS};
+  test_host_state state = {0};
+  praktor_c11_bt_host host;
+  salts_bt_node_status result = SALTS_BT_FAILURE;
+
+  default_tree_config(&config);
+  set_conditions(&state, 0u, conditions, 2u);
+  set_steps(&state, 1u, success, 1u);
+  set_steps(&state, 2u, success, 1u);
+  set_host(&host, &state);
+  CHECK(praktor_c11_bt_tree_init(&tree, &config, nodes, 3u, &host) == SALTS_OK);
+
+  CHECK(praktor_c11_bt_tree_tick(&tree, &result) == SALTS_OK);
+  CHECK(result == SALTS_BT_RUNNING);
+  CHECK(state.condition_calls[0] == 1u);
+  CHECK(state.tick_calls[1] == 0u);
+  CHECK(state.tick_calls[2] == 0u);
+  CHECK(praktor_c11_bt_tree_tick(&tree, &result) == SALTS_OK);
+  CHECK(result == SALTS_BT_SUCCESS);
+  CHECK(state.condition_calls[0] == 2u);
+  CHECK(state.tick_calls[1] == 1u);
+  CHECK(state.tick_calls[2] == 0u);
+  CHECK(praktor_c11_bt_tree_destroy(&tree) == SALTS_OK);
   return 0;
 }
 
@@ -329,6 +428,8 @@ static int test_invalid_parent_order_fails_before_callbacks(void) {
 
 int main(void) {
   if (test_sequence_preserves_running_child_state() != 0) return 1;
+  if (test_if_then_else_condition_child_is_halted_on_cancel() != 0) return 1;
+  if (test_callback_if_then_else_preserves_condition_status() != 0) return 1;
   if (test_running_condition_is_halted_on_cancel() != 0) return 1;
   if (test_while_do_condition_child_yields_each_iteration() != 0) return 1;
   if (test_parallel_context_lifecycle_and_cancel() != 0) return 1;
