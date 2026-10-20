@@ -683,6 +683,95 @@ int testWhileDoConditionFormsMatchTerminalEffects() {
   return 0;
 }
 
+int testReactiveFallbackRechecksPriorityAfterRunning() {
+  // A lower-priority child returns RUNNING. On the next tick, a newly
+  // successful high-priority child must preempt it instead of resuming it.
+  actions::Tree tree;
+  tree.root.id = "ReactiveFallback";
+  actions::Node priority;
+  priority.id = "Priority";
+  actions::Node lower_priority;
+  lower_priority.id = "LowerPriority";
+  tree.root.children.push_back(priority);
+  tree.root.children.push_back(lower_priority);
+
+  actions::Executor legacy;
+  int legacy_priority_calls = 0;
+  int legacy_lower_calls = 0;
+  legacy.registerTask("Priority", [&legacy_priority_calls](const auto&,
+                                                            actions::Blackboard&) {
+    ++legacy_priority_calls;
+    return legacy_priority_calls == 1 ? actions::NodeStatus::FAILURE
+                                      : actions::NodeStatus::SUCCESS;
+  });
+  legacy.registerTask("LowerPriority", [&legacy_lower_calls](const auto&,
+                                                              actions::Blackboard&) {
+    ++legacy_lower_calls;
+    return legacy_lower_calls == 1 ? actions::NodeStatus::RUNNING
+                                   : actions::NodeStatus::SUCCESS;
+  });
+  actions::Blackboard legacy_blackboard;
+  actions::ExecutionContext legacy_context;
+  CHECK(legacy.execute(tree.root, legacy_blackboard, legacy_context) ==
+        actions::NodeStatus::RUNNING);
+  CHECK(legacy.execute(tree.root, legacy_blackboard, legacy_context) ==
+        actions::NodeStatus::SUCCESS);
+  CHECK(legacy_priority_calls == 2);
+  CHECK(legacy_lower_calls == 1);
+
+  actions::Executor c11;
+  int c11_priority_calls = 0;
+  int c11_lower_calls = 0;
+  c11.registerTask("Priority", [&c11_priority_calls](const auto&,
+                                                      actions::Blackboard&) {
+    ++c11_priority_calls;
+    return c11_priority_calls == 1 ? actions::NodeStatus::FAILURE
+                                   : actions::NodeStatus::SUCCESS;
+  });
+  c11.registerTask("LowerPriority", [&c11_lower_calls](const auto&,
+                                                        actions::Blackboard&) {
+    ++c11_lower_calls;
+    return c11_lower_calls == 1 ? actions::NodeStatus::RUNNING
+                                : actions::NodeStatus::SUCCESS;
+  });
+  actions::Blackboard c11_blackboard;
+  actions::ExecutionContext c11_context;
+  praktor_c11_bt_host hooks{};
+  hooks.halt_leaf = &noOpHalt;
+  actions::c11::TreeExecutorSession session(tree, c11, c11_blackboard,
+                                            c11_context, limits(), &hooks);
+  salts_bt_node_status status = SALTS_BT_FAILURE;
+  CHECK(session.tick(&status) == SALTS_OK);
+  CHECK(status == SALTS_BT_RUNNING);
+  CHECK(session.tick(&status) == SALTS_OK);
+  CHECK(status == SALTS_BT_SUCCESS);
+  CHECK(c11_priority_calls == legacy_priority_calls);
+  CHECK(c11_lower_calls == legacy_lower_calls);
+  return 0;
+}
+
+int testEmptyReactiveFallbackMatchesFailure() {
+  actions::Tree tree;
+  tree.root.id = "ReactiveFallback";
+
+  actions::Executor legacy;
+  actions::Blackboard legacy_blackboard;
+  actions::ExecutionContext legacy_context;
+  CHECK(legacy.execute(tree.root, legacy_blackboard, legacy_context) ==
+        actions::NodeStatus::FAILURE);
+
+  actions::Executor c11;
+  actions::Blackboard c11_blackboard;
+  actions::ExecutionContext c11_context;
+  actions::c11::TreeExecutorSession session(tree, c11, c11_blackboard,
+                                            c11_context, limits());
+  salts_bt_node_status status = SALTS_BT_SUCCESS;
+  CHECK(session.validate() == SALTS_OK);
+  CHECK(session.tick(&status) == SALTS_OK);
+  CHECK(status == SALTS_BT_FAILURE);
+  return 0;
+}
+
 int testEmptySwitchResolvesSelectorThenFails() {
   {
     actions::Tree tree;
@@ -1328,6 +1417,8 @@ int main() {
   if (testScalarConditionAndSwitchUseBlackboard() != 0) return 1;
   if (testInTreeIfThenElseConditionMatchesExecutor() != 0) return 1;
   if (testWhileDoConditionFormsMatchTerminalEffects() != 0) return 1;
+  if (testReactiveFallbackRechecksPriorityAfterRunning() != 0) return 1;
+  if (testEmptyReactiveFallbackMatchesFailure() != 0) return 1;
   if (testEmptySwitchResolvesSelectorThenFails() != 0) return 1;
   if (testEmptyParallelAndReactiveSequenceMatchExecutor() != 0) return 1;
   if (testRunOnceAndKeepRunningStateMatchExecutor() != 0) return 1;
