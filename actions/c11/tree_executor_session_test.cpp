@@ -846,7 +846,7 @@ int testFailedInitialHostTickRunsCleanupExactlyOnce() {
   CHECK(state.tick_calls == 1);
   CHECK(state.halt_calls == 1);
   CHECK(executor_calls == 0);
-  CHECK(session.lastError().find("host leaf tick hook failed") != std::string::npos);
+  CHECK(session.lastError().find("host leaf hook returned status") != std::string::npos);
   return 0;
 }
 
