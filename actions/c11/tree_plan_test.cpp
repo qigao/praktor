@@ -97,6 +97,20 @@ int testEmptyParallelAndReactiveSequenceLowerToSuccessLeaf() {
   return 0;
 }
 
+int testEmptyReactiveFallbackLowersToFailureLeaf() {
+  Tree tree;
+  tree.root.id = "ReactiveFallback";
+  Blackboard blackboard;
+  const auto plan = compileTreePlan(tree, blackboard, testLimits());
+  CHECK(plan.nodes.size() == 1u);
+  CHECK(plan.source_nodes.size() == 1u);
+  CHECK(plan.terminal_actions.size() == 1u);
+  CHECK(plan.terminal_actions[0] == actions::c11::TreePlanTerminalAction::Failure);
+  CHECK(plan.nodes[0].kind == SALTS_BT_NODE_LEAF);
+  CHECK(plan.nodes[0].parent_index == PRAKTOR_C11_BT_NO_PARENT);
+  return 0;
+}
+
 int testZeroBudgetWhileDoLowersToNoOpLeaf() {
   Tree tree;
   tree.root.id = "WhileDo";
@@ -277,6 +291,7 @@ int main() {
   if (testParentFirstSequence() != 0) return 1;
   if (testDurationAndRepeatParameters() != 0) return 1;
   if (testEmptyParallelAndReactiveSequenceLowerToSuccessLeaf() != 0) return 1;
+  if (testEmptyReactiveFallbackLowersToFailureLeaf() != 0) return 1;
   if (testZeroBudgetWhileDoLowersToNoOpLeaf() != 0) return 1;
   if (testZeroBudgetKeepRunningLowersToNoOpFailureLeaf() != 0) return 1;
   if (testZeroBudgetControlsStillValidateChildArity() != 0) return 1;
