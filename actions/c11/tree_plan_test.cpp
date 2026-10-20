@@ -125,6 +125,12 @@ int testRejectsInvalidInputs() {
   }
   {
     Tree tree;
+    tree.root.id = "Repeat";
+    tree.root.params.emplace("num_cycles", Value{2147483648.0});
+    CHECK(expectInvalid(tree, blackboard) == 0);
+  }
+  {
+    Tree tree;
     tree.root.id = "SubTree";
     CHECK(expectInvalid(tree, blackboard) == 0);
   }

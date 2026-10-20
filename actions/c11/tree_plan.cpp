@@ -52,10 +52,14 @@ std::string valueToText(const Value &value, const Blackboard &blackboard,
 
 int64_t parseIntegerText(const std::string &raw, const Node &node,
                          const char *key) {
+  const double lower = static_cast<double>((std::numeric_limits<int>::min)());
+  const double upper = static_cast<double>((std::numeric_limits<int>::max)());
   try {
     size_t consumed = 0u;
     const long long value = std::stoll(raw, &consumed, 10);
-    if (consumed == raw.size()) {
+    if (consumed == raw.size() &&
+        value >= (std::numeric_limits<int>::min)() &&
+        value <= (std::numeric_limits<int>::max)()) {
       return static_cast<int64_t>(value);
     }
   } catch (const std::exception &) {
@@ -66,19 +70,15 @@ int64_t parseIntegerText(const std::string &raw, const Node &node,
     size_t consumed = 0u;
     const double numeric = std::stod(raw, &consumed);
     const double fractional = numeric - std::trunc(numeric);
-    const double upper_exclusive =
-        -static_cast<double>(std::numeric_limits<int64_t>::min());
     if (consumed != raw.size() || !std::isfinite(numeric) ||
-        std::abs(fractional) > 0.0 ||
-        numeric < static_cast<double>(std::numeric_limits<int64_t>::min()) ||
-        numeric >= upper_exclusive) {
-      throw std::invalid_argument("not an integral number");
+        std::abs(fractional) > 0.0 || numeric < lower || numeric > upper) {
+      throw std::invalid_argument("not an in-range integral number");
     }
     return static_cast<int64_t>(numeric);
   } catch (const std::exception &) {
     throw std::invalid_argument("Parameter '" + std::string(key) +
                                 "' on node '" + node.id +
-                                "' must be an integer, got '" + raw + "'");
+                                "' must be a 32-bit integer, got '" + raw + "'");
   }
 }
 
@@ -100,11 +100,9 @@ int64_t readIntegerParam(const Node &node, const Blackboard &blackboard,
     const double fractional = numeric - std::trunc(numeric);
     // Use an ordered comparison rather than ==/!= on floating-point values:
     // this project treats -Wfloat-equal as an error.
-    const double upper_exclusive =
-        -static_cast<double>(std::numeric_limits<int64_t>::min());
     if (!std::isfinite(numeric) || std::abs(fractional) > 0.0 ||
-        numeric < static_cast<double>(std::numeric_limits<int64_t>::min()) ||
-        numeric >= upper_exclusive) {
+        numeric < static_cast<double>((std::numeric_limits<int>::min)()) ||
+        numeric > static_cast<double>((std::numeric_limits<int>::max)())) {
       throw std::invalid_argument("Parameter '" + std::string(key) +
                                   "' on node '" + node.id +
                                   "' must be an integer");

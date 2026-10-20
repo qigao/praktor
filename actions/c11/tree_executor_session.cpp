@@ -51,6 +51,22 @@ std::string resolveStringValue(const actions::Value& value,
   return raw;
 }
 
+bool shellBooleanValue(const actions::Value& value,
+                       const actions::Blackboard& blackboard) {
+  if (std::holds_alternative<bool>(value)) return std::get<bool>(value);
+  if (std::holds_alternative<double>(value)) {
+    throw std::invalid_argument("Shell stream_output must be a boolean");
+  }
+  std::string raw = resolveStringValue(value, blackboard);
+  std::transform(raw.begin(), raw.end(), raw.begin(),
+                 [](unsigned char ch) {
+                   return static_cast<char>(std::tolower(ch));
+                 });
+  if (raw == "true") return true;
+  if (raw == "false") return false;
+  throw std::invalid_argument("Shell stream_output must be true or false");
+}
+
 bool conditionValue(const actions::Value& value,
                     const actions::Blackboard& blackboard) {
   if (std::holds_alternative<bool>(value)) {
@@ -70,10 +86,14 @@ bool conditionValue(const actions::Value& value,
 }
 
 long long parseInteger(const std::string& raw) {
+  const double lower = static_cast<double>((std::numeric_limits<int>::min)());
+  const double upper = static_cast<double>((std::numeric_limits<int>::max)());
   try {
     size_t consumed = 0u;
     const long long integer = std::stoll(raw, &consumed, 10);
-    if (consumed == raw.size()) return integer;
+    if (consumed == raw.size() &&
+        integer >= (std::numeric_limits<int>::min)() &&
+        integer <= (std::numeric_limits<int>::max)()) return integer;
   } catch (const std::exception&) {
     // Try the legacy executor's integral floating-point string form below.
   }
@@ -82,17 +102,13 @@ long long parseInteger(const std::string& raw) {
     size_t consumed = 0u;
     const double number = std::stod(raw, &consumed);
     const double fractional = number - std::trunc(number);
-    const double upper_exclusive =
-        -static_cast<double>((std::numeric_limits<long long>::min)());
     if (consumed != raw.size() || !std::isfinite(number) ||
-        std::abs(fractional) > 0.0 ||
-        number < static_cast<double>((std::numeric_limits<long long>::min)()) ||
-        number >= upper_exclusive) {
-      throw std::invalid_argument("not an integral number");
+        std::abs(fractional) > 0.0 || number < lower || number > upper) {
+      throw std::invalid_argument("not an in-range integral number");
     }
     return static_cast<long long>(number);
   } catch (const std::exception&) {
-    throw std::invalid_argument("switch variable is not an integer: " + raw);
+    throw std::invalid_argument("switch variable is not a 32-bit integer: " + raw);
   }
 }
 
@@ -695,7 +711,7 @@ struct TreeExecutorSession::Impl {
     if (exit_it != source.params.end()) state.exit_code_key = resolveStringValue(exit_it->second, blackboard);
     state.stream_output = true;
     const auto stream_it = source.params.find("stream_output");
-    if (stream_it != source.params.end()) state.stream_output = conditionValue(stream_it->second, blackboard);
+    if (stream_it != source.params.end()) state.stream_output = shellBooleanValue(stream_it->second, blackboard);
 
     uint64_t timeout_ms = UINT64_C(30000);
     const auto timeout_it = source.params.find("timeout");
@@ -1055,8 +1071,8 @@ struct TreeExecutorSession::Impl {
         const double number = std::get<double>(it->second);
         const double fractional = number - std::trunc(number);
         if (!std::isfinite(number) || std::abs(fractional) > 0.0 ||
-            number < static_cast<double>((std::numeric_limits<long long>::min)()) ||
-            number >= -static_cast<double>((std::numeric_limits<long long>::min)())) {
+            number < static_cast<double>((std::numeric_limits<int>::min)()) ||
+            number > static_cast<double>((std::numeric_limits<int>::max)())) {
           last_error = "Switch variable must resolve to an integer";
           return SALTS_EINVAL;
         }
