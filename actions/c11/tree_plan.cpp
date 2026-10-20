@@ -228,7 +228,6 @@ void appendNode(TreePlan &plan, const Node &node, size_t parent_index,
         node, "delay_ms");
     break;
   case SALTS_BT_NODE_PIPELINE_SEQUENCE:
-    (void)readIntegerParam(node, blackboard, "unused", 0);
     break;
   case SALTS_BT_NODE_ENTRY_UPDATED:
     if (findParam(node, "watch_key") == nullptr) {
