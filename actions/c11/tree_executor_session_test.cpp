@@ -805,6 +805,51 @@ int noOpParallelFinish(void*, size_t, size_t, salts_bt_node_status) {
 void noOpParallelAbort(void*, size_t, size_t) {}
 
 
+struct FailingHostLeafState {
+  int tick_calls = 0;
+  int halt_calls = 0;
+};
+
+int failingHostLeafTick(void* user, size_t, salts_bt_node_status*) {
+  auto* state = static_cast<FailingHostLeafState*>(user);
+  ++state->tick_calls;
+  return SALTS_EIO;
+}
+
+void failingHostLeafHalt(void* user, size_t) {
+  auto* state = static_cast<FailingHostLeafState*>(user);
+  ++state->halt_calls;
+}
+
+int testFailedInitialHostTickRunsCleanupExactlyOnce() {
+  actions::Tree tree;
+  tree.root.id = "HostManagedTask";
+  actions::Executor executor;
+  int executor_calls = 0;
+  executor.registerTask("HostManagedTask", [&executor_calls](const auto&,
+                                                              actions::Blackboard&) {
+    ++executor_calls;
+    return actions::NodeStatus::SUCCESS;
+  });
+
+  FailingHostLeafState state;
+  praktor_c11_bt_host hooks{};
+  hooks.tick_leaf = &failingHostLeafTick;
+  hooks.halt_leaf = &failingHostLeafHalt;
+  hooks.user = &state;
+  actions::Blackboard blackboard;
+  actions::ExecutionContext context;
+  actions::c11::TreeExecutorSession session(tree, executor, blackboard,
+                                            context, limits(), &hooks);
+  salts_bt_node_status status = SALTS_BT_FAILURE;
+  CHECK(session.tick(&status) == SALTS_EIO);
+  CHECK(state.tick_calls == 1);
+  CHECK(state.halt_calls == 1);
+  CHECK(executor_calls == 0);
+  CHECK(session.lastError().find("host leaf tick hook failed") != std::string::npos);
+  return 0;
+}
+
 int testHostExceptionsStayInsideCAbi() {
   actions::Tree tree;
   tree.root.id = "Parallel";
@@ -858,6 +903,7 @@ int main() {
   if (testBuiltInConsumeQueue() != 0) return 1;
   if (testConsumeQueueRejectsMalformedQueue() != 0) return 1;
   if (testBuiltInEntryUpdatedHook() != 0) return 1;
+  if (testFailedInitialHostTickRunsCleanupExactlyOnce() != 0) return 1;
   if (testHostExceptionsStayInsideCAbi() != 0) return 1;
   return 0;
 }

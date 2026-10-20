@@ -964,11 +964,16 @@ struct TreeExecutorSession::Impl {
       // An inactive leaf may be claimed by the optional host hook. ENOTSUP
       // means "not mine"; other errors are authoritative and never fall back.
       if (hooks.tick_leaf != nullptr) {
-        const int host_status = hooks.tick_leaf(hooks.user, index, out_status);
+        const int host_status = safeHostStatus("C11 host leaf tick hook failed", [&] {
+          return hooks.tick_leaf(hooks.user, index, out_status);
+        });
         if (host_status == SALTS_OK) {
           if (*out_status != SALTS_BT_SUCCESS &&
               *out_status != SALTS_BT_FAILURE &&
               *out_status != SALTS_BT_RUNNING) {
+            safeHostVoid("C11 host leaf cleanup after invalid status failed", [&] {
+              hooks.halt_leaf(hooks.user, index);
+            });
             last_error = "host leaf hook returned an invalid node status for '" +
                          source->id + "'";
             return SALTS_EINVAL;
@@ -978,8 +983,18 @@ struct TreeExecutorSession::Impl {
           return SALTS_OK;
         }
         if (host_status != SALTS_ENOTSUP) {
-          last_error = "host leaf hook returned status " + std::to_string(host_status) +
-                       " for node '" + source->id + "'";
+          // A failing tick may have partially acquired host resources even on
+          // the first activation. Request idempotent cleanup before Salts resets
+          // the tree; the adapter's subsequent halt callback sees no owner and
+          // therefore cannot invoke this cleanup a second time.
+          safeHostVoid("C11 host leaf cleanup after tick failure failed", [&] {
+            hooks.halt_leaf(hooks.user, index);
+          });
+          if (last_error.empty()) {
+            last_error = "host leaf hook returned status " + std::to_string(host_status) +
+                         " for node '" + source->id + "'";
+          }
+          leaf_owners[index] = LeafOwner::None;
           return host_status;
         }
       }
