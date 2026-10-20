@@ -3,11 +3,15 @@ cmake_minimum_required(VERSION 3.16)
 project(
     actions
     VERSION 2.0.0
-    LANGUAGES CXX
+    LANGUAGES C CXX
 )
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+option(PRAKTOR_ENABLE_C11_ACTIONS
+       "Build the experimental Salts C11 action-tree adapter and its tests"
+       OFF)
 
 cmake_add_source(ALL_SOURCE_FILES RECURSE
     DIRS src core
@@ -42,6 +46,47 @@ target_link_libraries(actions PUBLIC praktor_shell PRIVATE Salts::JsonParser)
 
 if(WIN32)
     target_link_libraries(actions PRIVATE psapi)
+endif()
+
+# This target is deliberately opt-in until the Praktor parity corpus passes.
+# Enabling it is fail-fast: it never silently falls back when the selected
+# SaltsUtils SDK does not export Salts::BehaviorTree.
+if(PRAKTOR_ENABLE_C11_ACTIONS)
+    if(NOT TARGET Salts::BehaviorTree)
+        message(FATAL_ERROR
+            "PRAKTOR_ENABLE_C11_ACTIONS requires an installed SaltsUtils SDK exporting Salts::BehaviorTree")
+    endif()
+
+    add_library(praktor_actions_c11 STATIC
+        c11/tree_adapter.c
+        c11/tree_adapter.h
+    )
+    target_include_directories(praktor_actions_c11
+        PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/c11>
+    )
+    target_link_libraries(praktor_actions_c11 PUBLIC Salts::BehaviorTree)
+    target_compile_features(praktor_actions_c11 PUBLIC c_std_11)
+    set_target_properties(praktor_actions_c11 PROPERTIES
+        C_STANDARD 11
+        C_STANDARD_REQUIRED ON
+        C_EXTENSIONS OFF
+        POSITION_INDEPENDENT_CODE ON
+        FOLDER "actions/c11"
+    )
+    cmake_config_target(praktor_actions_c11 NO_INSTALL NO_VERSION FOLDER "actions/c11")
+
+    if(ENABLE_TESTS)
+        add_executable(actions_c11_tree_adapter_test c11/tree_adapter_test.c)
+        target_link_libraries(actions_c11_tree_adapter_test PRIVATE praktor_actions_c11)
+        target_compile_features(actions_c11_tree_adapter_test PRIVATE c_std_11)
+        set_target_properties(actions_c11_tree_adapter_test PROPERTIES
+            C_STANDARD 11
+            C_STANDARD_REQUIRED ON
+            C_EXTENSIONS OFF
+            FOLDER "actions/c11/tests"
+        )
+        add_test(NAME actions_c11_tree_adapter_test COMMAND actions_c11_tree_adapter_test)
+    endif()
 endif()
 
 # ── EXAMPLES ──
