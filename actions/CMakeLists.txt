@@ -92,6 +92,17 @@ if(PRAKTOR_ENABLE_C11_ACTIONS)
             FOLDER "actions/c11/tests"
         )
         add_test(NAME actions_c11_tree_adapter_test COMMAND actions_c11_tree_adapter_test)
+
+        add_executable(actions_c11_tree_plan_test c11/tree_plan_test.cpp)
+        target_link_libraries(actions_c11_tree_plan_test PRIVATE praktor_actions_c11 actions)
+        target_compile_features(actions_c11_tree_plan_test PRIVATE cxx_std_17)
+        set_target_properties(actions_c11_tree_plan_test PROPERTIES
+            CXX_STANDARD 17
+            CXX_STANDARD_REQUIRED ON
+            CXX_EXTENSIONS OFF
+            FOLDER "actions/c11/tests"
+        )
+        add_test(NAME actions_c11_tree_plan_test COMMAND actions_c11_tree_plan_test)
     endif()
 endif()
 
