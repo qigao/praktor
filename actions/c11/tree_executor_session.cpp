@@ -308,60 +308,97 @@ struct TreeExecutorSession::Impl {
     }
   }
 
+  template <typename Callback>
+  int safeHostStatus(const char* operation, Callback&& callback) noexcept {
+    try {
+      return callback();
+    } catch (...) {
+      rememberCurrentException(operation);
+      return SALTS_EIO;
+    }
+  }
+
+  template <typename Callback>
+  void safeHostVoid(const char* operation, Callback&& callback) noexcept {
+    try {
+      callback();
+    } catch (...) {
+      rememberCurrentException(operation);
+    }
+  }
+
   int parallelEnter(size_t node, size_t child, bool first) noexcept {
-    return hooks.parallel_enter == nullptr
-               ? SALTS_ENOTSUP
-               : hooks.parallel_enter(hooks.user, node, child, first);
+    if (hooks.parallel_enter == nullptr) return SALTS_ENOTSUP;
+    return safeHostStatus("C11 Parallel enter hook failed", [&] {
+      return hooks.parallel_enter(hooks.user, node, child, first);
+    });
   }
   int parallelStep(size_t node, size_t child, salts_bt_node_status status) noexcept {
-    return hooks.parallel_step == nullptr
-               ? SALTS_ENOTSUP
-               : hooks.parallel_step(hooks.user, node, child, status);
+    if (hooks.parallel_step == nullptr) return SALTS_ENOTSUP;
+    return safeHostStatus("C11 Parallel step hook failed", [&] {
+      return hooks.parallel_step(hooks.user, node, child, status);
+    });
   }
   int parallelJoin(size_t node, salts_bt_node_status status) noexcept {
-    return hooks.parallel_join == nullptr
-               ? SALTS_ENOTSUP
-               : hooks.parallel_join(hooks.user, node, status);
+    if (hooks.parallel_join == nullptr) return SALTS_ENOTSUP;
+    return safeHostStatus("C11 Parallel join hook failed", [&] {
+      return hooks.parallel_join(hooks.user, node, status);
+    });
   }
   int parallelFinish(size_t node, size_t child, salts_bt_node_status status) noexcept {
-    return hooks.parallel_finish == nullptr
-               ? SALTS_ENOTSUP
-               : hooks.parallel_finish(hooks.user, node, child, status);
+    if (hooks.parallel_finish == nullptr) return SALTS_ENOTSUP;
+    return safeHostStatus("C11 Parallel finish hook failed", [&] {
+      return hooks.parallel_finish(hooks.user, node, child, status);
+    });
   }
   void parallelAbort(size_t node, size_t child) noexcept {
-    if (hooks.parallel_abort != nullptr) hooks.parallel_abort(hooks.user, node, child);
+    if (hooks.parallel_abort == nullptr) return;
+    safeHostVoid("C11 Parallel abort hook failed", [&] {
+      hooks.parallel_abort(hooks.user, node, child);
+    });
   }
   int pipelinePrepare(size_t node, size_t child) noexcept {
-    return hooks.pipeline_prepare == nullptr
-               ? SALTS_ENOTSUP
-               : hooks.pipeline_prepare(hooks.user, node, child);
+    if (hooks.pipeline_prepare == nullptr) return SALTS_ENOTSUP;
+    return safeHostStatus("C11 PipelineSequence prepare hook failed", [&] {
+      return hooks.pipeline_prepare(hooks.user, node, child);
+    });
   }
   int pipelineComplete(size_t node, size_t child,
                        salts_bt_node_status status) noexcept {
-    return hooks.pipeline_complete == nullptr
-               ? SALTS_ENOTSUP
-               : hooks.pipeline_complete(hooks.user, node, child, status);
+    if (hooks.pipeline_complete == nullptr) return SALTS_ENOTSUP;
+    return safeHostStatus("C11 PipelineSequence complete hook failed", [&] {
+      return hooks.pipeline_complete(hooks.user, node, child, status);
+    });
   }
   void pipelineAbort(size_t node, size_t child) noexcept {
-    if (hooks.pipeline_abort != nullptr) hooks.pipeline_abort(hooks.user, node, child);
+    if (hooks.pipeline_abort == nullptr) return;
+    safeHostVoid("C11 PipelineSequence abort hook failed", [&] {
+      hooks.pipeline_abort(hooks.user, node, child);
+    });
   }
   int entryChanged(size_t node, bool* changed) noexcept {
-    return hooks.entry_changed == nullptr
-               ? SALTS_ENOTSUP
-               : hooks.entry_changed(hooks.user, node, changed);
+    if (hooks.entry_changed == nullptr) return SALTS_ENOTSUP;
+    return safeHostStatus("C11 EntryUpdated hook failed", [&] {
+      return hooks.entry_changed(hooks.user, node, changed);
+    });
   }
   int queueBegin(size_t node, bool* has_item) noexcept {
-    return hooks.queue_begin == nullptr
-               ? SALTS_ENOTSUP
-               : hooks.queue_begin(hooks.user, node, has_item);
+    if (hooks.queue_begin == nullptr) return SALTS_ENOTSUP;
+    return safeHostStatus("C11 ConsumeQueue begin hook failed", [&] {
+      return hooks.queue_begin(hooks.user, node, has_item);
+    });
   }
   int queueFinish(size_t node, bool* has_more) noexcept {
-    return hooks.queue_finish == nullptr
-               ? SALTS_ENOTSUP
-               : hooks.queue_finish(hooks.user, node, has_more);
+    if (hooks.queue_finish == nullptr) return SALTS_ENOTSUP;
+    return safeHostStatus("C11 ConsumeQueue finish hook failed", [&] {
+      return hooks.queue_finish(hooks.user, node, has_more);
+    });
   }
   void queueAbort(size_t node) noexcept {
-    if (hooks.queue_abort != nullptr) hooks.queue_abort(hooks.user, node);
+    if (hooks.queue_abort == nullptr) return;
+    safeHostVoid("C11 ConsumeQueue abort hook failed", [&] {
+      hooks.queue_abort(hooks.user, node);
+    });
   }
 
   static Impl* self(void* user) noexcept { return static_cast<Impl*>(user); }
