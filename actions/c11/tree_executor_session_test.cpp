@@ -89,6 +89,47 @@ void customShellHalt(void* user, size_t node_index) {
 }
 
 
+int testExecutorOwnedRunningLeafDoesNotReenterDeclinedHook() {
+  actions::Tree tree;
+  tree.root.id = "Sequence";
+  actions::Node work;
+  work.id = "Work";
+  tree.root.children.push_back(work);
+
+  actions::Executor executor;
+  int executor_calls = 0;
+  executor.registerTask("Work", [&executor_calls](const auto&, actions::Blackboard&) {
+    ++executor_calls;
+    return executor_calls < 2 ? actions::NodeStatus::RUNNING
+                              : actions::NodeStatus::SUCCESS;
+  });
+
+  int dispatcher_calls = 0;
+  praktor_c11_bt_host hooks{};
+  hooks.tick_leaf = [](void* user, size_t, salts_bt_node_status*) -> int {
+    ++*static_cast<int*>(user);
+    return SALTS_ENOTSUP;
+  };
+  hooks.halt_leaf = &noOpHalt;
+  hooks.user = &dispatcher_calls;
+
+  actions::Blackboard blackboard;
+  actions::ExecutionContext context;
+  actions::c11::TreeExecutorSession session(tree, executor, blackboard,
+                                            context, limits(), &hooks);
+  salts_bt_node_status status = SALTS_BT_FAILURE;
+  CHECK(session.tick(&status) == SALTS_OK);
+  CHECK(status == SALTS_BT_RUNNING);
+  CHECK(dispatcher_calls == 1);
+  CHECK(executor_calls == 1);
+
+  CHECK(session.tick(&status) == SALTS_OK);
+  CHECK(status == SALTS_BT_SUCCESS);
+  CHECK(dispatcher_calls == 1);
+  CHECK(executor_calls == 2);
+  return 0;
+}
+
 int testRunningRegisteredLeafRequiresHaltHook() {
   actions::Tree tree;
   tree.root.id = "Work";
@@ -183,6 +224,40 @@ int testShellUsesSaltsProcessByDefaultAndAllowsExplicitOverride() {
     CHECK(blackboard.has("shell_output"));
     CHECK(blackboard.get("shell_output").find("c11-process") != std::string::npos);
     CHECK(blackboard.get("shell_exit_code") == "0");
+    CHECK(legacy_shell_calls == 0);
+  }
+
+  {
+    actions::Tree tree;
+    tree.root.id = "Shell";
+    tree.root.params.emplace("cmd", actions::Value{std::string("exit 7")});
+    tree.root.params.emplace("timeout", actions::Value{5000.0});
+    tree.root.params.emplace("stream_output", actions::Value{false});
+
+    actions::Executor executor;
+    int legacy_shell_calls = 0;
+    executor.registerTask("Shell", [&legacy_shell_calls](const auto&, actions::Blackboard&) {
+      ++legacy_shell_calls;
+      return actions::NodeStatus::SUCCESS;
+    });
+    actions::Blackboard blackboard;
+    actions::ExecutionContext context;
+    actions::c11::TreeExecutorSession session(tree, executor, blackboard,
+                                              context, limits());
+
+    const auto started = std::chrono::steady_clock::now();
+    salts_bt_node_status status = SALTS_BT_RUNNING;
+    do {
+      CHECK(session.tick(&status) == SALTS_OK);
+      if (status == SALTS_BT_RUNNING) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+      }
+      CHECK(std::chrono::steady_clock::now() - started < std::chrono::seconds(5));
+    } while (status == SALTS_BT_RUNNING);
+
+    CHECK(status == SALTS_BT_FAILURE);
+    CHECK(blackboard.get("shell_exit_code") == "7");
+    CHECK(blackboard.get("shell_error").find("unsuccessfully") != std::string::npos);
     CHECK(legacy_shell_calls == 0);
   }
 
@@ -550,6 +625,7 @@ int testHostExceptionsStayInsideCAbi() {
 int main() {
   if (testRegisteredLeafResumesRunningState() != 0) return 1;
   if (testRunningRegisteredLeafRequiresHaltHook() != 0) return 1;
+  if (testExecutorOwnedRunningLeafDoesNotReenterDeclinedHook() != 0) return 1;
   if (testShellUsesSaltsProcessByDefaultAndAllowsExplicitOverride() != 0) return 1;
   if (testCancelCallsHaltForRegisteredRunningLeaf() != 0) return 1;
   if (testScalarConditionAndSwitchUseBlackboard() != 0) return 1;
