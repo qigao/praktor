@@ -562,11 +562,24 @@ struct TreeExecutorSession::Impl {
   }
 
   void clearShellState(ShellState& state) noexcept {
+    // Never erase the callback owner while the C process still owns leases or
+    // teardown has failed. The shell session remains reachable for retry.
+    if (state.process.impl != nullptr) return;
     Impl* owner = state.owner;
     const size_t node_index = state.node_index;
     state = ShellState{};
     state.owner = owner;
     state.node_index = node_index;
+  }
+
+  void finalizeShellState(ShellState& state) noexcept {
+    const size_t index = state.node_index;
+    if (state.process.impl == nullptr) {
+      clearShellState(state);
+      if (index < leaf_owners.size()) leaf_owners[index] = LeafOwner::None;
+    } else if (index < leaf_owners.size()) {
+      leaf_owners[index] = LeafOwner::SaltsProcess;
+    }
   }
 
   int closeShellProcess(ShellState& state, bool clear_state) noexcept {
@@ -611,7 +624,10 @@ struct TreeExecutorSession::Impl {
 
     if (state.io_failed) result = SALTS_EIO;
     const std::string failure = state.failure_reason;
-    if (clear_state) clearShellState(state);
+    if (clear_state) finalizeShellState(state);
+    else if (state.process.impl != nullptr &&
+             state.node_index < leaf_owners.size())
+      leaf_owners[state.node_index] = LeafOwner::SaltsProcess;
     if (result != SALTS_OK && last_error.empty()) {
       last_error = failure.empty() ? "Salts::Process cleanup failed" : failure;
     }
@@ -812,8 +828,7 @@ struct TreeExecutorSession::Impl {
           last_error = state.failure_reason;
           publishShellResult(state, -1, false);
           *out_status = SALTS_BT_FAILURE;
-          clearShellState(state);
-          leaf_owners[index] = LeafOwner::None;
+          finalizeShellState(state);
           return SALTS_OK;
         }
       }
@@ -825,8 +840,7 @@ struct TreeExecutorSession::Impl {
         if (!reason.empty()) state.failure_reason = reason;
         publishShellResult(state, -1, false);
         last_error = state.failure_reason;
-        clearShellState(state);
-        leaf_owners[index] = LeafOwner::None;
+        finalizeShellState(state);
         *out_status = SALTS_BT_FAILURE;
         return SALTS_OK;
       }
@@ -861,8 +875,7 @@ struct TreeExecutorSession::Impl {
         if (!reason.empty()) state.failure_reason = reason;
         publishShellResult(state, -1, false);
         last_error = state.failure_reason;
-        clearShellState(state);
-        leaf_owners[index] = LeafOwner::None;
+        finalizeShellState(state);
         *out_status = SALTS_BT_FAILURE;
         return SALTS_OK;
       }
@@ -909,8 +922,7 @@ struct TreeExecutorSession::Impl {
       if (!success || cleanup_status != SALTS_OK) {
         if (!state.failure_reason.empty()) last_error = state.failure_reason;
       }
-      clearShellState(state);
-      leaf_owners[index] = LeafOwner::None;
+      finalizeShellState(state);
       *out_status = (success && cleanup_status == SALTS_OK)
                         ? SALTS_BT_SUCCESS : SALTS_BT_FAILURE;
       return SALTS_OK;
@@ -1052,7 +1064,7 @@ struct TreeExecutorSession::Impl {
     if (owner == LeafOwner::SaltsProcess ||
         (index < shell_states.size() && shell_states[index].process.impl != nullptr)) {
       (void)closeShellProcess(shell_states[index], true);
-      leaf_owners[index] = LeafOwner::None;
+      finalizeShellState(shell_states[index]);
       return;
     }
     leaf_owners[index] = LeafOwner::None;
@@ -1482,10 +1494,17 @@ int TreeExecutorSession::reset() {
   impl_->last_error.clear();
   const int status = praktor_c11_bt_tree_reset(&impl_->runtime);
   if (status == SALTS_OK) {
-    std::fill(impl_->leaf_owners.begin(), impl_->leaf_owners.end(), Impl::LeafOwner::None);
+    for (size_t i = 0u; i < impl_->leaf_owners.size(); ++i) {
+      impl_->leaf_owners[i] =
+          i < impl_->shell_states.size() &&
+                  impl_->shell_states[i].process.impl != nullptr
+              ? Impl::LeafOwner::SaltsProcess
+              : Impl::LeafOwner::None;
+    }
     std::fill(impl_->pipeline_states.begin(), impl_->pipeline_states.end(), Impl::PipelineState{});
     std::fill(impl_->entry_updated_states.begin(), impl_->entry_updated_states.end(), Impl::EntryUpdatedState{});
     std::fill(impl_->queue_states.begin(), impl_->queue_states.end(), Impl::QueueState{});
+    if (!impl_->last_error.empty()) return SALTS_EIO;
   } else {
     impl_->last_error = "C11 behavior tree reset failed with status " +
                         std::to_string(status);
@@ -1498,10 +1517,17 @@ int TreeExecutorSession::cancel() {
   impl_->last_error.clear();
   const int status = praktor_c11_bt_tree_cancel(&impl_->runtime);
   if (status == SALTS_OK) {
-    std::fill(impl_->leaf_owners.begin(), impl_->leaf_owners.end(), Impl::LeafOwner::None);
+    for (size_t i = 0u; i < impl_->leaf_owners.size(); ++i) {
+      impl_->leaf_owners[i] =
+          i < impl_->shell_states.size() &&
+                  impl_->shell_states[i].process.impl != nullptr
+              ? Impl::LeafOwner::SaltsProcess
+              : Impl::LeafOwner::None;
+    }
     std::fill(impl_->pipeline_states.begin(), impl_->pipeline_states.end(), Impl::PipelineState{});
     std::fill(impl_->entry_updated_states.begin(), impl_->entry_updated_states.end(), Impl::EntryUpdatedState{});
     std::fill(impl_->queue_states.begin(), impl_->queue_states.end(), Impl::QueueState{});
+    if (!impl_->last_error.empty()) return SALTS_EIO;
   } else {
     impl_->last_error = "C11 behavior tree cancel failed with status " +
                         std::to_string(status);

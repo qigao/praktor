@@ -898,6 +898,47 @@ void failingHostLeafHalt(void* user, size_t) {
   ++state->halt_calls;
 }
 
+struct ThrowingHaltState {
+  int ticks = 0;
+  int halts = 0;
+};
+
+int runningHostTick(void* user, size_t, salts_bt_node_status* out_status) {
+  auto* state = static_cast<ThrowingHaltState*>(user);
+  ++state->ticks;
+  *out_status = SALTS_BT_RUNNING;
+  return SALTS_OK;
+}
+
+void throwingHalt(void* user, size_t) {
+  auto* state = static_cast<ThrowingHaltState*>(user);
+  ++state->halts;
+  throw std::runtime_error("expected halt cleanup failure");
+}
+
+int testCancelReportsHostHaltFailure() {
+  actions::Tree tree;
+  tree.root.id = "HostAsync";
+  actions::Executor executor;
+  actions::Blackboard blackboard;
+  actions::ExecutionContext context;
+  ThrowingHaltState state;
+  praktor_c11_bt_host hooks{};
+  hooks.tick_leaf = &runningHostTick;
+  hooks.halt_leaf = &throwingHalt;
+  hooks.user = &state;
+  actions::c11::TreeExecutorSession session(tree, executor, blackboard,
+                                            context, limits(), &hooks);
+  salts_bt_node_status status = SALTS_BT_FAILURE;
+  CHECK(session.tick(&status) == SALTS_OK);
+  CHECK(status == SALTS_BT_RUNNING);
+  CHECK(state.ticks == 1);
+  CHECK(session.cancel() == SALTS_EIO);
+  CHECK(state.halts == 1);
+  CHECK(session.lastError().find("C11 host leaf halt failed") != std::string::npos);
+  return 0;
+}
+
 int testFailedInitialHostTickRunsCleanupExactlyOnce() {
   actions::Tree tree;
   tree.root.id = "HostManagedTask";
@@ -980,6 +1021,7 @@ int main() {
   if (testBuiltInConsumeQueue() != 0) return 1;
   if (testConsumeQueueRejectsMalformedQueue() != 0) return 1;
   if (testBuiltInEntryUpdatedHook() != 0) return 1;
+  if (testCancelReportsHostHaltFailure() != 0) return 1;
   if (testFailedInitialHostTickRunsCleanupExactlyOnce() != 0) return 1;
   if (testHostExceptionsStayInsideCAbi() != 0) return 1;
   return 0;
