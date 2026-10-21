@@ -303,6 +303,17 @@ WorkflowExecutionResult WorkflowRunner::execute(bool useConcurrent, int maxConcu
     return executeWithControl({}, useConcurrent, maxConcurrency);
 }
 
+WorkflowExecutionResult WorkflowRunner::executeWithC11ProcessOwner(
+    cflow_process_retainer* recoveryOwner,
+    std::shared_ptr<Praktor::Execution::ExecutionControl> executionControl) {
+    // Execution is intentionally serial: all Process admissions, callback
+    // delivery and recovery ownership moves share one lifecycle driver.
+    // Recovery work after this method returns remains the host's obligation.
+    return executeObservedWithHostTools(
+        std::move(executionControl), {}, {}, false, 1,
+        Praktor::Execution::ActionTreeBackend::C11, recoveryOwner);
+}
+
 WorkflowExecutionResult WorkflowRunner::executeWithControl(
     std::shared_ptr<Praktor::Execution::ExecutionControl> executionControl,
     bool useConcurrent, int maxConcurrency) {
@@ -323,7 +334,9 @@ WorkflowExecutionResult WorkflowRunner::executeObservedWithHostTools(
     std::shared_ptr<Praktor::Execution::ExecutionControl> executionControl,
     std::shared_ptr<Praktor::Execution::ExecutionObserver> executionObserver,
     std::shared_ptr<Praktor::Execution::HostToolHost> hostToolHost,
-    bool useConcurrent, int maxConcurrency) {
+    bool useConcurrent, int maxConcurrency,
+    Praktor::Execution::ActionTreeBackend actionBackend,
+    cflow_process_retainer* recoveryOwner) {
     bool workflow_started = false;
     try {
         TLOG_DEBUGF("Loading workflow from: {}", yamlPath_);
@@ -354,7 +367,9 @@ WorkflowExecutionResult WorkflowRunner::executeObservedWithHostTools(
             prepared.runtime_environment,
             useConcurrent ? maxConcurrency : 1,
             false,
-            max_trigger_depth_);
+            max_trigger_depth_,
+            actionBackend,
+            recoveryOwner);
         executor.execute(*prepared.context);
 
         auto result = makeExecutionResult(*prepared.context, prepared.workflow);
