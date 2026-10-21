@@ -84,6 +84,18 @@ static bool callback_contract_valid(const praktor_c11_bt_node_desc *desc,
   return true;
 }
 
+static int adapter_resolve_dynamic_parameters(
+    void *user, salts_bt_node_id runtime_id,
+    salts_bt_node_parameters *out_params) {
+  praktor_c11_bt_node *node = (praktor_c11_bt_node *)user;
+  (void)runtime_id;
+  if (node == NULL || node->owner == NULL || out_params == NULL ||
+      node->owner->host.resolve_dynamic_parameters == NULL)
+    return SALTS_EINVAL;
+  return node->owner->host.resolve_dynamic_parameters(
+      node->owner->host.user, node->index, out_params);
+}
+
 /*
  * Leaf callbacks in Salts return only a node status. Preserve a host callback's
  * actual error by provoking Salts' invalid-status path, which makes the runtime
@@ -261,46 +273,38 @@ static int adapter_add_node(praktor_c11_bt_impl *impl, size_t index) {
 
   if (desc->kind == SALTS_BT_NODE_LEAF) {
     const salts_bt_leaf_ops ops = {adapter_leaf_tick, adapter_leaf_halt};
-    return salts_bt_tree_add_leaf(&impl->runtime, parent_id, &ops, node,
-                                  &node->runtime_id);
-  }
-  if (is_timed_kind(desc->kind)) {
-    return salts_bt_tree_add_timed_node(&impl->runtime, parent_id, desc->kind,
-                                        desc->duration_ns, &node->runtime_id);
-  }
-  if (is_condition_kind(desc->kind) && desc->condition_callback) {
-    return salts_bt_tree_add_condition_node(
+    status = salts_bt_tree_add_leaf(&impl->runtime, parent_id, &ops, node,
+                                    &node->runtime_id);
+  } else if (is_timed_kind(desc->kind)) {
+    status = salts_bt_tree_add_timed_node(&impl->runtime, parent_id, desc->kind,
+                                          desc->duration_ns, &node->runtime_id);
+  } else if (is_condition_kind(desc->kind) && desc->condition_callback) {
+    status = salts_bt_tree_add_condition_node(
         &impl->runtime, parent_id, desc->kind, adapter_condition, node,
         desc->limit, &node->runtime_id);
-  }
-  if (desc->kind == SALTS_BT_NODE_SWITCH) {
-    return salts_bt_tree_add_switch_node(&impl->runtime, parent_id,
-                                         adapter_select_child, node,
-                                         &node->runtime_id);
-  }
-  if (desc->kind == SALTS_BT_NODE_PARALLEL && desc->parallel_hooks) {
-    return salts_bt_tree_add_parallel_node(
+  } else if (desc->kind == SALTS_BT_NODE_SWITCH) {
+    status = salts_bt_tree_add_switch_node(&impl->runtime, parent_id,
+                                           adapter_select_child, node,
+                                           &node->runtime_id);
+  } else if (desc->kind == SALTS_BT_NODE_PARALLEL && desc->parallel_hooks) {
+    status = salts_bt_tree_add_parallel_node(
         &impl->runtime, parent_id, adapter_parallel_enter, adapter_parallel_step,
         adapter_parallel_join, adapter_parallel_finish, adapter_parallel_abort,
         node, &node->runtime_id);
-  }
-  if (desc->kind == SALTS_BT_NODE_PIPELINE_SEQUENCE) {
-    return salts_bt_tree_add_pipeline_node(
+  } else if (desc->kind == SALTS_BT_NODE_PIPELINE_SEQUENCE) {
+    status = salts_bt_tree_add_pipeline_node(
         &impl->runtime, parent_id, adapter_pipeline_prepare,
         adapter_pipeline_complete, adapter_pipeline_abort, node,
         &node->runtime_id);
-  }
-  if (desc->kind == SALTS_BT_NODE_ENTRY_UPDATED) {
-    return salts_bt_tree_add_entry_updated_node(
+  } else if (desc->kind == SALTS_BT_NODE_ENTRY_UPDATED) {
+    status = salts_bt_tree_add_entry_updated_node(
         &impl->runtime, parent_id, adapter_entry_changed, node,
         &node->runtime_id);
-  }
-  if (desc->kind == SALTS_BT_NODE_CONSUME_QUEUE) {
-    return salts_bt_tree_add_consume_queue_node(
+  } else if (desc->kind == SALTS_BT_NODE_CONSUME_QUEUE) {
+    status = salts_bt_tree_add_consume_queue_node(
         &impl->runtime, parent_id, adapter_queue_begin, adapter_queue_finish,
         adapter_queue_abort, node, &node->runtime_id);
-  }
-  if (has_limit(desc->kind)) {
+  } else if (has_limit(desc->kind)) {
     status = salts_bt_tree_add_node_with_limit(
         &impl->runtime, parent_id, desc->kind, NULL, NULL, desc->limit,
         &node->runtime_id);
@@ -308,7 +312,15 @@ static int adapter_add_node(praktor_c11_bt_impl *impl, size_t index) {
     status = salts_bt_tree_add_node(&impl->runtime, parent_id, desc->kind,
                                     NULL, NULL, &node->runtime_id);
   }
-  return status;
+
+  if (status != SALTS_OK) return status;
+  if (desc->dynamic_parameter_mask != 0u) {
+    status = salts_bt_tree_set_node_parameters_resolver(
+        &impl->runtime, node->runtime_id, desc->dynamic_parameter_mask,
+        adapter_resolve_dynamic_parameters, node);
+    if (status != SALTS_OK) return status;
+  }
+  return SALTS_OK;
 }
 
 int praktor_c11_bt_tree_init(praktor_c11_bt_tree *tree,
