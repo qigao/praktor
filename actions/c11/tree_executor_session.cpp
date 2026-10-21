@@ -10,6 +10,7 @@
 #include <cctype>
 #include <cmath>
 #include <cstdint>
+#include <exception>
 #include <limits>
 #include <memory>
 #include <new>
@@ -443,13 +444,14 @@ struct TreeExecutorSession::Impl : std::enable_shared_from_this<Impl> {
   }
 
   ~Impl() {
-    if (runtime.impl != nullptr) {
-      (void)praktor_c11_bt_tree_destroy(&runtime);
-    }
+    // No borrowed Process may outlive Impl. TreeExecutorSession's destructor
+    // either quiesces the Process or transfers it and the retained Impl
+    // reference to the explicit recovery owner before this point.
+    if (runtime.impl != nullptr) std::terminate();
     for (auto& shell : shell_states) {
-      if (shell.process.impl != nullptr) {
-        (void)closeShellProcess(shell, true);
-      }
+      if (shell.process.impl != nullptr || shell.retained_owner != nullptr ||
+          shell.has_reservation)
+        std::terminate();
     }
   }
 
@@ -1726,11 +1728,47 @@ TreeExecutorSession::TreeExecutorSession(
     actions::Blackboard& blackboard,
     actions::ExecutionContext& execution_context,
     const salts_bt_tree_config& limits,
-    const praktor_c11_bt_host* host_hooks)
-    : impl_(std::make_unique<Impl>(tree, executor, blackboard,
-                                  execution_context, limits, host_hooks)) {}
+    const praktor_c11_bt_host* host_hooks,
+    cflow_process_retainer* recovery_owner)
+    : impl_(std::make_shared<Impl>(tree, executor, blackboard,
+                                  execution_context, limits, host_hooks,
+                                  recovery_owner)) {}
 
-TreeExecutorSession::~TreeExecutorSession() = default;
+TreeExecutorSession::~TreeExecutorSession() {
+  if (!impl_) return;
+  // First destroy the tree while the workflow's Executor/Blackboard and host
+  // callbacks remain in scope. Its halt callbacks perform bounded close
+  // steps, but may legitimately leave unsettled native Process leases.
+  if (impl_->runtime.impl != nullptr &&
+      praktor_c11_bt_tree_destroy(&impl_->runtime) != SALTS_OK)
+    std::terminate();
+
+  for (auto& state : impl_->shell_states) {
+    if (state.process.impl == nullptr) continue;
+    if (!state.close_requested)
+      (void)impl_->closeShellProcess(state, false);
+    if (state.process.impl == nullptr) {
+      impl_->finalizeShellState(state);
+      continue;
+    }
+    // Reservation and shared callback reference were acquired BEFORE
+    // process start. This transfer never allocates during teardown.
+    if (impl_->recovery_owner == nullptr ||
+        !state.has_reservation || state.retained_owner == nullptr)
+      std::terminate();
+    const int adopted = cflow_process_retainer_adopt(
+        impl_->recovery_owner, state.reservation, &state.process,
+        state.retained_owner, &Impl::releaseRetainedOwner);
+    if (adopted != SALTS_OK) {
+      // An invalid/expired external recovery owner is an explicit fatal
+      // contract violation; dropping the still-borrowed buffers is forbidden.
+      std::terminate();
+    }
+    state.retained_owner = nullptr;
+    state.has_reservation = false;
+    state.owner = nullptr;
+  }
+}
 
 int TreeExecutorSession::tick(salts_bt_node_status* out_status) {
   if (!impl_) return SALTS_EINVAL;
