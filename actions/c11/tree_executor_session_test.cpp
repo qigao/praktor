@@ -2552,6 +2552,10 @@ int testHostBranchResourcesReleasedAfterParallelJoinFailure() {
   state.session = &session;
   salts_bt_node_status status = SALTS_BT_FAILURE;
   CHECK(session.tick(&status) == SALTS_EIO);
+  std::fprintf(stderr, "join-failure probe: enters=(%d,%d) aborts=(%d,%d) prepared=(%d,%d)\n",
+               state.enters[0], state.enters[1], state.aborts[0],
+               state.aborts[1], state.branch_blackboards[0] ? 1 : 0,
+               state.branch_blackboards[1] ? 1 : 0);
   CHECK(state.enters[0] + state.enters[1] == 2);
   CHECK(state.aborts[0] + state.aborts[1] == 2);
   CHECK(!state.branch_blackboards[0] && !state.branch_blackboards[1]);
