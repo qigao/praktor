@@ -248,11 +248,11 @@ int testDynamicZeroControlsStayRuntimeNodes() {
   tree.root.children.push_back(child);
 
   Blackboard blackboard;
-  blackboard.set("attempts", "0");
+  /* The plan must not resolve a live value until execution starts. */
   const auto plan = compileTreePlan(tree, blackboard, testLimits());
   CHECK(plan.nodes.size() == 2u);
   CHECK(plan.nodes[0].kind == SALTS_BT_NODE_RETRY);
-  CHECK(plan.nodes[0].limit == 1u);
+  CHECK(plan.nodes[0].limit == 3u);
   CHECK(plan.nodes[0].dynamic_parameter_mask ==
         SALTS_BT_DYNAMIC_PARAMETER_LIMIT);
   CHECK(plan.terminal_actions[0] == actions::c11::TreePlanTerminalAction::Runtime);
