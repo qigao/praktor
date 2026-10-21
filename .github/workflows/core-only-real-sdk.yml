@@ -6,7 +6,7 @@ on:
       salts_utils_ref:
         description: SaltsUtils candidate revision exporting Salts::YamlParser and Salts::BehaviorTree
         type: string
-        default: 2318aeeecfcfc6892301d56eae30176e28c8df98
+        default: 7c3db3dab11758c95d394e9d1556e5a3bfcb5d14
   pull_request:
     paths:
       - "CMakeLists.txt"
@@ -55,7 +55,7 @@ jobs:
       CMAKE_PRESET: ${{ matrix.preset }}
       SDK_VARIANT: ${{ matrix.sdk }}
       PRODUCER_PRESET: ${{ matrix.producer }}
-      SALTS_UTILS_SOURCE_REF: ${{ inputs.salts_utils_ref || '2318aeeecfcfc6892301d56eae30176e28c8df98' }}
+      SALTS_UTILS_SOURCE_REF: ${{ inputs.salts_utils_ref || '7c3db3dab11758c95d394e9d1556e5a3bfcb5d14' }}
       CCACHE_DIR: ${{ github.workspace }}/.cache/ccache
       CCACHE_BASEDIR: ${{ github.workspace }}
       CCACHE_COMPILERCHECK: content
