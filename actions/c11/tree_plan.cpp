@@ -274,8 +274,9 @@ void appendNode(TreePlan &plan, const Node &node, size_t parent_index,
     }
     const bool dynamic_iterations =
         isRuntimeSubstitutedParam(node, "max_iterations");
-    const int64_t iterations =
-        readIntegerParam(node, blackboard, "max_iterations", 100);
+    const int64_t iterations = dynamic_iterations
+        ? 100
+        : readIntegerParam(node, blackboard, "max_iterations", 100);
     if (iterations < 0 ||
         static_cast<uint64_t>(iterations) > limits.max_control_iterations) {
       throw std::invalid_argument(
@@ -343,8 +344,9 @@ void appendNode(TreePlan &plan, const Node &node, size_t parent_index,
   case SALTS_BT_NODE_RETRY: {
     const bool dynamic_attempts =
         isRuntimeSubstitutedParam(node, "num_attempts");
-    const int64_t attempts =
-        readIntegerParam(node, blackboard, "num_attempts", 3);
+    const int64_t attempts = dynamic_attempts
+        ? 3
+        : readIntegerParam(node, blackboard, "num_attempts", 3);
     if (attempts < 0 ||
         static_cast<uint64_t>(attempts) > limits.max_control_iterations) {
       throw std::invalid_argument(
@@ -365,8 +367,9 @@ void appendNode(TreePlan &plan, const Node &node, size_t parent_index,
   case SALTS_BT_NODE_REPEAT: {
     const bool dynamic_count =
         isRuntimeSubstitutedParam(node, "num_cycles");
-    const int64_t count =
-        readIntegerParam(node, blackboard, "num_cycles", 0, true);
+    const int64_t count = dynamic_count
+        ? 0
+        : readIntegerParam(node, blackboard, "num_cycles", 0, true);
     if (count < 0 ||
         static_cast<uint64_t>(count) > limits.max_control_iterations) {
       throw std::invalid_argument("Repeat num_cycles must be non-negative and within the tree limit");
@@ -383,8 +386,9 @@ void appendNode(TreePlan &plan, const Node &node, size_t parent_index,
     }
     const bool dynamic_count =
         isRuntimeSubstitutedParam(node, "max_iterations");
-    const int64_t count =
-        readIntegerParam(node, blackboard, "max_iterations", 1000);
+    const int64_t count = dynamic_count
+        ? 1000
+        : readIntegerParam(node, blackboard, "max_iterations", 1000);
     if (count < 0 ||
         static_cast<uint64_t>(count) > limits.max_control_iterations) {
       throw std::invalid_argument("KeepRunningUntilFailure max_iterations must be non-negative and within the tree limit");
@@ -401,20 +405,26 @@ void appendNode(TreePlan &plan, const Node &node, size_t parent_index,
     }
     break;
   }
-  case SALTS_BT_NODE_TIMEOUT:
-    if (isRuntimeSubstitutedParam(node, "timeout_ms"))
+  case SALTS_BT_NODE_TIMEOUT: {
+    const bool dynamic_timeout = isRuntimeSubstitutedParam(node, "timeout_ms");
+    if (dynamic_timeout)
       desc.dynamic_parameter_mask |= SALTS_BT_DYNAMIC_PARAMETER_DURATION_NS;
-    desc.duration_ns = millisecondsToNanoseconds(
-        readIntegerParam(node, blackboard, "timeout_ms", 1000),
-        node, "timeout_ms");
+    const int64_t timeout_ms = dynamic_timeout
+        ? 1000
+        : readIntegerParam(node, blackboard, "timeout_ms", 1000);
+    desc.duration_ns = millisecondsToNanoseconds(timeout_ms, node, "timeout_ms");
     break;
-  case SALTS_BT_NODE_DELAY:
-    if (isRuntimeSubstitutedParam(node, "delay_ms"))
+  }
+  case SALTS_BT_NODE_DELAY: {
+    const bool dynamic_delay = isRuntimeSubstitutedParam(node, "delay_ms");
+    if (dynamic_delay)
       desc.dynamic_parameter_mask |= SALTS_BT_DYNAMIC_PARAMETER_DURATION_NS;
-    desc.duration_ns = millisecondsToNanoseconds(
-        readIntegerParam(node, blackboard, "delay_ms", 100),
-        node, "delay_ms");
+    const int64_t delay_ms = dynamic_delay
+        ? 100
+        : readIntegerParam(node, blackboard, "delay_ms", 100);
+    desc.duration_ns = millisecondsToNanoseconds(delay_ms, node, "delay_ms");
     break;
+  }
   case SALTS_BT_NODE_PIPELINE_SEQUENCE:
     break;
   case SALTS_BT_NODE_ENTRY_UPDATED:
