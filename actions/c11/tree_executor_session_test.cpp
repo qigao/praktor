@@ -263,11 +263,14 @@ int testZeroBudgetShellHandoffKeepsBuffersPastSessionDestruction() {
   tree.root.params.emplace("timeout", actions::Value{30000.0});
   tree.root.params.emplace("stream_output", actions::Value{false});
 
-  actions::Executor executor;
-  actions::Blackboard blackboard;
-  actions::ExecutionContext context;
   ScopedProcessRetainer recovery;
   {
+    // Destroy every caller-owned workflow object before the retained Process
+    // settles. Late terminal callbacks may touch ShellState, never these
+    // now-dead Executor, Blackboard or ExecutionContext references.
+    actions::Executor executor;
+    actions::Blackboard blackboard;
+    actions::ExecutionContext context;
     actions::c11::TreeExecutorSession session(
         tree, executor, blackboard, context, limits(),
         nullptr, &recovery.owner, 0u);
