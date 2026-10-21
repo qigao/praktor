@@ -78,11 +78,17 @@ target_link_libraries(
 if(ENABLE_SCRIPT_ENGINE)
     target_link_libraries(${TARGET_NAME_LIB} PUBLIC TurboScript::TurboScript)
 endif()
+# C11 is an explicitly selected runtime path. Keep the default workflow
+# executor linked to legacy actions until parity/ownership gates pass.
+if(PRAKTOR_ENABLE_C11_ACTIONS)
+    target_link_libraries(${TARGET_NAME_LIB} PRIVATE praktor_actions_c11)
+endif()
 if(UNIX AND NOT APPLE)
     target_link_libraries(${TARGET_NAME_LIB} PUBLIC ${CMAKE_DL_LIBS})
 endif()
 target_compile_definitions(
     ${TARGET_NAME_LIB} PUBLIC PRAKTOR_SCRIPT_ENGINE_ENABLED=$<BOOL:${ENABLE_SCRIPT_ENGINE}>
+                               PRAKTOR_C11_ACTIONS_ENABLED=$<BOOL:${PRAKTOR_ENABLE_C11_ACTIONS}>
                               $<$<BOOL:WIN32>:NOMINMAX>
                               $<$<BOOL:WIN32>:WIN32_LEAN_AND_MEAN>
 )
