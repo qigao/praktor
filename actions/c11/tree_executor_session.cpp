@@ -305,6 +305,7 @@ struct TreeExecutorSession::Impl {
   actions::Executor& executor;
   actions::Blackboard& blackboard;
   actions::ExecutionContext& execution_context;
+  salts_bt_tree_config tree_limits{};
   praktor_c11_bt_host hooks{};
   praktor_c11_bt_host runtime_host{};
   praktor_c11_bt_tree runtime{};
@@ -383,7 +384,8 @@ struct TreeExecutorSession::Impl {
         compiled_plan(compileTreePlan(tree, source_blackboard, limits)),
         executor(source_executor),
         blackboard(source_blackboard),
-        execution_context(source_execution_context) {
+        execution_context(source_execution_context),
+        tree_limits(limits) {
     if (supplied_hooks != nullptr) {
       hooks = *supplied_hooks;
     }
@@ -403,6 +405,7 @@ struct TreeExecutorSession::Impl {
     runtime_host.halt_leaf = &onHaltLeaf;
     runtime_host.condition = &onCondition;
     runtime_host.select_child = &onSelectChild;
+    runtime_host.resolve_dynamic_parameters = &onResolveDynamicParameters;
     runtime_host.parallel_enter = &onParallelEnter;
     runtime_host.parallel_step = &onParallelStep;
     runtime_host.parallel_join = &onParallelJoin;
@@ -418,7 +421,7 @@ struct TreeExecutorSession::Impl {
     runtime_host.user = this;
 
     const int status = praktor_c11_bt_tree_init(
-        &runtime, &limits, compiled_plan.nodes.data(),
+        &runtime, &tree_limits, compiled_plan.nodes.data(),
         compiled_plan.nodes.size(), &runtime_host);
     if (status != SALTS_OK) {
       throw std::runtime_error("C11 behavior tree initialization failed with status " +
@@ -1158,6 +1161,80 @@ struct TreeExecutorSession::Impl {
         rememberCurrentException("C11 host leaf halt failed");
       }
     }
+  }
+
+  int resolveDynamicParameters(size_t index,
+                               salts_bt_node_parameters* out_params) noexcept {
+    if (out_params == nullptr || nodeAt(index) == nullptr ||
+        index >= compiled_plan.nodes.size())
+      return SALTS_EINVAL;
+    try {
+      const auto* source = nodeAt(index);
+      const uint32_t mask = compiled_plan.nodes[index].dynamic_parameter_mask;
+      if ((mask & SALTS_BT_DYNAMIC_PARAMETER_LIMIT) != 0u) {
+        const char* key = nullptr;
+        int64_t default_value = 0;
+        bool required = false;
+        switch (compiled_plan.nodes[index].kind) {
+          case SALTS_BT_NODE_RETRY:
+            key = "num_attempts";
+            default_value = 3;
+            break;
+          case SALTS_BT_NODE_REPEAT:
+            key = "num_cycles";
+            default_value = 0;
+            required = true;
+            break;
+          case SALTS_BT_NODE_WHILE_DO:
+            key = "max_iterations";
+            default_value = 100;
+            break;
+          case SALTS_BT_NODE_KEEP_RUNNING_UNTIL_FAILURE:
+            key = "max_iterations";
+            default_value = 1000;
+            break;
+          default:
+            return SALTS_EINVAL;
+        }
+        const int64_t value =
+            resolveIntegerParameter(*source, blackboard, key, default_value,
+                                    required);
+        if (value < 0 ||
+            static_cast<uint64_t>(value) > tree_limits.max_control_iterations) {
+          throw std::invalid_argument(std::string("Dynamic parameter '") + key +
+                                      "' is outside the configured iteration budget");
+        }
+        out_params->limit = static_cast<size_t>(value);
+      } else if ((mask & SALTS_BT_DYNAMIC_PARAMETER_DURATION_NS) != 0u) {
+        const char* key = nullptr;
+        int64_t default_ms = 0;
+        if (compiled_plan.nodes[index].kind == SALTS_BT_NODE_TIMEOUT) {
+          key = "timeout_ms";
+          default_ms = 1000;
+        } else if (compiled_plan.nodes[index].kind == SALTS_BT_NODE_DELAY) {
+          key = "delay_ms";
+          default_ms = 100;
+        } else {
+          return SALTS_EINVAL;
+        }
+        out_params->duration_ns =
+            resolveDurationParameter(*source, blackboard, key, default_ms);
+      } else {
+        return SALTS_EINVAL;
+      }
+      return SALTS_OK;
+    } catch (...) {
+      rememberCurrentException("C11 dynamic control parameter resolution failed");
+      return SALTS_EINVAL;
+    }
+  }
+
+  static int onResolveDynamicParameters(
+      void* user, size_t index, salts_bt_node_parameters* out_params) {
+    auto* impl = self(user);
+    return impl == nullptr
+               ? SALTS_EINVAL
+               : impl->resolveDynamicParameters(index, out_params);
   }
 
   int condition(size_t index, salts_bt_node_status* out_status) noexcept {
