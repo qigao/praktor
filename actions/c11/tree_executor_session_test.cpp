@@ -1532,6 +1532,8 @@ int testParallelHookFailureAbortsEnteredBranches() {
   CHECK(stats.steps == 1u);
   CHECK(stats.enters > 0u);
   CHECK(stats.aborts == stats.enters);
+  CHECK(session.lastError().find("Parallel step hook failed") !=
+        std::string::npos);
   return 0;
 }
 
