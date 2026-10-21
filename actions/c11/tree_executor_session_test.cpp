@@ -5,6 +5,7 @@
 #include <stdexcept>
 #include <thread>
 #include <string>
+#include <memory>
 
 #define CHECK(expr)                                                            \
   do {                                                                         \
@@ -2369,6 +2370,143 @@ int testHostExceptionsStayInsideCAbi() {
 }
 
 
+struct IsolatedParallelHost {
+  actions::c11::TreeExecutorSession* session = nullptr;
+  actions::Executor* executor = nullptr;
+  actions::Blackboard* root_blackboard = nullptr;
+  std::unique_ptr<actions::Blackboard> branch_blackboards[2];
+  std::unique_ptr<actions::ExecutionContext> branch_contexts[2];
+  bool second_branch_saw_uncommitted_write = false;
+  int aborts[2] = {0, 0};
+};
+
+int isolatedParallelEnter(void* user, size_t, size_t child_index,
+                          bool first_activation) {
+  auto* state = static_cast<IsolatedParallelHost*>(user);
+  if (state == nullptr || child_index >= 2u || !first_activation ||
+      state->root_blackboard == nullptr) return SALTS_EINVAL;
+  state->branch_blackboards[child_index] =
+      std::make_unique<actions::Blackboard>(*state->root_blackboard);
+  state->branch_contexts[child_index] =
+      std::make_unique<actions::ExecutionContext>();
+  return SALTS_OK;
+}
+
+int isolatedParallelLeafTick(void* user, size_t node_index,
+                             salts_bt_node_status* out_status) {
+  auto* state = static_cast<IsolatedParallelHost*>(user);
+  if (state == nullptr || state->session == nullptr ||
+      state->executor == nullptr || out_status == nullptr ||
+      node_index == 0u || node_index > 2u) return SALTS_EINVAL;
+  const size_t branch = node_index - 1u;
+  if (!state->branch_blackboards[branch] ||
+      !state->branch_contexts[branch]) return SALTS_EINVAL;
+  const actions::Node* source = state->session->sourceNode(node_index);
+  if (source == nullptr) return SALTS_EINVAL;
+  if (branch == 1u) {
+    state->second_branch_saw_uncommitted_write =
+        state->branch_blackboards[branch]->has("shared");
+  }
+  const auto status = state->executor->execute(
+      *source, *state->branch_blackboards[branch],
+      *state->branch_contexts[branch]);
+  switch (status) {
+  case actions::NodeStatus::SUCCESS: *out_status = SALTS_BT_SUCCESS; break;
+  case actions::NodeStatus::FAILURE: *out_status = SALTS_BT_FAILURE; break;
+  case actions::NodeStatus::RUNNING: *out_status = SALTS_BT_RUNNING; break;
+  }
+  return SALTS_OK;
+}
+
+int isolatedParallelStep(void* user, size_t, size_t,
+                         salts_bt_node_status status) {
+  return user != nullptr && status == SALTS_BT_SUCCESS ? SALTS_OK : SALTS_EINVAL;
+}
+
+int isolatedParallelJoin(void* user, size_t,
+                         salts_bt_node_status status) {
+  auto* state = static_cast<IsolatedParallelHost*>(user);
+  if (state == nullptr || status != SALTS_BT_SUCCESS ||
+      state->root_blackboard == nullptr ||
+      !state->branch_blackboards[0] || !state->branch_blackboards[1])
+    return SALTS_EINVAL;
+  // Explicit host policy: merge in child-index order; later child wins conflicts.
+  state->branch_blackboards[0]->mergeInto(*state->root_blackboard);
+  state->branch_blackboards[1]->mergeInto(*state->root_blackboard);
+  return SALTS_OK;
+}
+
+int isolatedParallelFinish(void* user, size_t, size_t,
+                           salts_bt_node_status status) {
+  return user != nullptr && status == SALTS_BT_SUCCESS ? SALTS_OK : SALTS_EINVAL;
+}
+
+void isolatedParallelAbort(void* user, size_t, size_t child_index) {
+  auto* state = static_cast<IsolatedParallelHost*>(user);
+  if (state == nullptr || child_index >= 2u) return;
+  ++state->aborts[child_index];
+  state->branch_contexts[child_index].reset();
+  state->branch_blackboards[child_index].reset();
+}
+
+int testHostSuppliedParallelBranchIsolationAndMergeOrder() {
+  actions::Tree tree;
+  tree.root.id = "Parallel";
+  actions::Node first;
+  first.id = "First";
+  actions::Node second;
+  second.id = "Second";
+  tree.root.children.push_back(first);
+  tree.root.children.push_back(second);
+
+  actions::Executor executor;
+  executor.registerTask("First", [](const auto&, actions::Blackboard& bb) {
+    if (bb.has("shared")) return actions::NodeStatus::FAILURE;
+    bb.set("shared", "first");
+    bb.set("first_only", "visible-after-join");
+    return actions::NodeStatus::SUCCESS;
+  });
+  bool second_started_clean = false;
+  executor.registerTask("Second", [&second_started_clean](
+      const auto&, actions::Blackboard& bb) {
+    second_started_clean = !bb.has("shared") && !bb.has("first_only");
+    if (!second_started_clean) return actions::NodeStatus::FAILURE;
+    bb.set("shared", "second");
+    bb.set("second_only", "visible-after-join");
+    return actions::NodeStatus::SUCCESS;
+  });
+
+  actions::Blackboard blackboard;
+  actions::ExecutionContext context;
+  IsolatedParallelHost state;
+  state.executor = &executor;
+  state.root_blackboard = &blackboard;
+  praktor_c11_bt_host hooks{};
+  hooks.tick_leaf = &isolatedParallelLeafTick;
+  hooks.halt_leaf = &parallelTestLeafHalt;
+  hooks.parallel_enter = &isolatedParallelEnter;
+  hooks.parallel_step = &isolatedParallelStep;
+  hooks.parallel_join = &isolatedParallelJoin;
+  hooks.parallel_finish = &isolatedParallelFinish;
+  hooks.parallel_abort = &isolatedParallelAbort;
+  hooks.user = &state;
+
+  actions::c11::TreeExecutorSession session(
+      tree, executor, blackboard, context, limits(), &hooks);
+  state.session = &session;
+  salts_bt_node_status status = SALTS_BT_FAILURE;
+  CHECK(session.tick(&status) == SALTS_OK);
+  CHECK(status == SALTS_BT_SUCCESS);
+  CHECK(second_started_clean);
+  CHECK(!state.second_branch_saw_uncommitted_write);
+  CHECK(blackboard.get("shared") == "second");
+  CHECK(blackboard.get("first_only") == "visible-after-join");
+  CHECK(blackboard.get("second_only") == "visible-after-join");
+  CHECK(state.aborts[0] == 0 && state.aborts[1] == 0);
+  return 0;
+}
+
+
 } // namespace
 
 int main() {
@@ -2393,6 +2531,7 @@ int main() {
   if (testEmptySwitchResolvesSelectorThenFails() != 0) return 1;
   if (testNonEmptyParallelFailsClosedWithoutFullHookGroup() != 0) return 1;
   if (testParallelInvokesCompleteHostHookGroup() != 0) return 1;
+  if (testHostSuppliedParallelBranchIsolationAndMergeOrder() != 0) return 1;
   if (testParallelHookFailureAbortsEnteredBranches() != 0) return 1;
   if (testParallelAbortHookRunsForRunningChildrenOnCancel() != 0) return 1;
   if (testEmptyParallelAndReactiveSequenceMatchExecutor() != 0) return 1;
