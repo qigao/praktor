@@ -24,6 +24,9 @@ jobs:
       SALTS_UTILS_SHA: d576cf5e0132052669c8385c2ce1f05782e44483
       QIGAO_SDK_RID: linux-x64
       QIGAO_TARGET_TRIPLET: x64-linux
+      RID: linux-x64
+      TRIPLET: x64-linux
+      HOST_TRIPLET: x64-linux
       TSAN_OPTIONS: halt_on_error=1:exitcode=66
       CCACHE_DIR: ${{ github.workspace }}/.cache/c11-full-source-tsan
       CCACHE_BASEDIR: ${{ github.workspace }}
