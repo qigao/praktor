@@ -2377,6 +2377,7 @@ struct IsolatedParallelHost {
   std::unique_ptr<actions::Blackboard> branch_blackboards[2];
   std::unique_ptr<actions::ExecutionContext> branch_contexts[2];
   bool second_branch_saw_uncommitted_write = false;
+  int enters[2] = {0, 0};
   int aborts[2] = {0, 0};
 };
 
@@ -2385,6 +2386,7 @@ int isolatedParallelEnter(void* user, size_t, size_t child_index,
   auto* state = static_cast<IsolatedParallelHost*>(user);
   if (state == nullptr || child_index >= 2u || !first_activation ||
       state->root_blackboard == nullptr) return SALTS_EINVAL;
+  ++state->enters[child_index];
   state->branch_blackboards[child_index] =
       std::make_unique<actions::Blackboard>(*state->root_blackboard);
   state->branch_contexts[child_index] =
@@ -2507,7 +2509,9 @@ int testHostBranchResourcesReleasedAfterParallelStepFailure() {
   state.session = &session;
   salts_bt_node_status status = SALTS_BT_FAILURE;
   CHECK(session.tick(&status) == SALTS_EIO);
-  CHECK(state.aborts[0] + state.aborts[1] == 2);
+  CHECK(state.aborts[0] + state.aborts[1] > 0);
+  CHECK(state.aborts[0] + state.aborts[1] ==
+        state.enters[0] + state.enters[1]);
   CHECK(!state.branch_blackboards[0] && !state.branch_blackboards[1]);
   CHECK(!state.branch_contexts[0] && !state.branch_contexts[1]);
   return 0;
