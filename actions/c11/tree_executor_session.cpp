@@ -302,7 +302,7 @@ actions::Tree expandSubTrees(const actions::Tree& source,
 
 } // namespace
 
-struct TreeExecutorSession::Impl {
+struct TreeExecutorSession::Impl : std::enable_shared_from_this<Impl> {
   actions::Tree tree;
   TreePlan compiled_plan;
   actions::Executor& executor;
@@ -312,6 +312,7 @@ struct TreeExecutorSession::Impl {
   praktor_c11_bt_host hooks{};
   praktor_c11_bt_host runtime_host{};
   praktor_c11_bt_tree runtime{};
+  cflow_process_retainer* recovery_owner = nullptr;
   struct PipelineState {
     bool initialized = false;
     size_t active_child = 0u;
@@ -337,6 +338,9 @@ struct TreeExecutorSession::Impl {
     Impl* owner = nullptr;
     size_t node_index = 0u;
     cflow_process process{};
+    cflow_process_retainer_token reservation{};
+    bool has_reservation = false;
+    std::shared_ptr<Impl>* retained_owner = nullptr;
     bool started = false;
     bool close_requested = false;
     bool stdin_write_pending = false;
@@ -382,13 +386,15 @@ struct TreeExecutorSession::Impl {
        actions::Blackboard& source_blackboard,
        actions::ExecutionContext& source_execution_context,
        const salts_bt_tree_config& limits,
-       const praktor_c11_bt_host* supplied_hooks)
+       const praktor_c11_bt_host* supplied_hooks,
+       cflow_process_retainer* supplied_recovery_owner)
       : tree(expandSubTrees(source_tree, source_executor, source_blackboard, limits)),
         compiled_plan(compileTreePlan(tree, source_blackboard, limits)),
         executor(source_executor),
         blackboard(source_blackboard),
         execution_context(source_execution_context),
-        tree_limits(limits) {
+        tree_limits(limits),
+        recovery_owner(supplied_recovery_owner) {
     if (supplied_hooks != nullptr) {
       hooks = *supplied_hooks;
     }
@@ -430,6 +436,10 @@ struct TreeExecutorSession::Impl {
       throw std::runtime_error("C11 behavior tree initialization failed with status " +
                                std::to_string(status));
     }
+  }
+
+  static void releaseRetainedOwner(void* payload) noexcept {
+    delete static_cast<std::shared_ptr<Impl>*>(payload);
   }
 
   ~Impl() {
