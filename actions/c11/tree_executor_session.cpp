@@ -878,6 +878,23 @@ struct TreeExecutorSession::Impl : std::enable_shared_from_this<Impl> {
     config.completion = &onProcessCompletion;
     config.completion_user = &state;
 
+    if (recovery_owner == nullptr) {
+      state.failure_reason = "C11 Shell requires an explicit Process recovery owner";
+      return SALTS_ENOTSUP;
+    }
+    const int reserve_status = cflow_process_retainer_reserve(
+        recovery_owner, &state.reservation);
+    if (reserve_status != SALTS_OK) {
+      state.failure_reason = "C11 Shell recovery capacity unavailable (status " +
+                             std::to_string(reserve_status) + ")";
+      return reserve_status;
+    }
+    state.has_reservation = true;
+    // Reserve both the future retention slot and the shared callback owner
+    // before native I/O is admitted. No allocation is required on the fatal
+    // Session-destruction path.
+    state.retained_owner = new std::shared_ptr<Impl>(shared_from_this());
+
     const int status = cflow_process_start(&state.process, &options, &config);
     if (status != SALTS_OK) {
       state.failure_reason = "Salts::Process start failed with status " +
