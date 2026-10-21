@@ -1757,7 +1757,10 @@ TreeExecutorSession::~TreeExecutorSession() {
     std::terminate();
 
   for (auto& state : impl_->shell_states) {
-    if (state.process.impl == nullptr) continue;
+    if (state.process.impl == nullptr) {
+      impl_->finalizeShellState(state);
+      continue;
+    }
     if (!state.close_requested)
       (void)impl_->closeShellProcess(state, false);
     if (state.process.impl == nullptr) {
