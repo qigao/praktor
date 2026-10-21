@@ -683,7 +683,7 @@ int testWhileDoConditionFormsMatchTerminalEffects() {
   return 0;
 }
 
-int testRetryAndPersistentRunOnceCompatibilityBoundary() {
+int testRetryAndPersistentRunOnceMatchesLegacyExecutor() {
   const auto makeRetryTree = [](double attempts, const char* child_id) {
     actions::Tree tree;
     tree.root.id = "Retry";
@@ -709,7 +709,7 @@ int testRetryAndPersistentRunOnceCompatibilityBoundary() {
     actions::ExecutionContext legacy_context;
     CHECK(legacy.execute(tree.root, legacy_blackboard, legacy_context) ==
           actions::NodeStatus::SUCCESS);
-    CHECK(legacy_calls == 3);
+    CHECK(legacy_calls == 1);
 
     actions::Executor c11;
     int c11_calls = 0;
@@ -803,12 +803,9 @@ int testRetryAndPersistentRunOnceCompatibilityBoundary() {
     CHECK(c11_calls == 2);
   }
 
-  // Intentional semantic boundary, not legacy parity: the legacy Executor's
-  // resetRetrySubtreeState() clears RunOnce's state after every failed attempt,
-  // so it calls OnceFail once per Retry attempt. The C11 tree runtime retains
-  // terminal RunOnce caches across internal composite resets, so it calls the
-  // child once and reuses FAILURE for later attempts. Keep both outcomes
-  // explicit until the production workflow corpus approves the difference.
+  // RunOnce's terminal result is persistent across a parent Retry.
+  // The legacy helper resets transient descendant progress, not this cache,
+  // matching Salts::BehaviorTree's persistent-state reset contract.
   {
     auto tree = makeRetryTree(3.0, "RunOnce");
     actions::Node leaf;
@@ -1996,7 +1993,7 @@ int main() {
   if (testScalarConditionAndSwitchUseBlackboard() != 0) return 1;
   if (testInTreeIfThenElseConditionMatchesExecutor() != 0) return 1;
   if (testWhileDoConditionFormsMatchTerminalEffects() != 0) return 1;
-  if (testRetryAndPersistentRunOnceCompatibilityBoundary() != 0) return 1;
+  if (testRetryAndPersistentRunOnceMatchesLegacyExecutor() != 0) return 1;
   if (testReactiveFallbackRechecksPriorityAfterRunning() != 0) return 1;
   if (testEmptyReactiveFallbackMatchesFailure() != 0) return 1;
   if (testEmptySwitchResolvesSelectorThenFails() != 0) return 1;
