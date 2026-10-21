@@ -2398,6 +2398,85 @@ int testBuiltInEntryUpdatedHook() {
   return 0;
 }
 
+int testEntryUpdatedRejectsEmptyWatchKeyBeforeChildEffects() {
+  // Legacy EntryUpdated throws on an empty resolved watch_key. Its C11
+  // equivalent must not execute a child or cache an empty key observation.
+  for (bool dynamic : {false, true}) {
+    actions::Tree tree;
+    tree.root.id = "EntryUpdated";
+    tree.root.params.emplace(
+        "watch_key", actions::Value{dynamic ? std::string("{chosen_key}")
+                                            : std::string("")});
+    actions::Node child;
+    child.id = "SideEffect";
+    tree.root.children.push_back(child);
+
+    actions::Executor executor;
+    int calls = 0;
+    executor.registerTask("SideEffect",
+                          [&calls](const auto&, actions::Blackboard& bb) {
+      ++calls;
+      bb.set("unexpected_effect", "true");
+      return actions::NodeStatus::SUCCESS;
+    });
+
+    actions::Blackboard legacy_blackboard;
+    legacy_blackboard.set("chosen_key", "");
+    actions::ExecutionContext legacy_context;
+    bool legacy_rejected = false;
+    try {
+      (void)executor.execute(tree, legacy_blackboard, legacy_context);
+    } catch (const std::exception&) {
+      legacy_rejected = true;
+    }
+    CHECK(legacy_rejected);
+    CHECK(calls == 0);
+    CHECK(!legacy_blackboard.has("unexpected_effect"));
+
+    actions::Blackboard blackboard;
+    blackboard.set("chosen_key", "");
+    actions::ExecutionContext context;
+    actions::c11::TreeExecutorSession session(
+        tree, executor, blackboard, context, limits());
+    salts_bt_node_status status = SALTS_BT_SUCCESS;
+    CHECK(session.tick(&status) == SALTS_EINVAL);
+    CHECK(session.lastError().find("non-empty 'watch_key'") != std::string::npos);
+    CHECK(calls == 0);
+    CHECK(!blackboard.has("unexpected_effect"));
+  }
+
+  // A selector that was valid on the first visit may become empty later.
+  // It must be checked on each public tick, not just during plan construction.
+  actions::Tree tree;
+  tree.root.id = "EntryUpdated";
+  tree.root.params.emplace("watch_key",
+                           actions::Value{std::string("{chosen_key}")});
+  actions::Node child;
+  child.id = "Observe";
+  tree.root.children.push_back(child);
+  actions::Executor executor;
+  int calls = 0;
+  executor.registerTask("Observe", [&calls](const auto&, actions::Blackboard&) {
+    ++calls;
+    return actions::NodeStatus::SUCCESS;
+  });
+  actions::Blackboard blackboard;
+  blackboard.set("chosen_key", "watched");
+  blackboard.set("watched", "initial");
+  actions::ExecutionContext context;
+  actions::c11::TreeExecutorSession session(tree, executor, blackboard,
+                                            context, limits());
+  salts_bt_node_status status = SALTS_BT_FAILURE;
+  CHECK(session.tick(&status) == SALTS_OK);
+  CHECK(status == SALTS_BT_SUCCESS);
+  CHECK(calls == 1);
+  blackboard.set("chosen_key", "");
+  CHECK(session.tick(&status) == SALTS_EINVAL);
+  CHECK(session.lastError().find("non-empty 'watch_key'") != std::string::npos);
+  CHECK(calls == 1);
+  return 0;
+}
+
 int throwingParallelEnter(void*, size_t, size_t, bool) {
   throw std::runtime_error("test parallel enter exception");
 }
@@ -2934,6 +3013,7 @@ int main() {
   if (testBuiltInConsumeQueue() != 0) return 1;
   if (testConsumeQueueRejectsMalformedQueue() != 0) return 1;
   if (testBuiltInEntryUpdatedHook() != 0) return 1;
+  if (testEntryUpdatedRejectsEmptyWatchKeyBeforeChildEffects() != 0) return 1;
   if (testCancelReportsHostHaltFailure() != 0) return 1;
   if (testFailedInitialHostTickRunsCleanupExactlyOnce() != 0) return 1;
   if (testHostExceptionsStayInsideCAbi() != 0) return 1;
