@@ -1811,13 +1811,6 @@ int TreeExecutorSession::reset() {
         return SALTS_EBUSY;
       }
     }
-    for (const auto& shell : impl_->shell_states) {
-      if (shell.process.impl != nullptr && shell.close_requested) {
-        if (impl_->last_error.empty())
-          impl_->last_error = "C11 Shell has outstanding leases for recovery owner";
-        return SALTS_EBUSY;
-      }
-    }
     if (!impl_->last_error.empty()) return SALTS_EIO;
   } else {
     impl_->last_error = "C11 behavior tree reset failed with status " +
@@ -1841,6 +1834,13 @@ int TreeExecutorSession::cancel() {
     std::fill(impl_->pipeline_states.begin(), impl_->pipeline_states.end(), Impl::PipelineState{});
     std::fill(impl_->entry_updated_states.begin(), impl_->entry_updated_states.end(), Impl::EntryUpdatedState{});
     std::fill(impl_->queue_states.begin(), impl_->queue_states.end(), Impl::QueueState{});
+    for (const auto& shell : impl_->shell_states) {
+      if (shell.process.impl != nullptr && shell.close_requested) {
+        if (impl_->last_error.empty())
+          impl_->last_error = "C11 Shell has outstanding leases for recovery owner";
+        return SALTS_EBUSY;
+      }
+    }
     if (!impl_->last_error.empty()) return SALTS_EIO;
   } else {
     impl_->last_error = "C11 behavior tree cancel failed with status " +
