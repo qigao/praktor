@@ -296,7 +296,17 @@ TEST_CASE("opt-in C11 cancels a Shell after the child actually starts") {
 
     const auto begin = std::chrono::steady_clock::now();
     DeclarativeTreeExecutor executor({}, ActionTreeBackend::C11);
-    const auto result = executor.execute(task, context);
+    TaskResult result(false);
+    try {
+        result = executor.execute(task, context);
+    } catch (...) {
+        // Do not destroy an unjoined cancellation thread on an unexpected
+        // workflow adapter exception.
+        control->requestCancel();
+        canceller.join();
+        std::filesystem::remove_all(dir);
+        throw;
+    }
     const auto elapsed = std::chrono::steady_clock::now() - begin;
     canceller.join();
 
