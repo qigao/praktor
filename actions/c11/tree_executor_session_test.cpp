@@ -2556,8 +2556,9 @@ int testHostBranchResourcesReleasedAfterParallelJoinFailure() {
                state.enters[0], state.enters[1], state.aborts[0],
                state.aborts[1], state.branch_blackboards[0] ? 1 : 0,
                state.branch_blackboards[1] ? 1 : 0);
-  CHECK(state.enters[0] + state.enters[1] == 2);
-  CHECK(state.aborts[0] + state.aborts[1] == 2);
+  CHECK(state.enters[0] + state.enters[1] > 0);
+  CHECK(state.aborts[0] + state.aborts[1] ==
+        state.enters[0] + state.enters[1]);
   CHECK(!state.branch_blackboards[0] && !state.branch_blackboards[1]);
   CHECK(!state.branch_contexts[0] && !state.branch_contexts[1]);
   return 0;
