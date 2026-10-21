@@ -203,8 +203,7 @@ bool consumeJsonArrayFront(std::string_view input, std::string& item,
   return true;
 }
 
-std::string resolveSubTreeName(const actions::Node& node,
-                               const actions::Blackboard& blackboard) {
+std::string resolveSubTreeName(const actions::Node& node) {
   const auto it = node.params.find("tree");
   if (it == node.params.end()) {
     throw std::invalid_argument("SubTree requires 'tree' parameter");
@@ -212,7 +211,11 @@ std::string resolveSubTreeName(const actions::Node& node,
   if (std::holds_alternative<std::string>(it->second)) {
     const std::string& raw = std::get<std::string>(it->second);
     if (raw.size() >= 3u && raw.front() == '{' && raw.back() == '}') {
-      return blackboard.get(raw.substr(1u, raw.size() - 2u));
+      // Expansion happens only once. A mutable Blackboard selector would be
+      // frozen at construction rather than resolved on each SubTree visit.
+      throw std::invalid_argument(
+          "Dynamic SubTree selector is unsupported by the fixed C11 plan; "
+          "use a literal tree name or rebuild the session after binding");
     }
     return raw;
   }
@@ -239,7 +242,7 @@ actions::Node expandSubTreeNode(
     if (subtree_depth >= limits.max_depth) {
       throw std::length_error("SubTree expansion exceeds the configured nesting depth");
     }
-    const std::string name = resolveSubTreeName(source, blackboard);
+    const std::string name = resolveSubTreeName(source);
     if (std::find(active_subtrees.begin(), active_subtrees.end(), name) !=
         active_subtrees.end()) {
       throw std::invalid_argument("recursive SubTree reference: " + name);
@@ -443,6 +446,20 @@ struct TreeExecutorSession::Impl {
   const actions::Node* nodeAt(size_t index) const noexcept {
     if (index >= compiled_plan.source_nodes.size()) return nullptr;
     return compiled_plan.source_nodes[index];
+  }
+
+  bool isInsideParallelBranch(size_t index) const noexcept {
+    if (index >= compiled_plan.nodes.size()) return false;
+    size_t ancestor = compiled_plan.nodes[index].parent_index;
+    while (ancestor != PRAKTOR_C11_BT_NO_PARENT) {
+      if (ancestor >= compiled_plan.nodes.size()) return false;
+      const auto& desc = compiled_plan.nodes[ancestor];
+      if (desc.kind == SALTS_BT_NODE_PARALLEL && desc.parallel_hooks) {
+        return true;
+      }
+      ancestor = desc.parent_index;
+    }
+    return false;
   }
 
   void rememberCurrentException(const char* where) noexcept {
@@ -1123,6 +1140,16 @@ struct TreeExecutorSession::Impl {
           leaf_owners[index] = LeafOwner::None;
           return host_status;
         }
+      }
+
+      // A Parallel host may have allocated branch-local contexts in enter().
+      // An unclaimed leaf must not bypass isolation or the join/merge policy
+      // by executing against the session's shared Blackboard/ExecutionContext.
+      if (isInsideParallelBranch(index)) {
+        last_error = "C11 Parallel leaf '" + source->id +
+                     "' requires host branch-aware tick_leaf dispatch; "
+                     "refusing shared Blackboard/ExecutionContext fallback";
+        return SALTS_ENOTSUP;
       }
 
       if (source->id == "Shell") {
