@@ -2607,6 +2607,51 @@ int testHostBranchResourcesReleasedOnParallelCancel() {
   return 0;
 }
 
+int testHostBranchResourcesReleasedOnReset() {
+  actions::Tree tree;
+  tree.root.id = "Parallel";
+  actions::Node first;
+  first.id = "RunningA";
+  actions::Node second;
+  second.id = "RunningB";
+  tree.root.children.push_back(first);
+  tree.root.children.push_back(second);
+
+  actions::Executor executor;
+  actions::Blackboard blackboard;
+  actions::ExecutionContext context;
+  IsolatedParallelHost state;
+  state.executor = &executor;
+  state.root_blackboard = &blackboard;
+  praktor_c11_bt_host hooks{};
+  hooks.tick_leaf = &isolatedParallelRunningLeafTick;
+  hooks.halt_leaf = &parallelTestLeafHalt;
+  hooks.parallel_enter = &isolatedParallelEnter;
+  hooks.parallel_step = &isolatedParallelStepAcceptRunning;
+  hooks.parallel_join = &isolatedParallelJoinRunning;
+  hooks.parallel_finish = &isolatedParallelFinish;
+  hooks.parallel_abort = &isolatedParallelAbort;
+  hooks.user = &state;
+
+  actions::c11::TreeExecutorSession session(
+      tree, executor, blackboard, context, limits(), &hooks);
+  state.session = &session;
+  salts_bt_node_status status = SALTS_BT_FAILURE;
+  CHECK(session.tick(&status) == SALTS_OK);
+  CHECK(status == SALTS_BT_RUNNING);
+  CHECK(state.branch_blackboards[0] && state.branch_blackboards[1]);
+  CHECK(state.branch_contexts[0] && state.branch_contexts[1]);
+  CHECK(session.reset() == SALTS_OK);
+  CHECK(state.aborts[0] == state.enters[0]);
+  CHECK(state.aborts[1] == state.enters[1]);
+  CHECK(!state.branch_blackboards[0] && !state.branch_blackboards[1]);
+  CHECK(!state.branch_contexts[0] && !state.branch_contexts[1]);
+  const int total_aborts = state.aborts[0] + state.aborts[1];
+  CHECK(session.reset() == SALTS_OK);
+  CHECK(state.aborts[0] + state.aborts[1] == total_aborts);
+  return 0;
+}
+
 int testHostSuppliedParallelBranchIsolationAndMergeOrder() {
   actions::Tree tree;
   tree.root.id = "Parallel";
@@ -2693,6 +2738,7 @@ int main() {
   if (testHostBranchResourcesReleasedAfterParallelStepFailure() != 0) return 1;
   if (testHostBranchResourcesReleasedAfterParallelJoinFailure() != 0) return 1;
   if (testHostBranchResourcesReleasedOnParallelCancel() != 0) return 1;
+  if (testHostBranchResourcesReleasedOnReset() != 0) return 1;
   if (testParallelHookFailureAbortsEnteredBranches() != 0) return 1;
   if (testParallelAbortHookRunsForRunningChildrenOnCancel() != 0) return 1;
   if (testEmptyParallelAndReactiveSequenceMatchExecutor() != 0) return 1;
