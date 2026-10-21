@@ -73,8 +73,8 @@ if(PRAKTOR_ENABLE_C11_ACTIONS)
         PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/c11>
         PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
     )
-    target_link_libraries(praktor_actions_c11 PUBLIC Salts::BehaviorTree actions
-        PRIVATE Salts::JsonParser Salts::Process)
+    target_link_libraries(praktor_actions_c11 PUBLIC Salts::BehaviorTree Salts::Process actions
+        PRIVATE Salts::JsonParser)
     target_compile_features(praktor_actions_c11
         PUBLIC c_std_11
         PRIVATE cxx_std_17
