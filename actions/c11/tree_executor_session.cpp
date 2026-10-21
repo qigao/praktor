@@ -314,6 +314,7 @@ struct TreeExecutorSession::Impl : std::enable_shared_from_this<Impl> {
   praktor_c11_bt_host runtime_host{};
   praktor_c11_bt_tree runtime{};
   cflow_process_retainer* recovery_owner = nullptr;
+  uint32_t shell_close_budget_ms = 3000u;
   struct PipelineState {
     bool initialized = false;
     size_t active_child = 0u;
@@ -388,14 +389,16 @@ struct TreeExecutorSession::Impl : std::enable_shared_from_this<Impl> {
        actions::ExecutionContext& source_execution_context,
        const salts_bt_tree_config& limits,
        const praktor_c11_bt_host* supplied_hooks,
-       cflow_process_retainer* supplied_recovery_owner)
+       cflow_process_retainer* supplied_recovery_owner,
+       uint32_t supplied_shell_close_budget_ms)
       : tree(expandSubTrees(source_tree, source_executor, source_blackboard, limits)),
         compiled_plan(compileTreePlan(tree, source_blackboard, limits)),
         executor(source_executor),
         blackboard(source_blackboard),
         execution_context(source_execution_context),
         tree_limits(limits),
-        recovery_owner(supplied_recovery_owner) {
+        recovery_owner(supplied_recovery_owner),
+        shell_close_budget_ms(supplied_shell_close_budget_ms) {
     if (supplied_hooks != nullptr) {
       hooks = *supplied_hooks;
     }
@@ -1729,10 +1732,11 @@ TreeExecutorSession::TreeExecutorSession(
     actions::ExecutionContext& execution_context,
     const salts_bt_tree_config& limits,
     const praktor_c11_bt_host* host_hooks,
-    cflow_process_retainer* recovery_owner)
+    cflow_process_retainer* recovery_owner,
+    uint32_t shell_close_budget_ms)
     : impl_(std::make_shared<Impl>(tree, executor, blackboard,
                                   execution_context, limits, host_hooks,
-                                  recovery_owner)) {}
+                                  recovery_owner, shell_close_budget_ms)) {}
 
 TreeExecutorSession::~TreeExecutorSession() {
   if (!impl_) return;
