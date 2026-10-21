@@ -38,6 +38,15 @@ namespace actions::c11 {
  * groups must provide their prepare/begin, completion/finish and abort callbacks
  * together so cancellation has an explicit cleanup path.
  *
+ * Decorator numeric parameters expressed as exact Blackboard substitutions
+ * (for example, Retry.num_attempts="{attempts}", Timeout.timeout_ms="{timeout}",
+ * or Delay.delay_ms="{delay}") are resolved from the live Blackboard before
+ * each visit/tick rather than frozen at session construction. Every visit
+ * revalidates the value against the node's numeric and configured iteration /
+ * duration bounds. A missing key, non-integral limit, negative duration, or
+ * out-of-budget limit fails the tick; the underlying Salts runtime then halts
+ * active descendants and runs the normal host-resource cleanup path.
+ *
  * The tree and all callbacks are single-driver and synchronous. The caller
  * must keep Executor, Blackboard, ExecutionContext, hook user data and any
  * external resources alive until this session is destroyed.
