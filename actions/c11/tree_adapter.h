@@ -56,7 +56,9 @@ typedef struct praktor_c11_bt_host {
   int (*select_child)(void *user, size_t node_index,
                       size_t *out_child_index);
 
-  /* All four are required together when a node enables parallel_hooks. */
+  /* All five are required together when a node enables parallel_hooks.
+   * parallel_abort must synchronously clean up branch-local resources when
+   * reset/cancel/error interrupts an activation or a later hook fails. */
   int (*parallel_enter)(void *user, size_t node_index, size_t child_index,
                         bool first_activation);
   int (*parallel_step)(void *user, size_t node_index, size_t child_index,
