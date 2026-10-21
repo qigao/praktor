@@ -2379,6 +2379,7 @@ struct IsolatedParallelHost {
   bool second_branch_saw_uncommitted_write = false;
   int enters[2] = {0, 0};
   int aborts[2] = {0, 0};
+  int join_calls = 0;
 };
 
 int isolatedParallelEnter(void* user, size_t, size_t child_index,
@@ -2517,7 +2518,15 @@ int testHostBranchResourcesReleasedAfterParallelStepFailure() {
   return 0;
 }
 
-int isolatedParallelFailJoin(void*, size_t, salts_bt_node_status) {
+int isolatedParallelFailJoin(void* user, size_t,
+                             salts_bt_node_status status) {
+  auto* state = static_cast<IsolatedParallelHost*>(user);
+  if (state == nullptr || status != SALTS_BT_SUCCESS ||
+      state->enters[0] != 1 || state->enters[1] != 1 ||
+      !state->branch_blackboards[0] || !state->branch_blackboards[1] ||
+      !state->branch_contexts[0] || !state->branch_contexts[1])
+    return SALTS_EINVAL;
+  ++state->join_calls;
   return SALTS_EIO;
 }
 
@@ -2532,6 +2541,12 @@ int testHostBranchResourcesReleasedAfterParallelJoinFailure() {
   tree.root.children.push_back(second);
 
   actions::Executor executor;
+  executor.registerTask("First", [](const auto&, actions::Blackboard&) {
+    return actions::NodeStatus::SUCCESS;
+  });
+  executor.registerTask("Second", [](const auto&, actions::Blackboard&) {
+    return actions::NodeStatus::SUCCESS;
+  });
   actions::Blackboard blackboard;
   actions::ExecutionContext context;
   IsolatedParallelHost state;
@@ -2552,13 +2567,9 @@ int testHostBranchResourcesReleasedAfterParallelJoinFailure() {
   state.session = &session;
   salts_bt_node_status status = SALTS_BT_FAILURE;
   CHECK(session.tick(&status) == SALTS_EIO);
-  std::fprintf(stderr, "join-failure probe: enters=(%d,%d) aborts=(%d,%d) prepared=(%d,%d)\n",
-               state.enters[0], state.enters[1], state.aborts[0],
-               state.aborts[1], state.branch_blackboards[0] ? 1 : 0,
-               state.branch_blackboards[1] ? 1 : 0);
-  CHECK(state.enters[0] + state.enters[1] > 0);
-  CHECK(state.aborts[0] + state.aborts[1] ==
-        state.enters[0] + state.enters[1]);
+  CHECK(state.join_calls == 1);
+  CHECK(state.enters[0] == 1 && state.enters[1] == 1);
+  CHECK(state.aborts[0] == 1 && state.aborts[1] == 1);
   CHECK(!state.branch_blackboards[0] && !state.branch_blackboards[1]);
   CHECK(!state.branch_contexts[0] && !state.branch_contexts[1]);
   return 0;
