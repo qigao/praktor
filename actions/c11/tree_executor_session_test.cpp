@@ -729,12 +729,13 @@ int testRetryParameterIsReReadOnEachTick() {
                           : actions::NodeStatus::FAILURE;
   });
   actions::Blackboard c11_blackboard;
-  c11_blackboard.set("attempts", "2");
   actions::ExecutionContext c11_context;
   praktor_c11_bt_host hooks{};
   hooks.halt_leaf = &noOpHalt;
+  /* Session construction must not eagerly resolve the live Blackboard key. */
   actions::c11::TreeExecutorSession session(tree, c11, c11_blackboard,
                                             c11_context, limits(), &hooks);
+  c11_blackboard.set("attempts", "2");
   salts_bt_node_status status = SALTS_BT_FAILURE;
   CHECK(session.tick(&status) == SALTS_OK);
   CHECK(status == SALTS_BT_RUNNING);
