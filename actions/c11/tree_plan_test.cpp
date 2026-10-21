@@ -279,10 +279,11 @@ int testBlackboardIntegralFloatParameters() {
   blackboard.set("cycles", "3.0");
   blackboard.set("delay", "12.0");
   const auto plan = compileTreePlan(tree, blackboard, testLimits());
-  CHECK(plan.nodes[1].limit == 3u);
+  /* Runtime-substituted controls keep a neutral construction-time value. */
+  CHECK(plan.nodes[1].limit == 0u);
   CHECK(plan.nodes[1].dynamic_parameter_mask ==
         SALTS_BT_DYNAMIC_PARAMETER_LIMIT);
-  CHECK(plan.nodes[2].duration_ns == UINT64_C(12000000));
+  CHECK(plan.nodes[2].duration_ns == UINT64_C(100000000));
   CHECK(plan.nodes[2].dynamic_parameter_mask ==
         SALTS_BT_DYNAMIC_PARAMETER_DURATION_NS);
   return 0;
