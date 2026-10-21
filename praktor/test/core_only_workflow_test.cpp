@@ -209,6 +209,43 @@ TEST_CASE("WorkflowRunner selects C11 only with a live single-driver Process hos
     std::filesystem::remove_all(dir);
 }
 
+TEST_CASE("C11 WorkflowRunner rejects nested Uses without silently running Legacy") {
+    const auto dir = createCoreOnlyTempDir();
+    const auto parent = dir / "outer.yml";
+    const auto child = dir / "nested.yml";
+    const auto marker = dir / "must-not-be-created.txt";
+#ifdef _WIN32
+    const std::string legacy_command =
+        "echo hidden-legacy > \"" + marker.string() + "\"";
+#else
+    const std::string legacy_command =
+        "printf hidden-legacy > '" + marker.string() + "'";
+#endif
+    writeText(child,
+        "tasks:\n"
+        "  - name: nested_effect\n"
+        "    command: |-\n"
+        "      " + legacy_command + "\n");
+    writeText(parent,
+        "tasks:\n"
+        "  - name: nested_uses\n"
+        "    uses: ./nested.yml\n");
+
+    WorkflowRunner runner(parent.string());
+    ScopedWorkflowProcessOwner recovery;
+    const auto result = runner.executeWithC11ProcessOwner(&recovery.owner);
+    CHECK_FALSE(result.success);
+    CHECK(result.error_message.find(
+        "nested uses requires explicit recovery-owner propagation") !=
+        std::string::npos);
+    CHECK_FALSE(std::filesystem::exists(marker));
+    size_t reaped = 0u, pending = 0u;
+    CHECK(cflow_process_retainer_run_ready(
+        &recovery.owner, 64u, &reaped, &pending) == SALTS_OK);
+    CHECK(pending == 0u);
+    std::filesystem::remove_all(dir);
+}
+
 TEST_CASE("WorkflowRunner cancellation retains active Shell leases after workflow return") {
     const auto dir = createCoreOnlyTempDir();
     const auto workflow = dir / "cancel-hosted-shell.yml";
