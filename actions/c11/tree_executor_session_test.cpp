@@ -1377,6 +1377,14 @@ int parallelRunningJoin(void* user, size_t, salts_bt_node_status status) {
   return SALTS_OK;
 }
 
+int parallelFailingStep(void* user, size_t, size_t,
+                        salts_bt_node_status) {
+  auto* stats = static_cast<ParallelHookStats*>(user);
+  if (stats == nullptr) return SALTS_EINVAL;
+  ++stats->steps;
+  return SALTS_EIO;
+}
+
 int parallelTestJoin(void* user, size_t, salts_bt_node_status status) {
   auto* stats = static_cast<ParallelHookStats*>(user);
   if (stats == nullptr || status != SALTS_BT_SUCCESS) return SALTS_EINVAL;
@@ -1488,6 +1496,46 @@ int testParallelInvokesCompleteHostHookGroup() {
   return 0;
 }
 
+
+int testParallelHookFailureAbortsEnteredBranches() {
+  actions::Tree tree;
+  tree.root.id = "Parallel";
+  actions::Node first;
+  first.id = "First";
+  actions::Node second;
+  second.id = "Second";
+  tree.root.children.push_back(first);
+  tree.root.children.push_back(second);
+
+  actions::Executor executor;
+  executor.registerTask("First", [](const auto&, actions::Blackboard&) {
+    return actions::NodeStatus::SUCCESS;
+  });
+  executor.registerTask("Second", [](const auto&, actions::Blackboard&) {
+    return actions::NodeStatus::SUCCESS;
+  });
+  actions::Blackboard blackboard;
+  actions::ExecutionContext context;
+  ParallelHookStats stats;
+  praktor_c11_bt_host hooks{};
+  hooks.parallel_enter = &parallelTestEnter;
+  hooks.parallel_step = &parallelFailingStep;
+  hooks.parallel_join = &parallelTestJoin;
+  hooks.parallel_finish = &parallelTestFinish;
+  hooks.parallel_abort = &parallelTestAbort;
+  hooks.user = &stats;
+
+  actions::c11::TreeExecutorSession session(
+      tree, executor, blackboard, context, limits(), &hooks);
+  salts_bt_node_status status = SALTS_BT_FAILURE;
+  CHECK(session.tick(&status) == SALTS_EIO);
+  CHECK(stats.steps == 1u);
+  CHECK(stats.enters > 0u);
+  CHECK(stats.aborts == stats.enters);
+  CHECK(session.lastError().find("Parallel step hook failed") !=
+        std::string::npos);
+  return 0;
+}
 
 int testParallelAbortHookRunsForRunningChildrenOnCancel() {
   actions::Tree tree;
@@ -2345,6 +2393,7 @@ int main() {
   if (testEmptySwitchResolvesSelectorThenFails() != 0) return 1;
   if (testNonEmptyParallelFailsClosedWithoutFullHookGroup() != 0) return 1;
   if (testParallelInvokesCompleteHostHookGroup() != 0) return 1;
+  if (testParallelHookFailureAbortsEnteredBranches() != 0) return 1;
   if (testParallelAbortHookRunsForRunningChildrenOnCancel() != 0) return 1;
   if (testEmptyParallelAndReactiveSequenceMatchExecutor() != 0) return 1;
   if (testRunOnceAndKeepRunningStateMatchExecutor() != 0) return 1;
