@@ -50,6 +50,14 @@ target_include_directories(workflow_execution_regression_test.${TARGET_NAME_LIB}
 set_tests_properties(workflow_execution_regression_test.${TARGET_NAME_LIB}
     PROPERTIES TIMEOUT 60)
 
+# The opt-in C11 test suite exercises native process cancellation. Keep a
+# hard CTest timeout so a shutdown fault is reported as a failed qualification,
+# not an unbounded CI job; this is not a substitute for a lease-safe API.
+if(PRAKTOR_ENABLE_C11_ACTIONS AND NOT ENABLE_SCRIPT_ENGINE)
+    set_tests_properties(core_only_workflow_test.${TARGET_NAME_LIB}
+        PROPERTIES TIMEOUT 40)
+endif()
+
 if(ENABLE_SCRIPT_ENGINE)
     target_compile_definitions(script_engine_test.${TARGET_NAME_LIB} PRIVATE
         PRAKTOR_TEST_PYTHON="${PYTHON3_EXECUTABLE_ESCAPED}"
