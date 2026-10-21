@@ -274,8 +274,14 @@ void appendNode(TreePlan &plan, const Node &node, size_t parent_index,
     }
     const bool dynamic_iterations =
         isRuntimeSubstitutedParam(node, "max_iterations");
+    /*
+     * The concrete limit is refreshed at tick time. Keep the construction
+     * placeholder within the configured runtime budget so a smaller host limit
+     * does not reject a valid late-bound Blackboard value before the first tick.
+     */
     const int64_t iterations = dynamic_iterations
-        ? 100
+        ? static_cast<int64_t>(
+              (std::min)(static_cast<size_t>(100), limits.max_control_iterations))
         : readIntegerParam(node, blackboard, "max_iterations", 100);
     if (iterations < 0 ||
         static_cast<uint64_t>(iterations) > limits.max_control_iterations) {
@@ -386,8 +392,10 @@ void appendNode(TreePlan &plan, const Node &node, size_t parent_index,
     }
     const bool dynamic_count =
         isRuntimeSubstitutedParam(node, "max_iterations");
+    /* As with WhileDo, the dynamic value is resolved at tick time. */
     const int64_t count = dynamic_count
-        ? 1000
+        ? static_cast<int64_t>(
+              (std::min)(static_cast<size_t>(1000), limits.max_control_iterations))
         : readIntegerParam(node, blackboard, "max_iterations", 1000);
     if (count < 0 ||
         static_cast<uint64_t>(count) > limits.max_control_iterations) {
