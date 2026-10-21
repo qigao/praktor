@@ -1600,6 +1600,65 @@ int testParallelRejectsUnclaimedLeafBeforeSharedStateMutation() {
   return 0;
 }
 
+int testParallelRejectsUnscopedControlCallbacks() {
+  // Host-managed Parallel branches cannot resolve control values from the
+  // session's root Blackboard. Test condition, queue, and dynamic limit paths.
+  for (int kind = 0; kind < 3; ++kind) {
+    actions::Tree tree;
+    tree.root.id = "Parallel";
+    actions::Node controlled;
+    if (kind == 0) {
+      controlled.id = "IfThenElse";
+      controlled.params.emplace("condition",
+                                actions::Value{std::string("{branch_condition}")});
+    } else if (kind == 1) {
+      controlled.id = "ConsumeQueue";
+    } else {
+      controlled.id = "Retry";
+      controlled.params.emplace("num_attempts",
+                                actions::Value{std::string("{branch_attempts}")});
+    }
+    actions::Node child;
+    child.id = "ScopedLeaf";
+    controlled.children.push_back(child);
+    tree.root.children.push_back(controlled);
+    actions::Node sibling;
+    sibling.id = "ScopedLeaf";
+    tree.root.children.push_back(sibling);
+
+    actions::Executor executor;
+    actions::Blackboard blackboard;
+    blackboard.set("branch_condition", "true");
+    blackboard.set("task_queue", "[\"one\"]");
+    blackboard.set("branch_attempts", "2");
+    actions::ExecutionContext context;
+    ParallelHookStats stats;
+    praktor_c11_bt_host hooks{};
+    hooks.tick_leaf = &parallelTestLeafTick;
+    hooks.halt_leaf = &parallelTestLeafHalt;
+    hooks.parallel_enter = &parallelTestEnter;
+    hooks.parallel_step = &parallelTestStep;
+    hooks.parallel_join = &parallelTestJoin;
+    hooks.parallel_finish = &parallelTestFinish;
+    hooks.parallel_abort = &parallelTestAbort;
+    hooks.user = &stats;
+
+    actions::c11::TreeExecutorSession session(
+        tree, executor, blackboard, context, limits(), &hooks);
+    salts_bt_node_status status = SALTS_BT_SUCCESS;
+    CHECK(session.tick(&status) != SALTS_OK);
+    const char* expected = kind == 0 ? "Parallel condition requires"
+        : kind == 1 ? "Parallel ConsumeQueue requires"
+                    : "Parallel dynamic parameters require";
+    CHECK(session.lastError().find(expected) != std::string::npos);
+    CHECK(blackboard.get("task_queue") == "[\"one\"]");
+    CHECK(blackboard.get("branch_attempts") == "2");
+    CHECK(stats.enters > 0u);
+    CHECK(stats.aborts == stats.enters);
+  }
+  return 0;
+}
+
 int testParallelAbortHookRunsForRunningChildrenOnCancel() {
   actions::Tree tree;
   tree.root.id = "Parallel";
@@ -2855,6 +2914,7 @@ int main() {
   if (testHostBranchResourcesReleasedOnReset() != 0) return 1;
   if (testParallelHookFailureAbortsEnteredBranches() != 0) return 1;
   if (testParallelRejectsUnclaimedLeafBeforeSharedStateMutation() != 0) return 1;
+  if (testParallelRejectsUnscopedControlCallbacks() != 0) return 1;
   if (testParallelAbortHookRunsForRunningChildrenOnCancel() != 0) return 1;
   if (testEmptyParallelAndReactiveSequenceMatchExecutor() != 0) return 1;
   if (testRunOnceAndKeepRunningStateMatchExecutor() != 0) return 1;
