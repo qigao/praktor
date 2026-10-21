@@ -266,7 +266,7 @@ TEST_CASE("WorkflowRunner cancellation retains active Shell leases after workflo
         const int status = cflow_process_retainer_run_ready(
             &recovery.owner, 64u, &reaped, &pending);
         total_reaped += reaped;
-        CHECK(status == SALTS_OK || status == SALTS_EBUSY);
+        CHECK((status == SALTS_OK || status == SALTS_EBUSY));
         if (pending == 0u) {
             CHECK(status == SALTS_OK);
             break;
