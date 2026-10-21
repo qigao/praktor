@@ -511,9 +511,9 @@ TEST_CASE("DeclarativeTreeExecutor empty parameters", "[declarative_tree_executo
         DeclarativeTreeExecutor executor;
         auto result = executor.execute(task, context);
 
-        // Should handle empty params gracefully
-        // (will fail because no cmd, but shouldn't crash)
-        REQUIRE(true);
+        // A Shell node without a command is an observable task failure, not a passing no-op.
+        REQUIRE_FALSE(result.success);
+        CHECK_FALSE(result.error_message.empty());
     }
 }
 
