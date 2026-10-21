@@ -1196,6 +1196,17 @@ struct TreeExecutorSession::Impl {
     if (out_params == nullptr || nodeAt(index) == nullptr ||
         index >= compiled_plan.nodes.size())
       return SALTS_EINVAL;
+    // Dynamic values inside a Parallel branch must be resolved against the
+    // host-selected branch context, never the root Blackboard.
+    if (isInsideParallelBranch(index)) {
+      if (hooks.resolve_dynamic_parameters == nullptr) {
+        last_error = "C11 Parallel dynamic parameters require a host branch-aware resolver";
+        return SALTS_ENOTSUP;
+      }
+      return safeHostStatus("C11 Parallel dynamic parameter resolver failed", [&] {
+        return hooks.resolve_dynamic_parameters(hooks.user, index, out_params);
+      });
+    }
     try {
       const auto* source = nodeAt(index);
       const uint32_t mask = compiled_plan.nodes[index].dynamic_parameter_mask;
@@ -1272,6 +1283,10 @@ struct TreeExecutorSession::Impl {
       if (hooks.condition != nullptr) {
         return hooks.condition(hooks.user, index, out_status);
       }
+      if (isInsideParallelBranch(index)) {
+        last_error = "C11 Parallel condition requires a host branch-aware condition hook";
+        return SALTS_ENOTSUP;
+      }
       const auto* source = nodeAt(index);
       if (source == nullptr) return SALTS_EINVAL;
       const auto it = source->params.find("condition");
@@ -1295,6 +1310,10 @@ struct TreeExecutorSession::Impl {
       restorePipelineInputForNode(index);
       if (hooks.select_child != nullptr) {
         return hooks.select_child(hooks.user, index, out_child_index);
+      }
+      if (isInsideParallelBranch(index)) {
+        last_error = "C11 Parallel Switch requires a host branch-aware selection hook";
+        return SALTS_ENOTSUP;
       }
       const auto* source = nodeAt(index);
       if (source == nullptr) return SALTS_EINVAL;
@@ -1374,6 +1393,10 @@ struct TreeExecutorSession::Impl {
       });
     }
 
+    if (isInsideParallelBranch(node)) {
+      last_error = "C11 Parallel PipelineSequence requires host branch-aware hooks";
+      return SALTS_ENOTSUP;
+    }
     try {
       restorePipelineInputForNode(node);
       const auto* source = nodeAt(node);
@@ -1411,6 +1434,10 @@ struct TreeExecutorSession::Impl {
       });
     }
 
+    if (isInsideParallelBranch(node)) {
+      last_error = "C11 Parallel PipelineSequence requires host branch-aware hooks";
+      return SALTS_ENOTSUP;
+    }
     try {
       const auto* source = nodeAt(node);
       if (source == nullptr || node >= pipeline_states.size() ||
@@ -1455,6 +1482,10 @@ struct TreeExecutorSession::Impl {
       });
     }
 
+    if (isInsideParallelBranch(node)) {
+      last_error = "C11 Parallel EntryUpdated requires a host branch-aware observation hook";
+      return SALTS_ENOTSUP;
+    }
     try {
       restorePipelineInputForNode(node);
       const auto* source = nodeAt(node);
@@ -1485,6 +1516,10 @@ struct TreeExecutorSession::Impl {
       });
     }
 
+    if (isInsideParallelBranch(node)) {
+      last_error = "C11 Parallel ConsumeQueue requires host branch-aware hooks";
+      return SALTS_ENOTSUP;
+    }
     try {
       restorePipelineInputForNode(node);
       const auto* source = nodeAt(node);
@@ -1546,6 +1581,10 @@ struct TreeExecutorSession::Impl {
       return safeHostStatus("C11 ConsumeQueue finish hook failed", [&] {
         return hooks.queue_finish(hooks.user, node, has_more);
       });
+    }
+    if (isInsideParallelBranch(node)) {
+      last_error = "C11 Parallel ConsumeQueue requires host branch-aware hooks";
+      return SALTS_ENOTSUP;
     }
     if (node >= queue_states.size() || !queue_states[node].active) {
       last_error = "ConsumeQueue finish called without an active queue item";
