@@ -1036,6 +1036,10 @@ struct TreeExecutorSession::Impl {
         return SALTS_OK;
       }
       if (action == TreePlanTerminalAction::SwitchFailure) {
+        if (isInsideParallelBranch(index)) {
+          last_error = "C11 Parallel empty Switch requires a host branch-aware selector";
+          return SALTS_ENOTSUP;
+        }
         try {
           const auto* source = nodeAt(index);
           if (source == nullptr) return SALTS_EINVAL;
@@ -1052,7 +1056,7 @@ struct TreeExecutorSession::Impl {
     }
     try {
       const actions::Node* source = nodeAt(index);
-      restorePipelineInputForNode(index);
+      if (!isInsideParallelBranch(index)) restorePipelineInputForNode(index);
       const LeafOwner owner = leaf_owners[index];
 
       // Once a leaf is RUNNING, keep the selected execution owner. In
@@ -1279,13 +1283,13 @@ struct TreeExecutorSession::Impl {
   int condition(size_t index, salts_bt_node_status* out_status) noexcept {
     if (out_status == nullptr) return SALTS_EINVAL;
     try {
-      restorePipelineInputForNode(index);
-      if (hooks.condition != nullptr) {
-        return hooks.condition(hooks.user, index, out_status);
-      }
-      if (isInsideParallelBranch(index)) {
+      if (isInsideParallelBranch(index) && hooks.condition == nullptr) {
         last_error = "C11 Parallel condition requires a host branch-aware condition hook";
         return SALTS_ENOTSUP;
+      }
+      if (!isInsideParallelBranch(index)) restorePipelineInputForNode(index);
+      if (hooks.condition != nullptr) {
+        return hooks.condition(hooks.user, index, out_status);
       }
       const auto* source = nodeAt(index);
       if (source == nullptr) return SALTS_EINVAL;
@@ -1307,13 +1311,13 @@ struct TreeExecutorSession::Impl {
   int selectChild(size_t index, size_t* out_child_index) noexcept {
     if (out_child_index == nullptr) return SALTS_EINVAL;
     try {
-      restorePipelineInputForNode(index);
-      if (hooks.select_child != nullptr) {
-        return hooks.select_child(hooks.user, index, out_child_index);
-      }
-      if (isInsideParallelBranch(index)) {
+      if (isInsideParallelBranch(index) && hooks.select_child == nullptr) {
         last_error = "C11 Parallel Switch requires a host branch-aware selection hook";
         return SALTS_ENOTSUP;
+      }
+      if (!isInsideParallelBranch(index)) restorePipelineInputForNode(index);
+      if (hooks.select_child != nullptr) {
+        return hooks.select_child(hooks.user, index, out_child_index);
       }
       const auto* source = nodeAt(index);
       if (source == nullptr) return SALTS_EINVAL;
