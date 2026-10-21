@@ -82,6 +82,9 @@ jobs:
       HOST_TRIPLET: ${{ matrix.host }}
       CMAKE_PRESET: ${{ matrix.preset }}
       SDK_VERSION: ${{ needs.metadata.outputs.version }}
+      # The adapter draft must validate against the exact 3.0.11 producer artifact.
+      # Keep the override branch-scoped; unrelated PRs continue using released packages.
+      TURBOSCRIPT_CI_RUN: ${{ inputs.turboscript_ci_run || (github.event_name == 'pull_request' && github.head_ref == 'feat/praktor-c11-behavior-tree-adapter' && '38529473245') || '' }}
       CCACHE_DIR: ${{ github.workspace }}/.cache/ccache
       CCACHE_BASEDIR: ${{ github.workspace }}
       CCACHE_COMPILERCHECK: content
@@ -181,10 +184,10 @@ jobs:
           printf 'TurboScript.Native=%s\n' "$TURBOSCRIPT_NATIVE_VERSION"
 
       - name: Check candidate SDK provenance
-        if: inputs.turboscript_ci_run != ''
+        if: env.TURBOSCRIPT_CI_RUN != ''
         env:
           GH_TOKEN: ${{ github.token }}
-          CANDIDATE_RUN: ${{ inputs.turboscript_ci_run }}
+          CANDIDATE_RUN: ${{ env.TURBOSCRIPT_CI_RUN }}
         shell: bash
         run: |
           set -euo pipefail
@@ -201,18 +204,18 @@ jobs:
           PY
 
       - uses: actions/download-artifact@v4
-        if: inputs.turboscript_ci_run != ''
+        if: env.TURBOSCRIPT_CI_RUN != ''
         with:
           repository: qigao/TurboScript
-          run-id: ${{ inputs.turboscript_ci_run }}
+          run-id: ${{ env.TURBOSCRIPT_CI_RUN }}
           github-token: ${{ github.token }}
           name: turboscript-sdk-${{ matrix.rid }}
           path: build/turboscript-candidate
 
       - name: Select candidate SDK
-        if: inputs.turboscript_ci_run != ''
+        if: env.TURBOSCRIPT_CI_RUN != ''
         env:
-          CANDIDATE_RUN: ${{ inputs.turboscript_ci_run }}
+          CANDIDATE_RUN: ${{ env.TURBOSCRIPT_CI_RUN }}
         shell: bash
         run: |
           set -euo pipefail
