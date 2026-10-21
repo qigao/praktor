@@ -3,6 +3,7 @@
 
 #include "tree_plan.hpp"
 #include "core/executor.hpp"
+#include <salts/process_retainer.h>
 
 #include <memory>
 #include <string>
@@ -50,6 +51,15 @@ namespace actions::c11 {
  * The tree and all callbacks are single-driver and synchronous. The caller
  * must keep Executor, Blackboard, ExecutionContext, hook user data and any
  * external resources alive until this session is destroyed.
+ *
+ * Salts::Process Shell requires a caller-owned, fixed-capacity
+ * cflow_process_retainer. A slot is reserved before spawning. If shutdown
+ * cannot quiesce, the Process plus its stable completion_user and borrowed
+ * buffers are handed to that owner before the Session is released. The
+ * ServiceHost/Workflow owner must keep driving the retainer until settled.
+ * Without one, built-in Shell admission fails closed; no legacy fallback.
+ * Permanent driver faults occupy a bounded retainer slot rather than
+ * permitting unsafe destruction or invented terminal callbacks.
  */
 class TreeExecutorSession {
 public:
@@ -58,7 +68,8 @@ public:
                       actions::Blackboard& blackboard,
                       actions::ExecutionContext& execution_context,
                       const salts_bt_tree_config& limits,
-                      const praktor_c11_bt_host* host_hooks = nullptr);
+                      const praktor_c11_bt_host* host_hooks = nullptr,
+                       cflow_process_retainer* recovery_owner = nullptr);
   ~TreeExecutorSession();
 
   TreeExecutorSession(const TreeExecutorSession&) = delete;
@@ -77,7 +88,7 @@ public:
 
 private:
   struct Impl;
-  std::unique_ptr<Impl> impl_;
+  std::shared_ptr<Impl> impl_;
 };
 
 } // namespace actions::c11
