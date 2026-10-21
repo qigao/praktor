@@ -1115,10 +1115,11 @@ struct TreeExecutorSession::Impl {
           safeHostVoid("C11 host leaf cleanup after tick failure failed", [&] {
             hooks.halt_leaf(hooks.user, index);
           });
-          if (last_error.empty()) {
-            last_error = "host leaf hook returned status " + std::to_string(host_status) +
-                         " for node '" + source->id + "'";
-          }
+          // Preserve the public host-leaf diagnostic contract. safeHostStatus()
+          // records operation context for generic hooks, but this leaf API has
+          // historically exposed the returned status and node id directly.
+          last_error = "host leaf hook returned status " + std::to_string(host_status) +
+                       " for node '" + source->id + "'";
           leaf_owners[index] = LeafOwner::None;
           return host_status;
         }
