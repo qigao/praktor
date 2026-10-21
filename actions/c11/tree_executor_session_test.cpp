@@ -803,6 +803,44 @@ int testRetryBehaviorMatchesLegacyExecutor() {
     CHECK(c11_calls == 2);
   }
 
+  // RunOnce's terminal result is persistent across a parent Retry.
+  // A cached FAILURE must not cause the child to be invoked again.
+  {
+    auto tree = makeRetryTree(3.0, "RunOnce");
+    actions::Node leaf;
+    leaf.id = "OnceFail";
+    tree.root.children[0].children.push_back(leaf);
+
+    actions::Executor legacy;
+    int legacy_calls = 0;
+    legacy.registerTask("OnceFail", [&legacy_calls](const auto&,
+                                                    actions::Blackboard&) {
+      ++legacy_calls;
+      return actions::NodeStatus::FAILURE;
+    });
+    actions::Blackboard legacy_blackboard;
+    actions::ExecutionContext legacy_context;
+    CHECK(legacy.execute(tree.root, legacy_blackboard, legacy_context) ==
+          actions::NodeStatus::FAILURE);
+    CHECK(legacy_calls == 1);
+
+    actions::Executor c11;
+    int c11_calls = 0;
+    c11.registerTask("OnceFail", [&c11_calls](const auto&,
+                                              actions::Blackboard&) {
+      ++c11_calls;
+      return actions::NodeStatus::FAILURE;
+    });
+    actions::Blackboard c11_blackboard;
+    actions::ExecutionContext c11_context;
+    actions::c11::TreeExecutorSession session(tree, c11, c11_blackboard,
+                                              c11_context, limits());
+    salts_bt_node_status status = SALTS_BT_SUCCESS;
+    CHECK(session.tick(&status) == SALTS_OK);
+    CHECK(status == SALTS_BT_FAILURE);
+    CHECK(c11_calls == 1);
+  }
+
   // Zero attempts is a terminal FAILURE and never invokes the child.
   {
     auto tree = makeRetryTree(0.0, "NeverRun");
