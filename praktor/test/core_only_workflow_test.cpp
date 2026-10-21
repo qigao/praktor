@@ -154,6 +154,60 @@ struct ScopedWorkflowProcessOwner {
 };
 } // namespace
 
+TEST_CASE("WorkflowRunner selects C11 only with a live single-driver Process host") {
+    const auto dir = createCoreOnlyTempDir();
+    const auto workflow = dir / "hosted-shell.yml";
+    const auto marker = dir / "c11-entry.txt";
+#ifdef _WIN32
+    const std::string command = "echo hosted-c11 > \"" + marker.string() + "\"";
+#else
+    const std::string command = "printf hosted-c11 > '" + marker.string() + "'";
+#endif
+    writeText(workflow,
+        "tasks:\n"
+        "  - name: hosted_shell\n"
+        "    sequence:\n"
+        "      - shell:\n"
+        "          cmd: |-\n"
+        "            " + command + "\n"
+        "          stream_output: false\n");
+    WorkflowRunner runner(workflow.string());
+    ScopedWorkflowProcessOwner recovery;
+
+    // Neither a missing owner nor a parallel scheduler may silently choose
+    // legacy Shell or touch the filesystem.
+    const auto without_owner = runner.executeWithC11ProcessOwner(nullptr);
+    CHECK_FALSE(without_owner.success);
+    CHECK(without_owner.error_message.find("Process recovery owner") !=
+          std::string::npos);
+    CHECK_FALSE(std::filesystem::exists(marker));
+
+    const auto concurrently = runner.executeObservedWithHostTools(
+        {}, {}, {}, true, 2, Praktor::Execution::ActionTreeBackend::C11,
+        &recovery.owner);
+    CHECK_FALSE(concurrently.success);
+    CHECK(concurrently.error_message.find("single driver") !=
+          std::string::npos);
+    CHECK_FALSE(std::filesystem::exists(marker));
+
+    const auto result = runner.executeWithC11ProcessOwner(&recovery.owner);
+    REQUIRE(result.success);
+    CHECK(result.value["workflow_status"].as<std::string>() == "success");
+    REQUIRE(std::filesystem::exists(marker));
+    {
+        std::ifstream in(marker);
+        std::string content((std::istreambuf_iterator<char>(in)),
+                            std::istreambuf_iterator<char>());
+        CHECK(content.find("hosted-c11") != std::string::npos);
+    }
+
+    size_t reaped = 0u, pending = 0u;
+    CHECK(cflow_process_retainer_run_ready(
+        &recovery.owner, 64u, &reaped, &pending) == SALTS_OK);
+    CHECK(pending == 0u);
+    std::filesystem::remove_all(dir);
+}
+
 TEST_CASE("opt-in C11 action backend preserves workflow context and task output") {
     using Praktor::Execution::ActionTreeBackend;
     using Praktor::Execution::DeclarativeTreeExecutor;
