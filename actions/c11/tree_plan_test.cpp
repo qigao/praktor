@@ -52,6 +52,67 @@ int testParentFirstSequence() {
   return 0;
 }
 
+int testRetryAttemptLimitAndZeroAttemptFailure() {
+  Tree tree;
+  tree.root.id = "Sequence";
+
+  Node retry;
+  retry.id = "Retry";
+  retry.params.emplace("num_attempts", Value{3.0});
+  Node task;
+  task.id = "Task";
+  retry.children.push_back(task);
+  tree.root.children.push_back(retry);
+
+  Node zero_attempts;
+  zero_attempts.id = "Retry";
+  zero_attempts.params.emplace("num_attempts", Value{0.0});
+  Node never_run;
+  never_run.id = "NeverRun";
+  zero_attempts.children.push_back(never_run);
+  tree.root.children.push_back(zero_attempts);
+
+  Blackboard blackboard;
+  const auto plan = compileTreePlan(tree, blackboard, testLimits());
+  CHECK(plan.nodes.size() == 4u);
+  CHECK(plan.nodes[1].kind == SALTS_BT_NODE_RETRY);
+  CHECK(plan.nodes[1].limit == 3u);
+  CHECK(plan.nodes[2].parent_index == 1u);
+  CHECK(plan.nodes[3].kind == SALTS_BT_NODE_LEAF);
+  CHECK(plan.nodes[3].parent_index == 0u);
+  CHECK(plan.terminal_actions[3] == actions::c11::TreePlanTerminalAction::Failure);
+  return 0;
+}
+
+int testRetryRejectsInvalidAttemptsAndArity() {
+  Blackboard blackboard;
+  {
+    Tree tree;
+    tree.root.id = "Retry";
+    tree.root.params.emplace("num_attempts", Value{-1.0});
+    Node child;
+    child.id = "Task";
+    tree.root.children.push_back(child);
+    CHECK(expectInvalid(tree, blackboard) == 0);
+  }
+  {
+    Tree tree;
+    tree.root.id = "Retry";
+    tree.root.params.emplace("num_attempts", Value{33.0});
+    Node child;
+    child.id = "Task";
+    tree.root.children.push_back(child);
+    CHECK(expectInvalid(tree, blackboard) == 0);
+  }
+  {
+    Tree tree;
+    tree.root.id = "Retry";
+    tree.root.params.emplace("num_attempts", Value{0.0});
+    CHECK(expectInvalid(tree, blackboard) == 0);
+  }
+  return 0;
+}
+
 int testDurationAndRepeatParameters() {
   Tree tree;
   tree.root.id = "Sequence";
@@ -289,6 +350,8 @@ int testRejectsInvalidInputs() {
 
 int main() {
   if (testParentFirstSequence() != 0) return 1;
+  if (testRetryAttemptLimitAndZeroAttemptFailure() != 0) return 1;
+  if (testRetryRejectsInvalidAttemptsAndArity() != 0) return 1;
   if (testDurationAndRepeatParameters() != 0) return 1;
   if (testEmptyParallelAndReactiveSequenceLowerToSuccessLeaf() != 0) return 1;
   if (testEmptyReactiveFallbackLowersToFailureLeaf() != 0) return 1;

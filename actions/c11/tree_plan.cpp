@@ -142,6 +142,7 @@ void validateNodeArity(const Node &node, salts_bt_node_kind kind) {
   case SALTS_BT_NODE_INVERTER:
   case SALTS_BT_NODE_FORCE_SUCCESS:
   case SALTS_BT_NODE_FORCE_FAILURE:
+  case SALTS_BT_NODE_RETRY:
   case SALTS_BT_NODE_REPEAT:
   case SALTS_BT_NODE_TIMEOUT:
   case SALTS_BT_NODE_DELAY:
@@ -194,6 +195,7 @@ salts_bt_node_kind mapNodeKind(const Node &node) {
   if (node.id == "Parallel") return SALTS_BT_NODE_PARALLEL;
   if (node.id == "ReactiveSequence") return SALTS_BT_NODE_REACTIVE_SEQUENCE;
   if (node.id == "ReactiveFallback") return SALTS_BT_NODE_REACTIVE_FALLBACK;
+  if (node.id == "Retry") return SALTS_BT_NODE_RETRY;
   if (node.id == "Switch") return SALTS_BT_NODE_SWITCH;
   if (node.id == "IfThenElse") return SALTS_BT_NODE_IF_THEN_ELSE;
   if (node.id == "Precondition") return SALTS_BT_NODE_PRECONDITION;
@@ -325,6 +327,24 @@ void appendNode(TreePlan &plan, const Node &node, size_t parent_index,
       terminal_action = TreePlanTerminalAction::Success;
     }
     break;
+  case SALTS_BT_NODE_RETRY: {
+    const int64_t attempts =
+        readIntegerParam(node, blackboard, "num_attempts", 3);
+    if (attempts < 0 ||
+        static_cast<uint64_t>(attempts) > limits.max_control_iterations) {
+      throw std::invalid_argument(
+          "Retry num_attempts must be non-negative and within the tree limit");
+    }
+    if (attempts == 0) {
+      /* No attempts means FAILURE; validate child arity before lowering. */
+      desc.kind = SALTS_BT_NODE_LEAF;
+      skip_children = true;
+      terminal_action = TreePlanTerminalAction::Failure;
+    } else {
+      desc.limit = static_cast<size_t>(attempts);
+    }
+    break;
+  }
   case SALTS_BT_NODE_REPEAT: {
     const int64_t count =
         readIntegerParam(node, blackboard, "num_cycles", 0, true);

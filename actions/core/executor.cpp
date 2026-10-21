@@ -4,6 +4,7 @@
 #include "actions/output_parser.hpp"
 #include <json_parser.h>
 #include <cmath>
+#include <cstdint>
 #include <limits>
 #include <stdexcept>
 #include <chrono>
@@ -15,6 +16,26 @@
 namespace actions {
 
 namespace {
+
+void resetRetrySubtreeState(const Node& node, ExecutionContext& ctx) {
+  const std::string suffix =
+      std::to_string(reinterpret_cast<uintptr_t>(&node));
+  if (node.id == "Sequence") ctx.reset("Sequence_" + suffix);
+  if (node.id == "Fallback" || node.id == "Selector")
+    ctx.reset("Fallback_" + suffix);
+  if (node.id == "Retry") ctx.reset("Retry_" + suffix);
+  if (node.id == "RunOnce") ctx.reset("RunOnce_" + suffix);
+  if (node.id == "ConsumeQueue") ctx.reset("ConsumeQueue_" + suffix);
+  if (node.id == "EntryUpdated") {
+    ctx.reset("EntryUpdated_" + suffix);
+    ctx.reset("EntryUpdated_" + suffix + "_child");
+  }
+  if (node.id == "PipelineSequence") ctx.reset("PipelineSequence_" + suffix);
+
+  for (const Node& child : node.children) {
+    resetRetrySubtreeState(child, ctx);
+  }
+}
 
 struct JsonDeleter {
   void operator()(json_value_t* value) const noexcept {
@@ -323,6 +344,9 @@ void Executor::registerBuiltins() {
   dispatch_["ReactiveFallback"] = [this](const Node& node, Blackboard& bb) {
     return executeReactiveFallback(node, bb);
   };
+  dispatch_["Retry"] = [this](const Node& node, Blackboard& bb) {
+    return executeRetry(node, bb);
+  };
   dispatch_["PipelineSequence"] = [this](const Node& node, Blackboard& bb) {
     return executePipelineSequence(node, bb);
   };
@@ -382,6 +406,9 @@ void Executor::registerBuiltins() {
   stateful_dispatch_["ReactiveFallback"] = [this](const Node& node, Blackboard& bb, ExecutionContext& ctx) {
     return executeReactiveFallback(node, bb, ctx);
   };
+  stateful_dispatch_["Retry"] = [this](const Node& node, Blackboard& bb, ExecutionContext& ctx) {
+    return executeRetry(node, bb, ctx);
+  };
   stateful_dispatch_["PipelineSequence"] = [this](const Node& node, Blackboard& bb, ExecutionContext& ctx) {
     return executePipelineSequence(node, bb, ctx);
   };
@@ -438,6 +465,7 @@ void Executor::registerBuiltins() {
   tasks_["Parallel"] = nullptr;
   tasks_["ReactiveSequence"] = nullptr;
   tasks_["ReactiveFallback"] = nullptr;
+  tasks_["Retry"] = nullptr;
   tasks_["Switch"] = nullptr;
   tasks_["WhileDo"] = nullptr;
   tasks_["IfThenElse"] = nullptr;
@@ -1109,6 +1137,55 @@ NodeStatus Executor::executeForceFailure(const Node& node, Blackboard& bb, Execu
   if (status == NodeStatus::RUNNING) {
     return NodeStatus::RUNNING;
   }
+  return NodeStatus::FAILURE;
+}
+
+NodeStatus Executor::executeRetry(const Node& node, Blackboard& bb) {
+  if (node.children.size() != 1u) {
+    throw std::runtime_error("Retry must have exactly 1 child");
+  }
+
+  const int num_attempts = getIntParam(node, "num_attempts", bb, 3);
+  if (num_attempts < 0) {
+    throw std::runtime_error("Retry num_attempts must be non-negative");
+  }
+  for (int attempt = 0; attempt < num_attempts; ++attempt) {
+    const NodeStatus status = execute(node.children[0], bb);
+    if (status != NodeStatus::FAILURE) return status;
+  }
+  return NodeStatus::FAILURE;
+}
+
+NodeStatus Executor::executeRetry(const Node& node, Blackboard& bb,
+                                  ExecutionContext& ctx) {
+  if (node.children.size() != 1u) {
+    throw std::runtime_error("Retry must have exactly 1 child");
+  }
+
+  const int num_attempts = getIntParam(node, "num_attempts", bb, 3);
+  if (num_attempts < 0) {
+    throw std::runtime_error("Retry num_attempts must be non-negative");
+  }
+  const std::string node_id =
+      "Retry_" + std::to_string(reinterpret_cast<uintptr_t>(&node));
+  if (num_attempts == 0) {
+    ctx.reset(node_id);
+    return NodeStatus::FAILURE;
+  }
+
+  NodeState& state = ctx.getState(node_id);
+  while (state.retry_count < num_attempts) {
+    const NodeStatus status = execute(node.children[0], bb, ctx);
+    if (status == NodeStatus::RUNNING) return NodeStatus::RUNNING;
+    if (status == NodeStatus::SUCCESS) {
+      ctx.reset(node_id);
+      return NodeStatus::SUCCESS;
+    }
+
+    ++state.retry_count;
+    resetRetrySubtreeState(node.children[0], ctx);
+  }
+  ctx.reset(node_id);
   return NodeStatus::FAILURE;
 }
 

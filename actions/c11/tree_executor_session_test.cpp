@@ -683,6 +683,161 @@ int testWhileDoConditionFormsMatchTerminalEffects() {
   return 0;
 }
 
+int testRetryBehaviorMatchesLegacyExecutor() {
+  const auto makeRetryTree = [](double attempts, const char* child_id) {
+    actions::Tree tree;
+    tree.root.id = "Retry";
+    tree.root.params.emplace("num_attempts", actions::Value{attempts});
+    actions::Node child;
+    child.id = child_id;
+    tree.root.children.push_back(child);
+    return tree;
+  };
+
+  // A failed child is retried immediately; SUCCESS ends the retry loop.
+  {
+    auto tree = makeRetryTree(3.0, "Flaky");
+    actions::Executor legacy;
+    int legacy_calls = 0;
+    legacy.registerTask("Flaky", [&legacy_calls](const auto&,
+                                                 actions::Blackboard&) {
+      ++legacy_calls;
+      return legacy_calls < 3 ? actions::NodeStatus::FAILURE
+                              : actions::NodeStatus::SUCCESS;
+    });
+    actions::Blackboard legacy_blackboard;
+    actions::ExecutionContext legacy_context;
+    CHECK(legacy.execute(tree.root, legacy_blackboard, legacy_context) ==
+          actions::NodeStatus::SUCCESS);
+    CHECK(legacy_calls == 3);
+
+    actions::Executor c11;
+    int c11_calls = 0;
+    c11.registerTask("Flaky", [&c11_calls](const auto&,
+                                           actions::Blackboard&) {
+      ++c11_calls;
+      return c11_calls < 3 ? actions::NodeStatus::FAILURE
+                           : actions::NodeStatus::SUCCESS;
+    });
+    actions::Blackboard c11_blackboard;
+    actions::ExecutionContext c11_context;
+    actions::c11::TreeExecutorSession session(tree, c11, c11_blackboard,
+                                              c11_context, limits());
+    salts_bt_node_status status = SALTS_BT_FAILURE;
+    CHECK(session.tick(&status) == SALTS_OK);
+    CHECK(status == SALTS_BT_SUCCESS);
+    CHECK(c11_calls == 3);
+  }
+
+  // RUNNING preserves the active attempt rather than consuming it.
+  {
+    auto tree = makeRetryTree(2.0, "YieldOnce");
+    actions::Executor legacy;
+    int legacy_calls = 0;
+    legacy.registerTask("YieldOnce", [&legacy_calls](const auto&,
+                                                     actions::Blackboard&) {
+      ++legacy_calls;
+      return legacy_calls == 1 ? actions::NodeStatus::RUNNING
+                               : actions::NodeStatus::SUCCESS;
+    });
+    actions::Blackboard legacy_blackboard;
+    actions::ExecutionContext legacy_context;
+    CHECK(legacy.execute(tree.root, legacy_blackboard, legacy_context) ==
+          actions::NodeStatus::RUNNING);
+    CHECK(legacy.execute(tree.root, legacy_blackboard, legacy_context) ==
+          actions::NodeStatus::SUCCESS);
+    CHECK(legacy_calls == 2);
+
+    actions::Executor c11;
+    int c11_calls = 0;
+    c11.registerTask("YieldOnce", [&c11_calls](const auto&,
+                                               actions::Blackboard&) {
+      ++c11_calls;
+      return c11_calls == 1 ? actions::NodeStatus::RUNNING
+                            : actions::NodeStatus::SUCCESS;
+    });
+    actions::Blackboard c11_blackboard;
+    actions::ExecutionContext c11_context;
+    praktor_c11_bt_host hooks{};
+    hooks.halt_leaf = &noOpHalt;
+    actions::c11::TreeExecutorSession session(tree, c11, c11_blackboard,
+                                              c11_context, limits(), &hooks);
+    salts_bt_node_status status = SALTS_BT_FAILURE;
+    CHECK(session.tick(&status) == SALTS_OK);
+    CHECK(status == SALTS_BT_RUNNING);
+    CHECK(session.tick(&status) == SALTS_OK);
+    CHECK(status == SALTS_BT_SUCCESS);
+    CHECK(c11_calls == 2);
+  }
+
+  // Once all attempts fail, no extra call may occur.
+  {
+    auto tree = makeRetryTree(2.0, "AlwaysFail");
+    actions::Executor legacy;
+    int legacy_calls = 0;
+    legacy.registerTask("AlwaysFail", [&legacy_calls](const auto&,
+                                                       actions::Blackboard&) {
+      ++legacy_calls;
+      return actions::NodeStatus::FAILURE;
+    });
+    actions::Blackboard legacy_blackboard;
+    actions::ExecutionContext legacy_context;
+    CHECK(legacy.execute(tree.root, legacy_blackboard, legacy_context) ==
+          actions::NodeStatus::FAILURE);
+    CHECK(legacy_calls == 2);
+
+    actions::Executor c11;
+    int c11_calls = 0;
+    c11.registerTask("AlwaysFail", [&c11_calls](const auto&,
+                                                actions::Blackboard&) {
+      ++c11_calls;
+      return actions::NodeStatus::FAILURE;
+    });
+    actions::Blackboard c11_blackboard;
+    actions::ExecutionContext c11_context;
+    actions::c11::TreeExecutorSession session(tree, c11, c11_blackboard,
+                                              c11_context, limits());
+    salts_bt_node_status status = SALTS_BT_SUCCESS;
+    CHECK(session.tick(&status) == SALTS_OK);
+    CHECK(status == SALTS_BT_FAILURE);
+    CHECK(c11_calls == 2);
+  }
+
+  // Zero attempts is a terminal FAILURE and never invokes the child.
+  {
+    auto tree = makeRetryTree(0.0, "NeverRun");
+    actions::Executor legacy;
+    int legacy_calls = 0;
+    legacy.registerTask("NeverRun", [&legacy_calls](const auto&,
+                                                    actions::Blackboard&) {
+      ++legacy_calls;
+      return actions::NodeStatus::SUCCESS;
+    });
+    actions::Blackboard legacy_blackboard;
+    actions::ExecutionContext legacy_context;
+    CHECK(legacy.execute(tree.root, legacy_blackboard, legacy_context) ==
+          actions::NodeStatus::FAILURE);
+    CHECK(legacy_calls == 0);
+
+    actions::Executor c11;
+    int c11_calls = 0;
+    c11.registerTask("NeverRun", [&c11_calls](const auto&,
+                                              actions::Blackboard&) {
+      ++c11_calls;
+      return actions::NodeStatus::SUCCESS;
+    });
+    actions::Blackboard c11_blackboard;
+    actions::ExecutionContext c11_context;
+    actions::c11::TreeExecutorSession session(tree, c11, c11_blackboard,
+                                              c11_context, limits());
+    salts_bt_node_status status = SALTS_BT_SUCCESS;
+    CHECK(session.tick(&status) == SALTS_OK);
+    CHECK(status == SALTS_BT_FAILURE);
+    CHECK(c11_calls == 0);
+  }
+  return 0;
+}
+
 int testReactiveFallbackRechecksPriorityAfterRunning() {
   // A lower-priority child returns RUNNING. On the next tick, a newly
   // successful high-priority child must preempt it instead of resuming it.
@@ -1655,6 +1810,7 @@ int main() {
   if (testScalarConditionAndSwitchUseBlackboard() != 0) return 1;
   if (testInTreeIfThenElseConditionMatchesExecutor() != 0) return 1;
   if (testWhileDoConditionFormsMatchTerminalEffects() != 0) return 1;
+  if (testRetryBehaviorMatchesLegacyExecutor() != 0) return 1;
   if (testReactiveFallbackRechecksPriorityAfterRunning() != 0) return 1;
   if (testEmptyReactiveFallbackMatchesFailure() != 0) return 1;
   if (testEmptySwitchResolvesSelectorThenFails() != 0) return 1;
