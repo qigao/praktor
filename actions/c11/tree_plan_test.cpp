@@ -255,7 +255,7 @@ int testDynamicZeroControlsStayRuntimeNodes() {
   CHECK(plan.nodes[0].limit == 1u);
   CHECK(plan.nodes[0].dynamic_parameter_mask ==
         SALTS_BT_DYNAMIC_PARAMETER_LIMIT);
-  CHECK(plan.terminal_actions[0] == TreePlanTerminalAction::Runtime);
+  CHECK(plan.terminal_actions[0] == actions::c11::TreePlanTerminalAction::Runtime);
   return 0;
 }
 
