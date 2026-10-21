@@ -216,6 +216,58 @@ int testShellCancelTerminatesManagedProcess() {
   return 0;
 }
 
+int testZeroBudgetShellHandoffKeepsBuffersPastSessionDestruction() {
+  actions::Tree tree;
+  tree.root.id = "Shell";
+#if defined(_WIN32)
+  tree.root.params.emplace(
+      "cmd", actions::Value{std::string(
+                 "powershell.exe -NoProfile -Command Start-Sleep -Seconds 30")});
+#else
+  tree.root.params.emplace("cmd", actions::Value{std::string("sleep 30")});
+#endif
+  tree.root.params.emplace("timeout", actions::Value{30000.0});
+  tree.root.params.emplace("stream_output", actions::Value{false});
+
+  actions::Executor executor;
+  actions::Blackboard blackboard;
+  actions::ExecutionContext context;
+  ScopedProcessRetainer recovery;
+  {
+    actions::c11::TreeExecutorSession session(
+        tree, executor, blackboard, context, limits(),
+        nullptr, &recovery.owner, 0u);
+    salts_bt_node_status status = SALTS_BT_FAILURE;
+    CHECK(session.tick(&status) == SALTS_OK);
+    CHECK(status == SALTS_BT_RUNNING);
+    const auto started = std::chrono::steady_clock::now();
+    CHECK(session.cancel() == SALTS_EBUSY);
+    CHECK(std::chrono::steady_clock::now() - started <
+          std::chrono::seconds(2));
+    CHECK(session.lastError().find("active I/O leases") != std::string::npos);
+    // Session destruction performs the capacity-reserved transfer without
+    // releasing the kernel-borrowed buffer or callback state.
+  }
+  CHECK(cflow_process_retainer_destroy(&recovery.owner) == SALTS_EBUSY);
+  const auto started = std::chrono::steady_clock::now();
+  for (;;) {
+    size_t reaped = 0u, pending = 0u;
+    const int result = cflow_process_retainer_run_ready(
+        &recovery.owner, 64u, &reaped, &pending);
+    CHECK(result == SALTS_OK || result == SALTS_EBUSY);
+    CHECK(std::chrono::steady_clock::now() - started <
+          std::chrono::seconds(5));
+    if (pending == 0u) {
+      CHECK(result == SALTS_OK);
+      CHECK(reaped == 1u);
+      break;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  CHECK(cflow_process_retainer_destroy(&recovery.owner) == SALTS_OK);
+  return 0;
+}
+
 int testCancelCallsHaltForRegisteredRunningLeaf() {
   actions::Tree tree;
   tree.root.id = "Sequence";
@@ -3005,6 +3057,7 @@ int main() {
   if (testShellUsesSaltsProcessByDefaultAndAllowsExplicitOverride() != 0) return 1;
   if (testShellRejectsZeroTimeoutBeforeSpawningProcess() != 0) return 1;
   if (testShellCancelTerminatesManagedProcess() != 0) return 1;
+  if (testZeroBudgetShellHandoffKeepsBuffersPastSessionDestruction() != 0) return 1;
   if (testCancelCallsHaltForRegisteredRunningLeaf() != 0) return 1;
   if (testScalarConditionAndSwitchUseBlackboard() != 0) return 1;
   if (testInTreeIfThenElseConditionMatchesExecutor() != 0) return 1;
