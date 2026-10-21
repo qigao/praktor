@@ -170,6 +170,36 @@ TEST_CASE("opt-in C11 action backend preserves workflow context and task output"
     }
 }
 
+TEST_CASE("opt-in C11 explicitly differs on an empty Shell command") {
+    using Praktor::Execution::ActionTreeBackend;
+    using Praktor::Execution::DeclarativeTreeExecutor;
+
+    // Record an intentional semantic change instead of asserting false parity:
+    // legacy treats Shell with no cmd as a successful empty operation, while
+    // the C11 Process adapter rejects it before starting any process.
+    OrchNode shell;
+    shell.type = "Shell";
+    shell.params["stream_output"] = "false";
+    auto task = makeCoreOnlyActionTask("empty_shell", std::move(shell));
+
+    WorkflowContext legacy_context;
+    DeclarativeTreeExecutor legacy({}, ActionTreeBackend::Legacy);
+    const auto legacy_result = legacy.execute(task, legacy_context);
+    REQUIRE(legacy_result.success);
+    CHECK(legacy_result.stdout_data.empty());
+    CHECK(legacy_result.stderr_data.empty());
+
+    WorkflowContext c11_context;
+    DeclarativeTreeExecutor c11({}, ActionTreeBackend::C11);
+    const auto c11_result = c11.execute(task, c11_context);
+    CHECK_FALSE(c11_result.success);
+    CHECK(c11_result.exit_code == -1);
+    CHECK(c11_result.error_message.find("Shell requires parameter 'cmd'") !=
+          std::string::npos);
+    CHECK(c11_result.stdout_data.empty());
+    CHECK(c11_result.stderr_data.empty());
+}
+
 TEST_CASE("opt-in C11 shell result reaches TaskResult without legacy fallback") {
     using Praktor::Execution::ActionTreeBackend;
     using Praktor::Execution::DeclarativeTreeExecutor;
