@@ -1500,6 +1500,12 @@ struct TreeExecutorSession::Impl {
         return SALTS_EINVAL;
       }
       const std::string key = resolveStringValue(key_it->second, blackboard);
+      if (key.empty()) {
+        // Legacy EntryUpdated rejects an empty watch_key before its child runs.
+        // The same fail-closed rule applies to late-bound Blackboard values.
+        last_error = "EntryUpdated requires a non-empty 'watch_key'";
+        return SALTS_EINVAL;
+      }
       const std::string current = blackboard.has(key) ? blackboard.get(key) : "";
       auto& state = entry_updated_states[node];
       *changed = !state.observed || current != state.value;
