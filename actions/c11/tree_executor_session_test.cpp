@@ -28,8 +28,8 @@ salts_bt_tree_config limits() {
 
 struct ScopedProcessRetainer {
   cflow_process_retainer owner{};
-  ScopedProcessRetainer() {
-    if (cflow_process_retainer_init(&owner, 4u) != SALTS_OK)
+  explicit ScopedProcessRetainer(size_t capacity = 4u) {
+    if (cflow_process_retainer_init(&owner, capacity) != SALTS_OK)
       throw std::runtime_error("Cannot initialize test Process owner");
   }
   ~ScopedProcessRetainer() {
@@ -151,6 +151,40 @@ int testExecutorOwnedRunningLeafDoesNotReenterDeclinedHook() {
   CHECK(status == SALTS_BT_SUCCESS);
   CHECK(dispatcher_calls == 1);
   CHECK(executor_calls == 2);
+  return 0;
+}
+
+int testShellRejectsSaturatedRecoveryOwnerBeforeProcessStart() {
+  actions::Tree tree;
+  tree.root.id = "Shell";
+  tree.root.params.emplace("cmd", actions::Value{std::string("echo must-not-run")});
+  tree.root.params.emplace("stream_output", actions::Value{false});
+  actions::Executor executor;
+  int legacy_calls = 0;
+  executor.registerTask("Shell",
+      [&legacy_calls](const auto&, actions::Blackboard&) {
+        ++legacy_calls;
+        return actions::NodeStatus::SUCCESS;
+      });
+  ScopedProcessRetainer owner(1u);
+  cflow_process_retainer_token occupied{};
+  CHECK(cflow_process_retainer_reserve(&owner.owner, &occupied) == SALTS_OK);
+  actions::Blackboard blackboard;
+  actions::ExecutionContext context;
+  {
+    actions::c11::TreeExecutorSession session(
+        tree, executor, blackboard, context, limits(),
+        nullptr, &owner.owner);
+    salts_bt_node_status status = SALTS_BT_SUCCESS;
+    CHECK(session.tick(&status) == SALTS_OK);
+    CHECK(status == SALTS_BT_FAILURE);
+    CHECK(session.lastError().find("recovery capacity unavailable") !=
+          std::string::npos);
+    CHECK(!blackboard.has("shell_output") || blackboard.get("shell_output").empty());
+    CHECK(legacy_calls == 0);
+  }
+  CHECK(cflow_process_retainer_release(&owner.owner, occupied) == SALTS_OK);
+  CHECK(cflow_process_retainer_destroy(&owner.owner) == SALTS_OK);
   return 0;
 }
 
@@ -3056,6 +3090,7 @@ int main() {
   if (testExecutorOwnedRunningLeafDoesNotReenterDeclinedHook() != 0) return 1;
   if (testShellUsesSaltsProcessByDefaultAndAllowsExplicitOverride() != 0) return 1;
   if (testShellRejectsZeroTimeoutBeforeSpawningProcess() != 0) return 1;
+  if (testShellRejectsSaturatedRecoveryOwnerBeforeProcessStart() != 0) return 1;
   if (testShellCancelTerminatesManagedProcess() != 0) return 1;
   if (testZeroBudgetShellHandoffKeepsBuffersPastSessionDestruction() != 0) return 1;
   if (testCancelCallsHaltForRegisteredRunningLeaf() != 0) return 1;
