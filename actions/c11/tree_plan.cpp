@@ -1,5 +1,6 @@
 #include "tree_plan.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <limits>
