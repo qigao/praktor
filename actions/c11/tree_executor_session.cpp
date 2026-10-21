@@ -629,6 +629,12 @@ struct TreeExecutorSession::Impl : std::enable_shared_from_this<Impl> {
     // Never erase the callback owner while the C process still owns leases or
     // teardown has failed. The shell session remains reachable for retry.
     if (state.process.impl != nullptr) return;
+    if (state.has_reservation && recovery_owner != nullptr) {
+      (void)cflow_process_retainer_release(recovery_owner, state.reservation);
+      state.has_reservation = false;
+    }
+    delete state.retained_owner;
+    state.retained_owner = nullptr;
     Impl* owner = state.owner;
     const size_t node_index = state.node_index;
     state = ShellState{};
