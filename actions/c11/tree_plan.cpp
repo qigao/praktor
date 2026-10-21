@@ -352,7 +352,8 @@ void appendNode(TreePlan &plan, const Node &node, size_t parent_index,
     const bool dynamic_attempts =
         isRuntimeSubstitutedParam(node, "num_attempts");
     const int64_t attempts = dynamic_attempts
-        ? 3
+        ? static_cast<int64_t>(
+              (std::min)(static_cast<size_t>(3), limits.max_control_iterations))
         : readIntegerParam(node, blackboard, "num_attempts", 3);
     if (attempts < 0 ||
         static_cast<uint64_t>(attempts) > limits.max_control_iterations) {
