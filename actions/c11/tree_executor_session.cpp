@@ -661,11 +661,20 @@ struct TreeExecutorSession::Impl : std::enable_shared_from_this<Impl> {
     int result = SALTS_OK;
     if (state.process.impl != nullptr) {
       state.close_requested = true;
+      // Close first, even when the host chooses zero synchronous drain steps:
+      // the explicit retainer must only receive a closed-admission Process.
+      const int close_status = cflow_process_close(&state.process);
+      if (close_status != SALTS_OK && close_status != SALTS_EBUSY) {
+        state.io_failed = true;
+        if (state.failure_reason.empty())
+          state.failure_reason = "Salts::Process close failed with status " +
+                                 std::to_string(close_status);
+      }
       // Each shutdown_step is non-destructive and drives at most 64 actor
       // transitions. A persistent native/ack error cannot strand cancel()
       // or the Session destructor in an unbounded synchronous loop.
       const auto deadline = std::chrono::steady_clock::now() +
-                            std::chrono::seconds(3);
+                            std::chrono::milliseconds(shell_close_budget_ms);
       bool quiescent = false;
       for (size_t attempt = 0u; attempt < 4096u &&
            std::chrono::steady_clock::now() < deadline; ++attempt) {
