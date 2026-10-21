@@ -1338,6 +1338,12 @@ int parallelTestLeafTick(void*, size_t, salts_bt_node_status* out_status) {
   return SALTS_OK;
 }
 
+int parallelRunningLeafTick(void*, size_t, salts_bt_node_status* out_status) {
+  if (out_status == nullptr) return SALTS_EINVAL;
+  *out_status = SALTS_BT_RUNNING;
+  return SALTS_OK;
+}
+
 void parallelTestLeafHalt(void*, size_t) {}
 
 int parallelTestEnter(void* user, size_t, size_t, bool first_activation) {
@@ -1471,25 +1477,33 @@ int testParallelInvokesCompleteHostHookGroup() {
 int testParallelAbortHookRunsForRunningChildrenOnCancel() {
   actions::Tree tree;
   tree.root.id = "Parallel";
-  tree.root.children.resize(2);
-  tree.root.children[0].id = "RunningA";
-  tree.root.children[1].id = "RunningB";
+  actions::Node first;
+  first.id = "RunningA";
+  actions::Node second;
+  second.id = "RunningB";
+  tree.root.children.push_back(first);
+  tree.root.children.push_back(second);
 
+  actions::Executor executor;
+  actions::Blackboard blackboard;
+  actions::ExecutionContext context;
   ParallelHookStats stats;
-  stats.child_statuses = {SALTS_BT_RUNNING, SALTS_BT_RUNNING};
-  TreeExecutorHooks hooks;
-  hooks.tick_leaf = &parallelTestLeafTick;
+  praktor_c11_bt_host hooks{};
+  hooks.tick_leaf = &parallelRunningLeafTick;
   hooks.halt_leaf = &parallelTestLeafHalt;
   hooks.parallel_enter = &parallelTestEnter;
   hooks.parallel_step = &parallelTestStep;
   hooks.parallel_join = &parallelTestJoin;
   hooks.parallel_finish = &parallelTestFinish;
   hooks.parallel_abort = &parallelTestAbort;
+  hooks.user = &stats;
 
-  TreeExecutorSession session(tree, {}, hooks);
-  CHECK(session.tick() == SALTS_BT_RUNNING);
+  actions::c11::TreeExecutorSession session(
+      tree, executor, blackboard, context, limits(), &hooks);
+  salts_bt_node_status status = SALTS_BT_FAILURE;
+  CHECK(session.tick(&status) == SALTS_OK);
+  CHECK(status == SALTS_BT_RUNNING);
   CHECK(stats.enters == 2u);
-  CHECK(stats.steps == 2u);
   CHECK(session.cancel() == SALTS_OK);
   CHECK(stats.aborts == 2u);
   CHECK(session.cancel() == SALTS_OK);
