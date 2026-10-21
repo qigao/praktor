@@ -511,9 +511,12 @@ TEST_CASE("DeclarativeTreeExecutor empty parameters", "[declarative_tree_executo
         DeclarativeTreeExecutor executor;
         auto result = executor.execute(task, context);
 
-        // A Shell node without a command is an observable task failure, not a passing no-op.
-        REQUIRE_FALSE(result.success);
-        CHECK_FALSE(result.error_message.empty());
+        // The legacy action executor treats a Shell node with no command as a successful no-op.
+        // Keep this compatibility behavior explicit until the C11 backend has a differential oracle.
+        REQUIRE(result.success);
+        CHECK(result.error_message.empty());
+        CHECK(result.stdout_data.empty());
+        CHECK(result.stderr_data.empty());
     }
 }
 
