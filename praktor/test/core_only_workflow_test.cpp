@@ -7,6 +7,7 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <string>
 #include <thread>
 
@@ -205,6 +206,75 @@ TEST_CASE("WorkflowRunner selects C11 only with a live single-driver Process hos
     CHECK(cflow_process_retainer_run_ready(
         &recovery.owner, 64u, &reaped, &pending) == SALTS_OK);
     CHECK(pending == 0u);
+    std::filesystem::remove_all(dir);
+}
+
+TEST_CASE("WorkflowRunner cancellation retains active Shell leases after workflow return") {
+    const auto dir = createCoreOnlyTempDir();
+    const auto workflow = dir / "cancel-hosted-shell.yml";
+    const auto started = dir / "child-admitted.txt";
+#ifdef _WIN32
+    const std::string command =
+        "echo admitted > \"" + started.string() +
+        "\" & powershell.exe -NoProfile -NonInteractive -Command Start-Sleep -Seconds 30";
+#else
+    const std::string command =
+        "printf admitted > '" + started.string() + "'; exec sleep 30";
+#endif
+    writeText(workflow,
+        "tasks:\n"
+        "  - name: hosted_cancel\n"
+        "    timeout: 15000\n"
+        "    sequence:\n"
+        "      - shell:\n"
+        "          cmd: |-\n"
+        "            " + command + "\n"
+        "          stream_output: false\n"
+        "          timeout: 30000\n");
+    WorkflowRunner runner(workflow.string());
+    ScopedWorkflowProcessOwner recovery;
+    auto control = std::make_shared<Praktor::Execution::ExecutionControl>();
+    std::atomic<bool> observed_start{false};
+    std::jthread canceller([&] {
+        const auto deadline = std::chrono::steady_clock::now() +
+                              std::chrono::seconds(8);
+        while (std::chrono::steady_clock::now() < deadline) {
+            if (std::filesystem::exists(started)) {
+                observed_start.store(true, std::memory_order_relaxed);
+                break;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        control->requestCancel();
+    });
+    const auto began = std::chrono::steady_clock::now();
+    const auto result = runner.executeWithC11ProcessOwner(&recovery.owner, control);
+    canceller.join();
+    CHECK(observed_start.load(std::memory_order_relaxed));
+    CHECK_FALSE(result.success);
+    CHECK(std::chrono::steady_clock::now() - began <
+          std::chrono::seconds(12));
+
+    // This is after WorkflowRunner's DAG, its forked context, local Executor
+    // and action Session have exited. The retainer alone owns callbacks now.
+    size_t total_reaped = 0u;
+    size_t pending = 0u;
+    const auto deadline = std::chrono::steady_clock::now() +
+                          std::chrono::seconds(8);
+    for (;;) {
+        size_t reaped = 0u;
+        const int status = cflow_process_retainer_run_ready(
+            &recovery.owner, 64u, &reaped, &pending);
+        total_reaped += reaped;
+        CHECK(status == SALTS_OK || status == SALTS_EBUSY);
+        if (pending == 0u) {
+            CHECK(status == SALTS_OK);
+            break;
+        }
+        CHECK(std::chrono::steady_clock::now() < deadline);
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    CHECK(cflow_process_retainer_destroy(&recovery.owner) == SALTS_OK);
     std::filesystem::remove_all(dir);
 }
 
