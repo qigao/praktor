@@ -19,6 +19,14 @@ const Value *findParam(const Node &node, const char *key) {
   return it == node.params.end() ? nullptr : &it->second;
 }
 
+bool isRuntimeSubstitutedParam(const Node &node, const char *key) {
+  const Value *value = findParam(node, key);
+  if (value == nullptr || !std::holds_alternative<std::string>(*value))
+    return false;
+  const std::string &raw = std::get<std::string>(*value);
+  return raw.size() >= 2u && raw.front() == '{' && raw.back() == '}';
+}
+
 std::string valueToText(const Value &value, const Blackboard &blackboard,
                         const std::string &owner, const char *key,
                         bool bare_string_may_name_key = false) {
@@ -264,6 +272,8 @@ void appendNode(TreePlan &plan, const Node &node, size_t parent_index,
       throw std::invalid_argument(
           "WhileDo must have exactly 1 child with a scalar condition, or 2 children with an in-tree condition");
     }
+    const bool dynamic_iterations =
+        isRuntimeSubstitutedParam(node, "max_iterations");
     const int64_t iterations =
         readIntegerParam(node, blackboard, "max_iterations", 100);
     if (iterations < 0 ||
@@ -271,18 +281,21 @@ void appendNode(TreePlan &plan, const Node &node, size_t parent_index,
       throw std::invalid_argument(
           "WhileDo max_iterations must be non-negative and within the tree limit");
     }
-    if (iterations == 0) {
+    if (dynamic_iterations)
+      desc.dynamic_parameter_mask |= SALTS_BT_DYNAMIC_PARAMETER_LIMIT;
+    if (iterations == 0 && !dynamic_iterations) {
       /*
        * Salts rejects a zero-limit WhileDo constructor, but the legacy
        * Executor validates child arity and then returns SUCCESS without
-       * evaluating condition or body. Lower that no-op into a synthetic leaf.
+       * evaluating condition or body. Lower that static no-op into a synthetic leaf.
        */
       desc.kind = SALTS_BT_NODE_LEAF;
       skip_children = true;
       terminal_action = TreePlanTerminalAction::Success;
     } else {
       desc.condition_callback = scalar_condition;
-      desc.limit = static_cast<size_t>(iterations);
+      /* Dynamic zero is applied on the first tick, after tree construction. */
+      desc.limit = static_cast<size_t>(iterations > 0 ? iterations : 1);
     }
     break;
   }
@@ -328,6 +341,8 @@ void appendNode(TreePlan &plan, const Node &node, size_t parent_index,
     }
     break;
   case SALTS_BT_NODE_RETRY: {
+    const bool dynamic_attempts =
+        isRuntimeSubstitutedParam(node, "num_attempts");
     const int64_t attempts =
         readIntegerParam(node, blackboard, "num_attempts", 3);
     if (attempts < 0 ||
@@ -335,23 +350,29 @@ void appendNode(TreePlan &plan, const Node &node, size_t parent_index,
       throw std::invalid_argument(
           "Retry num_attempts must be non-negative and within the tree limit");
     }
-    if (attempts == 0) {
-      /* No attempts means FAILURE; validate child arity before lowering. */
+    if (dynamic_attempts)
+      desc.dynamic_parameter_mask |= SALTS_BT_DYNAMIC_PARAMETER_LIMIT;
+    if (attempts == 0 && !dynamic_attempts) {
+      /* Static zero attempts means FAILURE; validate child arity before lowering. */
       desc.kind = SALTS_BT_NODE_LEAF;
       skip_children = true;
       terminal_action = TreePlanTerminalAction::Failure;
     } else {
-      desc.limit = static_cast<size_t>(attempts);
+      desc.limit = static_cast<size_t>(attempts > 0 ? attempts : 1);
     }
     break;
   }
   case SALTS_BT_NODE_REPEAT: {
+    const bool dynamic_count =
+        isRuntimeSubstitutedParam(node, "num_cycles");
     const int64_t count =
         readIntegerParam(node, blackboard, "num_cycles", 0, true);
     if (count < 0 ||
         static_cast<uint64_t>(count) > limits.max_control_iterations) {
       throw std::invalid_argument("Repeat num_cycles must be non-negative and within the tree limit");
     }
+    if (dynamic_count)
+      desc.dynamic_parameter_mask |= SALTS_BT_DYNAMIC_PARAMETER_LIMIT;
     desc.limit = static_cast<size_t>(count);
     break;
   }
@@ -360,28 +381,36 @@ void appendNode(TreePlan &plan, const Node &node, size_t parent_index,
       throw std::invalid_argument(
           "KeepRunningUntilFailure must have exactly 1 child");
     }
+    const bool dynamic_count =
+        isRuntimeSubstitutedParam(node, "max_iterations");
     const int64_t count =
         readIntegerParam(node, blackboard, "max_iterations", 1000);
     if (count < 0 ||
         static_cast<uint64_t>(count) > limits.max_control_iterations) {
       throw std::invalid_argument("KeepRunningUntilFailure max_iterations must be non-negative and within the tree limit");
     }
-    if (count == 0) {
-      /* The legacy executor validates one child, runs zero iterations and returns FAILURE. */
+    if (dynamic_count)
+      desc.dynamic_parameter_mask |= SALTS_BT_DYNAMIC_PARAMETER_LIMIT;
+    if (count == 0 && !dynamic_count) {
+      /* Static zero validates one child, executes zero iterations, then fails. */
       desc.kind = SALTS_BT_NODE_LEAF;
       skip_children = true;
       terminal_action = TreePlanTerminalAction::Failure;
     } else {
-      desc.limit = static_cast<size_t>(count);
+      desc.limit = static_cast<size_t>(count > 0 ? count : 1);
     }
     break;
   }
   case SALTS_BT_NODE_TIMEOUT:
+    if (isRuntimeSubstitutedParam(node, "timeout_ms"))
+      desc.dynamic_parameter_mask |= SALTS_BT_DYNAMIC_PARAMETER_DURATION_NS;
     desc.duration_ns = millisecondsToNanoseconds(
         readIntegerParam(node, blackboard, "timeout_ms", 1000),
         node, "timeout_ms");
     break;
   case SALTS_BT_NODE_DELAY:
+    if (isRuntimeSubstitutedParam(node, "delay_ms"))
+      desc.dynamic_parameter_mask |= SALTS_BT_DYNAMIC_PARAMETER_DURATION_NS;
     desc.duration_ns = millisecondsToNanoseconds(
         readIntegerParam(node, blackboard, "delay_ms", 100),
         node, "delay_ms");
@@ -411,6 +440,20 @@ void appendNode(TreePlan &plan, const Node &node, size_t parent_index,
 }
 
 } // namespace
+
+int64_t resolveIntegerParameter(const actions::Node &node,
+                                const actions::Blackboard &blackboard,
+                                const char *key, int64_t default_value,
+                                bool required) {
+  return readIntegerParam(node, blackboard, key, default_value, required);
+}
+
+uint64_t resolveDurationParameter(const actions::Node &node,
+                                  const actions::Blackboard &blackboard,
+                                  const char *key, int64_t default_ms) {
+  return millisecondsToNanoseconds(
+      readIntegerParam(node, blackboard, key, default_ms), node, key);
+}
 
 TreePlan compileTreePlan(const actions::Tree &tree,
                          const actions::Blackboard &blackboard,
