@@ -21,14 +21,14 @@ TEST_CASE("DeclarativeTreeExecutor Mustache preprocessing", "[declarative_tree_e
     context.setValue("PROJECT_NAME", "MyApp");
     context.setValue("BUILD_TYPE", "Release");
 
-    SECTION("Simple Mustache template in shell command") {
-        // Create a simple orchestration tree
-        OrchNode shell_node;
-        shell_node.type = "Shell";
-        shell_node.params["cmd"] = "cmake --build {{ BUILD_DIR }}";
+    SECTION("Simple Mustache template is expanded into an observable output") {
+        OrchNode set_node;
+        set_node.type = "SetVariable";
+        set_node.params["key"] = "build_dir";
+        set_node.params["value"] = "{{ BUILD_DIR }}";
 
         OrchParams params;
-        params.root = shell_node;
+        params.root = set_node;
 
         Task task;
         task.name = "test_mustache";
@@ -36,23 +36,22 @@ TEST_CASE("DeclarativeTreeExecutor Mustache preprocessing", "[declarative_tree_e
         task.specifics = params;
 
         DeclarativeTreeExecutor executor;
-
-        // Note: This will actually execute the command, so we just test that it doesn't crash
-        // In a real test environment, we'd mock the shell execution
         auto result = executor.execute(task, context);
 
-        // The command will likely fail (no cmake project), but preprocessing should work
-        // We're mainly testing that Mustache templates are expanded without errors
-        REQUIRE(true); // If we get here, preprocessing didn't crash
+        REQUIRE(result.success);
+        auto value = context.getValueByPath("tasks.test_mustache.outputs.build_dir");
+        REQUIRE(value.is_string());
+        CHECK(value.as<std::string>() == "build");
     }
 
-    SECTION("Multiple Mustache templates") {
-        OrchNode shell_node;
-        shell_node.type = "Shell";
-        shell_node.params["cmd"] = "echo {{ PROJECT_NAME }} {{ BUILD_TYPE }}";
+    SECTION("Multiple Mustache templates preserve both resolved values") {
+        OrchNode set_node;
+        set_node.type = "SetVariable";
+        set_node.params["key"] = "description";
+        set_node.params["value"] = "{{ PROJECT_NAME }}-{{ BUILD_TYPE }}";
 
         OrchParams params;
-        params.root = shell_node;
+        params.root = set_node;
 
         Task task;
         task.name = "test_multiple_mustache";
@@ -62,7 +61,10 @@ TEST_CASE("DeclarativeTreeExecutor Mustache preprocessing", "[declarative_tree_e
         DeclarativeTreeExecutor executor;
         auto result = executor.execute(task, context);
 
-        REQUIRE(true); // Preprocessing should handle multiple templates
+        REQUIRE(result.success);
+        auto value = context.getValueByPath("tasks.test_multiple_mustache.outputs.description");
+        REQUIRE(value.is_string());
+        CHECK(value.as<std::string>() == "MyApp-Release");
     }
 
     SECTION("Nested nodes with Mustache templates") {
