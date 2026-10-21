@@ -683,6 +683,110 @@ int testWhileDoConditionFormsMatchTerminalEffects() {
   return 0;
 }
 
+struct DynamicTimeoutState {
+  int leaf_calls = 0;
+  int halt_calls = 0;
+};
+
+void countTimeoutHalt(void* user, size_t) {
+  auto* state = static_cast<DynamicTimeoutState*>(user);
+  ++state->halt_calls;
+}
+
+int testRetryParameterIsReReadOnEachTick() {
+  actions::Tree tree;
+  tree.root.id = "Retry";
+  tree.root.params.emplace("num_attempts",
+                           actions::Value{std::string("{attempts}")});
+  actions::Node child;
+  child.id = "DynamicAttempt";
+  tree.root.children.push_back(child);
+
+  actions::Executor legacy;
+  int legacy_calls = 0;
+  legacy.registerTask("DynamicAttempt", [&legacy_calls](const auto&,
+                                                         actions::Blackboard&) {
+    ++legacy_calls;
+    return legacy_calls == 1 ? actions::NodeStatus::RUNNING
+                             : actions::NodeStatus::FAILURE;
+  });
+  actions::Blackboard legacy_blackboard;
+  legacy_blackboard.set("attempts", "2");
+  actions::ExecutionContext legacy_context;
+  CHECK(legacy.execute(tree.root, legacy_blackboard, legacy_context) ==
+        actions::NodeStatus::RUNNING);
+  legacy_blackboard.set("attempts", "1");
+  CHECK(legacy.execute(tree.root, legacy_blackboard, legacy_context) ==
+        actions::NodeStatus::FAILURE);
+  CHECK(legacy_calls == 2);
+
+  actions::Executor c11;
+  int c11_calls = 0;
+  c11.registerTask("DynamicAttempt", [&c11_calls](const auto&,
+                                                  actions::Blackboard&) {
+    ++c11_calls;
+    return c11_calls == 1 ? actions::NodeStatus::RUNNING
+                          : actions::NodeStatus::FAILURE;
+  });
+  actions::Blackboard c11_blackboard;
+  c11_blackboard.set("attempts", "2");
+  actions::ExecutionContext c11_context;
+  praktor_c11_bt_host hooks{};
+  hooks.halt_leaf = &noOpHalt;
+  actions::c11::TreeExecutorSession session(tree, c11, c11_blackboard,
+                                            c11_context, limits(), &hooks);
+  salts_bt_node_status status = SALTS_BT_FAILURE;
+  CHECK(session.tick(&status) == SALTS_OK);
+  CHECK(status == SALTS_BT_RUNNING);
+  CHECK(c11_calls == 1);
+  c11_blackboard.set("attempts", "1");
+  CHECK(session.tick(&status) == SALTS_OK);
+  CHECK(status == SALTS_BT_FAILURE);
+  CHECK(c11_calls == 2);
+  CHECK(session.plan().nodes[0].dynamic_parameter_mask ==
+        SALTS_BT_DYNAMIC_PARAMETER_LIMIT);
+  return 0;
+}
+
+int testTimeoutDurationIsReReadAndHaltsBeforeAnotherLeafTick() {
+  actions::Tree tree;
+  tree.root.id = "Timeout";
+  tree.root.params.emplace("timeout_ms",
+                           actions::Value{std::string("{timeout}")});
+  actions::Node child;
+  child.id = "ManagedRunning";
+  tree.root.children.push_back(child);
+
+  actions::Executor executor;
+  DynamicTimeoutState state;
+  executor.registerTask("ManagedRunning", [&state](const auto&,
+                                                   actions::Blackboard&) {
+    ++state.leaf_calls;
+    return actions::NodeStatus::RUNNING;
+  });
+  actions::Blackboard blackboard;
+  blackboard.set("timeout", "2147483647");
+  actions::ExecutionContext context;
+  praktor_c11_bt_host hooks{};
+  hooks.halt_leaf = &countTimeoutHalt;
+  hooks.user = &state;
+  actions::c11::TreeExecutorSession session(tree, executor, blackboard,
+                                            context, limits(), &hooks);
+  salts_bt_node_status status = SALTS_BT_FAILURE;
+  CHECK(session.tick(&status) == SALTS_OK);
+  CHECK(status == SALTS_BT_RUNNING);
+  CHECK(state.leaf_calls == 1);
+  CHECK(state.halt_calls == 0);
+  blackboard.set("timeout", "0");
+  CHECK(session.tick(&status) == SALTS_OK);
+  CHECK(status == SALTS_BT_FAILURE);
+  CHECK(state.leaf_calls == 1);
+  CHECK(state.halt_calls == 1);
+  CHECK(session.plan().nodes[0].dynamic_parameter_mask ==
+        SALTS_BT_DYNAMIC_PARAMETER_DURATION_NS);
+  return 0;
+}
+
 int testRetryAndPersistentRunOnceMatchesLegacyExecutor() {
   const auto makeRetryTree = [](double attempts, const char* child_id) {
     actions::Tree tree;
@@ -2035,6 +2139,8 @@ int main() {
   if (testScalarConditionAndSwitchUseBlackboard() != 0) return 1;
   if (testInTreeIfThenElseConditionMatchesExecutor() != 0) return 1;
   if (testWhileDoConditionFormsMatchTerminalEffects() != 0) return 1;
+  if (testRetryParameterIsReReadOnEachTick() != 0) return 1;
+  if (testTimeoutDurationIsReReadAndHaltsBeforeAnotherLeafTick() != 0) return 1;
   if (testRetryAndPersistentRunOnceMatchesLegacyExecutor() != 0) return 1;
   if (testReactiveFallbackRechecksPriorityAfterRunning() != 0) return 1;
   if (testEmptyReactiveFallbackMatchesFailure() != 0) return 1;
