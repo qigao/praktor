@@ -1603,7 +1603,7 @@ int testParallelRejectsUnclaimedLeafBeforeSharedStateMutation() {
 int testParallelRejectsUnscopedControlCallbacks() {
   // Host-managed Parallel branches cannot resolve control values from the
   // session's root Blackboard. Test condition, queue, and dynamic limit paths.
-  for (int kind = 0; kind < 3; ++kind) {
+  for (int kind = 0; kind < 4; ++kind) {
     actions::Tree tree;
     tree.root.id = "Parallel";
     actions::Node controlled;
@@ -1613,14 +1613,19 @@ int testParallelRejectsUnscopedControlCallbacks() {
                                 actions::Value{std::string("{branch_condition}")});
     } else if (kind == 1) {
       controlled.id = "ConsumeQueue";
-    } else {
+    } else if (kind == 2) {
       controlled.id = "Retry";
       controlled.params.emplace("num_attempts",
                                 actions::Value{std::string("{branch_attempts}")});
+    } else {
+      // Empty Switch is lowered into a synthetic leaf, not select_child.
+      controlled.id = "Switch";
+      controlled.params.emplace("variable",
+                                actions::Value{std::string("{branch_selector}")});
     }
     actions::Node child;
     child.id = "ScopedLeaf";
-    controlled.children.push_back(child);
+    if (kind != 3) controlled.children.push_back(child);
     tree.root.children.push_back(controlled);
     actions::Node sibling;
     sibling.id = "ScopedLeaf";
@@ -1631,6 +1636,7 @@ int testParallelRejectsUnscopedControlCallbacks() {
     blackboard.set("branch_condition", "true");
     blackboard.set("task_queue", "[\"one\"]");
     blackboard.set("branch_attempts", "2");
+    blackboard.set("branch_selector", "0");
     actions::ExecutionContext context;
     ParallelHookStats stats;
     praktor_c11_bt_host hooks{};
@@ -1649,7 +1655,8 @@ int testParallelRejectsUnscopedControlCallbacks() {
     CHECK(session.tick(&status) != SALTS_OK);
     const char* expected = kind == 0 ? "Parallel condition requires"
         : kind == 1 ? "Parallel ConsumeQueue requires"
-                    : "Parallel dynamic parameters require";
+        : kind == 2 ? "Parallel dynamic parameters require"
+                    : "Parallel empty Switch requires";
     CHECK(session.lastError().find(expected) != std::string::npos);
     CHECK(blackboard.get("task_queue") == "[\"one\"]");
     CHECK(blackboard.get("branch_attempts") == "2");
