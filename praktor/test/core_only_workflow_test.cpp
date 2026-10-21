@@ -235,7 +235,7 @@ TEST_CASE("WorkflowRunner cancellation retains active Shell leases after workflo
     ScopedWorkflowProcessOwner recovery;
     auto control = std::make_shared<Praktor::Execution::ExecutionControl>();
     std::atomic<bool> observed_start{false};
-    std::jthread canceller([&] {
+    std::thread canceller([&] {
         const auto deadline = std::chrono::steady_clock::now() +
                               std::chrono::seconds(8);
         while (std::chrono::steady_clock::now() < deadline) {
@@ -247,6 +247,10 @@ TEST_CASE("WorkflowRunner cancellation retains active Shell leases after workflo
         }
         control->requestCancel();
     });
+    struct ThreadJoinGuard {
+        std::thread& worker;
+        ~ThreadJoinGuard() { if (worker.joinable()) worker.join(); }
+    } join_guard{canceller};
     const auto began = std::chrono::steady_clock::now();
     const auto result = runner.executeWithC11ProcessOwner(&recovery.owner, control);
     canceller.join();
