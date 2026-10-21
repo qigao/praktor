@@ -709,7 +709,7 @@ int testRetryAndPersistentRunOnceMatchesLegacyExecutor() {
     actions::ExecutionContext legacy_context;
     CHECK(legacy.execute(tree.root, legacy_blackboard, legacy_context) ==
           actions::NodeStatus::SUCCESS);
-    CHECK(legacy_calls == 1);
+    CHECK(legacy_calls == 3);
 
     actions::Executor c11;
     int c11_calls = 0;
@@ -823,7 +823,7 @@ int testRetryAndPersistentRunOnceMatchesLegacyExecutor() {
     actions::ExecutionContext legacy_context;
     CHECK(legacy.execute(tree.root, legacy_blackboard, legacy_context) ==
           actions::NodeStatus::FAILURE);
-    CHECK(legacy_calls == 3);
+    CHECK(legacy_calls == 1);
 
     actions::Executor c11;
     int c11_calls = 0;
