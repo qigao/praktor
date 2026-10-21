@@ -32,9 +32,9 @@ typedef struct praktor_c11_bt_node_desc {
   salts_bt_node_kind kind;
   size_t limit;
   uint64_t duration_ns;
-  uint32_t dynamic_parameter_mask;
   bool condition_callback;
   bool parallel_hooks;
+  uint32_t dynamic_parameter_mask;
 } praktor_c11_bt_node_desc;
 
 /*
@@ -57,9 +57,6 @@ typedef struct praktor_c11_bt_host {
   int (*select_child)(void *user, size_t node_index,
                       size_t *out_child_index);
 
-  /* Resolve Blackboard-backed decorator values on each node tick. */
-  int (*resolve_dynamic_parameters)(void *user, size_t node_index,
-                                    salts_bt_node_parameters *out_params);
 
   /* All five are required together when a node enables parallel_hooks.
    * parallel_abort must synchronously clean up branch-local resources when
@@ -86,6 +83,10 @@ typedef struct praktor_c11_bt_host {
   void (*queue_abort)(void *user, size_t node_index);
 
   void *user;
+
+  /* Resolve Blackboard-backed decorator values on each node tick. */
+  int (*resolve_dynamic_parameters)(void *user, size_t node_index,
+                                    salts_bt_node_parameters *out_params);
 } praktor_c11_bt_host;
 
 /*
