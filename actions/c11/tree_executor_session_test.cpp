@@ -1003,6 +1003,150 @@ int testEmptySwitchResolvesSelectorThenFails() {
   return 0;
 }
 
+struct ParallelHookStats {
+  size_t enters = 0u;
+  size_t first_activations = 0u;
+  size_t steps = 0u;
+  size_t joins = 0u;
+  size_t finishes = 0u;
+  size_t aborts = 0u;
+};
+
+int parallelTestLeafTick(void*, size_t, salts_bt_node_status* out_status) {
+  if (out_status == nullptr) return SALTS_EINVAL;
+  *out_status = SALTS_BT_SUCCESS;
+  return SALTS_OK;
+}
+
+void parallelTestLeafHalt(void*, size_t) {}
+
+int parallelTestEnter(void* user, size_t, size_t, bool first_activation) {
+  auto* stats = static_cast<ParallelHookStats*>(user);
+  if (stats == nullptr) return SALTS_EINVAL;
+  ++stats->enters;
+  if (first_activation) ++stats->first_activations;
+  return SALTS_OK;
+}
+
+int parallelTestStep(void* user, size_t, size_t,
+                     salts_bt_node_status status) {
+  auto* stats = static_cast<ParallelHookStats*>(user);
+  if (stats == nullptr || status != SALTS_BT_SUCCESS) return SALTS_EINVAL;
+  ++stats->steps;
+  return SALTS_OK;
+}
+
+int parallelTestJoin(void* user, size_t, salts_bt_node_status status) {
+  auto* stats = static_cast<ParallelHookStats*>(user);
+  if (stats == nullptr || status != SALTS_BT_SUCCESS) return SALTS_EINVAL;
+  ++stats->joins;
+  return SALTS_OK;
+}
+
+int parallelTestFinish(void* user, size_t, size_t,
+                       salts_bt_node_status status) {
+  auto* stats = static_cast<ParallelHookStats*>(user);
+  if (stats == nullptr || status != SALTS_BT_SUCCESS) return SALTS_EINVAL;
+  ++stats->finishes;
+  return SALTS_OK;
+}
+
+void parallelTestAbort(void* user, size_t, size_t) {
+  auto* stats = static_cast<ParallelHookStats*>(user);
+  if (stats != nullptr) ++stats->aborts;
+}
+
+int testNonEmptyParallelFailsClosedWithoutFullHookGroup() {
+  actions::Tree tree;
+  tree.root.id = "Parallel";
+  actions::Node first;
+  first.id = "First";
+  actions::Node second;
+  second.id = "Second";
+  tree.root.children.push_back(first);
+  tree.root.children.push_back(second);
+
+  {
+    actions::Executor executor;
+    actions::Blackboard blackboard;
+    actions::ExecutionContext context;
+    bool rejected = false;
+    std::string message;
+    try {
+      actions::c11::TreeExecutorSession session(
+          tree, executor, blackboard, context, limits());
+    } catch (const std::invalid_argument& error) {
+      rejected = true;
+      message = error.what();
+    }
+    CHECK(rejected);
+    CHECK(message.find("C11 Parallel requires enter/step/join/finish/abort hooks") !=
+          std::string::npos);
+  }
+
+  {
+    actions::Executor executor;
+    actions::Blackboard blackboard;
+    actions::ExecutionContext context;
+    ParallelHookStats stats;
+    praktor_c11_bt_host hooks{};
+    hooks.user = &stats;
+    hooks.parallel_enter = &parallelTestEnter;
+    bool rejected = false;
+    std::string message;
+    try {
+      actions::c11::TreeExecutorSession session(
+          tree, executor, blackboard, context, limits(), &hooks);
+    } catch (const std::invalid_argument& error) {
+      rejected = true;
+      message = error.what();
+    }
+    CHECK(rejected);
+    CHECK(message.find("C11 Parallel requires enter/step/join/finish/abort hooks") !=
+          std::string::npos);
+    CHECK(stats.enters == 0u);
+  }
+  return 0;
+}
+
+int testParallelInvokesCompleteHostHookGroup() {
+  actions::Tree tree;
+  tree.root.id = "Parallel";
+  actions::Node first;
+  first.id = "First";
+  actions::Node second;
+  second.id = "Second";
+  tree.root.children.push_back(first);
+  tree.root.children.push_back(second);
+
+  actions::Executor executor;
+  actions::Blackboard blackboard;
+  actions::ExecutionContext context;
+  ParallelHookStats stats;
+  praktor_c11_bt_host hooks{};
+  hooks.tick_leaf = &parallelTestLeafTick;
+  hooks.halt_leaf = &parallelTestLeafHalt;
+  hooks.parallel_enter = &parallelTestEnter;
+  hooks.parallel_step = &parallelTestStep;
+  hooks.parallel_join = &parallelTestJoin;
+  hooks.parallel_finish = &parallelTestFinish;
+  hooks.parallel_abort = &parallelTestAbort;
+  hooks.user = &stats;
+
+  actions::c11::TreeExecutorSession session(
+      tree, executor, blackboard, context, limits(), &hooks);
+  salts_bt_node_status status = SALTS_BT_FAILURE;
+  CHECK(session.tick(&status) == SALTS_OK);
+  CHECK(status == SALTS_BT_SUCCESS);
+  CHECK(stats.enters == 2u);
+  CHECK(stats.first_activations == 2u);
+  CHECK(stats.steps == 2u);
+  CHECK(stats.joins == 1u);
+  CHECK(stats.finishes == 2u);
+  CHECK(stats.aborts == 0u);
+  return 0;
+}
+
 int testEmptyParallelAndReactiveSequenceMatchExecutor() {
   const char* const node_kinds[] = {"Parallel", "ReactiveSequence"};
   for (const char* node_kind : node_kinds) {
@@ -1814,6 +1958,8 @@ int main() {
   if (testReactiveFallbackRechecksPriorityAfterRunning() != 0) return 1;
   if (testEmptyReactiveFallbackMatchesFailure() != 0) return 1;
   if (testEmptySwitchResolvesSelectorThenFails() != 0) return 1;
+  if (testNonEmptyParallelFailsClosedWithoutFullHookGroup() != 0) return 1;
+  if (testParallelInvokesCompleteHostHookGroup() != 0) return 1;
   if (testEmptyParallelAndReactiveSequenceMatchExecutor() != 0) return 1;
   if (testRunOnceAndKeepRunningStateMatchExecutor() != 0) return 1;
   if (testSubTreeExpansionAndCycleRejection() != 0) return 1;
