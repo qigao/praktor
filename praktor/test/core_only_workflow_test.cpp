@@ -3,10 +3,12 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <atomic>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <thread>
 
 namespace {
 
@@ -245,6 +247,71 @@ TEST_CASE("opt-in C11 task deadline cancels a delayed leaf") {
         "tasks.deadline_guard.outputs.must_not_publish").is_null());
 }
 
+TEST_CASE("opt-in C11 cancels a Shell after the child actually starts") {
+    using Praktor::Execution::ActionTreeBackend;
+    using Praktor::Execution::DeclarativeTreeExecutor;
+
+    const auto dir = createCoreOnlyTempDir();
+    const auto started_file = dir / "child-started.txt";
+    std::string command;
+#ifdef _WIN32
+    // Keep the sleeper in the native PowerShell process rather than spawning
+    // an unowned nested process. The marker proves execution reached the leaf.
+    std::string escaped_path = started_file.string();
+    for (size_t i = 0; (i = escaped_path.find('\'', i)) != std::string::npos; i += 2) {
+        escaped_path.insert(i, 1, '\'');
+    }
+    command = "powershell.exe -NoProfile -NonInteractive -Command \""
+              "[System.IO.File]::WriteAllText('" + escaped_path +
+              "', 'started'); Start-Sleep -Seconds 30\"";
+#else
+    command = "printf started > '" + started_file.string() +
+              "'; exec sleep 30";
+#endif
+
+    WorkflowContext context;
+    auto control = std::make_shared<Praktor::Execution::ExecutionControl>();
+    context.setExecutionControl(control);
+    OrchNode shell;
+    shell.type = "Shell";
+    shell.params["cmd"] = command;
+    shell.params["timeout"] = "30000";
+    shell.params["stream_output"] = "false";
+    auto task = makeCoreOnlyActionTask("cancel_running_shell", std::move(shell));
+    task.timeout = "15000";
+
+    std::atomic<bool> observed_start{false};
+    std::thread canceller([&] {
+        const auto deadline = std::chrono::steady_clock::now() +
+                              std::chrono::seconds(10);
+        while (std::chrono::steady_clock::now() < deadline) {
+            if (std::filesystem::exists(started_file)) {
+                observed_start.store(true, std::memory_order_relaxed);
+                break;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        control->requestCancel();
+    });
+
+    const auto begin = std::chrono::steady_clock::now();
+    DeclarativeTreeExecutor executor({}, ActionTreeBackend::C11);
+    const auto result = executor.execute(task, context);
+    const auto elapsed = std::chrono::steady_clock::now() - begin;
+    canceller.join();
+
+    CHECK(observed_start.load(std::memory_order_relaxed));
+    CHECK_FALSE(result.success);
+    CHECK(result.error_message.find("cancelled") != std::string::npos);
+    CHECK(elapsed < std::chrono::seconds(13));
+    const auto node_status = context.getValueByPath(
+        "tasks.cancel_running_shell.outputs.node_status");
+    REQUIRE(node_status.is_string());
+    CHECK(node_status.as<std::string>() == "FAILURE");
+
+    std::filesystem::remove_all(dir);
+}
+
 TEST_CASE("opt-in C11 workflow rejects bad plan before leaf side effects") {
     using Praktor::Execution::ActionTreeBackend;
     using Praktor::Execution::DeclarativeTreeExecutor;
@@ -304,7 +371,7 @@ TEST_CASE("opt-in C11 Parallel fails closed without branch-host hooks") {
     WorkflowContext context;
     OrchNode root;
     root.type = "Parallel";
-    for (const std::string& key : {"a", "b"}) {
+    for (const char* key : {"a", "b"}) {
         OrchNode step;
         step.type = "SetVariable";
         step.params["key"] = key;
