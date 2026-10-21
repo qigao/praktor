@@ -47,13 +47,16 @@ static bool is_timed_kind(salts_bt_node_kind kind) {
 
 static bool callback_contract_valid(const praktor_c11_bt_node_desc *desc,
                                     const praktor_c11_bt_host *host) {
+  const uint32_t valid_dynamic_mask =
+      SALTS_BT_DYNAMIC_PARAMETER_LIMIT | SALTS_BT_DYNAMIC_PARAMETER_DURATION_NS;
   if (desc->condition_callback &&
       (!is_condition_kind(desc->kind) || host->condition == NULL))
     return false;
   if (desc->parallel_hooks) {
     if (desc->kind != SALTS_BT_NODE_PARALLEL ||
         host->parallel_enter == NULL || host->parallel_step == NULL ||
-        host->parallel_join == NULL || host->parallel_finish == NULL)
+        host->parallel_join == NULL || host->parallel_finish == NULL ||
+        host->parallel_abort == NULL)
       return false;
   }
   if (desc->kind == SALTS_BT_NODE_LEAF && host->tick_leaf == NULL)
@@ -71,6 +74,18 @@ static bool callback_contract_valid(const praktor_c11_bt_node_desc *desc,
   if (!has_limit(desc->kind) && desc->limit != 0u)
     return false;
   if (!is_timed_kind(desc->kind) && desc->duration_ns != 0u)
+    return false;
+  if ((desc->dynamic_parameter_mask & ~valid_dynamic_mask) != 0u ||
+      desc->dynamic_parameter_mask == valid_dynamic_mask)
+    return false;
+  if (desc->dynamic_parameter_mask != 0u &&
+      host->resolve_dynamic_parameters == NULL)
+    return false;
+  if ((desc->dynamic_parameter_mask & SALTS_BT_DYNAMIC_PARAMETER_LIMIT) != 0u &&
+      !has_limit(desc->kind))
+    return false;
+  if ((desc->dynamic_parameter_mask & SALTS_BT_DYNAMIC_PARAMETER_DURATION_NS) != 0u &&
+      !is_timed_kind(desc->kind))
     return false;
   if (desc->parallel_hooks && desc->kind != SALTS_BT_NODE_PARALLEL)
     return false;
