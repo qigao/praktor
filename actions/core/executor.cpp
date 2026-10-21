@@ -24,12 +24,12 @@ void resetRetrySubtreeState(const Node& node, ExecutionContext& ctx) {
   if (node.id == "Fallback" || node.id == "Selector")
     ctx.reset("Fallback_" + suffix);
   if (node.id == "Retry") ctx.reset("Retry_" + suffix);
-  if (node.id == "RunOnce") ctx.reset("RunOnce_" + suffix);
+  /*
+   * RunOnce and EntryUpdated keep persistent per-context observations. Reset
+   * their transient descendants, but preserve their own cached terminal state,
+   * matching Salts::BehaviorTree reset_node_state semantics.
+   */
   if (node.id == "ConsumeQueue") ctx.reset("ConsumeQueue_" + suffix);
-  if (node.id == "EntryUpdated") {
-    ctx.reset("EntryUpdated_" + suffix);
-    ctx.reset("EntryUpdated_" + suffix + "_child");
-  }
   if (node.id == "PipelineSequence") ctx.reset("PipelineSequence_" + suffix);
 
   for (const Node& child : node.children) {
