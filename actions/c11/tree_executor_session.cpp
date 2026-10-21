@@ -311,6 +311,7 @@ struct TreeExecutorSession::Impl {
   struct PipelineState {
     bool initialized = false;
     size_t active_child = 0u;
+    uint64_t input_restore_tick = 0u;
     std::string data;
     std::string output_key = "pipeline_result";
   };
@@ -369,6 +370,7 @@ struct TreeExecutorSession::Impl {
   std::vector<PipelineState> pipeline_states;
   std::vector<EntryUpdatedState> entry_updated_states;
   std::vector<QueueState> queue_states;
+  uint64_t tick_generation = 0u;
   std::string last_error;
 
   Impl(const actions::Tree& source_tree,
@@ -975,7 +977,7 @@ struct TreeExecutorSession::Impl {
            parent < compiled_plan.nodes.size()) {
       if (compiled_plan.nodes[parent].kind == SALTS_BT_NODE_PIPELINE_SEQUENCE &&
           parent < pipeline_states.size()) {
-        const auto& state = pipeline_states[parent];
+        auto& state = pipeline_states[parent];
         const auto* pipeline = nodeAt(parent);
         if (state.initialized && pipeline != nullptr &&
             state.active_child < pipeline->children.size()) {
@@ -988,8 +990,10 @@ struct TreeExecutorSession::Impl {
               break;
             }
           }
-          if (active_stage_index == descendant) {
+          if (active_stage_index == descendant &&
+              state.input_restore_tick != tick_generation) {
             blackboard.set("pipeline_input", state.data);
+            state.input_restore_tick = tick_generation;
             return;
           }
         }
@@ -1221,24 +1225,28 @@ struct TreeExecutorSession::Impl {
   int parallelEnter(size_t node, size_t child, bool first) noexcept {
     if (hooks.parallel_enter == nullptr) return SALTS_ENOTSUP;
     return safeHostStatus("C11 Parallel enter hook failed", [&] {
+      restorePipelineInputForNode(node);
       return hooks.parallel_enter(hooks.user, node, child, first);
     });
   }
   int parallelStep(size_t node, size_t child, salts_bt_node_status status) noexcept {
     if (hooks.parallel_step == nullptr) return SALTS_ENOTSUP;
     return safeHostStatus("C11 Parallel step hook failed", [&] {
+      restorePipelineInputForNode(node);
       return hooks.parallel_step(hooks.user, node, child, status);
     });
   }
   int parallelJoin(size_t node, salts_bt_node_status status) noexcept {
     if (hooks.parallel_join == nullptr) return SALTS_ENOTSUP;
     return safeHostStatus("C11 Parallel join hook failed", [&] {
+      restorePipelineInputForNode(node);
       return hooks.parallel_join(hooks.user, node, status);
     });
   }
   int parallelFinish(size_t node, size_t child, salts_bt_node_status status) noexcept {
     if (hooks.parallel_finish == nullptr) return SALTS_ENOTSUP;
     return safeHostStatus("C11 Parallel finish hook failed", [&] {
+      restorePipelineInputForNode(node);
       return hooks.parallel_finish(hooks.user, node, child, status);
     });
   }
@@ -1251,6 +1259,7 @@ struct TreeExecutorSession::Impl {
   int pipelinePrepare(size_t node, size_t child) noexcept {
     if (hooks.pipeline_prepare != nullptr) {
       return safeHostStatus("C11 PipelineSequence prepare hook failed", [&] {
+        restorePipelineInputForNode(node);
         return hooks.pipeline_prepare(hooks.user, node, child);
       });
     }
@@ -1528,6 +1537,8 @@ TreeExecutorSession::~TreeExecutorSession() = default;
 
 int TreeExecutorSession::tick(salts_bt_node_status* out_status) {
   if (!impl_) return SALTS_EINVAL;
+  ++impl_->tick_generation;
+  if (impl_->tick_generation == 0u) ++impl_->tick_generation;
   impl_->last_error.clear();
   const int status = praktor_c11_bt_tree_tick(&impl_->runtime, out_status);
   if (status != SALTS_OK && impl_->last_error.empty()) {

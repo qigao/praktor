@@ -1036,6 +1036,66 @@ int testSubTreeExpansionAndCycleRejection() {
 }
 
 
+int testPipelineSequencePreservesInputMutationWithinStage() {
+  const auto makeTree = [] {
+    actions::Tree tree;
+    tree.root.id = "PipelineSequence";
+    tree.root.params.emplace("input_key", actions::Value{std::string("seed")});
+    tree.root.params.emplace("output_key", actions::Value{std::string("result")});
+    actions::Node sequence;
+    sequence.id = "Sequence";
+    actions::Node mutate;
+    mutate.id = "MutatePipelineInput";
+    actions::Node observe;
+    observe.id = "ObservePipelineInput";
+    sequence.children.push_back(mutate);
+    sequence.children.push_back(observe);
+    tree.root.children.push_back(sequence);
+    return tree;
+  };
+  const auto registerTasks = [](actions::Executor& executor) {
+    executor.registerTask("MutatePipelineInput")(
+        [](const auto&, actions::Blackboard& bb) {
+          bb.set("pipeline_input", "mutated");
+          return actions::NodeStatus::SUCCESS;
+        });
+    executor.registerTask("ObservePipelineInput")(
+        [](const auto&, actions::Blackboard& bb) {
+          if (bb.get("pipeline_input") != "mutated")
+            return actions::NodeStatus::FAILURE;
+          bb.set("pipeline_output", "done");
+          return actions::NodeStatus::SUCCESS;
+        });
+  };
+
+  {
+    auto tree = makeTree();
+    actions::Executor executor;
+    registerTasks(executor);
+    actions::Blackboard blackboard;
+    blackboard.set("seed", "start");
+    actions::ExecutionContext context;
+    CHECK(executor.execute(tree.root, blackboard, context) ==
+          actions::NodeStatus::SUCCESS);
+    CHECK(blackboard.get("result") == "done");
+  }
+  {
+    auto tree = makeTree();
+    actions::Executor executor;
+    registerTasks(executor);
+    actions::Blackboard blackboard;
+    blackboard.set("seed", "start");
+    actions::ExecutionContext context;
+    actions::c11::TreeExecutorSession session(
+        tree, executor, blackboard, context, limits());
+    salts_bt_node_status status = SALTS_BT_FAILURE;
+    CHECK(session.tick(&status) == SALTS_OK);
+    CHECK(status == SALTS_BT_SUCCESS);
+    CHECK(blackboard.get("result") == "done");
+  }
+  return 0;
+}
+
 int testPipelineSequenceRestoresInputBeforeNestedSwitchSelection() {
   const auto makeTree = [] {
     actions::Tree tree;
@@ -1601,6 +1661,7 @@ int main() {
   if (testEmptyParallelAndReactiveSequenceMatchExecutor() != 0) return 1;
   if (testRunOnceAndKeepRunningStateMatchExecutor() != 0) return 1;
   if (testSubTreeExpansionAndCycleRejection() != 0) return 1;
+  if (testPipelineSequencePreservesInputMutationWithinStage() != 0) return 1;
   if (testPipelineSequenceResumesActiveStageAndRestoresInput() != 0) return 1;
   if (testPipelineSequenceRestoresInputBeforeNestedSwitchSelection() != 0) return 1;
   if (testBuiltInPipelineSequenceHooks() != 0) return 1;
