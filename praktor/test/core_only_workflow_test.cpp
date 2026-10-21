@@ -10,6 +10,10 @@
 #include <string>
 #include <thread>
 
+#if PRAKTOR_C11_ACTIONS_ENABLED
+#include <salts/process_retainer.h>
+#endif
+
 namespace {
 
 std::filesystem::path createCoreOnlyTempDir() {
@@ -125,6 +129,31 @@ TEST_CASE("core-only default action backend remains legacy") {
 
 #if PRAKTOR_C11_ACTIONS_ENABLED
 
+namespace {
+struct ScopedWorkflowProcessOwner {
+    cflow_process_retainer owner{};
+    ScopedWorkflowProcessOwner() {
+        if (cflow_process_retainer_init(&owner, 8u) != SALTS_OK)
+            throw std::runtime_error("Process recovery owner initialization failed");
+    }
+    ~ScopedWorkflowProcessOwner() {
+        if (owner.impl == nullptr) return;
+        const auto deadline = std::chrono::steady_clock::now() +
+                              std::chrono::seconds(5);
+        while (std::chrono::steady_clock::now() < deadline) {
+            size_t reaped = 0u, pending = 0u;
+            const int status = cflow_process_retainer_run_ready(
+                &owner, 64u, &reaped, &pending);
+            if (status == SALTS_OK && pending == 0u) break;
+            if (status != SALTS_EBUSY) std::terminate();
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        if (cflow_process_retainer_destroy(&owner) != SALTS_OK)
+            std::terminate();
+    }
+};
+} // namespace
+
 TEST_CASE("opt-in C11 action backend preserves workflow context and task output") {
     using Praktor::Execution::ActionTreeBackend;
     using Praktor::Execution::DeclarativeTreeExecutor;
@@ -212,7 +241,8 @@ TEST_CASE("opt-in C11 shell result reaches TaskResult without legacy fallback") 
         shell.params["timeout"] = "5000";
         shell.params["stream_output"] = "false";
         auto task = makeCoreOnlyActionTask("shell_failure", std::move(shell));
-        DeclarativeTreeExecutor executor({}, backend);
+        ScopedWorkflowProcessOwner recovery;
+        DeclarativeTreeExecutor executor({}, backend, &recovery.owner);
         const auto result = executor.execute(task, context);
         CHECK_FALSE(result.success);
         CHECK(result.exit_code == 7);
@@ -237,7 +267,8 @@ TEST_CASE("opt-in C11 successful Shell output reaches workflow context") {
         shell.params["stream_output"] = "false";
         auto task = makeCoreOnlyActionTask("shell_success", std::move(shell));
 
-        DeclarativeTreeExecutor executor({}, backend);
+        ScopedWorkflowProcessOwner recovery;
+        DeclarativeTreeExecutor executor({}, backend, &recovery.owner);
         const auto result = executor.execute(task, context);
         REQUIRE(result.success);
         CHECK(result.exit_code == 0);
@@ -325,7 +356,8 @@ TEST_CASE("opt-in C11 cancels a Shell after the child actually starts") {
     });
 
     const auto begin = std::chrono::steady_clock::now();
-    DeclarativeTreeExecutor executor({}, ActionTreeBackend::C11);
+    ScopedWorkflowProcessOwner recovery;
+    DeclarativeTreeExecutor executor({}, ActionTreeBackend::C11, &recovery.owner);
     TaskResult result(false);
     try {
         result = executor.execute(task, context);
