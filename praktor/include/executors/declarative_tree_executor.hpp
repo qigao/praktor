@@ -7,6 +7,8 @@
 #include <functional>
 #include <unordered_map>
 
+struct cflow_process_retainer;
+
 namespace Praktor::Execution
 {
 
@@ -19,7 +21,8 @@ class DeclarativeTreeExecutor : public TaskExecutor
 public:
   explicit DeclarativeTreeExecutor(
       std::unordered_map<std::string, std::string> base_environment = {},
-      ActionTreeBackend backend = ActionTreeBackend::Legacy);
+      ActionTreeBackend backend = ActionTreeBackend::Legacy,
+      cflow_process_retainer* recovery_owner = nullptr);
   ~DeclarativeTreeExecutor() override = default;
 
   TaskResult execute(const Task& task, WorkflowContext& context) override;
@@ -54,10 +57,12 @@ private:
 
   std::unordered_map<std::string, std::string> base_environment_;
   ActionTreeBackend backend_ = ActionTreeBackend::Legacy;
+  cflow_process_retainer* recovery_owner_ = nullptr;
 };
 
 std::unique_ptr<TaskExecutor> createDeclarativeTreeExecutor(
     std::unordered_map<std::string, std::string> base_environment = {},
-    ActionTreeBackend backend = ActionTreeBackend::Legacy);
+    ActionTreeBackend backend = ActionTreeBackend::Legacy,
+    cflow_process_retainer* recovery_owner = nullptr);
 
 }  // namespace Praktor::Execution
