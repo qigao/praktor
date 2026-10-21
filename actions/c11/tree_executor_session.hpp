@@ -29,7 +29,12 @@ namespace actions::c11 {
  * Blackboard-backed hooks (ConsumeQueue uses the shared C JSON parser).
  * Parallel currently requires host-supplied enter/step/join/finish/abort hooks,
  * because its branch-local Blackboard/ExecutionContext isolation and commit
- * policy are still host-defined. Custom PipelineSequence and ConsumeQueue hook
+ * policy are still host-defined. These lifecycle hooks do not themselves route
+ * registered Executor leaves to branch-local state: such leaves still execute
+ * against the session's single Blackboard/ExecutionContext. A host that needs
+ * isolation must explicitly dispatch the relevant leaves through tick_leaf and
+ * manage branch state in its own callback/user-data contract; otherwise branch
+ * isolation is not provided. Custom PipelineSequence and ConsumeQueue hook
  * groups must provide their prepare/begin, completion/finish and abort callbacks
  * together so cancellation has an explicit cleanup path.
  *
