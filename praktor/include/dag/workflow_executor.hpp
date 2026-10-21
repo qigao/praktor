@@ -2,6 +2,7 @@
 
 #include "dependency_graph.hpp"
 #include "task_executor.hpp"
+#include "executors/declarative_tree_executor.hpp"
 #include "trigger_executor.hpp"
 #include "workflow_context.hpp"
 #include "yml/task.hpp"
@@ -27,12 +28,18 @@ public:
                      std::unordered_map<std::string, std::string> base_environment = {},
                      size_t num_threads = 1,
                      bool schedule_trigger_tasks = false,
-                     size_t max_trigger_depth = Praktor::Execution::kMaxTriggerChainDepth);
+                     size_t max_trigger_depth = Praktor::Execution::kMaxTriggerChainDepth,
+                     Praktor::Execution::ActionTreeBackend action_backend =
+                         Praktor::Execution::ActionTreeBackend::Legacy,
+                     cflow_process_retainer* recovery_owner = nullptr);
 
     WorkflowExecutor(DependencyGraph<Task>& graph,
                      std::unordered_map<std::string, std::string> base_environment = {},
                      size_t num_threads = 1,
-                     size_t max_trigger_depth = Praktor::Execution::kMaxTriggerChainDepth);
+                     size_t max_trigger_depth = Praktor::Execution::kMaxTriggerChainDepth,
+                     Praktor::Execution::ActionTreeBackend action_backend =
+                         Praktor::Execution::ActionTreeBackend::Legacy,
+                     cflow_process_retainer* recovery_owner = nullptr);
 
     void execute(WorkflowContext& context, std::optional<std::string> alias = std::nullopt);
 
