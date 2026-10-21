@@ -10,10 +10,16 @@
 namespace Praktor::Execution
 {
 
+// Explicitly selected per executor instance. Legacy remains the default for all
+// workflow-scheduler call sites; C11 is only available in qualified builds.
+enum class ActionTreeBackend { Legacy, C11 };
+
 class DeclarativeTreeExecutor : public TaskExecutor
 {
 public:
-  explicit DeclarativeTreeExecutor(std::unordered_map<std::string, std::string> base_environment = {});
+  explicit DeclarativeTreeExecutor(
+      std::unordered_map<std::string, std::string> base_environment = {},
+      ActionTreeBackend backend = ActionTreeBackend::Legacy);
   ~DeclarativeTreeExecutor() override = default;
 
   TaskResult execute(const Task& task, WorkflowContext& context) override;
@@ -47,9 +53,11 @@ private:
   actions::Value parseValue(const std::string& str) const;
 
   std::unordered_map<std::string, std::string> base_environment_;
+  ActionTreeBackend backend_ = ActionTreeBackend::Legacy;
 };
 
 std::unique_ptr<TaskExecutor> createDeclarativeTreeExecutor(
-    std::unordered_map<std::string, std::string> base_environment = {});
+    std::unordered_map<std::string, std::string> base_environment = {},
+    ActionTreeBackend backend = ActionTreeBackend::Legacy);
 
 }  // namespace Praktor::Execution
