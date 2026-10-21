@@ -788,6 +788,140 @@ int testTimeoutDurationIsReReadAndHaltsBeforeAnotherLeafTick() {
   return 0;
 }
 
+int testRepeatLimitIsResolvedFromLiveBlackboard() {
+  actions::Tree tree;
+  tree.root.id = "Repeat";
+  tree.root.params.emplace("num_cycles",
+                           actions::Value{std::string("{cycles}")});
+  actions::Node child;
+  child.id = "DynamicCycle";
+  tree.root.children.push_back(child);
+
+  actions::Executor legacy;
+  int legacy_calls = 0;
+  legacy.registerTask("DynamicCycle", [&legacy_calls](const auto&,
+                                                       actions::Blackboard&) {
+    ++legacy_calls;
+    return actions::NodeStatus::SUCCESS;
+  });
+  actions::Blackboard legacy_blackboard;
+  legacy_blackboard.set("cycles", "2.0");
+  actions::ExecutionContext legacy_context;
+  CHECK(legacy.execute(tree.root, legacy_blackboard, legacy_context) ==
+        actions::NodeStatus::SUCCESS);
+  CHECK(legacy_calls == 2);
+
+  actions::Executor c11;
+  int c11_calls = 0;
+  c11.registerTask("DynamicCycle", [&c11_calls](const auto&,
+                                                actions::Blackboard&) {
+    ++c11_calls;
+    return actions::NodeStatus::SUCCESS;
+  });
+  actions::Blackboard c11_blackboard;
+  actions::ExecutionContext c11_context;
+  actions::c11::TreeExecutorSession session(tree, c11, c11_blackboard,
+                                            c11_context, limits());
+  /* The live key may be populated after session construction. */
+  c11_blackboard.set("cycles", "2.0");
+  salts_bt_node_status status = SALTS_BT_FAILURE;
+  CHECK(session.tick(&status) == SALTS_OK);
+  CHECK(status == SALTS_BT_SUCCESS);
+  CHECK(c11_calls == 2);
+  CHECK(session.plan().nodes[0].dynamic_parameter_mask ==
+        SALTS_BT_DYNAMIC_PARAMETER_LIMIT);
+  return 0;
+}
+
+int testWhileDoLimitIsReResolvedFromLiveBlackboard() {
+  actions::Tree tree;
+  tree.root.id = "WhileDo";
+  tree.root.params.emplace("condition", actions::Value{true});
+  tree.root.params.emplace("max_iterations",
+                           actions::Value{std::string("{iterations}")});
+  actions::Node child;
+  child.id = "DynamicBody";
+  tree.root.children.push_back(child);
+
+  actions::Executor legacy;
+  int legacy_calls = 0;
+  legacy.registerTask("DynamicBody", [&legacy_calls](const auto&,
+                                                     actions::Blackboard&) {
+    ++legacy_calls;
+    return actions::NodeStatus::SUCCESS;
+  });
+  actions::Blackboard legacy_blackboard;
+  legacy_blackboard.set("iterations", "0");
+  actions::ExecutionContext legacy_context;
+  CHECK(legacy.execute(tree.root, legacy_blackboard, legacy_context) ==
+        actions::NodeStatus::SUCCESS);
+  CHECK(legacy_calls == 0);
+  legacy_blackboard.set("iterations", "1");
+  CHECK(legacy.execute(tree.root, legacy_blackboard, legacy_context) ==
+        actions::NodeStatus::SUCCESS);
+  CHECK(legacy_calls == 1);
+
+  actions::Executor c11;
+  int c11_calls = 0;
+  c11.registerTask("DynamicBody", [&c11_calls](const auto&,
+                                               actions::Blackboard&) {
+    ++c11_calls;
+    return actions::NodeStatus::SUCCESS;
+  });
+  actions::Blackboard c11_blackboard;
+  actions::ExecutionContext c11_context;
+  actions::c11::TreeExecutorSession session(tree, c11, c11_blackboard,
+                                            c11_context, limits());
+  c11_blackboard.set("iterations", "0");
+  salts_bt_node_status status = SALTS_BT_FAILURE;
+  CHECK(session.tick(&status) == SALTS_OK);
+  CHECK(status == SALTS_BT_SUCCESS);
+  CHECK(c11_calls == 0);
+  c11_blackboard.set("iterations", "1");
+  CHECK(session.tick(&status) == SALTS_OK);
+  CHECK(status == SALTS_BT_SUCCESS);
+  CHECK(c11_calls == 1);
+  CHECK(session.plan().nodes[0].dynamic_parameter_mask ==
+        SALTS_BT_DYNAMIC_PARAMETER_LIMIT);
+  return 0;
+}
+
+int testDelayDurationIsReResolvedAndStartsChildWhenShortened() {
+  actions::Tree tree;
+  tree.root.id = "Delay";
+  tree.root.params.emplace("delay_ms",
+                           actions::Value{std::string("{delay}")});
+  actions::Node child;
+  child.id = "DelayedWork";
+  tree.root.children.push_back(child);
+
+  actions::Executor executor;
+  int child_calls = 0;
+  executor.registerTask("DelayedWork", [&child_calls](const auto&,
+                                                       actions::Blackboard&) {
+    ++child_calls;
+    return actions::NodeStatus::SUCCESS;
+  });
+  actions::Blackboard blackboard;
+  actions::ExecutionContext context;
+  actions::c11::TreeExecutorSession session(tree, executor, blackboard,
+                                            context, limits());
+  /* Deliberately provide the dynamic key only after the plan was compiled. */
+  blackboard.set("delay", "60000");
+  salts_bt_node_status status = SALTS_BT_FAILURE;
+  CHECK(session.tick(&status) == SALTS_OK);
+  CHECK(status == SALTS_BT_RUNNING);
+  CHECK(child_calls == 0);
+
+  blackboard.set("delay", "0");
+  CHECK(session.tick(&status) == SALTS_OK);
+  CHECK(status == SALTS_BT_SUCCESS);
+  CHECK(child_calls == 1);
+  CHECK(session.plan().nodes[0].dynamic_parameter_mask ==
+        SALTS_BT_DYNAMIC_PARAMETER_DURATION_NS);
+  return 0;
+}
+
 int testRetryAndPersistentRunOnceMatchesLegacyExecutor() {
   const auto makeRetryTree = [](double attempts, const char* child_id) {
     actions::Tree tree;
@@ -2141,6 +2275,9 @@ int main() {
   if (testInTreeIfThenElseConditionMatchesExecutor() != 0) return 1;
   if (testWhileDoConditionFormsMatchTerminalEffects() != 0) return 1;
   if (testRetryParameterIsReReadOnEachTick() != 0) return 1;
+  if (testRepeatLimitIsResolvedFromLiveBlackboard() != 0) return 1;
+  if (testWhileDoLimitIsReResolvedFromLiveBlackboard() != 0) return 1;
+  if (testDelayDurationIsReResolvedAndStartsChildWhenShortened() != 0) return 1;
   if (testTimeoutDurationIsReReadAndHaltsBeforeAnotherLeafTick() != 0) return 1;
   if (testRetryAndPersistentRunOnceMatchesLegacyExecutor() != 0) return 1;
   if (testReactiveFallbackRechecksPriorityAfterRunning() != 0) return 1;
