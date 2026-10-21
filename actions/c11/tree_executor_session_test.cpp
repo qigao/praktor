@@ -1519,6 +1519,8 @@ int testParallelHookFailureAbortsEnteredBranches() {
   actions::ExecutionContext context;
   ParallelHookStats stats;
   praktor_c11_bt_host hooks{};
+  hooks.tick_leaf = &parallelTestLeafTick;
+  hooks.halt_leaf = &parallelTestLeafHalt;
   hooks.parallel_enter = &parallelTestEnter;
   hooks.parallel_step = &parallelFailingStep;
   hooks.parallel_join = &parallelTestJoin;
@@ -1535,6 +1537,66 @@ int testParallelHookFailureAbortsEnteredBranches() {
   CHECK(stats.aborts == stats.enters);
   CHECK(session.lastError().find("Parallel step hook failed") !=
         std::string::npos);
+  return 0;
+}
+
+
+int decliningParallelLeafTick(void*, size_t, salts_bt_node_status*) {
+  return SALTS_ENOTSUP;
+}
+
+int testParallelRejectsUnclaimedLeafBeforeSharedStateMutation() {
+  // Parallel must never silently run a leaf against the session Blackboard:
+  // the host may have already allocated branch-local snapshots for this tick.
+  for (int with_declining_hook = 0; with_declining_hook < 2; ++with_declining_hook) {
+    actions::Tree tree;
+    tree.root.id = "Parallel";
+    actions::Node sequence;
+    sequence.id = "Sequence";
+    actions::Node first;
+    first.id = "SharedWriter";
+    sequence.children.push_back(first);
+    actions::Node second;
+    second.id = "SharedWriter";
+    tree.root.children.push_back(sequence);
+    tree.root.children.push_back(second);
+
+    int shared_executor_calls = 0;
+    actions::Executor executor;
+    executor.registerTask("SharedWriter",
+                          [&shared_executor_calls](const auto&, actions::Blackboard& bb) {
+      ++shared_executor_calls;
+      bb.set("would_leak", "true");
+      return actions::NodeStatus::SUCCESS;
+    });
+    actions::Blackboard blackboard;
+    actions::ExecutionContext context;
+    ParallelHookStats stats;
+    praktor_c11_bt_host hooks{};
+    hooks.parallel_enter = &parallelTestEnter;
+    hooks.parallel_step = &parallelTestStep;
+    hooks.parallel_join = &parallelTestJoin;
+    hooks.parallel_finish = &parallelTestFinish;
+    hooks.parallel_abort = &parallelTestAbort;
+    if (with_declining_hook) {
+      hooks.tick_leaf = &decliningParallelLeafTick;
+      hooks.halt_leaf = &parallelTestLeafHalt;
+    }
+    hooks.user = &stats;
+
+    actions::c11::TreeExecutorSession session(
+        tree, executor, blackboard, context, limits(), &hooks);
+    salts_bt_node_status status = SALTS_BT_SUCCESS;
+    CHECK(session.tick(&status) == SALTS_ENOTSUP);
+    CHECK(session.lastError().find("requires host branch-aware tick_leaf dispatch") !=
+          std::string::npos);
+    CHECK(shared_executor_calls == 0);
+    CHECK(!blackboard.has("would_leak"));
+    CHECK(stats.enters > 0u);
+    CHECK(stats.aborts == stats.enters);
+    CHECK(session.cancel() == SALTS_OK);
+    CHECK(stats.aborts == stats.enters);
+  }
   return 0;
 }
 
@@ -1759,6 +1821,47 @@ int testSubTreeExpansionAndCycleRejection() {
       rejected = true;
     }
     CHECK(rejected);
+  }
+
+  {
+    // The legacy Executor resolves the selector on invocation, but C11's
+    // expanded plan cannot change topology after construction. Rejecting a
+    // dynamic selector is safer than silently pinning its initial value.
+    actions::Tree registered;
+    registered.name = "inner";
+    registered.root.id = "InnerTask";
+    actions::Tree outer;
+    outer.root.id = "SubTree";
+    outer.root.params.emplace(
+        "tree", actions::Value{std::string("{selected_tree}")});
+
+    actions::Executor executor;
+    int legacy_calls = 0;
+    executor.registerTree(registered);
+    executor.registerTask("InnerTask",
+                          [&legacy_calls](const auto&, actions::Blackboard&) {
+      ++legacy_calls;
+      return actions::NodeStatus::SUCCESS;
+    });
+    actions::Blackboard blackboard;
+    blackboard.set("selected_tree", "inner");
+    actions::ExecutionContext context;
+    CHECK(executor.execute(outer, blackboard, context) == actions::NodeStatus::SUCCESS);
+    CHECK(legacy_calls == 1);
+
+    bool rejected = false;
+    std::string message;
+    try {
+      actions::c11::TreeExecutorSession session(
+          outer, executor, blackboard, context, limits());
+      (void)session;
+    } catch (const std::invalid_argument& error) {
+      rejected = true;
+      message = error.what();
+    }
+    CHECK(rejected);
+    CHECK(message.find("Dynamic SubTree selector is unsupported") != std::string::npos);
+    CHECK(legacy_calls == 1);
   }
   return 0;
 }
@@ -2751,6 +2854,7 @@ int main() {
   if (testHostBranchResourcesReleasedOnParallelCancel() != 0) return 1;
   if (testHostBranchResourcesReleasedOnReset() != 0) return 1;
   if (testParallelHookFailureAbortsEnteredBranches() != 0) return 1;
+  if (testParallelRejectsUnclaimedLeafBeforeSharedStateMutation() != 0) return 1;
   if (testParallelAbortHookRunsForRunningChildrenOnCancel() != 0) return 1;
   if (testEmptyParallelAndReactiveSequenceMatchExecutor() != 0) return 1;
   if (testRunOnceAndKeepRunningStateMatchExecutor() != 0) return 1;
