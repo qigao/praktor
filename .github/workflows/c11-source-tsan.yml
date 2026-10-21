@@ -1,0 +1,212 @@
+name: C11 Process complete-source TSan qualification
+
+'on':
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/c11-source-tsan.yml'
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: c11-process-source-tsan-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  source-tsan:
+    name: Salts rc17 + SaltsUtils BT/Process + Praktor TSan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    env:
+      SALTS_RC17_SHA: 6d6fd387cb245be8d7b0d866f9babad026a26832
+      SALTS_UTILS_SHA: d576cf5e0132052669c8385c2ce1f05782e44483
+      QIGAO_SDK_RID: linux-x64
+      QIGAO_TARGET_TRIPLET: x64-linux
+      TSAN_OPTIONS: halt_on_error=1:exitcode=66
+      CCACHE_DIR: ${{ github.workspace }}/.cache/c11-full-source-tsan
+      CCACHE_BASEDIR: ${{ github.workspace }}
+      CCACHE_COMPILERCHECK: content
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Checkout immutable Salts rc17
+        uses: actions/checkout@v4
+        with:
+          repository: qigao/salts
+          ref: 6d6fd387cb245be8d7b0d866f9babad026a26832
+          path: build/p1-salts-source
+          persist-credentials: false
+
+      - name: Checkout combined BehaviorTree / Process SDK
+        uses: actions/checkout@v4
+        with:
+          repository: qigao/salts-utils
+          ref: d576cf5e0132052669c8385c2ce1f05782e44483
+          path: build/p1-salts-utils-source
+          persist-credentials: false
+
+      - uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-cache@0dc254695917bc180504d916240292e9096e9da5
+        with:
+          mode: read
+
+      - uses: qigao/vcpkg-cache/.github/actions/setup-re2c-tools@0dc254695917bc180504d916240292e9096e9da5
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore unrelated official CHttp native SDK
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./cmake/RestoreNativeSdks.ps1 -Rid linux-x64 -CoreOnly -SaltsUtilsVersion 4.3.0-rc.2
+
+      - name: Attest source inputs and compiler prerequisites
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends ccache ninja-build nasm pkg-config binutils python3
+          test "$(git -C build/p1-salts-source rev-parse HEAD)" = "$SALTS_RC17_SHA"
+          test "$(git -C build/p1-salts-source hash-object utils/src/tlog.c)" = "7f3781d262a7a5e432362c03351c1ca51c0a3ac4"
+          test "$(git -C build/p1-salts-utils-source rev-parse HEAD)" = "$SALTS_UTILS_SHA"
+          test -n "$RE2C_ROOT"
+          test -n "$VCPKG_ROOT"
+          echo "Salts rc17=$SALTS_RC17_SHA; SaltsUtils=$SALTS_UTILS_SHA" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Build and install fully instrumented Salts rc17
+        shell: bash
+        run: |
+          set -euo pipefail
+          stage="$RUNNER_TEMP/p1-salts-tsan-sdk"
+          cmake --preset linux-tsan-ci -S build/p1-salts-source -B build/p1-salts-tsan \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_INSTALL_PREFIX="$stage" \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            -DBUILD_TESTS=OFF -DBUILD_BENCHMARKS=OFF -DBUILD_EXAMPLES=OFF \
+            -DENABLE_SANITIZER_ADDRESS=OFF -DENABLE_SANITIZER_THREAD=ON \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+          cmake --build build/p1-salts-tsan --parallel 2
+          cmake --install build/p1-salts-tsan
+          test -f "$stage/lib/libsalts.so.2.3"
+          test -f "$stage/lib/cmake/Salts/SaltsConfig.cmake"
+          echo "SALTS_ROOT=$stage" >> "$GITHUB_ENV"
+          echo "SALTS_SOURCE_TSAN_ROOT=$stage" >> "$GITHUB_ENV"
+
+      - name: Build and install fully instrumented combined SaltsUtils
+        shell: bash
+        run: |
+          set -euo pipefail
+          stage="$RUNNER_TEMP/p1-salts-utils-tsan-sdk"
+          cmake --preset ci-sdk-release-user -S build/p1-salts-utils-source \
+            -B build/p1-salts-utils-tsan \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_INSTALL_PREFIX="$stage" \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            -DENABLE_SANITIZER_THREAD=ON -DENABLE_SANITIZER_ADDRESS=OFF \
+            -DENABLE_SANITIZER_UNDEFINED=OFF \
+            -DBUILD_TESTS=OFF -DBUILD_BENCHMARKS=OFF -DBUILD_EXAMPLES=OFF \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+          cmake --build build/p1-salts-utils-tsan --parallel 2
+          cmake --install build/p1-salts-utils-tsan
+          test -f "$stage/lib/cmake/SaltsUtils/SaltsUtilsConfig.cmake"
+          test -f "$stage/include/salts/process_retainer.h"
+          test -f "$stage/include/salts/behavior_tree.h"
+          echo "SALTS_UTILS_ROOT=$stage" >> "$GITHUB_ENV"
+          echo "SALTS_UTILS_SOURCE_TSAN_ROOT=$stage" >> "$GITHUB_ENV"
+
+      - name: Audit actual original-source TSan translation units
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' | tee build/p1-source-tsan-audit.json
+          import json
+          from pathlib import Path
+          source_units = {
+              "Salts": (Path("build/p1-salts-tsan/compile_commands.json"), [
+                  "/utils/src/tlog.c",
+                  "/utils/src/cmeta_buffer.c",
+                  "/utils/src/cmeta_thread.c",
+                  "/concurrency/src/disruptor.c",
+                  "/platform/src/thread_posix.c",
+              ]),
+              "SaltsUtils": (Path("build/p1-salts-utils-tsan/compile_commands.json"), [
+                  "/cflow-process/src/process.c",
+                  "/cflow-process/src/process_retainer.c",
+                  "/behavior-tree/src/behavior_tree.c",
+              ]),
+          }
+          attestation = {}
+          for name, (path, required) in source_units.items():
+              rows = json.loads(path.read_text())
+              for suffix in required:
+                  matches = [r for r in rows if r["file"].replace("\\", "/").endswith(suffix)]
+                  if len(matches) != 1:
+                      raise SystemExit(f"{name}: missing/duplicate {suffix}: {len(matches)}")
+                  command = matches[0].get("command") or " ".join(matches[0].get("arguments", []))
+                  if "-fsanitize=thread" not in command:
+                      raise SystemExit(f"{name}: source unit not compiled under TSan: {suffix}")
+                  attestation[suffix] = {"owner": name, "tsan": True}
+          print(json.dumps(attestation, indent=2))
+          PY
+
+      - name: Compile actual C11 workflow and Process consumer under TSan
+        shell: bash
+        env:
+          TSAN_OPTIONS: halt_on_error=1:exitcode=66
+        run: |
+          set -euo pipefail
+          flags="-fsanitize=thread -fno-omit-frame-pointer -fno-optimize-sibling-calls -O1 -g"
+          cmake --preset ci-linux-sdk -B build/p1-praktor-tsan \
+            -DCMAKE_BUILD_TYPE=Debug -DENABLE_TESTS=ON \
+            -DENABLE_SCRIPT_ENGINE=OFF -DPRAKTOR_ENABLE_C11_ACTIONS=ON \
+            "-DCMAKE_C_FLAGS=$flags" "-DCMAKE_CXX_FLAGS=$flags" \
+            "-DCMAKE_EXE_LINKER_FLAGS=-fsanitize=thread" \
+            "-DCMAKE_SHARED_LINKER_FLAGS=-fsanitize=thread"
+          cmake --build build/p1-praktor-tsan \
+            --target core_only_workflow_test.praktor_lib actions_c11_tree_executor_session_test \
+            --parallel 2
+
+      - name: Require fully instrumented Salts dynamic linkage
+        shell: bash
+        run: |
+          set -euo pipefail
+          export LD_LIBRARY_PATH="$SALTS_SOURCE_TSAN_ROOT/lib:$SALTS_UTILS_SOURCE_TSAN_ROOT/lib:$CHTTP_ROOT/lib:${LD_LIBRARY_PATH:-}"
+          binary=build/p1-praktor-tsan/bin/core_only_workflow_test.praktor_lib
+          nm -D "$binary" | grep -F ' __tsan_init'
+          ldd "$binary" | tee build/p1-source-tsan-linked-libraries.txt
+          grep -F "$SALTS_SOURCE_TSAN_ROOT/lib/libsalts.so.2.3" \
+            build/p1-source-tsan-linked-libraries.txt
+          if grep -F 'not found' build/p1-source-tsan-linked-libraries.txt; then
+            echo "Missing source-TSan runtime dependency" >&2
+            exit 1
+          fi
+
+      - name: Run real YAML cancellation and C11 lifetime under unsuppressed TSan
+        shell: bash
+        env:
+          TSAN_OPTIONS: halt_on_error=1:exitcode=66
+        run: |
+          set -euo pipefail
+          export LD_LIBRARY_PATH="$SALTS_SOURCE_TSAN_ROOT/lib:$SALTS_UTILS_SOURCE_TSAN_ROOT/lib:$CHTTP_ROOT/lib:${LD_LIBRARY_PATH:-}"
+          ctest --test-dir build/p1-praktor-tsan \
+            --no-tests=error --output-on-failure --parallel 1 --timeout 90 \
+            -R '^(core_only_workflow_test\.praktor_lib|actions_c11_tree_executor_session_test)$'
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: c11-complete-source-tsan-evidence
+          if-no-files-found: ignore
+          retention-days: 14
+          path: |
+            build/p1-source-tsan-audit.json
+            build/p1-source-tsan-linked-libraries.txt
+            build/p1-salts-tsan/compile_commands.json
+            build/p1-salts-utils-tsan/compile_commands.json
+            build/p1-praktor-tsan/Testing/Temporary/LastTest.log
+            build/p1-salts-tsan/CMakeFiles/CMakeConfigureLog.yaml
+            build/p1-salts-utils-tsan/CMakeFiles/CMakeConfigureLog.yaml
