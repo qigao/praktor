@@ -26,6 +26,29 @@ salts_bt_tree_config limits() {
   return value;
 }
 
+struct ScopedProcessRetainer {
+  cflow_process_retainer owner{};
+  ScopedProcessRetainer() {
+    if (cflow_process_retainer_init(&owner, 4u) != SALTS_OK)
+      throw std::runtime_error("Cannot initialize test Process owner");
+  }
+  ~ScopedProcessRetainer() {
+    if (owner.impl == nullptr) return;
+    const auto deadline = std::chrono::steady_clock::now() +
+                          std::chrono::seconds(5);
+    while (std::chrono::steady_clock::now() < deadline) {
+      size_t reaped = 0u, pending = 0u;
+      const int status = cflow_process_retainer_run_ready(
+          &owner, 64u, &reaped, &pending);
+      if (status == SALTS_OK && pending == 0u) break;
+      if (status != SALTS_EBUSY) std::terminate();
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    if (cflow_process_retainer_destroy(&owner) != SALTS_OK)
+      std::terminate();
+  }
+};
+
 void noOpHalt(void*, size_t) {}
 
 int testRegisteredLeafResumesRunningState() {
@@ -177,8 +200,9 @@ int testShellCancelTerminatesManagedProcess() {
   actions::Executor executor;
   actions::Blackboard blackboard;
   actions::ExecutionContext context;
+  ScopedProcessRetainer owner;
   actions::c11::TreeExecutorSession session(tree, executor, blackboard,
-                                            context, limits());
+                                             context, limits(), nullptr, &owner.owner);
 
   salts_bt_node_status status = SALTS_BT_FAILURE;
   CHECK(session.tick(&status) == SALTS_OK);
@@ -239,8 +263,9 @@ int testShellUsesSaltsProcessByDefaultAndAllowsExplicitOverride() {
     });
     actions::Blackboard blackboard;
     actions::ExecutionContext context;
+    ScopedProcessRetainer owner;
     actions::c11::TreeExecutorSession session(tree, executor, blackboard,
-                                              context, limits());
+                                               context, limits(), nullptr, &owner.owner);
 
     const auto started = std::chrono::steady_clock::now();
     salts_bt_node_status status = SALTS_BT_RUNNING;
@@ -274,8 +299,9 @@ int testShellUsesSaltsProcessByDefaultAndAllowsExplicitOverride() {
     });
     actions::Blackboard blackboard;
     actions::ExecutionContext context;
+    ScopedProcessRetainer owner;
     actions::c11::TreeExecutorSession session(tree, executor, blackboard,
-                                              context, limits());
+                                               context, limits(), nullptr, &owner.owner);
 
     const auto started = std::chrono::steady_clock::now();
     salts_bt_node_status status = SALTS_BT_RUNNING;
@@ -338,8 +364,9 @@ int testShellRejectsZeroTimeoutBeforeSpawningProcess() {
   });
   actions::Blackboard blackboard;
   actions::ExecutionContext context;
+  ScopedProcessRetainer owner;
   actions::c11::TreeExecutorSession session(tree, executor, blackboard,
-                                            context, limits());
+                                             context, limits(), nullptr, &owner.owner);
   salts_bt_node_status status = SALTS_BT_RUNNING;
   CHECK(session.tick(&status) == SALTS_OK);
   CHECK(status == SALTS_BT_FAILURE);
