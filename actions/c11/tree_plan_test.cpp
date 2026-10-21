@@ -239,6 +239,26 @@ int testZeroBudgetControlsStillValidateChildArity() {
   return 0;
 }
 
+int testDynamicZeroControlsStayRuntimeNodes() {
+  Tree tree;
+  tree.root.id = "Retry";
+  tree.root.params.emplace("num_attempts", Value{std::string("{attempts}")});
+  Node child;
+  child.id = "Task";
+  tree.root.children.push_back(child);
+
+  Blackboard blackboard;
+  blackboard.set("attempts", "0");
+  const auto plan = compileTreePlan(tree, blackboard, testLimits());
+  CHECK(plan.nodes.size() == 2u);
+  CHECK(plan.nodes[0].kind == SALTS_BT_NODE_RETRY);
+  CHECK(plan.nodes[0].limit == 1u);
+  CHECK(plan.nodes[0].dynamic_parameter_mask ==
+        SALTS_BT_DYNAMIC_PARAMETER_LIMIT);
+  CHECK(plan.terminal_actions[0] == TreePlanTerminalAction::Runtime);
+  return 0;
+}
+
 int testBlackboardIntegralFloatParameters() {
   Tree tree;
   tree.root.id = "Sequence";
@@ -260,7 +280,11 @@ int testBlackboardIntegralFloatParameters() {
   blackboard.set("delay", "12.0");
   const auto plan = compileTreePlan(tree, blackboard, testLimits());
   CHECK(plan.nodes[1].limit == 3u);
+  CHECK(plan.nodes[1].dynamic_parameter_mask ==
+        SALTS_BT_DYNAMIC_PARAMETER_LIMIT);
   CHECK(plan.nodes[2].duration_ns == UINT64_C(12000000));
+  CHECK(plan.nodes[2].dynamic_parameter_mask ==
+        SALTS_BT_DYNAMIC_PARAMETER_DURATION_NS);
   return 0;
 }
 
@@ -359,6 +383,7 @@ int main() {
   if (testZeroBudgetKeepRunningLowersToNoOpFailureLeaf() != 0) return 1;
   if (testZeroBudgetControlsStillValidateChildArity() != 0) return 1;
   if (testBlackboardIntegralFloatParameters() != 0) return 1;
+  if (testDynamicZeroControlsStayRuntimeNodes() != 0) return 1;
   if (testRejectsInvalidInputs() != 0) return 1;
   return 0;
 }
