@@ -1370,6 +1370,13 @@ int parallelRunningStep(void* user, size_t, size_t,
   return SALTS_OK;
 }
 
+int parallelRunningJoin(void* user, size_t, salts_bt_node_status status) {
+  auto* stats = static_cast<ParallelHookStats*>(user);
+  if (stats == nullptr || status != SALTS_BT_RUNNING) return SALTS_EINVAL;
+  ++stats->joins;
+  return SALTS_OK;
+}
+
 int parallelTestJoin(void* user, size_t, salts_bt_node_status status) {
   auto* stats = static_cast<ParallelHookStats*>(user);
   if (stats == nullptr || status != SALTS_BT_SUCCESS) return SALTS_EINVAL;
@@ -1501,7 +1508,7 @@ int testParallelAbortHookRunsForRunningChildrenOnCancel() {
   hooks.halt_leaf = &parallelTestLeafHalt;
   hooks.parallel_enter = &parallelTestEnter;
   hooks.parallel_step = &parallelRunningStep;
-  hooks.parallel_join = &parallelTestJoin;
+  hooks.parallel_join = &parallelRunningJoin;
   hooks.parallel_finish = &parallelTestFinish;
   hooks.parallel_abort = &parallelTestAbort;
   hooks.user = &stats;
