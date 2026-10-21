@@ -192,6 +192,59 @@ TEST_CASE("opt-in C11 shell result reaches TaskResult without legacy fallback") 
     }
 }
 
+TEST_CASE("opt-in C11 successful Shell output reaches workflow context") {
+    using Praktor::Execution::ActionTreeBackend;
+    using Praktor::Execution::DeclarativeTreeExecutor;
+
+    for (const auto backend : {ActionTreeBackend::Legacy, ActionTreeBackend::C11}) {
+        WorkflowContext context;
+        OrchNode shell;
+        shell.type = "Shell";
+        shell.params["cmd"] = "echo workflow-c11-bridge";
+        shell.params["timeout"] = "5000";
+        shell.params["stream_output"] = "false";
+        auto task = makeCoreOnlyActionTask("shell_success", std::move(shell));
+
+        DeclarativeTreeExecutor executor({}, backend);
+        const auto result = executor.execute(task, context);
+        REQUIRE(result.success);
+        CHECK(result.exit_code == 0);
+        CHECK(result.stdout_data.find("workflow-c11-bridge") != std::string::npos);
+        const auto stdout_output = context.getValueByPath(
+            "tasks.shell_success.outputs.stdout");
+        REQUIRE(stdout_output.is_string());
+        CHECK(stdout_output.as<std::string>().find("workflow-c11-bridge") !=
+              std::string::npos);
+    }
+}
+
+TEST_CASE("opt-in C11 task deadline cancels a delayed leaf") {
+    using Praktor::Execution::ActionTreeBackend;
+    using Praktor::Execution::DeclarativeTreeExecutor;
+
+    WorkflowContext context;
+    OrchNode delay;
+    delay.type = "Delay";
+    delay.params["delay_ms"] = "2000";
+    OrchNode leaf;
+    leaf.type = "SetVariable";
+    leaf.params["key"] = "must_not_publish";
+    leaf.params["value"] = "late";
+    delay.children.push_back(std::move(leaf));
+    auto task = makeCoreOnlyActionTask("deadline_guard", std::move(delay));
+    task.timeout = "20";
+
+    DeclarativeTreeExecutor executor({}, ActionTreeBackend::C11);
+    const auto started = std::chrono::steady_clock::now();
+    const auto result = executor.execute(task, context);
+    CHECK_FALSE(result.success);
+    CHECK(result.error_message.find("task deadline") != std::string::npos);
+    CHECK(std::chrono::steady_clock::now() - started <
+          std::chrono::seconds(3));
+    CHECK(context.getValueByPath(
+        "tasks.deadline_guard.outputs.must_not_publish").is_null());
+}
+
 TEST_CASE("opt-in C11 workflow rejects bad plan before leaf side effects") {
     using Praktor::Execution::ActionTreeBackend;
     using Praktor::Execution::DeclarativeTreeExecutor;
