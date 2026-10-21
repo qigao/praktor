@@ -1054,12 +1054,12 @@ int testPipelineSequencePreservesInputMutationWithinStage() {
     return tree;
   };
   const auto registerTasks = [](actions::Executor& executor) {
-    executor.registerTask("MutatePipelineInput")(
+    executor.registerTask("MutatePipelineInput",
         [](const auto&, actions::Blackboard& bb) {
           bb.set("pipeline_input", "mutated");
           return actions::NodeStatus::SUCCESS;
         });
-    executor.registerTask("ObservePipelineInput")(
+    executor.registerTask("ObservePipelineInput",
         [](const auto&, actions::Blackboard& bb) {
           if (bb.get("pipeline_input") != "mutated")
             return actions::NodeStatus::FAILURE;
