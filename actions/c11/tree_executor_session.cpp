@@ -655,52 +655,57 @@ struct TreeExecutorSession::Impl : std::enable_shared_from_this<Impl> {
   int closeShellProcess(ShellState& state, bool clear_state) noexcept {
     int result = SALTS_OK;
     if (state.process.impl != nullptr) {
-      const int close_status = cflow_process_close(&state.process);
       state.close_requested = true;
-      if (close_status != SALTS_OK && close_status != SALTS_EBUSY) {
-        state.io_failed = true;
-        if (state.failure_reason.empty()) {
-          state.failure_reason = "Salts::Process close failed with status " +
-                                 std::to_string(close_status);
-        }
-      }
-
-      // close() requests native termination and cancellation. Keep driving until
-      // every admitted I/O lease has reached its terminal callback and the
-      // process adapter is quiescent; destroy must never race completion leases.
-      while (!cflow_process_is_quiescent(&state.process)) {
+      // Each shutdown_step is non-destructive and drives at most 64 actor
+      // transitions. A persistent native/ack error cannot strand cancel()
+      // or the Session destructor in an unbounded synchronous loop.
+      const auto deadline = std::chrono::steady_clock::now() +
+                            std::chrono::seconds(3);
+      bool quiescent = false;
+      for (size_t attempt = 0u; attempt < 4096u &&
+           std::chrono::steady_clock::now() < deadline; ++attempt) {
         size_t progressed = 0u;
-        const int drive_status =
-            cflow_process_run_ready(&state.process, 64u, &progressed);
-        if (drive_status != SALTS_OK && drive_status != SALTS_EBUSY) {
+        const int status = cflow_process_shutdown_step(
+            &state.process, 64u, &progressed, &quiescent);
+        if (status != SALTS_OK && status != SALTS_EBUSY) {
           state.io_failed = true;
-          if (state.failure_reason.empty()) {
-            state.failure_reason = "Salts::Process drain failed with status " +
-                                   std::to_string(drive_status);
-          }
+          if (state.failure_reason.empty())
+            state.failure_reason = "Salts::Process shutdown step failed with status " +
+                                   std::to_string(status);
+          break;
         }
+        if (quiescent) break;
         if (progressed == 0u)
           std::this_thread::sleep_for(std::chrono::milliseconds(1));
       }
-      const int destroy_status = cflow_process_destroy(&state.process);
-      if (destroy_status != SALTS_OK) {
-        state.io_failed = true;
-        if (state.failure_reason.empty()) {
-          state.failure_reason = "Salts::Process destroy failed with status " +
-                                 std::to_string(destroy_status);
+
+      if (quiescent) {
+        const int status = cflow_process_destroy(&state.process);
+        if (status != SALTS_OK) {
+          state.io_failed = true;
+          if (state.failure_reason.empty())
+            state.failure_reason = "Salts::Process destroy failed with status " +
+                                   std::to_string(status);
         }
+      }
+      if (state.process.impl != nullptr) {
+        // The retention token and all borrowed buffers remain in ShellState.
+        // The Session destructor hands them to the explicit recovery owner.
+        state.io_failed = true;
+        result = SALTS_EBUSY;
+        if (state.failure_reason.empty())
+          state.failure_reason = "Salts::Process still owns active I/O leases";
       }
     }
 
-    if (state.io_failed) result = SALTS_EIO;
+    if (state.io_failed && result == SALTS_OK) result = SALTS_EIO;
     const std::string failure = state.failure_reason;
     if (clear_state) finalizeShellState(state);
     else if (state.process.impl != nullptr &&
              state.node_index < leaf_owners.size())
       leaf_owners[state.node_index] = LeafOwner::SaltsProcess;
-    if (result != SALTS_OK && last_error.empty()) {
+    if (result != SALTS_OK && last_error.empty())
       last_error = failure.empty() ? "Salts::Process cleanup failed" : failure;
-    }
     return result;
   }
 
