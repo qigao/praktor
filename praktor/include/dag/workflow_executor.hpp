@@ -81,6 +81,8 @@ private:
     DependencyGraph<Task>& graph_;
     std::unordered_map<std::string, std::string> base_environment_;
     size_t max_concurrency_;
+    Praktor::Execution::ActionTreeBackend action_backend_ =
+        Praktor::Execution::ActionTreeBackend::Legacy;
     Praktor::Execution::TriggerExecutor trigger_executor_;
 
     // Executor registry: maps TaskAction to its executor implementation
