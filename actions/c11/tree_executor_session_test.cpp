@@ -2449,6 +2449,113 @@ void isolatedParallelAbort(void* user, size_t, size_t child_index) {
   state->branch_blackboards[child_index].reset();
 }
 
+int isolatedParallelFailStep(void*, size_t, size_t,
+                             salts_bt_node_status) {
+  return SALTS_EIO;
+}
+
+int isolatedParallelRunningLeafTick(void* user, size_t node_index,
+                                    salts_bt_node_status* out_status) {
+  auto* state = static_cast<IsolatedParallelHost*>(user);
+  if (state == nullptr || out_status == nullptr || node_index == 0u ||
+      node_index > 2u) return SALTS_EINVAL;
+  const size_t branch = node_index - 1u;
+  if (!state->branch_blackboards[branch] || !state->branch_contexts[branch])
+    return SALTS_EINVAL;
+  *out_status = SALTS_BT_RUNNING;
+  return SALTS_OK;
+}
+
+int isolatedParallelStepAcceptRunning(void* user, size_t, size_t,
+                                      salts_bt_node_status status) {
+  return user != nullptr && status == SALTS_BT_RUNNING ? SALTS_OK : SALTS_EINVAL;
+}
+
+int isolatedParallelJoinRunning(void* user, size_t,
+                                salts_bt_node_status status) {
+  return user != nullptr && status == SALTS_BT_RUNNING ? SALTS_OK : SALTS_EINVAL;
+}
+
+int testHostBranchResourcesReleasedAfterParallelStepFailure() {
+  actions::Tree tree;
+  tree.root.id = "Parallel";
+  actions::Node first;
+  first.id = "First";
+  actions::Node second;
+  second.id = "Second";
+  tree.root.children.push_back(first);
+  tree.root.children.push_back(second);
+
+  actions::Executor executor;
+  actions::Blackboard blackboard;
+  actions::ExecutionContext context;
+  IsolatedParallelHost state;
+  state.executor = &executor;
+  state.root_blackboard = &blackboard;
+  praktor_c11_bt_host hooks{};
+  hooks.tick_leaf = &isolatedParallelLeafTick;
+  hooks.halt_leaf = &parallelTestLeafHalt;
+  hooks.parallel_enter = &isolatedParallelEnter;
+  hooks.parallel_step = &isolatedParallelFailStep;
+  hooks.parallel_join = &isolatedParallelJoin;
+  hooks.parallel_finish = &isolatedParallelFinish;
+  hooks.parallel_abort = &isolatedParallelAbort;
+  hooks.user = &state;
+
+  actions::c11::TreeExecutorSession session(
+      tree, executor, blackboard, context, limits(), &hooks);
+  state.session = &session;
+  salts_bt_node_status status = SALTS_BT_FAILURE;
+  CHECK(session.tick(&status) == SALTS_EIO);
+  CHECK(state.aborts[0] + state.aborts[1] == 2);
+  CHECK(!state.branch_blackboards[0] && !state.branch_blackboards[1]);
+  CHECK(!state.branch_contexts[0] && !state.branch_contexts[1]);
+  return 0;
+}
+
+int testHostBranchResourcesReleasedOnParallelCancel() {
+  actions::Tree tree;
+  tree.root.id = "Parallel";
+  actions::Node first;
+  first.id = "RunningA";
+  actions::Node second;
+  second.id = "RunningB";
+  tree.root.children.push_back(first);
+  tree.root.children.push_back(second);
+
+  actions::Executor executor;
+  actions::Blackboard blackboard;
+  actions::ExecutionContext context;
+  IsolatedParallelHost state;
+  state.executor = &executor;
+  state.root_blackboard = &blackboard;
+  praktor_c11_bt_host hooks{};
+  hooks.tick_leaf = &isolatedParallelRunningLeafTick;
+  hooks.halt_leaf = &parallelTestLeafHalt;
+  hooks.parallel_enter = &isolatedParallelEnter;
+  hooks.parallel_step = &isolatedParallelStepAcceptRunning;
+  hooks.parallel_join = &isolatedParallelJoinRunning;
+  hooks.parallel_finish = &isolatedParallelFinish;
+  hooks.parallel_abort = &isolatedParallelAbort;
+  hooks.user = &state;
+
+  actions::c11::TreeExecutorSession session(
+      tree, executor, blackboard, context, limits(), &hooks);
+  state.session = &session;
+  salts_bt_node_status status = SALTS_BT_FAILURE;
+  CHECK(session.tick(&status) == SALTS_OK);
+  CHECK(status == SALTS_BT_RUNNING);
+  CHECK(state.branch_blackboards[0] && state.branch_blackboards[1]);
+  CHECK(state.branch_contexts[0] && state.branch_contexts[1]);
+  CHECK(session.cancel() == SALTS_OK);
+  CHECK(state.aborts[0] == 1 && state.aborts[1] == 1);
+  CHECK(!state.branch_blackboards[0] && !state.branch_blackboards[1]);
+  CHECK(!state.branch_contexts[0] && !state.branch_contexts[1]);
+  CHECK(session.cancel() == SALTS_OK);
+  CHECK(state.aborts[0] == 1 && state.aborts[1] == 1);
+  return 0;
+}
+
 int testHostSuppliedParallelBranchIsolationAndMergeOrder() {
   actions::Tree tree;
   tree.root.id = "Parallel";
@@ -2532,6 +2639,8 @@ int main() {
   if (testNonEmptyParallelFailsClosedWithoutFullHookGroup() != 0) return 1;
   if (testParallelInvokesCompleteHostHookGroup() != 0) return 1;
   if (testHostSuppliedParallelBranchIsolationAndMergeOrder() != 0) return 1;
+  if (testHostBranchResourcesReleasedAfterParallelStepFailure() != 0) return 1;
+  if (testHostBranchResourcesReleasedOnParallelCancel() != 0) return 1;
   if (testParallelHookFailureAbortsEnteredBranches() != 0) return 1;
   if (testParallelAbortHookRunsForRunningChildrenOnCancel() != 0) return 1;
   if (testEmptyParallelAndReactiveSequenceMatchExecutor() != 0) return 1;
