@@ -1283,7 +1283,12 @@ struct TreeExecutorSession::Impl {
   template <typename Callback>
   int safeHostStatus(const char* operation, Callback&& callback) noexcept {
     try {
-      return callback();
+      const int status = callback();
+      if (status != SALTS_OK && last_error.empty()) {
+        last_error = std::string(operation) + ": returned status " +
+                     std::to_string(status);
+      }
+      return status;
     } catch (...) {
       rememberCurrentException(operation);
       return SALTS_EIO;
