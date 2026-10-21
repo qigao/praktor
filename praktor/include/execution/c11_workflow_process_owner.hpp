@@ -10,6 +10,7 @@
 #include "workflow_runner.hpp"
 
 #include <salts/process_retainer.h>
+#include <salts/error_codes.h>
 
 #include <atomic>
 #include <cstddef>
