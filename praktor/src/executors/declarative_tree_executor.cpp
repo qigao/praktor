@@ -452,8 +452,10 @@ void DeclarativeTreeExecutor::contextToBlackboard(const WorkflowContext& context
 }
 
 DeclarativeTreeExecutor::DeclarativeTreeExecutor(
-    EnvMap base_environment, ActionTreeBackend backend)
-    : base_environment_(std::move(base_environment)), backend_(backend) {}
+    EnvMap base_environment, ActionTreeBackend backend,
+    cflow_process_retainer* recovery_owner)
+    : base_environment_(std::move(base_environment)),
+      backend_(backend), recovery_owner_(recovery_owner) {}
 
 // Task 3.7: Map blackboard outputs back to context
 void DeclarativeTreeExecutor::blackboardToContext(const actions::Blackboard& bb, 
@@ -593,7 +595,8 @@ TaskResult DeclarativeTreeExecutor::execute(const Task& task, WorkflowContext& c
     salts_bt_tree_config_init(&config);
     actions::ExecutionContext node_context;
     actions::c11::TreeExecutorSession session(
-        tree, executor, blackboard, node_context, config);
+        tree, executor, blackboard, node_context, config,
+        nullptr, recovery_owner_);
     const int deadline_ms = task.timeout ? parseDurationMs(*task.timeout) : 30000;
     if (deadline_ms <= 0) {
       throw std::invalid_argument("C11 action-tree deadline must be positive");
@@ -727,10 +730,11 @@ TaskResult DeclarativeTreeExecutor::execute(const Task& task, WorkflowContext& c
 }
 
 std::unique_ptr<TaskExecutor> createDeclarativeTreeExecutor(
-    EnvMap base_environment, ActionTreeBackend backend)
+    EnvMap base_environment, ActionTreeBackend backend,
+    cflow_process_retainer* recovery_owner)
 {
   return std::make_unique<DeclarativeTreeExecutor>(
-      std::move(base_environment), backend);
+      std::move(base_environment), backend, recovery_owner);
 }
 
 }  // namespace Praktor::Execution
