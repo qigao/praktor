@@ -842,6 +842,48 @@ int testRetryAndPersistentRunOnceMatchesLegacyExecutor() {
     CHECK(c11_calls == 1);
   }
 
+  // EntryUpdated also retains its terminal observation while Retry retries
+  // the same unchanged Blackboard value; the leaf must not run again.
+  {
+    auto tree = makeRetryTree(3.0, "EntryUpdated");
+    tree.root.children[0].params.emplace(
+        "watch_key", actions::Value{std::string("watched")});
+    actions::Node leaf;
+    leaf.id = "AlwaysFail";
+    tree.root.children[0].children.push_back(leaf);
+
+    actions::Executor legacy;
+    int legacy_calls = 0;
+    legacy.registerTask("AlwaysFail", [&legacy_calls](const auto&,
+                                                       actions::Blackboard&) {
+      ++legacy_calls;
+      return actions::NodeStatus::FAILURE;
+    });
+    actions::Blackboard legacy_blackboard;
+    legacy_blackboard.set("watched", "first");
+    actions::ExecutionContext legacy_context;
+    CHECK(legacy.execute(tree.root, legacy_blackboard, legacy_context) ==
+          actions::NodeStatus::FAILURE);
+    CHECK(legacy_calls == 1);
+
+    actions::Executor c11;
+    int c11_calls = 0;
+    c11.registerTask("AlwaysFail", [&c11_calls](const auto&,
+                                                 actions::Blackboard&) {
+      ++c11_calls;
+      return actions::NodeStatus::FAILURE;
+    });
+    actions::Blackboard c11_blackboard;
+    c11_blackboard.set("watched", "first");
+    actions::ExecutionContext c11_context;
+    actions::c11::TreeExecutorSession session(tree, c11, c11_blackboard,
+                                              c11_context, limits());
+    salts_bt_node_status status = SALTS_BT_SUCCESS;
+    CHECK(session.tick(&status) == SALTS_OK);
+    CHECK(status == SALTS_BT_FAILURE);
+    CHECK(c11_calls == 1);
+  }
+
   // Zero attempts is a terminal FAILURE and never invokes the child.
   {
     auto tree = makeRetryTree(0.0, "NeverRun");
