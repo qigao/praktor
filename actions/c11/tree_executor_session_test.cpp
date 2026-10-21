@@ -1467,6 +1467,37 @@ int testParallelInvokesCompleteHostHookGroup() {
   return 0;
 }
 
+
+int testParallelAbortHookRunsForRunningChildrenOnCancel() {
+  actions::Tree tree;
+  tree.root.id = "Parallel";
+  tree.root.children.resize(2);
+  tree.root.children[0].id = "RunningA";
+  tree.root.children[1].id = "RunningB";
+
+  ParallelHookStats stats;
+  stats.child_statuses = {SALTS_BT_RUNNING, SALTS_BT_RUNNING};
+  TreeExecutorHooks hooks;
+  hooks.tick_leaf = &parallelTestLeafTick;
+  hooks.halt_leaf = &parallelTestLeafHalt;
+  hooks.parallel_enter = &parallelTestEnter;
+  hooks.parallel_step = &parallelTestStep;
+  hooks.parallel_join = &parallelTestJoin;
+  hooks.parallel_finish = &parallelTestFinish;
+  hooks.parallel_abort = &parallelTestAbort;
+
+  TreeExecutorSession session(tree, {}, hooks);
+  CHECK(session.tick() == SALTS_BT_RUNNING);
+  CHECK(stats.enters == 2u);
+  CHECK(stats.steps == 2u);
+  CHECK(session.cancel() == SALTS_OK);
+  CHECK(stats.aborts == 2u);
+  CHECK(session.cancel() == SALTS_OK);
+  CHECK(stats.aborts == 2u);
+  return 0;
+}
+
+
 int testEmptyParallelAndReactiveSequenceMatchExecutor() {
   const char* const node_kinds[] = {"Parallel", "ReactiveSequence"};
   for (const char* node_kind : node_kinds) {
@@ -2285,6 +2316,7 @@ int main() {
   if (testEmptySwitchResolvesSelectorThenFails() != 0) return 1;
   if (testNonEmptyParallelFailsClosedWithoutFullHookGroup() != 0) return 1;
   if (testParallelInvokesCompleteHostHookGroup() != 0) return 1;
+  if (testParallelAbortHookRunsForRunningChildrenOnCancel() != 0) return 1;
   if (testEmptyParallelAndReactiveSequenceMatchExecutor() != 0) return 1;
   if (testRunOnceAndKeepRunningStateMatchExecutor() != 0) return 1;
   if (testSubTreeExpansionAndCycleRejection() != 0) return 1;
