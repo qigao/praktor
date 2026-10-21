@@ -20,6 +20,8 @@ using actions::c11::compileTreePlan;
 
 namespace {
 
+int expectInvalid(Tree& tree, Blackboard& blackboard);
+
 salts_bt_tree_config testLimits() {
   salts_bt_tree_config limits{};
   salts_bt_tree_config_init(&limits);
@@ -209,8 +211,6 @@ int testZeroBudgetKeepRunningLowersToNoOpFailureLeaf() {
   CHECK(plan.nodes[0].kind == SALTS_BT_NODE_LEAF);
   return 0;
 }
-
-int expectInvalid(Tree& tree, Blackboard& blackboard);
 
 int testZeroBudgetControlsStillValidateChildArity() {
   Blackboard blackboard;
