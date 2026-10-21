@@ -13,6 +13,7 @@
 
 #if PRAKTOR_C11_ACTIONS_ENABLED
 #include <salts/process_retainer.h>
+#include "execution/c11_workflow_process_owner.hpp"
 #endif
 
 namespace {
@@ -154,6 +155,102 @@ struct ScopedWorkflowProcessOwner {
     }
 };
 } // namespace
+
+TEST_CASE("C11 WorkflowProcessOwner executes and closes only after owner drain") {
+    const auto dir = createCoreOnlyTempDir();
+    const auto workflow = dir / "owner-workflow.yml";
+    const auto marker = dir / "owner-produced.txt";
+#ifdef _WIN32
+    const std::string cmd = "echo owner > \"" + marker.string() + "\"";
+#else
+    const std::string cmd = "printf owner > '" + marker.string() + "'";
+#endif
+    writeText(workflow, "tasks:\n"
+                       "  - name: owner_task\n"
+                       "    sequence:\n"
+                       "      - shell:\n"
+                       "          cmd: |-\n"
+                       "            " + cmd + "\n");
+    WorkflowRunner runner(workflow.string());
+    Praktor::Execution::C11WorkflowProcessOwner host(1u);
+    const auto result = host.execute(runner);
+    CHECK(result.success);
+    CHECK(std::filesystem::exists(marker));
+    std::size_t reaped = 0u, pending = 0u;
+    CHECK(host.runReady(64u, &reaped, &pending) == SALTS_OK);
+    CHECK(pending == 0u);
+    CHECK(host.close() == SALTS_OK);
+    const auto denied = host.execute(runner);
+    CHECK_FALSE(denied.success);
+    CHECK(denied.error_message.find("closed") != std::string::npos);
+    std::filesystem::remove_all(dir);
+}
+
+TEST_CASE("C11 WorkflowProcessOwner serializes concurrent execution and recovery") {
+    const auto dir = createCoreOnlyTempDir();
+    const auto workflow = dir / "serialized-owner.yml";
+    const auto marker = dir / "started.txt";
+#ifdef _WIN32
+    const std::string cmd = "echo started > \"" + marker.string() +
+        "\" & powershell.exe -NoProfile -NonInteractive -Command Start-Sleep -Seconds 30";
+#else
+    const std::string cmd = "printf started > '" + marker.string() + "'; exec sleep 30";
+#endif
+    writeText(workflow, "tasks:\n"
+                       "  - name: serialized_task\n"
+                       "    timeout: 15000\n"
+                       "    sequence:\n"
+                       "      - shell:\n"
+                       "          cmd: |-\n"
+                       "            " + cmd + "\n"
+                       "          timeout: 30000\n");
+
+    WorkflowRunner runner(workflow.string());
+    Praktor::Execution::C11WorkflowProcessOwner host(1u);
+    auto control = std::make_shared<Praktor::Execution::ExecutionControl>();
+    WorkflowExecutionResult running_result{};
+    std::thread running([&] {
+        running_result = host.execute(runner, control);
+    });
+    struct JoinOnExit {
+        std::thread& thread;
+        ~JoinOnExit() {
+            if (thread.joinable()) thread.join();
+        }
+    } join_guard{running};
+
+    const auto started_deadline = std::chrono::steady_clock::now() +
+                                  std::chrono::seconds(8);
+    while (!std::filesystem::exists(marker) &&
+           std::chrono::steady_clock::now() < started_deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    const bool admitted = std::filesystem::exists(marker);
+    std::size_t reaped = 0u, pending = 0u;
+    if (admitted) {
+        CHECK(host.runReady(64u, &reaped, &pending) == SALTS_EBUSY);
+        CHECK(host.close() == SALTS_EBUSY);
+        const auto rejected = host.execute(runner);
+        CHECK_FALSE(rejected.success);
+        CHECK(rejected.error_message.find("active driver") != std::string::npos);
+    }
+    control->requestCancel();
+    running.join();
+    CHECK(admitted);
+    CHECK_FALSE(running_result.success);
+
+    const auto finished_deadline = std::chrono::steady_clock::now() +
+                                   std::chrono::seconds(8);
+    for (;;) {
+        const int status = host.runReady(64u, &reaped, &pending);
+        CHECK((status == SALTS_OK || status == SALTS_EBUSY));
+        if (pending == 0u) break;
+        CHECK(std::chrono::steady_clock::now() < finished_deadline);
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    CHECK(host.close() == SALTS_OK);
+    std::filesystem::remove_all(dir);
+}
 
 TEST_CASE("WorkflowRunner selects C11 only with a live single-driver Process host") {
     const auto dir = createCoreOnlyTempDir();
