@@ -45,6 +45,15 @@ struct TreePlan {
  * Throws std::invalid_argument for unsupported/malformed node definitions and
  * std::length_error when the supplied Salts tree limits are exceeded.
  */
+/* Resolve substituted numeric controls against the current Blackboard. */
+int64_t resolveIntegerParameter(const actions::Node &node,
+                                const actions::Blackboard &blackboard,
+                                const char *key, int64_t default_value,
+                                bool required = false);
+uint64_t resolveDurationParameter(const actions::Node &node,
+                                  const actions::Blackboard &blackboard,
+                                  const char *key, int64_t default_ms);
+
 TreePlan compileTreePlan(const actions::Tree &tree,
                          const actions::Blackboard &blackboard,
                          const salts_bt_tree_config &limits);
