@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Require Salts::Process linkage and reject a second Praktor OS process backend."""
+"""Audit Shell/Program ownership and the persistent-application control bridge.
+
+This does not cover the remaining Windows application-identity native backend.
+"""
 import re
 import subprocess
 import sys
@@ -31,4 +34,14 @@ for symbol in ('fork', 'vfork', 'posix_spawn', 'execve', 'waitpid', 'pipe', 'pip
                'CreateJobObjectW', 'TerminateProcess', 'TerminateJobObject'):
     if re.search(r'\b' + symbol + r'\b', symbols + facade):
         raise SystemExit('Praktor OS process backend remains: ' + symbol)
-print('Process facade: Salts::Process owns native spawn, I/O and teardown')
+if len(sys.argv) > 3:
+    archive = subprocess.check_output(['nm', '-u', '-A', sys.argv[3]], text=True)
+    control = '\n'.join(line for line in archive.splitlines()
+                        if 'process_control_legacy_bridge' in line)
+    if not re.search(r'\bpraktor_process_control_execute\b', control):
+        raise SystemExit('Application controller must delegate to the C state machine')
+    if re.search(r'steady_clock|this_thread|sleep_for|cmeta_(?:sleep|hrtime|monotonic)|'
+                 r'_ZNSt6thread|_ZNSt5mutex|_ZNSt18condition_variable', control):
+        raise SystemExit('C++ application bridge still owns polling/time/synchronization')
+    print('Application control bridge: C owns polling, deadlines and compensation')
+print('Shell/Program facade: Salts::Process owns native spawn, I/O and teardown')

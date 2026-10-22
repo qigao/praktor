@@ -93,7 +93,11 @@ Validation projects:
   callback-user destruction. The joined worker suite additionally tests copied
   argv/environment/binary input, bounded admission, setup failure, pre-admission
   cancellation, concurrent observers, callback reentrancy, timeout, overflow,
-  failed spawn and teardown before callback storage destruction. Both executables
+  failed spawn and teardown before callback storage destruction. The application
+  controller suite covers typed arguments, idempotence, restart ordering, startup
+  compensation against an exact instance despite replacement queries, late native
+  calls, stop escalation, error propagation and counter wrap with a controlled
+  monotonic clock. All three executables
   reject C++ ABI/runtime dependencies and run against baseline and P1 profiles.
 - `actions/c11/session-c-standalone`: a `LANGUAGES C` project that rejects C++
   compiler/target loading. TinyTest exercises owned plan lifetime, bounded state,
@@ -141,3 +145,23 @@ always joins; it never detaches a live driver or drops native leases. Removing a
 C++ is the migration goal; this step does not yet replace the default backend.
 Full WorkflowContext migration, all built-in leaves, native event queues,
 branch-transaction integration and complete YAML/node parity remain open.
+
+Persistent application control is a separate synchronous C state machine in
+`shared/process/src/process_control.c`: bounded stack state, no allocations,
+typed query/start/stop/terminate hooks, and Salts monotonic time/sleep. Backend
+call time consumes startup/stop deadlines. It preserves the original started
+PID/session/token/image for timeout compensation and re-queries before forced
+stop. It leaves successful persistent applications alive. Its borrowed string
+lifetimes are explicit in `process_control.h`; start and query identity storage
+must be independent, and failed queries must preserve the last successful image.
+Callbacks cannot be preempted and must themselves be bounded by the host.
+
+`praktor/src/system/managed_process.cpp` is removed. The explicit
+`process_control_legacy_bridge.cpp` only converts legacy values, pins separate
+successful start/query snapshots and contains/rethrows exceptions around the C
+boundary. All existing controller/executor tests also run with the script engine
+disabled, including real Windows identity/instance tests. ASan/UBSan and the
+complete-source TSan slice include this bridge suite. The C application-control
+test additionally links and runs without any C++ compiler/runtime in both SDK
+profiles. The Windows identity/native backend in `managed_process_win.cpp`
+still remains C++; migrating that backend is separate unfinished work.

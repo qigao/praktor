@@ -208,7 +208,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 cmake/ci/audit-process-adapter.py build/ci-sdk/shared/shell/libpraktor_shell.a \
-            build/ci-sdk/shared/process/libpraktor_process_driver.a
+            build/ci-sdk/shared/process/libpraktor_process_driver.a build/ci-sdk/praktor/libpraktor_lib.a
 
       # Independent C-only project, with no C++ compiler or actions library.
       - name: C11 BehaviorTree adapter standalone C-only link
@@ -232,6 +232,7 @@ jobs:
           cmake --build build/ci-process-c --parallel 2
           python3 cmake/ci/audit-c11-runtime-link.py build/ci-process-c/praktor_process_driver_test
           python3 cmake/ci/audit-c11-runtime-link.py build/ci-process-c/praktor_process_worker_test
+          python3 cmake/ci/audit-c11-runtime-link.py build/ci-process-c/praktor_process_control_test
           ctest --test-dir build/ci-process-c --no-tests=error --output-on-failure
 
       - name: C11 Session without a C++ compiler or runtime

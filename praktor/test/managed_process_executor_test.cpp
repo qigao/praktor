@@ -50,7 +50,7 @@ ManagedProcessSnapshot running(std::uint32_t pid = kFixturePid) {
 }
 
 ManagedProcessSnapshot notRunning() {
-  return {ManagedProcessState::NotRunning, 0};
+  return {ManagedProcessState::NotRunning, 0, 0, 0, {}};
 }
 
 template <typename T>
@@ -472,6 +472,35 @@ spec("startup timeout reports compensation confirmation timeout") {
 spec("managed process stop timeout does not terminate unless explicitly enabled") {
     it("force termination disabled") { test_managed_process_stop_timeout_does_not_terminate_unless_explicitly_enabled_11(0); }
     it("force termination enabled") { test_managed_process_stop_timeout_does_not_terminate_unless_explicitly_enabled_11(1); }
+}
+
+spec("C process control bridge preserves ownership and exceptions") {
+  it("keeps the last successful image alive after a failed query") {
+    FakeManagedProcessBackend backend;
+    const std::string image(4096, 'x');
+    std::size_t queries = 0;
+    backend.query_action = [&]() -> ManagedProcessResult<ManagedProcessSnapshot> {
+      if (++queries > 1) return {false, {}, 5, "query denied"};
+      auto snapshot = running(); snapshot.canonical_image_name = image;
+      return success(std::move(snapshot));
+    };
+    ManagedProcessController controller(backend, std::chrono::milliseconds(1));
+    const auto result = controller.execute(params(SystemOperation::Stop));
+    check((!result.ok && result.changed && result.native_error == 5));
+    check((result.phase == "stop_poll" && result.snapshot.canonical_image_name == image));
+    check((result.snapshot.pid == kFixturePid && backend.terminated_snapshots.empty()));
+  }
+  it("rethrows backend exceptions after returning across the C boundary") {
+    FakeManagedProcessBackend backend;
+    backend.start_action = []() -> ManagedProcessResult<ManagedProcessSnapshot> {
+      throw std::runtime_error("backend admission exception");
+    };
+    ManagedProcessController controller(backend, std::chrono::milliseconds(1));
+    check((praktor_test::throws_containing(
+        [&] { controller.execute(params(SystemOperation::Start)); },
+        {"backend admission exception"})));
+    check((backend.started_params.size() == 1 && backend.terminated_snapshots.empty()));
+  }
 }
 
 [[maybe_unused]] static void test_managed_process_executor_maps_outputs_and_structured_failures_12(int section_index) {

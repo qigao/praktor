@@ -33,20 +33,21 @@ cmake --preset "$CMAKE_PRESET" -B "$build_dir" \
   "-DCMAKE_SHARED_LINKER_FLAGS=$sanitizer_flags"
 
 cmake --build "$build_dir" \
-  --target shell_executor_test praktor_process_driver_test praktor_process_worker_test actions_c11_tree_executor_session_test actions_c11_session_c_test actions_c11_tree_plan_test actions_c11_session_independent_test actions_c11_native_host_test actions_c11_session_yaml_differential_test core_only_workflow_test.praktor_lib \
+  --target shell_executor_test praktor_process_driver_test praktor_process_worker_test praktor_process_control_test managed_process_executor_test.praktor_lib actions_c11_tree_executor_session_test actions_c11_session_c_test actions_c11_tree_plan_test actions_c11_session_independent_test actions_c11_native_host_test actions_c11_session_yaml_differential_test core_only_workflow_test.praktor_lib \
   --parallel 2
 # Released Salts.Native is not TSan-instrumented. Consumer-only TSan
 # cannot see its async logger's release/acquire edges and reports an invalid
-# mixed-instrumentation race in the full WorkflowRunner test. That exact
-# test is instead REQUIRED in .github/workflows/c11-source-tsan.yml with
+# mixed-instrumentation race in tests exercising WorkflowRunner/Executor
+# logging. WorkflowRunner and the application-control bridge tests are instead
+# REQUIRED in .github/workflows/c11-source-tsan.yml with
 # fully instrumented Salts + SaltsUtils and attested actual DSO linkage.
 # The separately instrumented C11 Session smoke test remains useful here.
 case "$mode" in
   address)
-    test_regex='^(shell_executor_test|praktor_process_driver_test|praktor_process_worker_test|actions_c11_tree_executor_session_test|actions_c11_session_c_test|actions_c11_tree_plan_test|actions_c11_session_independent_test|actions_c11_native_host_test|actions_c11_session_yaml_differential_test|core_only_workflow_test\.praktor_lib)$'
+    test_regex='^(managed_process_executor_test\.praktor_lib|shell_executor_test|praktor_process_driver_test|praktor_process_worker_test|praktor_process_control_test|actions_c11_tree_executor_session_test|actions_c11_session_c_test|actions_c11_tree_plan_test|actions_c11_session_independent_test|actions_c11_native_host_test|actions_c11_session_yaml_differential_test|core_only_workflow_test\.praktor_lib)$'
     ;;
   thread)
-    test_regex='^(shell_executor_test|praktor_process_driver_test|praktor_process_worker_test|actions_c11_tree_executor_session_test|actions_c11_session_c_test|actions_c11_tree_plan_test|actions_c11_session_independent_test|actions_c11_native_host_test)$'
+    test_regex='^(shell_executor_test|praktor_process_driver_test|praktor_process_worker_test|praktor_process_control_test|actions_c11_tree_executor_session_test|actions_c11_session_c_test|actions_c11_tree_plan_test|actions_c11_session_independent_test|actions_c11_native_host_test)$'
     ;;
 esac
 ctest --test-dir "$build_dir" \

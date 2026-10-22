@@ -209,6 +209,7 @@ jobs:
           cmake --build build/p1-process-c-tsan --parallel 2
           python3 cmake/ci/audit-c11-runtime-link.py build/p1-process-c-tsan/praktor_process_driver_test
           python3 cmake/ci/audit-c11-runtime-link.py build/p1-process-c-tsan/praktor_process_worker_test
+          python3 cmake/ci/audit-c11-runtime-link.py build/p1-process-c-tsan/praktor_process_control_test
           export LD_LIBRARY_PATH="$SALTS_SOURCE_TSAN_ROOT/lib:$SALTS_UTILS_SOURCE_TSAN_ROOT/lib:$CHTTP_ROOT/lib:${LD_LIBRARY_PATH:-}"
           ctest --test-dir build/p1-process-c-tsan --no-tests=error --output-on-failure --timeout 90
 
@@ -253,15 +254,15 @@ jobs:
             "-DCMAKE_EXE_LINKER_FLAGS=-fsanitize=thread" \
             "-DCMAKE_SHARED_LINKER_FLAGS=-fsanitize=thread"
           cmake --build build/p1-praktor-tsan \
-            --target shell_executor_test praktor_process_driver_test praktor_process_worker_test core_only_workflow_test.praktor_lib actions_c11_tree_executor_session_test actions_c11_session_yaml_differential_test \
+            --target shell_executor_test praktor_process_driver_test praktor_process_worker_test praktor_process_control_test managed_process_executor_test.praktor_lib core_only_workflow_test.praktor_lib actions_c11_tree_executor_session_test actions_c11_session_yaml_differential_test \
             --parallel 2
 
-      - name: Reject an alternative Praktor native process backend
+      - name: Audit Shell ownership and application control bridge
         shell: bash
         run: |
           set -euo pipefail
           python3 cmake/ci/audit-process-adapter.py build/p1-praktor-tsan/shared/shell/libpraktor_shell.a \
-            build/p1-praktor-tsan/shared/process/libpraktor_process_driver.a
+            build/p1-praktor-tsan/shared/process/libpraktor_process_driver.a build/p1-praktor-tsan/praktor/libpraktor_lib.a
 
       - name: Require fully instrumented Salts dynamic linkage
         shell: bash
@@ -287,7 +288,7 @@ jobs:
           export LD_LIBRARY_PATH="$SALTS_SOURCE_TSAN_ROOT/lib:$SALTS_UTILS_SOURCE_TSAN_ROOT/lib:$CHTTP_ROOT/lib:${LD_LIBRARY_PATH:-}"
           ctest --test-dir build/p1-praktor-tsan \
             --no-tests=error --output-on-failure --parallel 1 --timeout 90 \
-            -R '^(shell_executor_test|praktor_process_driver_test|praktor_process_worker_test|core_only_workflow_test\.praktor_lib|actions_c11_tree_executor_session_test|actions_c11_session_yaml_differential_test)$'
+            -R '^(shell_executor_test|praktor_process_driver_test|praktor_process_worker_test|praktor_process_control_test|managed_process_executor_test\.praktor_lib|core_only_workflow_test\.praktor_lib|actions_c11_tree_executor_session_test|actions_c11_session_yaml_differential_test)$'
 
       - uses: actions/upload-artifact@v4
         if: always()

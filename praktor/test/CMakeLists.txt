@@ -31,7 +31,6 @@ if(ENABLE_SCRIPT_ENGINE)
         script_engine_test.cpp
         declarative_tree_executor_test.cpp
         service_executor_test.cpp
-        managed_process_executor_test.cpp
         structured_document_query_test.cpp
     )
 else()
@@ -39,6 +38,7 @@ else()
 endif()
 
 list(APPEND TEST_SOURCES
+    managed_process_executor_test.cpp
     download_executor_test.cpp
     workflow_execution_regression_test.cpp
     system_info_test.cpp
@@ -82,55 +82,57 @@ if(ENABLE_SCRIPT_ENGINE)
         workflow_runner_test.${TARGET_NAME_LIB}
         PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../src
     )
+endif()
 
-    if(WIN32)
-        add_executable(managed_process_fixture helpers/managed_process_fixture.cpp)
-        add_executable(managed_process_fixture_alt helpers/managed_process_fixture.cpp)
+if(WIN32)
+    add_executable(managed_process_fixture helpers/managed_process_fixture.cpp)
+    add_executable(managed_process_fixture_alt helpers/managed_process_fixture.cpp)
+    set_target_properties(managed_process_fixture_alt PROPERTIES
+        OUTPUT_NAME "managed_process_fixture"
+        SUFFIX ".com"
+    )
+    if(MSVC)
         set_target_properties(managed_process_fixture_alt PROPERTIES
-            OUTPUT_NAME "managed_process_fixture"
-            SUFFIX ".com"
+            PDB_NAME "managed_process_fixture_alt"
         )
-        if(MSVC)
-            set_target_properties(managed_process_fixture_alt PROPERTIES
-                PDB_NAME "managed_process_fixture_alt"
-            )
-            target_link_options(managed_process_fixture_alt PRIVATE
-                "/ILK:$<TARGET_FILE_DIR:managed_process_fixture_alt>/managed_process_fixture_alt.ilk"
-            )
-        endif()
-        cmake_config_target(
-            managed_process_fixture
-            NO_INSTALL
-            NO_VERSION
-            FOLDER "${folder_name}/test/helpers"
+        target_link_options(managed_process_fixture_alt PRIVATE
+            "/ILK:$<TARGET_FILE_DIR:managed_process_fixture_alt>/managed_process_fixture_alt.ilk"
         )
-        cmake_config_target(
-            managed_process_fixture_alt
-            NO_INSTALL
-            NO_VERSION
-            FOLDER "${folder_name}/test/helpers"
-        )
-        add_dependencies(managed_process_executor_test.${TARGET_NAME_LIB}
-                         managed_process_fixture
-                         managed_process_fixture_alt)
-        add_dependencies(workflow_runner_test.${TARGET_NAME_LIB}
-                         managed_process_fixture)
-        target_compile_definitions(
-            managed_process_executor_test.${TARGET_NAME_LIB}
-            PRIVATE PRAKTOR_MANAGED_PROCESS_FIXTURE="$<TARGET_FILE:managed_process_fixture>"
-                    PRAKTOR_MANAGED_PROCESS_FIXTURE_ALT="$<TARGET_FILE:managed_process_fixture_alt>"
-        )
+    endif()
+    cmake_config_target(
+        managed_process_fixture
+        NO_INSTALL
+        NO_VERSION
+        FOLDER "${folder_name}/test/helpers"
+    )
+    cmake_config_target(
+        managed_process_fixture_alt
+        NO_INSTALL
+        NO_VERSION
+        FOLDER "${folder_name}/test/helpers"
+    )
+    add_dependencies(managed_process_executor_test.${TARGET_NAME_LIB}
+                     managed_process_fixture
+                     managed_process_fixture_alt)
+    target_compile_definitions(
+        managed_process_executor_test.${TARGET_NAME_LIB}
+        PRIVATE PRAKTOR_MANAGED_PROCESS_FIXTURE="$<TARGET_FILE:managed_process_fixture>"
+                PRAKTOR_MANAGED_PROCESS_FIXTURE_ALT="$<TARGET_FILE:managed_process_fixture_alt>"
+    )
+    if(TARGET workflow_runner_test.${TARGET_NAME_LIB})
+        add_dependencies(workflow_runner_test.${TARGET_NAME_LIB} managed_process_fixture)
         target_compile_definitions(
             workflow_runner_test.${TARGET_NAME_LIB}
             PRIVATE PRAKTOR_MANAGED_PROCESS_FIXTURE="$<TARGET_FILE:managed_process_fixture>"
                     PRAKTOR_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
         )
-        set_tests_properties(
-            managed_process_executor_test.${TARGET_NAME_LIB}
-            workflow_runner_test.${TARGET_NAME_LIB}
-            PROPERTIES RESOURCE_LOCK praktor_managed_process_fixture
-        )
+        set_tests_properties(workflow_runner_test.${TARGET_NAME_LIB}
+            PROPERTIES RESOURCE_LOCK praktor_managed_process_fixture)
     endif()
+    set_tests_properties(
+        managed_process_executor_test.${TARGET_NAME_LIB}
+        PROPERTIES RESOURCE_LOCK praktor_managed_process_fixture
+    )
 endif()
 
 if(PRAKTOR_ENABLE_C11_ACTIONS)
