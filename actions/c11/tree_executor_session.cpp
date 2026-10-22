@@ -290,9 +290,9 @@ actions::Tree expandSubTrees(const actions::Tree& source,
 struct TreeExecutorSession::Impl : std::enable_shared_from_this<Impl> {
   actions::Tree tree;
   TreePlan compiled_plan;
-  actions::Executor& executor;
-  actions::Blackboard& blackboard;
-  actions::ExecutionContext& execution_context;
+  actions::Executor* executor;
+  actions::Blackboard* blackboard;
+  actions::ExecutionContext* execution_context;
   salts_bt_tree_config tree_limits{};
   praktor_c11_bt_host hooks{};
   praktor_c11_bt_host runtime_host{};
@@ -368,9 +368,9 @@ struct TreeExecutorSession::Impl : std::enable_shared_from_this<Impl> {
   std::string last_error;
 
   Impl(const actions::Tree& source_tree,
-       actions::Executor& source_executor,
-       actions::Blackboard& source_blackboard,
-       actions::ExecutionContext& source_execution_context,
+       actions::Executor* source_executor,
+       actions::Blackboard* source_blackboard,
+       actions::ExecutionContext* source_execution_context,
        const salts_bt_tree_config& limits,
        const SubTreeResolver& subtree_resolver,
        const praktor_c11_bt_host* supplied_hooks,
@@ -473,7 +473,11 @@ struct TreeExecutorSession::Impl : std::enable_shared_from_this<Impl> {
   }
 
   std::string getValue(const std::string& key) const {
-    if (hooks.value_get == nullptr) return blackboard.get(key);
+    if (hooks.value_get == nullptr) {
+      if (blackboard == nullptr)
+        throw std::runtime_error("C11 host value store is required for this session");
+      return blackboard->get(key);
+    }
     constexpr size_t kMaximumHostValueBytes = 16u * 1024u * 1024u;
     size_t required = 0u;
     int status = hooks.value_get(hooks.value_user, key.c_str(), nullptr, 0u,
@@ -498,7 +502,11 @@ struct TreeExecutorSession::Impl : std::enable_shared_from_this<Impl> {
   }
 
   bool hasValue(const std::string& key) const {
-    if (hooks.value_contains == nullptr) return blackboard.has(key);
+    if (hooks.value_contains == nullptr) {
+      if (blackboard == nullptr)
+        throw std::runtime_error("C11 host value store is required for this session");
+      return blackboard->has(key);
+    }
     int contains = 0;
     const int status = hooks.value_contains(hooks.value_user, key.c_str(),
                                             &contains);
@@ -510,7 +518,9 @@ struct TreeExecutorSession::Impl : std::enable_shared_from_this<Impl> {
 
   void setValue(const std::string& key, const std::string& value) {
     if (hooks.value_set == nullptr) {
-      blackboard.set(key, value);
+      if (blackboard == nullptr)
+        throw std::runtime_error("C11 host value store is required for this session");
+      blackboard->set(key, value);
       return;
     }
     if (hooks.value_set(hooks.value_user, key.c_str(), value.c_str()) !=
@@ -544,6 +554,11 @@ struct TreeExecutorSession::Impl : std::enable_shared_from_this<Impl> {
          hooks.value_user == nullptr)) {
       throw std::invalid_argument(
           "C11 host value store requires get/set/contains callbacks and value_user");
+    }
+    if (executor == nullptr &&
+        (!has_value_get || hooks.tick_leaf == nullptr || hooks.halt_leaf == nullptr)) {
+      throw std::invalid_argument(
+          "Host-only C11 session requires host value get/set/contains and tick/halt hooks");
     }
     if (has_value_get &&
         (hooks.tick_leaf == nullptr || hooks.halt_leaf == nullptr)) {
@@ -919,9 +934,11 @@ struct TreeExecutorSession::Impl : std::enable_shared_from_this<Impl> {
 
     std::vector<std::string> env_entries;
     std::vector<const char*> env;
-    env_entries.reserve(executor.getEnvironment().size());
-    for (const auto& entry : executor.getEnvironment()) {
-      env_entries.push_back(entry.first + "=" + entry.second);
+    if (executor != nullptr) {
+      env_entries.reserve(executor->getEnvironment().size());
+      for (const auto& entry : executor->getEnvironment()) {
+        env_entries.push_back(entry.first + "=" + entry.second);
+      }
     }
     env.reserve(env_entries.size() + 1u);
     for (const auto& entry : env_entries) env.push_back(entry.c_str());
@@ -1180,8 +1197,12 @@ struct TreeExecutorSession::Impl : std::enable_shared_from_this<Impl> {
         return tickShell(index, *source, out_status);
       }
       if (owner == LeafOwner::Executor) {
-        *out_status = toSaltsStatus(executor.execute(*source, blackboard,
-                                                     execution_context));
+        if (executor == nullptr || blackboard == nullptr || execution_context == nullptr) {
+          last_error = "host-only C11 session cannot dispatch through legacy Executor";
+          return SALTS_ENOTSUP;
+        }
+        *out_status = toSaltsStatus(executor->execute(*source, *blackboard,
+                                                     *execution_context));
         if (*out_status == SALTS_BT_RUNNING && hooks.halt_leaf == nullptr) {
           last_error = "registered action leaf '" + source->id +
                        "' returned RUNNING without a halt_leaf hook";
@@ -1284,8 +1305,12 @@ struct TreeExecutorSession::Impl : std::enable_shared_from_this<Impl> {
         return tickShell(index, *source, out_status);
       }
 
-      *out_status = toSaltsStatus(executor.execute(*source, blackboard,
-                                                   execution_context));
+      if (executor == nullptr || blackboard == nullptr || execution_context == nullptr) {
+        last_error = "host-only C11 session cannot dispatch through legacy Executor";
+        return SALTS_ENOTSUP;
+      }
+      *out_status = toSaltsStatus(executor->execute(*source, *blackboard,
+                                                   *execution_context));
       if (*out_status == SALTS_BT_RUNNING && hooks.halt_leaf == nullptr) {
         last_error = "registered action leaf '" + source->id +
                      "' returned RUNNING without a halt_leaf hook";
@@ -1873,9 +1898,20 @@ TreeExecutorSession::TreeExecutorSession(
     const praktor_c11_bt_host* host_hooks,
     cflow_process_retainer* recovery_owner,
     uint32_t shell_close_budget_ms)
-    : impl_(std::make_shared<Impl>(tree, executor, blackboard,
-                                  execution_context, limits, subtree_resolver,
+    : impl_(std::make_shared<Impl>(tree, &executor, &blackboard,
+                                  &execution_context, limits, subtree_resolver,
                                   host_hooks, recovery_owner,
+                                  shell_close_budget_ms)) {}
+
+TreeExecutorSession::TreeExecutorSession(
+    const actions::Tree& tree,
+    const SubTreeResolver& subtree_resolver,
+    const salts_bt_tree_config& limits,
+    const praktor_c11_bt_host& host_hooks,
+    cflow_process_retainer* recovery_owner,
+    uint32_t shell_close_budget_ms)
+    : impl_(std::make_shared<Impl>(tree, nullptr, nullptr, nullptr, limits,
+                                  subtree_resolver, &host_hooks, recovery_owner,
                                   shell_close_budget_ms)) {}
 
 TreeExecutorSession::~TreeExecutorSession() {

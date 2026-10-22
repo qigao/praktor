@@ -136,6 +136,19 @@ public:
                       const praktor_c11_bt_host* host_hooks = nullptr,
                       cflow_process_retainer* recovery_owner = nullptr,
                       uint32_t shell_close_budget_ms = 3000u);
+
+  /*
+   * Host-only constructor: no actions::Executor, Blackboard or ExecutionContext
+   * is retained. A complete host value store and tick/halt callbacks are
+   * mandatory; declined non-Shell leaves fail closed. Shell uses Salts::Process
+   * with an empty inherited environment (supply explicit command parameters).
+   */
+  TreeExecutorSession(const actions::Tree& tree,
+                      const SubTreeResolver& subtree_resolver,
+                      const salts_bt_tree_config& limits,
+                      const praktor_c11_bt_host& host_hooks,
+                      cflow_process_retainer* recovery_owner = nullptr,
+                      uint32_t shell_close_budget_ms = 3000u);
   ~TreeExecutorSession();
 
   TreeExecutorSession(const TreeExecutorSession&) = delete;
