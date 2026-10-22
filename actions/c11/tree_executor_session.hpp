@@ -67,10 +67,12 @@ private:
  * Link praktor_c11_session for the host-only constructor. This independent
  * target owns the AST/Salts state but has no legacy execution link dependency.
  * The C11 native_host helper supplies bounded values plus typed SetVariable /
- * CheckExitCode dispatch. Other actions need explicit host dispatch or Shell.
+ * CheckExitCode dispatch and explicitly budgeted cooperative Sleep. Other
+ * actions need explicit host dispatch or Shell.
  * Link praktor_actions_c11 to opt into the legacy compatibility constructors.
  *
- * With the compatibility constructors, ordinary action leaves execute through actions::Executor
+ * With the compatibility constructors, ordinary action leaves execute through
+ * actions::Executor
  * against the caller-owned Blackboard and ExecutionContext. The session owns
  * a stable copy of the AST because TreePlan's source_nodes refer into it.
  *
@@ -81,7 +83,7 @@ private:
  * ShellExecutor path. A custom leaf hook may override Shell; SALTS_ENOTSUP on
  * an inactive Shell selects the built-in Salts::Process path, but a live host
  * or Executor activation can never switch owners midway through a tick.
- * A registered Executor leaf that returns RUNNING requires a halt_leaf hook.
+ * A registered Executor leaf that returns RUNNING requires a halt hook.
  *
  * PipelineSequence, EntryUpdated and ConsumeQueue have built-in
  * Blackboard-backed hooks (ConsumeQueue uses the shared C JSON parser).

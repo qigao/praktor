@@ -76,6 +76,9 @@ typedef struct praktor_c11_leaf_request {
   /* Root-scoped helpers must decline this request. A branch-aware host routes
    * it to its own branch state using the stable node index and compiled plan. */
   bool in_parallel_branch;
+  /* Ephemeral identity for one Session, never dereferenced or serialized by a
+   * host. It disambiguates equal node indices in different live Sessions. */
+  const void *session_owner;
 } praktor_c11_leaf_request;
 
 typedef struct praktor_c11_bt_host {
@@ -133,9 +136,11 @@ typedef struct praktor_c11_bt_host {
                                     salts_bt_node_parameters *out_params);
   /* Session AST bridge: use either tick_leaf or this typed dispatcher.
    * RUNNING uses the same dispatcher until halt/terminal completion.
-   * halt_leaf remains mandatory and receives request.node_index. */
+   * Supply exactly one halt callback: indexed halt_leaf or halt_typed_leaf.
+   * Stateful typed hosts should use halt_typed_leaf for scoped cancellation. */
   int (*tick_typed_leaf)(void *user, const praktor_c11_leaf_request *request,
                          salts_bt_node_status *out_status);
+  void (*halt_typed_leaf)(void *user, const praktor_c11_leaf_request *request);
 } praktor_c11_bt_host;
 
 /*

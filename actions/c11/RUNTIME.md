@@ -7,7 +7,7 @@ production switch is implied by these independent execution targets.
 | --- | --- |
 | `praktor_c11_bt_core` | C11 topology/state and Salts::BehaviorTree; no C++ compiler required |
 | `praktor_c11_value_store` | Fixed-capacity C11 values and optimistic transactions |
-| `praktor_c11_native_host` | C11 value-store owner and preallocated parameter scratch; typed `SetVariable` and `CheckExitCode` leaves |
+| `praktor_c11_native_host` | C11 value-store owner and preallocated parameter scratch; typed `SetVariable`, `CheckExitCode` and cooperative `Sleep` leaves |
 | `praktor_c11_session` | C++ AST compiler/session over C11 state, JSON queue hooks and Salts::Process; no legacy execution symbols |
 | `praktor_actions_c11` | Explicit compatibility constructors, legacy Blackboard access, Executor dispatch, environment and Shell log adaptation |
 
@@ -17,7 +17,7 @@ Typed requests preserve string/number/boolean ports. Payloads refer to the
 session-owned AST and must not be retained past their callback. A dispatcher
 returning RUNNING owns that activation until completion or `halt_leaf`; it
 cannot decline on resume and transfer ownership. Select either typed or indexed
-leaf dispatch, and always provide halt. Unsupported native leaves fail closed;
+leaf dispatch, and provide exactly one indexed or typed halt callback. Unsupported native leaves fail closed;
 Shell can use the existing Salts::Process path with an explicit retainer.
 
 The Native Host allocates all key/value and parameter scratch memory at init.
@@ -27,6 +27,26 @@ C++ AST bridge allocation-free or provide a transaction for an entire Sequence.
 Parallel still requires branch-aware host lifecycle/dispatch hooks; the new
 host does not silently use root values inside branches. Atomic value-store group
 commit is available separately; automatic Parallel integration remains open.
+
+Positive-duration `Sleep` uses fixed-capacity native activation slots configured
+through `praktor_c11_native_host_init_with_config`. The convenience initializer
+reserves zero slots; positive durations then fail with `SALTS_ENOBUFS` rather
+than blocking or delegating to Executor. Zero-duration Sleep needs no slot.
+All waiting states are allocated at Host init. Admission snapshots the resolved
+duration; later Blackboard changes apply only to the next activation. Each slot
+is scoped by the ephemeral Session identity plus node index. Typed halt clears
+only that activation, including on cancel/reset/destruction, Timeout and driver
+errors. Two Sessions sharing one Host cannot cancel each other's equal indices.
+The optional monotonic clock callback and user storage are borrowed for Host life;
+they must be single-driver, non-blocking and return nanoseconds.
+
+Supported Sleep inputs are finite non-negative numeric milliseconds or strings
+with no suffix / `ms` / `s` / `m` / `h`, truncated to integer milliseconds in
+`[0, INT_MAX]`. Bool, overflow, negative/non-finite values and unknown suffixes
+fail closed. Legacy Sleep blocks its calling thread and treats unknown suffixes
+as milliseconds; those behaviors are intentionally not copied. Differential
+validation compares supported terminal outcomes and values, while native tests
+cover cooperative RUNNING, cancellation and exact deadlines independently.
 
 The legacy adapter borrows Executor, Blackboard and ExecutionContext until
 session destruction. Retained Process callbacks touch only stable ShellState;
@@ -44,8 +64,10 @@ Validation projects:
   executable. Core-only and complete-source TSan run the independent project.
 - `actions_c11_session_yaml_differential_test`: real YAML parsing, native vs
   legacy values/copy semantics, exit-code success/failure and malformed-value
-  rejection before later leaf effects. Existing workflow/YAML/lifecycle tests
-  continue exercising the compatibility entry point.
+  rejection before later leaf effects. Supported Sleep durations compare terminal
+  Blackboard effects with Legacy; a controlled native clock also verifies waiting,
+  cancel-before-next-leaf, and fresh admission after cancel. Existing workflow /
+  lifecycle tests continue exercising the compatibility entry point.
 
 Full WorkflowContext migration, all built-in leaves, native event queues,
 branch-transaction integration and complete YAML/node parity remain open.

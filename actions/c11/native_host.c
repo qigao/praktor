@@ -1,4 +1,5 @@
 #include "native_host.h"
+#include <salts/clock.h>
 #include <errno.h>
 #include <limits.h>
 #include <math.h>
@@ -7,10 +8,22 @@
 #include <stdlib.h>
 #include <string.h>
 
+typedef struct native_sleep_state {
+  const void *session_owner;
+  size_t node_index;
+  uint64_t started_ns;
+  uint64_t duration_ns;
+  bool active;
+} native_sleep_state;
+
 typedef struct native_host_impl {
   praktor_c11_value_store values;
   size_t scratch_capacity;
   char *scratch;
+  native_sleep_state *sleep_states;
+  size_t max_running_leaves;
+  uint64_t (*now_ns)(void *user);
+  void *clock_user;
 } native_host_impl;
 
 static int value_result(int result) {
@@ -87,6 +100,85 @@ static int parse_integer(const char *text, int *out) {
   *out = (int)value;
   return SALTS_OK;
 }
+static native_sleep_state *find_sleep(native_host_impl *impl,
+                                       const praktor_c11_leaf_request *request) {
+  size_t i;
+  for (i = 0u; i < impl->max_running_leaves; ++i) {
+    native_sleep_state *state = &impl->sleep_states[i];
+    if (state->active && state->session_owner == request->session_owner &&
+        state->node_index == request->node_index) return state;
+  }
+  return NULL;
+}
+
+/* Supported duration forms match the legacy non-negative finite range and
+ * truncation to integer milliseconds. Unknown suffixes are rejected rather
+ * than silently interpreted as milliseconds. */
+static int sleep_duration(native_host_impl *impl,
+                           const praktor_c11_leaf_parameter *param,
+                           uint64_t *out_duration_ns) {
+  double value = 0.0, multiplier = 1.0;
+  char *end = NULL;
+  int result;
+  if (param != NULL) {
+    if (param->kind == PRAKTOR_C11_LEAF_NUMBER) {
+      value = param->number;
+    } else if (param->kind == PRAKTOR_C11_LEAF_STRING) {
+      result = resolve(impl, param, impl->scratch,
+                        impl->scratch + impl->scratch_capacity);
+      if (result != SALTS_OK) return result;
+      errno = 0;
+      value = strtod(impl->scratch, &end);
+      if (end == impl->scratch || errno == ERANGE) return SALTS_EINVAL;
+      if (strcmp(end, "s") == 0) multiplier = 1000.0;
+      else if (strcmp(end, "m") == 0) multiplier = 60000.0;
+      else if (strcmp(end, "h") == 0) multiplier = 3600000.0;
+      else if (*end != '\0' && strcmp(end, "ms") != 0) return SALTS_EINVAL;
+    } else return SALTS_EINVAL;
+  }
+  value *= multiplier;
+  if (!isfinite(value) || value < 0.0 || value > INT_MAX) return SALTS_EINVAL;
+  *out_duration_ns = (uint64_t)value * UINT64_C(1000000);
+  return SALTS_OK;
+}
+
+static uint64_t default_now_ns(void *user) { (void)user; return cmeta_hrtime(); }
+
+static int tick_sleep(native_host_impl *impl, const praktor_c11_leaf_request *request,
+                       salts_bt_node_status *status) {
+  native_sleep_state *state;
+  uint64_t now, duration = 0u;
+  size_t i;
+  int result;
+  if (request->session_owner == NULL) return SALTS_EINVAL;
+  state = find_sleep(impl, request);
+  if (state == NULL) {
+    result = sleep_duration(impl, parameter(request, "duration"), &duration);
+    if (result != SALTS_OK) return result;
+    if (duration == 0u) { *status = SALTS_BT_SUCCESS; return SALTS_OK; }
+    for (i = 0u; i < impl->max_running_leaves; ++i) {
+      if (!impl->sleep_states[i].active) { state = &impl->sleep_states[i]; break; }
+    }
+    if (state == NULL) return SALTS_ENOBUFS;
+    state->session_owner = request->session_owner;
+    state->node_index = request->node_index;
+    state->duration_ns = duration;
+    state->started_ns = impl->now_ns(impl->clock_user);
+    state->active = true;
+    *status = SALTS_BT_RUNNING;
+    return SALTS_OK;
+  }
+  now = impl->now_ns(impl->clock_user);
+  if (now < state->started_ns) return SALTS_EINVAL;
+  if (now - state->started_ns < state->duration_ns) {
+    *status = SALTS_BT_RUNNING;
+  } else {
+    memset(state, 0, sizeof(*state));
+    *status = SALTS_BT_SUCCESS;
+  }
+  return SALTS_OK;
+}
+
 static int tick_leaf(void *user, const praktor_c11_leaf_request *request,
                       salts_bt_node_status *status) {
   native_host_impl *impl = (native_host_impl *)user;
@@ -103,6 +195,8 @@ static int tick_leaf(void *user, const praktor_c11_leaf_request *request,
     for (j = 0u; j < i; ++j)
       if (strcmp(request->parameters[i].name, request->parameters[j].name) == 0) return SALTS_EINVAL;
   }
+  if (strcmp(request->action, "Sleep") == 0) return tick_sleep(impl, request, status);
+  if (find_sleep(impl, request) != NULL) return SALTS_EINVAL;
   key = impl->scratch;
   value = key + impl->scratch_capacity;
   temporary = value + impl->scratch_capacity;
@@ -156,30 +250,61 @@ static int tick_leaf(void *user, const praktor_c11_leaf_request *request,
   }
   return SALTS_ENOTSUP;
 }
-static void halt_leaf(void *user, size_t index) { (void)user; (void)index; }
+static void halt_typed_leaf(void *user, const praktor_c11_leaf_request *request) {
+  native_host_impl *impl = (native_host_impl *)user;
+  native_sleep_state *state;
+  if (impl == NULL || request == NULL || request->session_owner == NULL) return;
+  state = find_sleep(impl, request);
+  if (state != NULL) memset(state, 0, sizeof(*state));
+}
+
+int praktor_c11_native_host_init_with_config(
+    praktor_c11_native_host *host, const praktor_c11_native_host_config *config) {
+  native_host_impl *impl;
+  size_t scratch_bytes;
+  int result;
+  if (host == NULL || host->impl != NULL || config == NULL) return SALTS_EINVAL;
+  scratch_bytes = config->max_key_bytes > config->max_value_bytes
+      ? config->max_key_bytes : config->max_value_bytes;
+  if (scratch_bytes == SIZE_MAX || scratch_bytes + 1u > SIZE_MAX / 3u ||
+      config->max_running_leaves > SIZE_MAX / sizeof(native_sleep_state)) return SALTS_EINVAL;
+  impl = (native_host_impl *)calloc(1u, sizeof(*impl));
+  if (impl == NULL) return SALTS_ENOMEM;
+  result = praktor_c11_value_store_init(&impl->values, config->value_capacity,
+                                        config->max_key_bytes, config->max_value_bytes);
+  if (result != PRAKTOR_C11_VALUE_OK) {
+    free(impl);
+    return result == PRAKTOR_C11_VALUE_ENOMEM ? SALTS_ENOMEM : SALTS_EINVAL;
+  }
+  impl->scratch_capacity = scratch_bytes + 1u;
+  impl->scratch = (char *)calloc(3u, impl->scratch_capacity);
+  if (config->max_running_leaves != 0u)
+    impl->sleep_states = (native_sleep_state *)calloc(config->max_running_leaves, sizeof(native_sleep_state));
+  if (impl->scratch == NULL ||
+      (config->max_running_leaves != 0u && impl->sleep_states == NULL)) {
+    praktor_c11_value_store_destroy(&impl->values);
+    free(impl->scratch); free(impl->sleep_states); free(impl);
+    return SALTS_ENOMEM;
+  }
+  impl->max_running_leaves = config->max_running_leaves;
+  impl->now_ns = config->now_ns == NULL ? default_now_ns : config->now_ns;
+  impl->clock_user = config->clock_user;
+  host->impl = impl;
+  return SALTS_OK;
+}
 
 int praktor_c11_native_host_init(praktor_c11_native_host *host, size_t capacity,
                                  size_t max_key_bytes, size_t max_value_bytes) {
-  native_host_impl *impl;
-  size_t scratch_bytes = max_key_bytes > max_value_bytes ? max_key_bytes : max_value_bytes;
-  int result;
-  if (host == NULL || host->impl != NULL || scratch_bytes == SIZE_MAX ||
-      scratch_bytes + 1u > SIZE_MAX / 3u) return SALTS_EINVAL;
-  impl = (native_host_impl *)calloc(1u, sizeof(*impl));
-  if (impl == NULL) return SALTS_ENOMEM;
-  result = praktor_c11_value_store_init(&impl->values, capacity, max_key_bytes, max_value_bytes);
-  if (result != PRAKTOR_C11_VALUE_OK) { free(impl); return result == PRAKTOR_C11_VALUE_ENOMEM ? SALTS_ENOMEM : SALTS_EINVAL; }
-  impl->scratch_capacity = scratch_bytes + 1u;
-  impl->scratch = (char *)calloc(3u, impl->scratch_capacity);
-  if (impl->scratch == NULL) { praktor_c11_value_store_destroy(&impl->values); free(impl); return SALTS_ENOMEM; }
-  host->impl = impl;
-  return SALTS_OK;
+  const praktor_c11_native_host_config config = {
+      capacity, max_key_bytes, max_value_bytes, 0u, NULL, NULL};
+  return praktor_c11_native_host_init_with_config(host, &config);
 }
 void praktor_c11_native_host_destroy(praktor_c11_native_host *host) {
   native_host_impl *impl = host == NULL ? NULL : (native_host_impl *)host->impl;
   if (impl == NULL) return;
   praktor_c11_value_store_destroy(&impl->values);
   free(impl->scratch);
+  free(impl->sleep_states);
   free(impl);
   host->impl = NULL;
 }
@@ -192,7 +317,7 @@ int praktor_c11_native_host_bind(praktor_c11_native_host *host, praktor_c11_bt_h
   out_hooks->value_set = set_value;
   out_hooks->value_contains = contains_value;
   out_hooks->tick_typed_leaf = tick_leaf;
-  out_hooks->halt_leaf = halt_leaf;
+  out_hooks->halt_typed_leaf = halt_typed_leaf;
   return SALTS_OK;
 }
 praktor_c11_value_store *praktor_c11_native_host_values(praktor_c11_native_host *host) {

@@ -11,8 +11,11 @@ namespace {
 struct Host {
   praktor_c11_native_host state{};
   praktor_c11_bt_host hooks{};
-  Host() {
-    if (praktor_c11_native_host_init(&state, 8u, 64u, 4096u) != SALTS_OK ||
+  static uint64_t readClock(void* user) { return *static_cast<uint64_t*>(user); }
+  explicit Host(size_t max_running = 0u, uint64_t* clock = nullptr) {
+    const praktor_c11_native_host_config config{
+        8u, 64u, 4096u, max_running, clock != nullptr ? readClock : nullptr, clock};
+    if (praktor_c11_native_host_init_with_config(&state, &config) != SALTS_OK ||
         praktor_c11_native_host_bind(&state, &hooks) != SALTS_OK) throw std::runtime_error("host init");
   }
   ~Host() { praktor_c11_native_host_destroy(&state); }
@@ -96,6 +99,7 @@ struct RunningHost {
 int typedCancellationAndTimeout() {
   Host host; RunningHost running;
   host.hooks.user = &running; host.hooks.tick_typed_leaf = &RunningHost::tick;
+  host.hooks.halt_typed_leaf = nullptr;
   host.hooks.halt_leaf = &RunningHost::halt;
   actions::Tree tree; tree.root.id = "Timeout";
   tree.root.params["timeout_ms"] = std::string("{deadline}");
@@ -118,6 +122,85 @@ int typedCancellationAndTimeout() {
   CHECK(session.tick(&status) == SALTS_ENOTSUP && running.halts == 3);
   return 0;
 }
+int nativeSleepLifecycleAndOwnership() {
+  uint64_t now = 0u;
+  Host host(1u, &now);
+  CHECK(host.set("duration", "100ms") == PRAKTOR_C11_VALUE_OK);
+  actions::Tree tree; tree.root.id = "Sleep";
+  tree.root.params["duration"] = std::string("{duration}");
+  actions::c11::TreeExecutorSession session(tree, {}, limits(), host.hooks);
+  salts_bt_node_status status = SALTS_BT_FAILURE;
+  CHECK(session.tick(&status) == SALTS_OK && status == SALTS_BT_RUNNING);
+  CHECK(host.set("duration", "0ms") == PRAKTOR_C11_VALUE_OK);
+  CHECK(session.tick(&status) == SALTS_OK && status == SALTS_BT_RUNNING);
+  CHECK(session.cancel() == SALTS_OK);
+  CHECK(session.tick(&status) == SALTS_OK && status == SALTS_BT_SUCCESS);
+  CHECK(host.set("duration", "100ms") == PRAKTOR_C11_VALUE_OK);
+  CHECK(session.tick(&status) == SALTS_OK && status == SALTS_BT_RUNNING);
+  CHECK(session.reset() == SALTS_OK);
+  CHECK(host.set("duration", "0ms") == PRAKTOR_C11_VALUE_OK);
+  CHECK(session.tick(&status) == SALTS_OK && status == SALTS_BT_SUCCESS);
+
+  actions::c11::TreeExecutorSession second(tree, {}, limits(), host.hooks);
+  {
+    actions::c11::TreeExecutorSession first(tree, {}, limits(), host.hooks);
+    CHECK(host.set("duration", "100ms") == PRAKTOR_C11_VALUE_OK);
+    CHECK(first.tick(&status) == SALTS_OK && status == SALTS_BT_RUNNING);
+    CHECK(second.tick(&status) == SALTS_ENOBUFS);
+    CHECK(host.set("duration", "0ms") == PRAKTOR_C11_VALUE_OK);
+    CHECK(first.tick(&status) == SALTS_OK && status == SALTS_BT_RUNNING);
+    // The rejected second Session's halt cannot erase the first's activation.
+  }
+  CHECK(second.reset() == SALTS_OK);
+  CHECK(second.tick(&status) == SALTS_OK && status == SALTS_BT_SUCCESS);
+  CHECK(host.set("duration", "1s") == PRAKTOR_C11_VALUE_OK);
+  CHECK(second.tick(&status) == SALTS_OK && status == SALTS_BT_RUNNING);
+  CHECK(second.cancel() == SALTS_OK);
+  now = 100u;
+  CHECK(session.tick(&status) == SALTS_OK && status == SALTS_BT_RUNNING);
+  now = 99u;
+  CHECK(session.tick(&status) == SALTS_EINVAL);
+  CHECK(second.tick(&status) == SALTS_OK && status == SALTS_BT_RUNNING);
+  CHECK(second.cancel() == SALTS_OK);
+  return 0;
+}
+
+int timeoutReleasesNativeSleepSlot() {
+  uint64_t now = 0u; Host host(1u, &now);
+  CHECK(host.set("duration", "1h") == PRAKTOR_C11_VALUE_OK);
+  CHECK(host.set("deadline", "10000") == PRAKTOR_C11_VALUE_OK);
+  actions::Tree tree; tree.root.id = "Timeout";
+  tree.root.params["timeout_ms"] = std::string("{deadline}");
+  actions::Node sleep; sleep.id = "Sleep"; sleep.params["duration"] = std::string("{duration}");
+  tree.root.children.push_back(sleep);
+  actions::c11::TreeExecutorSession session(tree, {}, limits(), host.hooks);
+  salts_bt_node_status status = SALTS_BT_FAILURE;
+  CHECK(session.tick(&status) == SALTS_OK && status == SALTS_BT_RUNNING);
+  CHECK(host.set("deadline", "0") == PRAKTOR_C11_VALUE_OK);
+  CHECK(session.tick(&status) == SALTS_OK && status == SALTS_BT_FAILURE);
+  CHECK(host.set("deadline", "10000") == PRAKTOR_C11_VALUE_OK);
+  CHECK(host.set("duration", "0ms") == PRAKTOR_C11_VALUE_OK);
+  CHECK(session.reset() == SALTS_OK);
+  CHECK(session.tick(&status) == SALTS_OK && status == SALTS_BT_SUCCESS);
+  // Positive admission proves Timeout actually returned the sole slot.
+  CHECK(host.set("duration", "1s") == PRAKTOR_C11_VALUE_OK);
+  CHECK(session.tick(&status) == SALTS_OK && status == SALTS_BT_RUNNING);
+  CHECK(session.cancel() == SALTS_OK);
+  return 0;
+}
+
+int rejectAmbiguousHaltCallbacks() {
+  Host host;
+  host.hooks.halt_leaf = [](void*, size_t) {};
+  actions::Tree tree; tree.root = setVariable("not-written", std::string("no"));
+  bool rejected = false;
+  try { actions::c11::TreeExecutorSession session(tree, {}, limits(), host.hooks); }
+  catch (const std::invalid_argument&) { rejected = true; }
+  CHECK(rejected);
+  CHECK(praktor_c11_value_store_size(praktor_c11_native_host_values(&host.state)) == 0u);
+  return 0;
+}
+
 int realProcessAndRetainer() {
   cflow_process_retainer retainer{};
   CHECK(cflow_process_retainer_init(&retainer, 2u) == SALTS_OK);
@@ -170,5 +253,8 @@ int main() {
   if (nativeValuesAndCapacity() != 0) return 1;
   if (typedCancellationAndTimeout() != 0) return 1;
   if (parallelScopeFailsClosed() != 0) return 1;
+  if (nativeSleepLifecycleAndOwnership() != 0) return 1;
+  if (timeoutReleasesNativeSleepSlot() != 0) return 1;
+  if (rejectAmbiguousHaltCallbacks() != 0) return 1;
   return realProcessAndRetainer();
 }

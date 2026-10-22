@@ -61,7 +61,7 @@ add_test(NAME actions_c11_value_store_standalone_test COMMAND actions_c11_value_
 
 add_library(praktor_c11_native_host STATIC ../native_host.c)
 target_include_directories(praktor_c11_native_host PUBLIC ..)
-target_link_libraries(praktor_c11_native_host PUBLIC praktor_c11_value_store praktor_c11_bt_core)
+target_link_libraries(praktor_c11_native_host PUBLIC praktor_c11_value_store praktor_c11_bt_core PRIVATE Salts::Platform)
 target_compile_features(praktor_c11_native_host PUBLIC c_std_11)
 set_target_properties(praktor_c11_native_host PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
 if(UNIX)

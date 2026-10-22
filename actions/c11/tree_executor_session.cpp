@@ -556,19 +556,39 @@ struct TreeExecutorSession::Impl : std::enable_shared_from_this<Impl> {
     return hooks.tick_leaf != nullptr || hooks.tick_typed_leaf != nullptr;
   }
 
+  bool hasLeafHalt() const noexcept {
+    return hooks.halt_leaf != nullptr || hooks.halt_typed_leaf != nullptr;
+  }
+
+  praktor_c11_leaf_request leafRequest(size_t index) const noexcept {
+    const auto& parameters = leaf_parameters[index];
+    return {index, nodeAt(index)->id.c_str(), parameters.data(), parameters.size(),
+            isInsideParallelBranch(index), this};
+  }
+
   int dispatchLeaf(size_t index, salts_bt_node_status* out_status) {
     if (hooks.tick_typed_leaf != nullptr) {
-      const auto& parameters = leaf_parameters[index];
-      const praktor_c11_leaf_request request{
-          index, nodeAt(index)->id.c_str(), parameters.data(), parameters.size(),
-          isInsideParallelBranch(index)};
+      const auto request = leafRequest(index);
       return hooks.tick_typed_leaf(hooks.user, &request, out_status);
     }
     return hooks.tick_leaf == nullptr ? SALTS_ENOTSUP
                                      : hooks.tick_leaf(hooks.user, index, out_status);
   }
 
+  void dispatchHalt(size_t index) {
+    if (hooks.halt_typed_leaf != nullptr) {
+      const auto request = leafRequest(index);
+      hooks.halt_typed_leaf(hooks.user, &request);
+    } else if (hooks.halt_leaf != nullptr) {
+      hooks.halt_leaf(hooks.user, index);
+    }
+  }
+
   void validateHostContracts() const {
+    if (hooks.halt_leaf != nullptr && hooks.halt_typed_leaf != nullptr)
+      throw std::invalid_argument("Select exactly one C11 leaf halt callback");
+    if (hooks.halt_typed_leaf != nullptr && hooks.tick_typed_leaf == nullptr)
+      throw std::invalid_argument("Typed halt requires typed leaf dispatch");
     if (hooks.tick_leaf != nullptr && hooks.tick_typed_leaf != nullptr)
       throw std::invalid_argument("Select exactly one C11 leaf dispatcher");
     const bool has_value_get = hooks.value_get != nullptr;
@@ -581,12 +601,12 @@ struct TreeExecutorSession::Impl : std::enable_shared_from_this<Impl> {
           "C11 host value store requires get/set/contains callbacks and value_user");
     }
     if (!compatibility &&
-        (!has_value_get || !hasLeafDispatch() || hooks.halt_leaf == nullptr)) {
+        (!has_value_get || !hasLeafDispatch() || !hasLeafHalt())) {
       throw std::invalid_argument(
           "Host-only C11 session requires host value get/set/contains and tick/halt hooks");
     }
     if (has_value_get &&
-        (!hasLeafDispatch() || hooks.halt_leaf == nullptr)) {
+        (!hasLeafDispatch() || !hasLeafHalt())) {
       throw std::invalid_argument(
           "C11 host value store requires explicit host leaf dispatch and halt hooks");
     }
@@ -597,7 +617,7 @@ struct TreeExecutorSession::Impl : std::enable_shared_from_this<Impl> {
         throw std::invalid_argument("TreePlan has no source AST node");
       }
 
-      if (hasLeafDispatch() && hooks.halt_leaf == nullptr) {
+      if (hasLeafDispatch() && !hasLeafHalt()) {
         throw std::invalid_argument(
             "A custom leaf tick hook requires a halt hook to define cancellation cleanup");
       }
@@ -1222,7 +1242,7 @@ struct TreeExecutorSession::Impl : std::enable_shared_from_this<Impl> {
           return SALTS_ENOTSUP;
         }
         *out_status = compatibility->tick(*source);
-        if (*out_status == SALTS_BT_RUNNING && hooks.halt_leaf == nullptr) {
+        if (*out_status == SALTS_BT_RUNNING && !hasLeafHalt()) {
           last_error = "registered action leaf '" + source->id +
                        "' returned RUNNING without a halt_leaf hook";
           leaf_owners[index] = LeafOwner::None;
@@ -1270,7 +1290,7 @@ struct TreeExecutorSession::Impl : std::enable_shared_from_this<Impl> {
               *out_status != SALTS_BT_FAILURE &&
               *out_status != SALTS_BT_RUNNING) {
             safeHostVoid("C11 host leaf cleanup after invalid status failed", [&] {
-              hooks.halt_leaf(hooks.user, index);
+              dispatchHalt(index);
             });
             last_error = "host leaf hook returned an invalid node status for '" +
                          source->id + "'";
@@ -1286,7 +1306,7 @@ struct TreeExecutorSession::Impl : std::enable_shared_from_this<Impl> {
           // the tree; the adapter's subsequent halt callback sees no owner and
           // therefore cannot invoke this cleanup a second time.
           safeHostVoid("C11 host leaf cleanup after tick failure failed", [&] {
-            hooks.halt_leaf(hooks.user, index);
+            dispatchHalt(index);
           });
           // Preserve the public host-leaf diagnostic contract. safeHostStatus()
           // records operation context for generic hooks, but this leaf API has
@@ -1327,7 +1347,7 @@ struct TreeExecutorSession::Impl : std::enable_shared_from_this<Impl> {
         return SALTS_ENOTSUP;
       }
       *out_status = compatibility->tick(*source);
-      if (*out_status == SALTS_BT_RUNNING && hooks.halt_leaf == nullptr) {
+      if (*out_status == SALTS_BT_RUNNING && !hasLeafHalt()) {
         last_error = "registered action leaf '" + source->id +
                      "' returned RUNNING without a halt_leaf hook";
         return SALTS_ENOTSUP;
@@ -1351,9 +1371,9 @@ struct TreeExecutorSession::Impl : std::enable_shared_from_this<Impl> {
     }
     leaf_owners[index] = LeafOwner::None;
     if ((owner == LeafOwner::HostHook || owner == LeafOwner::Executor) &&
-        hooks.halt_leaf != nullptr) {
+        hasLeafHalt()) {
       try {
-        hooks.halt_leaf(hooks.user, index);
+        dispatchHalt(index);
       } catch (...) {
         rememberCurrentException("C11 host leaf halt failed");
       }
