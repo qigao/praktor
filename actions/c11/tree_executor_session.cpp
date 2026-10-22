@@ -1320,6 +1320,48 @@ struct TreeExecutorSession::Impl : std::enable_shared_from_this<Impl> {
     }
   }
 
+  int64_t resolveHostIntegerParameter(const actions::Node& source,
+                                      const char* key,
+                                      int64_t default_value,
+                                      bool required) const {
+    const auto it = source.params.find(key);
+    if (it == source.params.end()) {
+      if (required)
+        throw std::invalid_argument("Node '" + source.id +
+                                    "' requires parameter '" + key + "'");
+      return default_value;
+    }
+    if (std::holds_alternative<double>(it->second)) {
+      const double number = std::get<double>(it->second);
+      if (!std::isfinite(number) || std::abs(number - std::trunc(number)) > 0.0 ||
+          number < static_cast<double>((std::numeric_limits<int>::min)()) ||
+          number > static_cast<double>((std::numeric_limits<int>::max)())) {
+        throw std::invalid_argument("Dynamic parameter '" + std::string(key) +
+                                    "' must be an in-range integer");
+      }
+      return static_cast<int64_t>(number);
+    }
+    if (std::holds_alternative<bool>(it->second)) {
+      throw std::invalid_argument("Dynamic parameter '" + std::string(key) +
+                                  "' must be an integer, not a boolean");
+    }
+    return static_cast<int64_t>(parseInteger(resolveValue(it->second)));
+  }
+
+  uint64_t resolveHostDurationParameter(const actions::Node& source,
+                                        const char* key,
+                                        int64_t default_ms) const {
+    const int64_t milliseconds =
+        resolveHostIntegerParameter(source, key, default_ms, false);
+    if (milliseconds < 0 ||
+        static_cast<uint64_t>(milliseconds) >
+            (std::numeric_limits<uint64_t>::max)() / 1000000u) {
+      throw std::invalid_argument("Dynamic duration '" + std::string(key) +
+                                  "' is outside the supported range");
+    }
+    return static_cast<uint64_t>(milliseconds) * 1000000u;
+  }
+
   int resolveDynamicParameters(size_t index,
                                salts_bt_node_parameters* out_params) noexcept {
     if (out_params == nullptr || nodeAt(index) == nullptr ||
@@ -1364,9 +1406,10 @@ struct TreeExecutorSession::Impl : std::enable_shared_from_this<Impl> {
           default:
             return SALTS_EINVAL;
         }
-        const int64_t value =
-            resolveIntegerParameter(*source, blackboard, key, default_value,
-                                    required);
+        const int64_t value = hooks.value_get != nullptr
+            ? resolveHostIntegerParameter(*source, key, default_value, required)
+            : resolveIntegerParameter(*source, blackboard, key, default_value,
+                                      required);
         if (value < 0 ||
             static_cast<uint64_t>(value) > tree_limits.max_control_iterations) {
           throw std::invalid_argument(std::string("Dynamic parameter '") + key +
@@ -1385,8 +1428,9 @@ struct TreeExecutorSession::Impl : std::enable_shared_from_this<Impl> {
         } else {
           return SALTS_EINVAL;
         }
-        out_params->duration_ns =
-            resolveDurationParameter(*source, blackboard, key, default_ms);
+        out_params->duration_ns = hooks.value_get != nullptr
+            ? resolveHostDurationParameter(*source, key, default_ms)
+            : resolveDurationParameter(*source, blackboard, key, default_ms);
       } else {
         return SALTS_EINVAL;
       }
