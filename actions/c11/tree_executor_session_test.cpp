@@ -2568,6 +2568,49 @@ int testBuiltInEntryUpdatedUsesHostValueStore() {
   return 0;
 }
 
+int testDynamicDelayUsesHostValueStore() {
+  actions::Tree tree;
+  tree.root.id = "Delay";
+  tree.root.params.emplace("delay_ms",
+                           actions::Value{std::string("{delay}")});
+  actions::Node child;
+  child.id = "Observe";
+  tree.root.children.push_back(child);
+
+  actions::Executor executor;
+  int host_calls = 0;
+  int legacy_calls = 0;
+  executor.registerTask("Observe", [&legacy_calls](const auto&, actions::Blackboard&) {
+    ++legacy_calls;
+    return actions::NodeStatus::SUCCESS;
+  });
+
+  actions::Blackboard legacy_blackboard;
+  legacy_blackboard.set("delay", "60000");
+  actions::ExecutionContext context;
+  HostValueMap values{{"delay", "0"}};
+  praktor_c11_bt_host hooks{};
+  hooks.tick_leaf = &hostSuccessLeaf;
+  hooks.halt_leaf = &noOpHalt;
+  hooks.user = &host_calls;
+  hooks.value_get = &hostValueGet;
+  hooks.value_set = &hostValueSet;
+  hooks.value_contains = &hostValueContains;
+  hooks.value_user = &values;
+
+  actions::c11::TreeExecutorSession session(
+      tree, executor, legacy_blackboard, context, limits(), &hooks);
+  CHECK(session.validate() == SALTS_OK);
+  salts_bt_node_status status = SALTS_BT_RUNNING;
+  for (int i = 0; i < 8 && status == SALTS_BT_RUNNING; ++i) {
+    CHECK(session.tick(&status) == SALTS_OK);
+  }
+  CHECK(status == SALTS_BT_SUCCESS);
+  CHECK(host_calls == 1);
+  CHECK(legacy_calls == 0);
+  return 0;
+}
+
 int testEntryUpdatedRejectsEmptyWatchKeyBeforeChildEffects() {
   // Legacy EntryUpdated throws on an empty resolved watch_key. Its C11
   // equivalent must not execute a child or cache an empty key observation.
@@ -3185,6 +3228,7 @@ int main() {
   if (testBuiltInConsumeQueue() != 0) return 1;
   if (testConsumeQueueRejectsMalformedQueue() != 0) return 1;
   if (testBuiltInEntryUpdatedUsesHostValueStore() != 0) return 1;
+  if (testDynamicDelayUsesHostValueStore() != 0) return 1;
   if (testEntryUpdatedRejectsEmptyWatchKeyBeforeChildEffects() != 0) return 1;
   if (testCancelReportsHostHaltFailure() != 0) return 1;
   if (testFailedInitialHostTickRunsCleanupExactlyOnce() != 0) return 1;
