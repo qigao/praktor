@@ -7,6 +7,12 @@
 #endif
 #include <tinytest.hpp>
 
+// These optional BDD aliases collide with Windows PPL's task::then and
+// workflow APIs. Tests use spec/it directly; keep library identifiers intact.
+#undef given
+#undef when
+#undef then
+
 #include <array>
 #include <initializer_list>
 #include <limits>
