@@ -19,9 +19,6 @@
 
 #ifdef _WIN32
 #include <windows.h>
-#else
-#include <pthread.h>
-#include <signal.h>
 #endif
 
 namespace Praktor::Shell {
@@ -264,17 +261,6 @@ struct ManagedProcess::Impl {
       output.stderr_output = "Salts::Process start failed (status " + std::to_string(start_status) + ")";
       return;
     }
-#ifndef _WIN32
-    // Native pipe writes can raise SIGPIPE on peer close (notably Kqueue).
-    // This dedicated driver blocks it for its remaining lifetime. Spawn has
-    // already completed, so children do not inherit this policy; the caller's
-    // signal mask and process-wide disposition are never changed. Do not
-    // unblock a pending SIGPIPE before this driver thread exits.
-    sigset_t pipe_signal;
-    sigemptyset(&pipe_signal);
-    sigaddset(&pipe_signal, SIGPIPE);
-    if (pthread_sigmask(SIG_BLOCK, &pipe_signal, nullptr) != 0) failed = true;
-#endif
     {
       std::lock_guard<std::mutex> lock(mutex);
       if (!cancel_requested) observed = ProcessState::Running;

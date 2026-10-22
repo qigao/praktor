@@ -13,7 +13,7 @@
     <RepositoryUrl>https://github.com/qigao/praktor</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <NoWarn>$(NoWarn);NU5128</NoWarn>
-    <SaltsUtilsVersion Condition="'$(SaltsUtilsVersion)' == ''">*-*</SaltsUtilsVersion>
+    <SaltsUtilsVersion Condition="'$(SaltsUtilsVersion)' == ''">4.3.0-rc.11</SaltsUtilsVersion>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Salts.Native" Version="*-*" />

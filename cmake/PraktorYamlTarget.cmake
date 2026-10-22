@@ -1,6 +1,5 @@
-# SaltsUtils 4.3.0-rc.2 exports CYaml. Keep that supported SDK usable while
-# consumers adopt the canonical YamlParser spelling. Remove this bridge when
-# Praktor's minimum SDK version exports YamlParser itself.
+# Some supported SDKs export the parser as CYaml. This is a target spelling
+# bridge to the same provider, with no alternate parser implementation.
 if(NOT TARGET Salts::YamlParser)
     if(NOT TARGET Salts::CYaml)
         message(FATAL_ERROR "The selected SaltsUtils SDK has no YAML parser target")

@@ -14,10 +14,10 @@ The synchronous facade has one joined driver thread per invocation. Only this
 thread calls Process start/submit/run/close/destroy. Cancellation and observers
 access synchronized adapter metadata, never a native Process handle. There are
 three fixed 4096-byte I/O buffers and eight bounded request slots. Input and both
-output streams progress concurrently through Process callbacks. On POSIX, the
-dedicated driver blocks SIGPIPE only after spawn and keeps it blocked until
-thread exit, so early stdin peer-close becomes an I/O result without changing
-the caller or child signal policy. Captured stdout
+output streams progress concurrently through Process callbacks. Darwin stdin
+peer-close protection belongs to the Process-owned parent endpoint, supplied by
+SaltsUtils `4.3.0-rc.11` or the pinned P1 candidate. Praktor changes neither the
+caller nor the child signal policy. Captured stdout
 and stderr share `max_output_bytes` (16 MiB by default), with a bounded terminal
 error diagnostic. Stream callbacks preserve per-stream lines and trailing text.
 
@@ -32,6 +32,10 @@ quiescence and successful destruction. Transient cleanup errors are retried by
 the same owner and reported as failure. This facade is synchronous on teardown:
 a persistent cleanup fault can keep wait/destruction blocked; it never force-frees
 live leases or detaches their storage.
+
+The P1 candidate is `qigao/salts-utils@779705d76ae173d1b5d18ad1de10ee88c086452c`
+(Draft PR #689), retaining the hardened close/acknowledgement, stats and retainer
+paths while adding the Darwin endpoint fix.
 
 The cooperative C11 Session continues to use its separate explicit fixed-capacity
 Process retainer for bounded synchronous teardown and later owner-driven drain.
