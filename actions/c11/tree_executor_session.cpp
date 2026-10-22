@@ -546,6 +546,11 @@ struct TreeExecutorSession::Impl : std::enable_shared_from_this<Impl> {
       throw std::invalid_argument(
           "C11 host value store requires get/set/contains callbacks and value_user");
     }
+    if (has_value_get &&
+        (hooks.tick_leaf == nullptr || hooks.halt_leaf == nullptr)) {
+      throw std::invalid_argument(
+          "C11 host value store requires explicit host leaf dispatch and halt hooks");
+    }
     for (size_t i = 0u; i < compiled_plan.nodes.size(); ++i) {
       const auto& desc = compiled_plan.nodes[i];
       const auto* source = nodeAt(i);
@@ -1254,6 +1259,16 @@ struct TreeExecutorSession::Impl : std::enable_shared_from_this<Impl> {
           leaf_owners[index] = LeafOwner::None;
           return host_status;
         }
+      }
+
+      // A host-owned value store cannot be mixed with legacy Executor leaves:
+      // those leaves mutate a different Blackboard. Declined host dispatch is
+      // therefore fail-closed; Shell may still use built-in Salts::Process,
+      // which publishes through setValue().
+      if (hooks.value_get != nullptr && source->id != "Shell") {
+        last_error = "host-owned C11 values require host leaf dispatch; refusing legacy Executor fallback for '" +
+                     source->id + "'";
+        return SALTS_ENOTSUP;
       }
 
       // A Parallel host may have allocated branch-local contexts in enter().

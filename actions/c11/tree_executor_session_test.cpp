@@ -54,6 +54,13 @@ struct ScopedProcessRetainer {
 
 void noOpHalt(void*, size_t) {}
 
+int hostSuccessLeaf(void* user, size_t, salts_bt_node_status* out_status) {
+  if (user == nullptr || out_status == nullptr) return SALTS_EINVAL;
+  ++*static_cast<int*>(user);
+  *out_status = SALTS_BT_SUCCESS;
+  return SALTS_OK;
+}
+
 using HostValueMap = std::map<std::string, std::string>;
 
 int hostValueGet(void* user, const char* key, char* out_value,
@@ -2524,9 +2531,10 @@ int testBuiltInEntryUpdatedUsesHostValueStore() {
   tree.root.children.push_back(child);
 
   actions::Executor executor;
-  int calls = 0;
-  executor.registerTask("Observe", [&calls](const auto&, actions::Blackboard&) {
-    ++calls;
+  int host_calls = 0;
+  int legacy_calls = 0;
+  executor.registerTask("Observe", [&legacy_calls](const auto&, actions::Blackboard&) {
+    ++legacy_calls;
     return actions::NodeStatus::SUCCESS;
   });
   actions::Blackboard legacy_blackboard;
@@ -2534,6 +2542,9 @@ int testBuiltInEntryUpdatedUsesHostValueStore() {
   actions::ExecutionContext context;
   HostValueMap values{{"watched", "first"}};
   praktor_c11_bt_host hooks{};
+  hooks.tick_leaf = &hostSuccessLeaf;
+  hooks.halt_leaf = &noOpHalt;
+  hooks.user = &host_calls;
   hooks.value_get = &hostValueGet;
   hooks.value_set = &hostValueSet;
   hooks.value_contains = &hostValueContains;
@@ -2543,14 +2554,17 @@ int testBuiltInEntryUpdatedUsesHostValueStore() {
   salts_bt_node_status status = SALTS_BT_FAILURE;
   CHECK(session.tick(&status) == SALTS_OK);
   CHECK(status == SALTS_BT_SUCCESS);
-  CHECK(calls == 1);
+  CHECK(host_calls == 1);
+  CHECK(legacy_calls == 0);
   CHECK(session.tick(&status) == SALTS_OK);
   CHECK(status == SALTS_BT_SUCCESS);
-  CHECK(calls == 1);
+  CHECK(host_calls == 1);
+  CHECK(legacy_calls == 0);
   values["watched"] = "second";
   CHECK(session.tick(&status) == SALTS_OK);
   CHECK(status == SALTS_BT_SUCCESS);
-  CHECK(calls == 2);
+  CHECK(host_calls == 2);
+  CHECK(legacy_calls == 0);
   return 0;
 }
 
