@@ -2720,6 +2720,38 @@ int testDynamicDelayUsesHostValueStore() {
   return 0;
 }
 
+int testHostValueStoreDeclinedLeafDoesNotFallback() {
+  actions::Tree tree;
+  tree.root.id = "Observe";
+  actions::Executor executor;
+  int legacy_calls = 0;
+  executor.registerTask("Observe", [&legacy_calls](const auto&, actions::Blackboard&) {
+    ++legacy_calls;
+    return actions::NodeStatus::SUCCESS;
+  });
+  actions::Blackboard legacy_blackboard;
+  actions::ExecutionContext context;
+  HostValueMap values{{"seed", "host"}};
+  int host_calls = 0;
+  praktor_c11_bt_host hooks{};
+  hooks.tick_leaf = &hostDeclineLeaf;
+  hooks.halt_leaf = &noOpHalt;
+  hooks.user = &host_calls;
+  hooks.value_get = &hostValueGet;
+  hooks.value_set = &hostValueSet;
+  hooks.value_contains = &hostValueContains;
+  hooks.value_user = &values;
+  actions::c11::TreeExecutorSession session(
+      tree, executor, legacy_blackboard, context, limits(), &hooks);
+  salts_bt_node_status status = SALTS_BT_SUCCESS;
+  CHECK(session.tick(&status) == SALTS_ENOTSUP);
+  CHECK(legacy_calls == 0);
+  CHECK(status == SALTS_BT_FAILURE || status == SALTS_BT_SUCCESS);
+  CHECK(session.lastError().find("refusing legacy Executor fallback") !=
+        std::string::npos);
+  return 0;
+}
+
 int testEntryUpdatedRejectsEmptyWatchKeyBeforeChildEffects() {
   // Legacy EntryUpdated throws on an empty resolved watch_key. Its C11
   // equivalent must not execute a child or cache an empty key observation.
@@ -3338,6 +3370,7 @@ int main() {
   if (testConsumeQueueRejectsMalformedQueue() != 0) return 1;
   if (testBuiltInEntryUpdatedUsesHostValueStore() != 0) return 1;
   if (testDynamicDelayUsesHostValueStore() != 0) return 1;
+  if (testHostValueStoreDeclinedLeafDoesNotFallback() != 0) return 1;
   if (testEntryUpdatedRejectsEmptyWatchKeyBeforeChildEffects() != 0) return 1;
   if (testCancelReportsHostHaltFailure() != 0) return 1;
   if (testFailedInitialHostTickRunsCleanupExactlyOnce() != 0) return 1;
