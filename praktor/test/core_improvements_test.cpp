@@ -1,4 +1,4 @@
-#include <catch2/catch_all.hpp>
+#include "praktor_test.hpp"
 #include "yml/task_parser.hpp"
 #include "dag/task_executor.hpp"
 #include "dag/task_failure_context.hpp"
@@ -24,7 +24,7 @@ std::string writeTextCommand(const fs::path& path, const std::string& text)
 
 }
 
-TEST_CASE("TaskResult failure keeps legacy message and structured metadata") {
+[[maybe_unused]] static void test_taskresult_failure_keeps_legacy_message_and_structured_metadata_1() {
     auto details = WorkflowValue::object();
     details["state"] = "start_pending";
     auto result = TaskResult::fail(
@@ -32,22 +32,30 @@ TEST_CASE("TaskResult failure keeps legacy message and structured metadata") {
         "poll", "service did not reach running",
         std::move(details));
 
-    CHECK_FALSE(result.success);
-    CHECK(result.error_message == "service did not reach running");
-    CHECK(result.error_code == "timeout");
-    CHECK(result.error_phase == "poll");
-    CHECK(result.error_details["state"].as<std::string>() == "start_pending");
+    check((!(result.success)));
+    check((result.error_message == "service did not reach running"));
+    check((result.error_code == "timeout"));
+    check((result.error_phase == "poll"));
+    check((result.error_details["state"].as<std::string>() == "start_pending"));
 }
 
-TEST_CASE("Task error code rejects unknown enum values") {
+spec("TaskResult failure keeps legacy message and structured metadata") {
+    it("complete case") { test_taskresult_failure_keeps_legacy_message_and_structured_metadata_1(); }
+}
+
+[[maybe_unused]] static void test_task_error_code_rejects_unknown_enum_values_2() {
     const auto unknown = static_cast<Praktor::Execution::TaskErrorCode>(999);
 
-    CHECK_THROWS_AS(Praktor::Execution::taskErrorCodeName(unknown), std::invalid_argument);
-    CHECK_THROWS_AS(TaskResult::fail(unknown, "poll", "invalid task error code"),
+    check_throws_as(Praktor::Execution::taskErrorCodeName(unknown), std::invalid_argument);
+    check_throws_as(TaskResult::fail(unknown, "poll", "invalid task error code"),
                     std::invalid_argument);
 }
 
-TEST_CASE("TaskFailureContext keeps legacy failure data with structured metadata") {
+spec("Task error code rejects unknown enum values") {
+    it("complete case") { test_task_error_code_rejects_unknown_enum_values_2(); }
+}
+
+[[maybe_unused]] static void test_taskfailurecontext_keeps_legacy_failure_data_with_structured_metadata_3() {
     TaskFailureContext failure;
     failure.task_name = "start_service";
     failure.task_type = "service";
@@ -60,20 +68,24 @@ TEST_CASE("TaskFailureContext keeps legacy failure data with structured metadata
     const auto variables = failure.toFailureVariables();
     const auto serialized = failure.toJson();
 
-    CHECK(variables.at("failed_task_error").as<std::string>() == "service did not reach running");
-    CHECK(variables.at("failed_task_error_code").as<std::string>() == "timeout");
-    CHECK(variables.at("failed_task_error_phase").as<std::string>() == "poll");
-    CHECK(variables.at("failed_task_error_details")["state"].as<std::string>() == "start_pending");
-    CHECK(serialized["error"].as<std::string>() == "service did not reach running");
-    CHECK(serialized["error_code"].as<std::string>() == "timeout");
-    CHECK(serialized["error_phase"].as<std::string>() == "poll");
-    CHECK(serialized["error_details"]["state"].as<std::string>() == "start_pending");
+    check((variables.at("failed_task_error").as<std::string>() == "service did not reach running"));
+    check((variables.at("failed_task_error_code").as<std::string>() == "timeout"));
+    check((variables.at("failed_task_error_phase").as<std::string>() == "poll"));
+    check((variables.at("failed_task_error_details")["state"].as<std::string>() == "start_pending"));
+    check((serialized["error"].as<std::string>() == "service did not reach running"));
+    check((serialized["error_code"].as<std::string>() == "timeout"));
+    check((serialized["error_phase"].as<std::string>() == "poll"));
+    check((serialized["error_details"]["state"].as<std::string>() == "start_pending"));
 }
 
-TEST_CASE("Parser Improvements - Line Numbers & Validation", "[parser][schema]") {
+spec("TaskFailureContext keeps legacy failure data with structured metadata") {
+    it("complete case") { test_taskfailurecontext_keeps_legacy_failure_data_with_structured_metadata_3(); }
+}
+
+[[maybe_unused]] static void test_parser_improvements_line_numbers_validation_4(int section_index) {
     fs::path temp_file = "temp_invalid.yml";
 
-    SECTION("Unknown keys throw with line info") {
+    if (section_index == 0) {
         std::string invalid_yml = "name: Test\ntasks:\n  - name: my_task\n    typO: command\n";
         {
             std::ofstream ofs(temp_file);
@@ -82,19 +94,23 @@ TEST_CASE("Parser Improvements - Line Numbers & Validation", "[parser][schema]")
 
         try {
             TaskParser::parseFile(temp_file.string());
-            FAIL("Should have thrown for unknown key 'typO'");
+            check(false, "%s", praktor_test::message([&](std::ostream& out) { out << "Should have thrown for unknown key 'typO'"; }).c_str());
         } catch (const std::exception& e) {
             std::string msg = e.what();
             // Expected something like "temp_invalid.yml: Parse error: Unknown key: 'typO'"
-            REQUIRE(msg.find("temp_invalid.yml") != std::string::npos);
-            REQUIRE(msg.find("Unknown key: 'typO'") != std::string::npos);
+            check((msg.find("temp_invalid.yml") != std::string::npos));
+            check((msg.find("Unknown key: 'typO'") != std::string::npos));
         }
     }
 
     if (fs::exists(temp_file)) fs::remove(temp_file);
 }
 
-TEST_CASE("Include System - Circular Detection", "[parser][includes]") {
+spec("Parser Improvements - Line Numbers & Validation") {
+    it("Unknown keys throw with line info") { test_parser_improvements_line_numbers_validation_4(0); }
+}
+
+[[maybe_unused]] static void test_include_system_circular_detection_5(int section_index) {
     fs::path a = fs::absolute("circ_a.yml");
     fs::path b = fs::absolute("circ_b.yml");
 
@@ -103,15 +119,15 @@ TEST_CASE("Include System - Circular Detection", "[parser][includes]") {
         std::ofstream(b) << "includes:\n  a: ./circ_a.yml\ntasks:\n  - name: t2\n    command: echo B\n";
     }
 
-    SECTION("Circular include detected") {
+    if (section_index == 0) {
         try {
             TaskParser::parseFile(a.string());
-            FAIL("Should have thrown for circular include");
+            check(false, "%s", praktor_test::message([&](std::ostream& out) { out << "Should have thrown for circular include"; }).c_str());
         } catch (const std::exception& e) {
             std::string msg = e.what();
-            REQUIRE(msg.find("Circular include detected") != std::string::npos);
-            REQUIRE(msg.find("circ_a.yml") != std::string::npos);
-            REQUIRE(msg.find("circ_b.yml") != std::string::npos);
+            check((msg.find("Circular include detected") != std::string::npos));
+            check((msg.find("circ_a.yml") != std::string::npos));
+            check((msg.find("circ_b.yml") != std::string::npos));
         }
     }
 
@@ -119,7 +135,11 @@ TEST_CASE("Include System - Circular Detection", "[parser][includes]") {
     if (fs::exists(b)) fs::remove(b);
 }
 
-TEST_CASE("Execution Engine - Task Caching", "[execution][caching]") {
+spec("Include System - Circular Detection") {
+    it("Circular include detected") { test_include_system_circular_detection_5(0); }
+}
+
+[[maybe_unused]] static void test_execution_engine_task_caching_6(int section_index) {
     fs::path src = fs::absolute("test_input.txt");
     fs::path gen = fs::absolute("test_output.txt");
     fs::path wf_path = fs::absolute("cache_wf.yml");
@@ -138,26 +158,26 @@ TEST_CASE("Execution Engine - Task Caching", "[execution][caching]") {
     WorkflowContext context;
     WorkflowExecutor executor(graph);
 
-    SECTION("First run: execute and cache") {
+    if (section_index == 0) {
         executor.execute(context);
-        REQUIRE(fs::exists(gen));
-        REQUIRE(context.getTaskStatus("cache_task") == "success");
+        check((fs::exists(gen)));
+        check((context.getTaskStatus("cache_task") == "success"));
         // Verify cache was created (usually in the workflow's parent dir)
         fs::path expected_cache = wf_path.parent_path() / ".praktor_cache";
-        REQUIRE(fs::exists(expected_cache));
+        check((fs::exists(expected_cache)));
     }
 
-    SECTION("Second run: skip") {
+    if (section_index == 1) {
         // Execute first to ensure it's cached
         executor.execute(context);
 
         // Execute again
         WorkflowContext context2;
         executor.execute(context2);
-        REQUIRE(context2.getTaskStatus("cache_task") == "skipped");
+        check((context2.getTaskStatus("cache_task") == "skipped"));
     }
 
-    SECTION("Third run: source changed, re-execute") {
+    if (section_index == 2) {
         executor.execute(context); // cache it
 
         // Change source
@@ -168,10 +188,10 @@ TEST_CASE("Execution Engine - Task Caching", "[execution][caching]") {
 
         WorkflowContext context3;
         executor.execute(context3);
-        REQUIRE(context3.getTaskStatus("cache_task") == "success");
+        check((context3.getTaskStatus("cache_task") == "success"));
     }
 
-    SECTION("Action changed: re-execute") {
+    if (section_index == 3) {
         executor.execute(context); // cache the first command
 
         {
@@ -190,11 +210,11 @@ TEST_CASE("Execution Engine - Task Caching", "[execution][caching]") {
 
         updated_executor.execute(context4);
 
-        REQUIRE(context4.getTaskStatus("cache_task") == "success");
+        check((context4.getTaskStatus("cache_task") == "success"));
         std::ifstream in(gen);
         std::string output;
         std::getline(in, output);
-        CHECK(output.find("changed") != std::string::npos);
+        check((output.find("changed") != std::string::npos));
     }
 
     if (fs::exists(src)) fs::remove(src);
@@ -203,7 +223,14 @@ TEST_CASE("Execution Engine - Task Caching", "[execution][caching]") {
     if (fs::exists(wf_path.parent_path() / ".praktor_cache")) fs::remove(wf_path.parent_path() / ".praktor_cache");
 }
 
-TEST_CASE("Execution Engine - Each outputs are aggregated", "[execution][each]") {
+spec("Execution Engine - Task Caching") {
+    it("First run: execute and cache") { test_execution_engine_task_caching_6(0); }
+    it("Second run: skip") { test_execution_engine_task_caching_6(1); }
+    it("Third run: source changed, re-execute") { test_execution_engine_task_caching_6(2); }
+    it("Action changed: re-execute") { test_execution_engine_task_caching_6(3); }
+}
+
+[[maybe_unused]] static void test_execution_engine_each_outputs_are_aggregated_7() {
     fs::path wf_path = fs::absolute("each_outputs_wf.yml");
 
     {
@@ -224,21 +251,25 @@ TEST_CASE("Execution Engine - Each outputs are aggregated", "[execution][each]")
     executor.execute(context);
 
     auto outputs = context.getValueByPath("tasks.fanout.outputs");
-    REQUIRE(outputs.is_object());
-    REQUIRE(outputs.contains("stdout"));
-    CHECK(outputs["stdout"].as<std::string>().find("gamma") != std::string::npos);
-    REQUIRE(outputs.contains("iterations"));
-    REQUIRE(outputs["iterations"].is_array());
-    REQUIRE(outputs["iterations"].size() == 3);
+    check((outputs.is_object()));
+    check((outputs.contains("stdout")));
+    check((outputs["stdout"].as<std::string>().find("gamma") != std::string::npos));
+    check((outputs.contains("iterations")));
+    check((outputs["iterations"].is_array()));
+    check((outputs["iterations"].size() == 3));
 
     auto first = outputs["iterations"][0];
     auto second = outputs["iterations"][1];
     auto third = outputs["iterations"][2];
 
-    CHECK(first["status"].as<std::string>() == "success");
-    CHECK(first["outputs"]["stdout"].as<std::string>().find("alpha") != std::string::npos);
-    CHECK(second["outputs"]["stdout"].as<std::string>().find("beta") != std::string::npos);
-    CHECK(third["outputs"]["stdout"].as<std::string>().find("gamma") != std::string::npos);
+    check((first["status"].as<std::string>() == "success"));
+    check((first["outputs"]["stdout"].as<std::string>().find("alpha") != std::string::npos));
+    check((second["outputs"]["stdout"].as<std::string>().find("beta") != std::string::npos));
+    check((third["outputs"]["stdout"].as<std::string>().find("gamma") != std::string::npos));
 
     if (fs::exists(wf_path)) fs::remove(wf_path);
+}
+
+spec("Execution Engine - Each outputs are aggregated") {
+    it("complete case") { test_execution_engine_each_outputs_are_aggregated_7(); }
 }

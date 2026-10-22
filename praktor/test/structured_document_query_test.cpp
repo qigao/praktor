@@ -1,11 +1,11 @@
-#include <catch2/catch_test_macros.hpp>
+#include "praktor_test.hpp"
 
 #include "data/structured_document_query.hpp"
 
 using Praktor::Data::StructuredDocumentQuery;
 using Praktor::Data::StructuredFormat;
 
-TEST_CASE("WorkflowValue copies own independent Turbo JSON trees", "[workflow-value]") {
+[[maybe_unused]] static void test_workflowvalue_copies_own_independent_turbo_json_trees_1() {
     WorkflowValue original = WorkflowValue::object();
     original["nested"] = WorkflowValue::object();
     original["nested"]["value"] = 7;
@@ -13,78 +13,110 @@ TEST_CASE("WorkflowValue copies own independent Turbo JSON trees", "[workflow-va
     WorkflowValue copy = original;
     copy["nested"]["value"] = 9;
 
-    CHECK(original["nested"]["value"].as<int>() == 7);
-    CHECK(copy["nested"]["value"].as<int>() == 9);
+    check((original["nested"]["value"].as<int>() == 7));
+    check((copy["nested"]["value"].as<int>() == 9));
 }
 
-TEST_CASE("WorkflowValue distinguishes object keys from array indexes", "[workflow-value]") {
+spec("WorkflowValue copies own independent Turbo JSON trees") {
+    it("complete case") { test_workflowvalue_copies_own_independent_turbo_json_trees_1(); }
+}
+
+[[maybe_unused]] static void test_workflowvalue_distinguishes_object_keys_from_array_indexes_2() {
     WorkflowValue value = WorkflowValue::object();
     value["#0"] = "object member";
 
-    CHECK(value["#0"].as<std::string>() == "object member");
+    check((value["#0"].as<std::string>() == "object member"));
 }
 
-TEST_CASE("WorkflowValue promotes null to an object on member assignment", "[workflow-value]") {
+spec("WorkflowValue distinguishes object keys from array indexes") {
+    it("complete case") { test_workflowvalue_distinguishes_object_keys_from_array_indexes_2(); }
+}
+
+[[maybe_unused]] static void test_workflowvalue_promotes_null_to_an_object_on_member_assignment_3() {
     WorkflowValue value;
     value["task"] = "build";
 
-    REQUIRE(value.is_object());
-    CHECK(value["task"].as<std::string>() == "build");
+    check((value.is_object()));
+    check((value["task"].as<std::string>() == "build"));
 }
 
-TEST_CASE("WorkflowValue transfers rvalue trees into containers", "[workflow-value]") {
+spec("WorkflowValue promotes null to an object on member assignment") {
+    it("complete case") { test_workflowvalue_promotes_null_to_an_object_on_member_assignment_3(); }
+}
+
+[[maybe_unused]] static void test_workflowvalue_transfers_rvalue_trees_into_containers_4() {
     WorkflowValue child = WorkflowValue::object({{"name", "Ada"}});
     WorkflowValue values = WorkflowValue::array();
     values.push_back(std::move(child));
 
-    REQUIRE(values.size() == 1);
-    CHECK(values[0]["name"].as<std::string>() == "Ada");
+    check((values.size() == 1));
+    check((values[0]["name"].as<std::string>() == "Ada"));
 }
 
-TEST_CASE("StructuredDocumentQuery uses JSONPath", "[structured-query]") {
+spec("WorkflowValue transfers rvalue trees into containers") {
+    it("complete case") { test_workflowvalue_transfers_rvalue_trees_into_containers_4(); }
+}
+
+[[maybe_unused]] static void test_structureddocumentquery_uses_jsonpath_5() {
     const auto result = StructuredDocumentQuery::query(
         StructuredFormat::Json,
         R"({"users":[{"name":"Ada"},{"name":"Lin"}]})",
         "$.users[*].name");
 
-    REQUIRE(result.is_array());
-    REQUIRE(result.size() == 2);
-    CHECK(result[0].as<std::string>() == "Ada");
-    CHECK(result[1].as<std::string>() == "Lin");
+    check((result.is_array()));
+    check((result.size() == 2));
+    check((result[0].as<std::string>() == "Ada"));
+    check((result[1].as<std::string>() == "Lin"));
 }
 
-TEST_CASE("StructuredDocumentQuery uses YPATH", "[structured-query]") {
+spec("StructuredDocumentQuery uses JSONPath") {
+    it("complete case") { test_structureddocumentquery_uses_jsonpath_5(); }
+}
+
+[[maybe_unused]] static void test_structureddocumentquery_uses_ypath_6() {
     const auto result = StructuredDocumentQuery::query(
         StructuredFormat::Yaml,
         "users:\n  - name: Ada\n  - name: Lin\n",
         "/users[*]/name");
 
-    REQUIRE(result.is_array());
-    REQUIRE(result.size() == 2);
-    CHECK(result[0].as<std::string>() == "Ada");
-    CHECK(result[1].as<std::string>() == "Lin");
+    check((result.is_array()));
+    check((result.size() == 2));
+    check((result[0].as<std::string>() == "Ada"));
+    check((result[1].as<std::string>() == "Lin"));
 }
 
-TEST_CASE("StructuredDocumentQuery uses XPath", "[structured-query]") {
+spec("StructuredDocumentQuery uses YPATH") {
+    it("complete case") { test_structureddocumentquery_uses_ypath_6(); }
+}
+
+[[maybe_unused]] static void test_structureddocumentquery_uses_xpath_7() {
     const auto result = StructuredDocumentQuery::query(
         StructuredFormat::Xml,
         "<users><name>Ada</name><name>Lin</name></users>",
         "//name/text()");
 
-    REQUIRE(result.is_array());
-    REQUIRE(result.size() == 2);
-    CHECK(result[0].as<std::string>() == "Ada");
-    CHECK(result[1].as<std::string>() == "Lin");
+    check((result.is_array()));
+    check((result.size() == 2));
+    check((result[0].as<std::string>() == "Ada"));
+    check((result[1].as<std::string>() == "Lin"));
 }
 
-TEST_CASE("StructuredDocumentQuery uses CSVPath filters", "[structured-query]") {
+spec("StructuredDocumentQuery uses XPath") {
+    it("complete case") { test_structureddocumentquery_uses_xpath_7(); }
+}
+
+[[maybe_unused]] static void test_structureddocumentquery_uses_csvpath_filters_8() {
     const auto result = StructuredDocumentQuery::query(
         StructuredFormat::Csv,
         "name,score_n\r\nAda,9\r\nLin,7\r\n",
         "score_n >= 8");
 
-    REQUIRE(result.is_array());
-    REQUIRE(result.size() == 1);
-    CHECK(result[0]["name"].as<std::string>() == "Ada");
-    CHECK(result[0]["score_n"].as<std::string>() == "9");
+    check((result.is_array()));
+    check((result.size() == 1));
+    check((result[0]["name"].as<std::string>() == "Ada"));
+    check((result[0]["score_n"].as<std::string>() == "9"));
+}
+
+spec("StructuredDocumentQuery uses CSVPath filters") {
+    it("complete case") { test_structureddocumentquery_uses_csvpath_filters_8(); }
 }

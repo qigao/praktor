@@ -1,7 +1,7 @@
+#include "praktor_test.hpp"
 #include "executors/managed_process_executor.hpp"
 #include "system/managed_process.hpp"
 
-#include <catch2/catch_all.hpp>
 
 #include <algorithm>
 #include <cctype>
@@ -124,49 +124,58 @@ ManagedProcessParams params(SystemOperation operation) {
 
 }  // namespace
 
-TEST_CASE("managed process status reports the queried snapshot") {
+[[maybe_unused]] static void test_managed_process_status_reports_the_queried_snapshot_1() {
   FakeManagedProcessBackend backend;
   backend.query_action = [] { return success(running()); };
   ManagedProcessController controller(backend, std::chrono::milliseconds(1));
 
   const auto result = controller.execute(params(SystemOperation::Status));
 
-  REQUIRE(result.ok);
-  CHECK(result.snapshot.state == ManagedProcessState::Running);
-  CHECK(result.snapshot.pid == kFixturePid);
-  CHECK_FALSE(result.changed);
-  CHECK(backend.queried_identities.size() == 1);
+  check((result.ok));
+  check((result.snapshot.state == ManagedProcessState::Running));
+  check((result.snapshot.pid == kFixturePid));
+  check((!(result.changed)));
+  check((backend.queried_identities.size() == 1));
 }
 
-TEST_CASE("managed process start and stop are idempotent at their target state") {
-  SECTION("start when already running") {
+spec("managed process status reports the queried snapshot") {
+    it("complete case") { test_managed_process_status_reports_the_queried_snapshot_1(); }
+}
+
+[[maybe_unused]] static void test_managed_process_start_and_stop_are_idempotent_at_their_target_state_2(int section_index) {
+  if (section_index == 0) {
     FakeManagedProcessBackend backend;
     backend.query_action = [] { return success(running()); };
     ManagedProcessController controller(backend, std::chrono::milliseconds(1));
 
     const auto result = controller.execute(params(SystemOperation::Start));
 
-    REQUIRE(result.ok);
-    CHECK(result.snapshot.state == ManagedProcessState::Running);
-    CHECK_FALSE(result.changed);
-    CHECK(backend.started_params.empty());
+    check((result.ok));
+    check((result.snapshot.state == ManagedProcessState::Running));
+    check((!(result.changed)));
+    check((backend.started_params.empty()));
   }
 
-  SECTION("stop when already stopped") {
+  if (section_index == 1) {
     FakeManagedProcessBackend backend;
     backend.query_action = [] { return success(notRunning()); };
     ManagedProcessController controller(backend, std::chrono::milliseconds(1));
 
     const auto result = controller.execute(params(SystemOperation::Stop));
 
-    REQUIRE(result.ok);
-    CHECK(result.snapshot.state == ManagedProcessState::NotRunning);
-    CHECK_FALSE(result.changed);
-    CHECK(backend.stopped_snapshots.empty());
+    check((result.ok));
+    check((result.snapshot.state == ManagedProcessState::NotRunning));
+    check((!(result.changed)));
+    check((backend.stopped_snapshots.empty()));
   }
 }
 
-TEST_CASE("managed process start waits for identity query to report running") {
+spec("managed process start and stop are idempotent at their target state") {
+    it("start when already running") { test_managed_process_start_and_stop_are_idempotent_at_their_target_state_2(0); }
+    it("stop when already stopped") { test_managed_process_start_and_stop_are_idempotent_at_their_target_state_2(1); }
+}
+
+[[maybe_unused]] static void test_managed_process_start_waits_for_identity_query_to_report_running_3() {
   FakeManagedProcessBackend backend;
   std::size_t query_count = 0;
   backend.query_action = [&] {
@@ -178,16 +187,20 @@ TEST_CASE("managed process start waits for identity query to report running") {
   const auto request = params(SystemOperation::Start);
   const auto result = controller.execute(request);
 
-  INFO(result.message);
-  REQUIRE(result.ok);
-  CHECK(result.snapshot.state == ManagedProcessState::Running);
-  CHECK(result.changed);
-  REQUIRE(backend.started_params.size() == 1);
-  CHECK(backend.started_params.front().arguments == request.arguments);
-  CHECK(query_count == 3);
+  info("%s", praktor_test::message([&](std::ostream& out) { out << result.message; }).c_str());
+  check((result.ok));
+  check((result.snapshot.state == ManagedProcessState::Running));
+  check((result.changed));
+  check((backend.started_params.size() == 1));
+  check((backend.started_params.front().arguments == request.arguments));
+  check((query_count == 3));
 }
 
-TEST_CASE("managed process stop requests graceful close and confirms stopped") {
+spec("managed process start waits for identity query to report running") {
+    it("complete case") { test_managed_process_start_waits_for_identity_query_to_report_running_3(); }
+}
+
+[[maybe_unused]] static void test_managed_process_stop_requests_graceful_close_and_confirms_stopped_4() {
   FakeManagedProcessBackend backend;
   std::size_t query_count = 0;
   backend.query_action = [&] {
@@ -198,16 +211,20 @@ TEST_CASE("managed process stop requests graceful close and confirms stopped") {
 
   const auto result = controller.execute(params(SystemOperation::Stop));
 
-  INFO(result.message);
-  REQUIRE(result.ok);
-  CHECK(result.snapshot.state == ManagedProcessState::NotRunning);
-  CHECK(result.changed);
-  REQUIRE(backend.stopped_snapshots.size() == 1);
-  CHECK(backend.stopped_snapshots.front().pid == kFixturePid);
-  CHECK(backend.terminated_snapshots.empty());
+  info("%s", praktor_test::message([&](std::ostream& out) { out << result.message; }).c_str());
+  check((result.ok));
+  check((result.snapshot.state == ManagedProcessState::NotRunning));
+  check((result.changed));
+  check((backend.stopped_snapshots.size() == 1));
+  check((backend.stopped_snapshots.front().pid == kFixturePid));
+  check((backend.terminated_snapshots.empty()));
 }
 
-TEST_CASE("managed process restart confirms stop before starting") {
+spec("managed process stop requests graceful close and confirms stopped") {
+    it("complete case") { test_managed_process_stop_requests_graceful_close_and_confirms_stopped_4(); }
+}
+
+[[maybe_unused]] static void test_managed_process_restart_confirms_stop_before_starting_5() {
   FakeManagedProcessBackend backend;
   std::size_t query_count = 0;
   backend.query_action = [&] {
@@ -227,17 +244,21 @@ TEST_CASE("managed process restart confirms stop before starting") {
 
   const auto result = controller.execute(params(SystemOperation::Restart));
 
-  INFO(result.message);
-  REQUIRE(result.ok);
-  CHECK(result.snapshot.state == ManagedProcessState::Running);
-  CHECK(result.snapshot.pid == 4343);
-  CHECK(result.changed);
-  REQUIRE(backend.stopped_snapshots.size() == 1);
-  REQUIRE(backend.started_params.size() == 1);
-  CHECK(query_count == 4);
+  info("%s", praktor_test::message([&](std::ostream& out) { out << result.message; }).c_str());
+  check((result.ok));
+  check((result.snapshot.state == ManagedProcessState::Running));
+  check((result.snapshot.pid == 4343));
+  check((result.changed));
+  check((backend.stopped_snapshots.size() == 1));
+  check((backend.started_params.size() == 1));
+  check((query_count == 4));
 }
 
-TEST_CASE("managed process startup timeout is bounded by the startup deadline") {
+spec("managed process restart confirms stop before starting") {
+    it("complete case") { test_managed_process_restart_confirms_stop_before_starting_5(); }
+}
+
+[[maybe_unused]] static void test_managed_process_startup_timeout_is_bounded_by_the_startup_deadline_6() {
   FakeManagedProcessBackend backend;
   backend.query_action = [] { return success(notRunning()); };
   ManagedProcessController controller(backend, std::chrono::milliseconds(1));
@@ -246,15 +267,19 @@ TEST_CASE("managed process startup timeout is bounded by the startup deadline") 
 
   const auto result = controller.execute(request);
 
-  CHECK_FALSE(result.ok);
-  CHECK(result.error == ManagedProcessError::Timeout);
-  CHECK(result.phase == "start_poll");
-  CHECK(result.snapshot.state == ManagedProcessState::NotRunning);
-  CHECK(result.changed);
-  CHECK(backend.started_params.size() == 1);
+  check((!(result.ok)));
+  check((result.error == ManagedProcessError::Timeout));
+  check((result.phase == "start_poll"));
+  check((result.snapshot.state == ManagedProcessState::NotRunning));
+  check((result.changed));
+  check((backend.started_params.size() == 1));
 }
 
-TEST_CASE("managed process backend start time consumes the startup budget") {
+spec("managed process startup timeout is bounded by the startup deadline") {
+    it("complete case") { test_managed_process_startup_timeout_is_bounded_by_the_startup_deadline_6(); }
+}
+
+[[maybe_unused]] static void test_managed_process_backend_start_time_consumes_the_startup_budget_7() {
   FakeManagedProcessBackend backend;
   bool start_completed = false;
   bool terminated = false;
@@ -276,14 +301,18 @@ TEST_CASE("managed process backend start time consumes the startup budget") {
 
   const auto result = controller.execute(request);
 
-  CHECK_FALSE(result.ok);
-  CHECK(result.error == ManagedProcessError::Timeout);
-  CHECK(result.phase == "start_poll");
-  CHECK(result.duration_ms >= 15);
-  REQUIRE(backend.started_params.size() == 1);
+  check((!(result.ok)));
+  check((result.error == ManagedProcessError::Timeout));
+  check((result.phase == "start_poll"));
+  check((result.duration_ms >= 15));
+  check((backend.started_params.size() == 1));
 }
 
-TEST_CASE("startup timeout compensates the exact started instance") {
+spec("managed process backend start time consumes the startup budget") {
+    it("complete case") { test_managed_process_backend_start_time_consumes_the_startup_budget_7(); }
+}
+
+[[maybe_unused]] static void test_startup_timeout_compensates_the_exact_started_instance_8() {
   FakeManagedProcessBackend backend;
   const ManagedProcessSnapshot started = running(5151);
   bool spawned = false;
@@ -297,10 +326,10 @@ TEST_CASE("startup timeout compensates the exact started instance") {
     return success(spawned && !terminated ? started : notRunning());
   };
   backend.terminate_action = [&](const ManagedProcessSnapshot& snapshot) {
-    CHECK(snapshot.pid == started.pid);
-    CHECK(snapshot.session_id == started.session_id);
-    CHECK(snapshot.instance_token == started.instance_token);
-    CHECK(snapshot.canonical_image_name == started.canonical_image_name);
+    check((snapshot.pid == started.pid));
+    check((snapshot.session_id == started.session_id));
+    check((snapshot.instance_token == started.instance_token));
+    check((snapshot.canonical_image_name == started.canonical_image_name));
     terminated = true;
     return commandSuccess();
   };
@@ -312,15 +341,19 @@ TEST_CASE("startup timeout compensates the exact started instance") {
 
   const auto result = controller.execute(request);
 
-  CHECK_FALSE(result.ok);
-  CHECK(result.error == ManagedProcessError::Timeout);
-  CHECK(result.phase == "start_poll");
-  CHECK(result.snapshot.state == ManagedProcessState::NotRunning);
-  CHECK(result.snapshot.pid == 0);
-  REQUIRE(backend.terminated_snapshots.size() == 1);
+  check((!(result.ok)));
+  check((result.error == ManagedProcessError::Timeout));
+  check((result.phase == "start_poll"));
+  check((result.snapshot.state == ManagedProcessState::NotRunning));
+  check((result.snapshot.pid == 0));
+  check((backend.terminated_snapshots.size() == 1));
 }
 
-TEST_CASE("startup timeout reports compensation command failure") {
+spec("startup timeout compensates the exact started instance") {
+    it("complete case") { test_startup_timeout_compensates_the_exact_started_instance_8(); }
+}
+
+[[maybe_unused]] static void test_startup_timeout_reports_compensation_command_failure_9() {
   FakeManagedProcessBackend backend;
   const ManagedProcessSnapshot started = running(5252);
   bool spawned = false;
@@ -343,17 +376,21 @@ TEST_CASE("startup timeout reports compensation command failure") {
 
   const auto result = controller.execute(request);
 
-  CHECK_FALSE(result.ok);
-  CHECK(result.error == ManagedProcessError::BackendFailure);
-  CHECK(result.phase == "start_timeout_terminate");
-  CHECK(result.native_error == 5);
-  CHECK(result.snapshot.state == ManagedProcessState::Running);
-  CHECK(result.snapshot.pid == started.pid);
-  CHECK(result.snapshot.instance_token == started.instance_token);
-  REQUIRE(backend.terminated_snapshots.size() == 1);
+  check((!(result.ok)));
+  check((result.error == ManagedProcessError::BackendFailure));
+  check((result.phase == "start_timeout_terminate"));
+  check((result.native_error == 5));
+  check((result.snapshot.state == ManagedProcessState::Running));
+  check((result.snapshot.pid == started.pid));
+  check((result.snapshot.instance_token == started.instance_token));
+  check((backend.terminated_snapshots.size() == 1));
 }
 
-TEST_CASE("startup timeout reports compensation confirmation timeout") {
+spec("startup timeout reports compensation command failure") {
+    it("complete case") { test_startup_timeout_reports_compensation_command_failure_9(); }
+}
+
+[[maybe_unused]] static void test_startup_timeout_reports_compensation_confirmation_timeout_10() {
   FakeManagedProcessBackend backend;
   const ManagedProcessSnapshot started = running(5353);
   bool spawned = false;
@@ -376,17 +413,21 @@ TEST_CASE("startup timeout reports compensation confirmation timeout") {
 
   const auto result = controller.execute(request);
 
-  CHECK_FALSE(result.ok);
-  CHECK(result.error == ManagedProcessError::Timeout);
-  CHECK(result.phase == "start_timeout_cleanup_poll");
-  CHECK(result.snapshot.state == ManagedProcessState::Running);
-  CHECK(result.snapshot.pid == started.pid);
-  CHECK(result.snapshot.instance_token == started.instance_token);
-  REQUIRE(backend.terminated_snapshots.size() == 1);
+  check((!(result.ok)));
+  check((result.error == ManagedProcessError::Timeout));
+  check((result.phase == "start_timeout_cleanup_poll"));
+  check((result.snapshot.state == ManagedProcessState::Running));
+  check((result.snapshot.pid == started.pid));
+  check((result.snapshot.instance_token == started.instance_token));
+  check((backend.terminated_snapshots.size() == 1));
 }
 
-TEST_CASE("managed process stop timeout does not terminate unless explicitly enabled") {
-  SECTION("force termination disabled") {
+spec("startup timeout reports compensation confirmation timeout") {
+    it("complete case") { test_startup_timeout_reports_compensation_confirmation_timeout_10(); }
+}
+
+[[maybe_unused]] static void test_managed_process_stop_timeout_does_not_terminate_unless_explicitly_enabled_11(int section_index) {
+  if (section_index == 0) {
     FakeManagedProcessBackend backend;
     backend.query_action = [] { return success(running()); };
     ManagedProcessController controller(backend, std::chrono::milliseconds(1));
@@ -395,15 +436,15 @@ TEST_CASE("managed process stop timeout does not terminate unless explicitly ena
 
     const auto result = controller.execute(request);
 
-    CHECK_FALSE(result.ok);
-    CHECK(result.error == ManagedProcessError::Timeout);
-    CHECK(result.phase == "stop_poll");
-    CHECK(result.snapshot.state == ManagedProcessState::Running);
-    CHECK(backend.stopped_snapshots.size() == 1);
-    CHECK(backend.terminated_snapshots.empty());
+    check((!(result.ok)));
+    check((result.error == ManagedProcessError::Timeout));
+    check((result.phase == "stop_poll"));
+    check((result.snapshot.state == ManagedProcessState::Running));
+    check((backend.stopped_snapshots.size() == 1));
+    check((backend.terminated_snapshots.empty()));
   }
 
-  SECTION("force termination enabled") {
+  if (section_index == 1) {
     FakeManagedProcessBackend backend;
     backend.query_action = [&] {
       return success(backend.terminated_snapshots.empty() ? running()
@@ -416,20 +457,25 @@ TEST_CASE("managed process stop timeout does not terminate unless explicitly ena
 
     const auto result = controller.execute(request);
 
-    INFO(result.message);
-    REQUIRE(result.ok);
-    CHECK(result.error == ManagedProcessError::None);
-    CHECK(result.phase.empty());
-    CHECK(result.message.empty());
-    CHECK(result.snapshot.state == ManagedProcessState::NotRunning);
-    CHECK(result.changed);
-    REQUIRE(backend.terminated_snapshots.size() == 1);
-    CHECK(backend.terminated_snapshots.front().pid == kFixturePid);
+    info("%s", praktor_test::message([&](std::ostream& out) { out << result.message; }).c_str());
+    check((result.ok));
+    check((result.error == ManagedProcessError::None));
+    check((result.phase.empty()));
+    check((result.message.empty()));
+    check((result.snapshot.state == ManagedProcessState::NotRunning));
+    check((result.changed));
+    check((backend.terminated_snapshots.size() == 1));
+    check((backend.terminated_snapshots.front().pid == kFixturePid));
   }
 }
 
-TEST_CASE("managed process executor maps outputs and structured failures") {
-  SECTION("successful status") {
+spec("managed process stop timeout does not terminate unless explicitly enabled") {
+    it("force termination disabled") { test_managed_process_stop_timeout_does_not_terminate_unless_explicitly_enabled_11(0); }
+    it("force termination enabled") { test_managed_process_stop_timeout_does_not_terminate_unless_explicitly_enabled_11(1); }
+}
+
+[[maybe_unused]] static void test_managed_process_executor_maps_outputs_and_structured_failures_12(int section_index) {
+  if (section_index == 0) {
     FakeManagedProcessBackend backend;
     backend.query_action = [] { return success(running()); };
     Praktor::Execution::ManagedProcessExecutor executor(
@@ -444,22 +490,22 @@ TEST_CASE("managed process executor maps outputs and structured failures") {
 
     const TaskResult result = executor.execute(task, context);
 
-    REQUIRE(result.success);
-    CHECK(context.getValueByPath("tasks.__root__.outputs.image_name")
-              .as<std::string>() == "managed_process_fixture.exe");
-    CHECK(context.getValueByPath("tasks.__root__.outputs.operation")
-              .as<std::string>() == "status");
-    CHECK(context.getValueByPath("tasks.__root__.outputs.state")
-              .as<std::string>() == "running");
-    CHECK(context.getValueByPath("tasks.__root__.outputs.pid").as<int64_t>() ==
-          kFixturePid);
-    CHECK_FALSE(context.getValueByPath("tasks.__root__.outputs.changed")
-                    .as<bool>());
-    CHECK(context.getValueByPath("tasks.__root__.outputs.duration_ms")
-              .as<int64_t>() >= 0);
+    check((result.success));
+    check((context.getValueByPath("tasks.__root__.outputs.image_name")
+              .as<std::string>() == "managed_process_fixture.exe"));
+    check((context.getValueByPath("tasks.__root__.outputs.operation")
+              .as<std::string>() == "status"));
+    check((context.getValueByPath("tasks.__root__.outputs.state")
+              .as<std::string>() == "running"));
+    check((context.getValueByPath("tasks.__root__.outputs.pid").as<int64_t>() ==
+          kFixturePid));
+    check((!(context.getValueByPath("tasks.__root__.outputs.changed")
+                    .as<bool>())));
+    check((context.getValueByPath("tasks.__root__.outputs.duration_ms")
+              .as<int64_t>() >= 0));
   }
 
-  SECTION("backend failure") {
+  if (section_index == 1) {
     FakeManagedProcessBackend backend;
     backend.query_action = [] {
       return ManagedProcessResult<ManagedProcessSnapshot>{
@@ -477,13 +523,13 @@ TEST_CASE("managed process executor maps outputs and structured failures") {
 
     const TaskResult result = executor.execute(task, context);
 
-    CHECK_FALSE(result.success);
-    CHECK(result.error_code == "service_state_failed");
-    CHECK(result.error_phase == "query");
-    CHECK_FALSE(result.error_details.contains("native_error"));
+    check((!(result.success)));
+    check((result.error_code == "service_state_failed"));
+    check((result.error_phase == "query"));
+    check((!(result.error_details.contains("native_error"))));
   }
 
-  SECTION("unsupported platform") {
+  if (section_index == 2) {
     FakeManagedProcessBackend backend;
     backend.query_action = [] {
       return ManagedProcessResult<ManagedProcessSnapshot>{
@@ -502,10 +548,16 @@ TEST_CASE("managed process executor maps outputs and structured failures") {
 
     const TaskResult result = executor.execute(task, context);
 
-    CHECK_FALSE(result.success);
-    CHECK(result.error_code == "unsupported_platform");
-    CHECK(result.error_phase == "query");
+    check((!(result.success)));
+    check((result.error_code == "unsupported_platform"));
+    check((result.error_phase == "query"));
   }
+}
+
+spec("managed process executor maps outputs and structured failures") {
+    it("successful status") { test_managed_process_executor_maps_outputs_and_structured_failures_12(0); }
+    it("backend failure") { test_managed_process_executor_maps_outputs_and_structured_failures_12(1); }
+    it("unsupported platform") { test_managed_process_executor_maps_outputs_and_structured_failures_12(2); }
 }
 
 #ifdef _WIN32
@@ -614,30 +666,34 @@ private:
 
 } // namespace
 
-TEST_CASE("Windows managed process identity matching is current-session exact basename") {
+[[maybe_unused]] static void test_windows_managed_process_identity_matching_is_current_session_exact_basename_13() {
   using Praktor::System::WinDetail::matchesManagedProcessCandidate;
 
   const auto case_insensitive =
       matchesManagedProcessCandidate("C:/configured/WORKER.EXE", "C:/runtime/worker.exe", 7, 7);
-  REQUIRE(case_insensitive.ok);
-  CHECK(case_insensitive.value);
+  check((case_insensitive.ok));
+  check((case_insensitive.value));
 
   const auto different_extension =
       matchesManagedProcessCandidate("worker.exe", "C:/runtime/worker.com", 7, 7);
-  REQUIRE(different_extension.ok);
-  CHECK_FALSE(different_extension.value);
+  check((different_extension.ok));
+  check((!(different_extension.value)));
 
   const auto different_session =
       matchesManagedProcessCandidate("worker.exe", "C:/runtime/WORKER.EXE", 8, 7);
-  REQUIRE(different_session.ok);
-  CHECK_FALSE(different_session.value);
+  check((different_session.ok));
+  check((!(different_session.value)));
 }
 
-TEST_CASE("Windows fixture cleanup reports backend failures") {
+spec("Windows managed process identity matching is current-session exact basename") {
+    it("complete case") { test_windows_managed_process_identity_matching_is_current_session_exact_basename_13(); }
+}
+
+[[maybe_unused]] static void test_windows_fixture_cleanup_reports_backend_failures_14(int section_index) {
   ManagedProcessIdentity identity;
   identity.image_name = "managed_process_fixture.exe";
 
-  SECTION("query failure") {
+  if (section_index == 0) {
     FakeManagedProcessBackend backend;
     backend.query_action = [] {
       return ManagedProcessResult<ManagedProcessSnapshot>{
@@ -647,11 +703,11 @@ TEST_CASE("Windows fixture cleanup reports backend failures") {
     const auto cleaned = cleanupManagedProcessFixture(
         backend, identity, std::chrono::milliseconds(10), std::chrono::milliseconds(1));
 
-    CHECK_FALSE(cleaned.ok);
-    CHECK(cleaned.native_error == 5);
+    check((!(cleaned.ok)));
+    check((cleaned.native_error == 5));
   }
 
-  SECTION("termination failure") {
+  if (section_index == 1) {
     FakeManagedProcessBackend backend;
     backend.query_action = [] {
       ManagedProcessSnapshot running;
@@ -664,11 +720,11 @@ TEST_CASE("Windows fixture cleanup reports backend failures") {
     const auto cleaned = cleanupManagedProcessFixture(
         backend, identity, std::chrono::milliseconds(10), std::chrono::milliseconds(1));
 
-    CHECK_FALSE(cleaned.ok);
-    CHECK(cleaned.native_error == 6);
+    check((!(cleaned.ok)));
+    check((cleaned.native_error == 6));
   }
 
-  SECTION("timeout") {
+  if (section_index == 2) {
     FakeManagedProcessBackend backend;
     backend.query_action = [] {
       ManagedProcessSnapshot running;
@@ -680,12 +736,18 @@ TEST_CASE("Windows fixture cleanup reports backend failures") {
     const auto cleaned = cleanupManagedProcessFixture(
         backend, identity, std::chrono::milliseconds(0), std::chrono::milliseconds(0));
 
-    CHECK_FALSE(cleaned.ok);
-    CHECK(cleaned.native_error == ERROR_TIMEOUT);
+    check((!(cleaned.ok)));
+    check((cleaned.native_error == ERROR_TIMEOUT));
   }
 }
 
-TEST_CASE("Windows action validation rejects changed process evidence") {
+spec("Windows fixture cleanup reports backend failures") {
+    it("query failure") { test_windows_fixture_cleanup_reports_backend_failures_14(0); }
+    it("termination failure") { test_windows_fixture_cleanup_reports_backend_failures_14(1); }
+    it("timeout") { test_windows_fixture_cleanup_reports_backend_failures_14(2); }
+}
+
+[[maybe_unused]] static void test_windows_action_validation_rejects_changed_process_evidence_15() {
   using Praktor::System::WinDetail::matchesManagedProcessSnapshot;
 
   ManagedProcessSnapshot expected;
@@ -698,25 +760,29 @@ TEST_CASE("Windows action validation rejects changed process evidence") {
   auto changed_token = expected;
   ++changed_token.instance_token;
   const auto token_match = matchesManagedProcessSnapshot(expected, changed_token, 7);
-  REQUIRE(token_match.ok);
-  CHECK_FALSE(token_match.value);
+  check((token_match.ok));
+  check((!(token_match.value)));
 
   auto changed_image = expected;
   changed_image.canonical_image_name = "worker.com";
   const auto image_match = matchesManagedProcessSnapshot(expected, changed_image, 7);
-  REQUIRE(image_match.ok);
-  CHECK_FALSE(image_match.value);
+  check((image_match.ok));
+  check((!(image_match.value)));
 
   auto changed_session = expected;
   ++changed_session.session_id;
   const auto session_match = matchesManagedProcessSnapshot(expected, changed_session, 7);
-  REQUIRE(session_match.ok);
-  CHECK_FALSE(session_match.value);
+  check((session_match.ok));
+  check((!(session_match.value)));
 }
 
-TEST_CASE("Windows stop rejects a stale managed process instance token") {
+spec("Windows action validation rejects changed process evidence") {
+    it("complete case") { test_windows_action_validation_rejects_changed_process_evidence_15(); }
+}
+
+[[maybe_unused]] static void test_windows_stop_rejects_a_stale_managed_process_instance_token_16() {
   auto backend = Praktor::System::createManagedProcessBackend();
-  REQUIRE(backend != nullptr);
+  check((backend != nullptr));
 
   ManagedProcessParams request = params(SystemOperation::Start);
   request.executable = PRAKTOR_MANAGED_PROCESS_FIXTURE;
@@ -727,37 +793,41 @@ TEST_CASE("Windows stop rejects a stale managed process instance token") {
   request.force_terminate = true;
   const auto setup_cleanup = cleanupManagedProcessFixture(
       *backend, request.identity, std::chrono::seconds(3), std::chrono::milliseconds(20));
-  INFO(setup_cleanup.message);
-  REQUIRE(setup_cleanup.ok);
+  info("%s", praktor_test::message([&](std::ostream& out) { out << setup_cleanup.message; }).c_str());
+  check((setup_cleanup.ok));
   ManagedProcessFixtureCleanup cleanup(*backend, request.identity);
   ManagedProcessController controller(*backend, std::chrono::milliseconds(20));
 
   const auto started = controller.execute(request);
-  INFO(started.phase << ":" << started.message);
-  REQUIRE(started.ok);
-  REQUIRE(started.changed);
+  info("%s", praktor_test::message([&](std::ostream& out) { out << started.phase << ":" << started.message; }).c_str());
+  check((started.ok));
+  check((started.changed));
 
   auto stale = started.snapshot;
   ++stale.instance_token;
   const auto stopped = backend->requestStop(stale);
-  CHECK_FALSE(stopped.ok);
+  check((!(stopped.ok)));
 
   const auto after = backend->query(request.identity);
-  REQUIRE(after.ok);
-  CHECK(after.value.state == ManagedProcessState::Running);
-  CHECK(after.value.instance_token == started.snapshot.instance_token);
+  check((after.ok));
+  check((after.value.state == ManagedProcessState::Running));
+  check((after.value.instance_token == started.snapshot.instance_token));
 
   const auto final_cleanup = cleanup.cleanup();
-  INFO(final_cleanup.native_error << ":" << final_cleanup.message);
-  REQUIRE(final_cleanup.ok);
+  info("%s", praktor_test::message([&](std::ostream& out) { out << final_cleanup.native_error << ":" << final_cleanup.message; }).c_str());
+  check((final_cleanup.ok));
   const auto cleaned = backend->query(request.identity);
-  REQUIRE(cleaned.ok);
-  CHECK(cleaned.value.state == ManagedProcessState::NotRunning);
+  check((cleaned.ok));
+  check((cleaned.value.state == ManagedProcessState::NotRunning));
 }
 
-TEST_CASE("Windows terminate rejects changed canonical process identity") {
+spec("Windows stop rejects a stale managed process instance token") {
+    it("complete case") { test_windows_stop_rejects_a_stale_managed_process_instance_token_16(); }
+}
+
+[[maybe_unused]] static void test_windows_terminate_rejects_changed_canonical_process_identity_17() {
   auto backend = Praktor::System::createManagedProcessBackend();
-  REQUIRE(backend != nullptr);
+  check((backend != nullptr));
 
   ManagedProcessParams request = params(SystemOperation::Start);
   request.executable = PRAKTOR_MANAGED_PROCESS_FIXTURE;
@@ -768,37 +838,41 @@ TEST_CASE("Windows terminate rejects changed canonical process identity") {
   request.force_terminate = true;
   const auto setup_cleanup = cleanupManagedProcessFixture(
       *backend, request.identity, std::chrono::seconds(3), std::chrono::milliseconds(20));
-  INFO(setup_cleanup.message);
-  REQUIRE(setup_cleanup.ok);
+  info("%s", praktor_test::message([&](std::ostream& out) { out << setup_cleanup.message; }).c_str());
+  check((setup_cleanup.ok));
   ManagedProcessFixtureCleanup cleanup(*backend, request.identity);
   ManagedProcessController controller(*backend, std::chrono::milliseconds(20));
 
   const auto started = controller.execute(request);
-  INFO(started.phase << ":" << started.message);
-  REQUIRE(started.ok);
-  REQUIRE(started.changed);
+  info("%s", praktor_test::message([&](std::ostream& out) { out << started.phase << ":" << started.message; }).c_str());
+  check((started.ok));
+  check((started.changed));
 
   auto changed_identity = started.snapshot;
   changed_identity.canonical_image_name = "managed_process_fixture.com";
   const auto terminated = backend->terminate(changed_identity);
-  CHECK_FALSE(terminated.ok);
+  check((!(terminated.ok)));
 
   const auto after = backend->query(request.identity);
-  REQUIRE(after.ok);
-  CHECK(after.value.state == ManagedProcessState::Running);
-  CHECK(after.value.instance_token == started.snapshot.instance_token);
+  check((after.ok));
+  check((after.value.state == ManagedProcessState::Running));
+  check((after.value.instance_token == started.snapshot.instance_token));
 
   const auto final_cleanup = cleanup.cleanup();
-  INFO(final_cleanup.native_error << ":" << final_cleanup.message);
-  REQUIRE(final_cleanup.ok);
+  info("%s", praktor_test::message([&](std::ostream& out) { out << final_cleanup.native_error << ":" << final_cleanup.message; }).c_str());
+  check((final_cleanup.ok));
   const auto cleaned = backend->query(request.identity);
-  REQUIRE(cleaned.ok);
-  CHECK(cleaned.value.state == ManagedProcessState::NotRunning);
+  check((cleaned.ok));
+  check((cleaned.value.state == ManagedProcessState::NotRunning));
 }
 
-TEST_CASE("Windows managed process backend starts queries and gracefully stops fixture") {
+spec("Windows terminate rejects changed canonical process identity") {
+    it("complete case") { test_windows_terminate_rejects_changed_canonical_process_identity_17(); }
+}
+
+[[maybe_unused]] static void test_windows_managed_process_backend_starts_queries_and_gracefully_stops_fixture_18() {
   auto backend = Praktor::System::createManagedProcessBackend();
-  REQUIRE(backend != nullptr);
+  check((backend != nullptr));
 
   ManagedProcessParams request = params(SystemOperation::Start);
   request.executable = PRAKTOR_MANAGED_PROCESS_FIXTURE;
@@ -809,57 +883,61 @@ TEST_CASE("Windows managed process backend starts queries and gracefully stops f
   request.force_terminate = false;
   const auto setup_cleanup = cleanupManagedProcessFixture(
       *backend, request.identity, std::chrono::seconds(3), std::chrono::milliseconds(20));
-  INFO(setup_cleanup.message);
-  REQUIRE(setup_cleanup.ok);
+  info("%s", praktor_test::message([&](std::ostream& out) { out << setup_cleanup.message; }).c_str());
+  check((setup_cleanup.ok));
   ManagedProcessFixtureCleanup cleanup(*backend, request.identity);
   ManagedProcessController controller(*backend, std::chrono::milliseconds(20));
 
   const auto started = controller.execute(request);
-  INFO(started.phase << ":" << started.message);
-  REQUIRE(started.ok);
-  REQUIRE(started.snapshot.state == ManagedProcessState::Running);
-  CHECK(started.changed);
+  info("%s", praktor_test::message([&](std::ostream& out) { out << started.phase << ":" << started.message; }).c_str());
+  check((started.ok));
+  check((started.snapshot.state == ManagedProcessState::Running));
+  check((started.changed));
   DWORD current_session_id = 0;
-  REQUIRE(ProcessIdToSessionId(GetCurrentProcessId(), &current_session_id));
-  CHECK(started.snapshot.session_id == current_session_id);
-  CHECK(started.snapshot.instance_token != 0);
-  CHECK(started.snapshot.canonical_image_name == request.identity.image_name);
+  check((ProcessIdToSessionId(GetCurrentProcessId(), &current_session_id)));
+  check((started.snapshot.session_id == current_session_id));
+  check((started.snapshot.instance_token != 0));
+  check((started.snapshot.canonical_image_name == request.identity.image_name));
 
   ManagedProcessIdentity uppercase_identity = request.identity;
   std::transform(uppercase_identity.image_name.begin(), uppercase_identity.image_name.end(),
                  uppercase_identity.image_name.begin(),
                  [](unsigned char ch) { return static_cast<char>(std::toupper(ch)); });
   const auto queried = backend->query(uppercase_identity);
-  INFO(queried.message);
-  REQUIRE(queried.ok);
-  CHECK(queried.value.state == ManagedProcessState::Running);
-  CHECK(queried.value.pid == started.snapshot.pid);
-  CHECK(queried.value.session_id == started.snapshot.session_id);
-  CHECK(queried.value.instance_token == started.snapshot.instance_token);
-  CHECK(queried.value.canonical_image_name == started.snapshot.canonical_image_name);
-  REQUIRE(waitForFixtureTopLevelWindow(started.snapshot.pid));
+  info("%s", praktor_test::message([&](std::ostream& out) { out << queried.message; }).c_str());
+  check((queried.ok));
+  check((queried.value.state == ManagedProcessState::Running));
+  check((queried.value.pid == started.snapshot.pid));
+  check((queried.value.session_id == started.snapshot.session_id));
+  check((queried.value.instance_token == started.snapshot.instance_token));
+  check((queried.value.canonical_image_name == started.snapshot.canonical_image_name));
+  check((waitForFixtureTopLevelWindow(started.snapshot.pid)));
 
   request.operation = SystemOperation::Stop;
   const auto stopped = controller.execute(request);
-  INFO(stopped.phase << ":" << stopped.message);
-  REQUIRE(stopped.ok);
-  CHECK(stopped.snapshot.state == ManagedProcessState::NotRunning);
+  info("%s", praktor_test::message([&](std::ostream& out) { out << stopped.phase << ":" << stopped.message; }).c_str());
+  check((stopped.ok));
+  check((stopped.snapshot.state == ManagedProcessState::NotRunning));
 
   const auto after = backend->query(request.identity);
-  REQUIRE(after.ok);
-  CHECK(after.value.state == ManagedProcessState::NotRunning);
+  check((after.ok));
+  check((after.value.state == ManagedProcessState::NotRunning));
 
   const auto final_cleanup = cleanup.cleanup();
-  INFO(final_cleanup.native_error << ":" << final_cleanup.message);
-  REQUIRE(final_cleanup.ok);
+  info("%s", praktor_test::message([&](std::ostream& out) { out << final_cleanup.native_error << ":" << final_cleanup.message; }).c_str());
+  check((final_cleanup.ok));
   const auto cleaned = backend->query(request.identity);
-  REQUIRE(cleaned.ok);
-  CHECK(cleaned.value.state == ManagedProcessState::NotRunning);
+  check((cleaned.ok));
+  check((cleaned.value.state == ManagedProcessState::NotRunning));
 }
 
-TEST_CASE("Windows managed process startup does not hide a fixed backend delay") {
+spec("Windows managed process backend starts queries and gracefully stops fixture") {
+    it("complete case") { test_windows_managed_process_backend_starts_queries_and_gracefully_stops_fixture_18(); }
+}
+
+[[maybe_unused]] static void test_windows_managed_process_startup_does_not_hide_a_fixed_backend_delay_19() {
   auto backend = Praktor::System::createManagedProcessBackend();
-  REQUIRE(backend != nullptr);
+  check((backend != nullptr));
 
   ManagedProcessParams request = params(SystemOperation::Start);
   request.executable = PRAKTOR_MANAGED_PROCESS_FIXTURE;
@@ -870,35 +948,39 @@ TEST_CASE("Windows managed process startup does not hide a fixed backend delay")
   request.force_terminate = true;
   const auto setup_cleanup = cleanupManagedProcessFixture(
       *backend, request.identity, std::chrono::seconds(3), std::chrono::milliseconds(20));
-  INFO(setup_cleanup.message);
-  REQUIRE(setup_cleanup.ok);
+  info("%s", praktor_test::message([&](std::ostream& out) { out << setup_cleanup.message; }).c_str());
+  check((setup_cleanup.ok));
   ManagedProcessFixtureCleanup cleanup(*backend, request.identity);
   ManagedProcessController controller(*backend, std::chrono::milliseconds(20));
 
   const auto started = controller.execute(request);
 
-  INFO(started.phase << ":" << started.message << ", duration_ms=" << started.duration_ms);
-  CHECK_FALSE(started.ok);
-  CHECK(started.error == ManagedProcessError::Timeout);
-  CHECK(started.phase == "start_poll");
-  CHECK(started.snapshot.state == ManagedProcessState::NotRunning);
-  CHECK(started.duration_ms < 250);
+  info("%s", praktor_test::message([&](std::ostream& out) { out << started.phase << ":" << started.message << ", duration_ms=" << started.duration_ms; }).c_str());
+  check((!(started.ok)));
+  check((started.error == ManagedProcessError::Timeout));
+  check((started.phase == "start_poll"));
+  check((started.snapshot.state == ManagedProcessState::NotRunning));
+  check((started.duration_ms < 250));
 
   const auto after = backend->query(request.identity);
-  REQUIRE(after.ok);
-  CHECK(after.value.state == ManagedProcessState::NotRunning);
+  check((after.ok));
+  check((after.value.state == ManagedProcessState::NotRunning));
 
   const auto final_cleanup = cleanup.cleanup();
-  INFO(final_cleanup.native_error << ":" << final_cleanup.message);
-  REQUIRE(final_cleanup.ok);
+  info("%s", praktor_test::message([&](std::ostream& out) { out << final_cleanup.native_error << ":" << final_cleanup.message; }).c_str());
+  check((final_cleanup.ok));
   const auto cleaned = backend->query(request.identity);
-  REQUIRE(cleaned.ok);
-  CHECK(cleaned.value.state == ManagedProcessState::NotRunning);
+  check((cleaned.ok));
+  check((cleaned.value.state == ManagedProcessState::NotRunning));
 }
 
-TEST_CASE("Windows managed process query does not match a different extension") {
+spec("Windows managed process startup does not hide a fixed backend delay") {
+    it("complete case") { test_windows_managed_process_startup_does_not_hide_a_fixed_backend_delay_19(); }
+}
+
+[[maybe_unused]] static void test_windows_managed_process_query_does_not_match_a_different_extension_20() {
   auto backend = Praktor::System::createManagedProcessBackend();
-  REQUIRE(backend != nullptr);
+  check((backend != nullptr));
 
   ManagedProcessParams alternate = params(SystemOperation::Start);
   alternate.executable = PRAKTOR_MANAGED_PROCESS_FIXTURE_ALT;
@@ -909,34 +991,38 @@ TEST_CASE("Windows managed process query does not match a different extension") 
   alternate.force_terminate = true;
   const auto setup_cleanup = cleanupManagedProcessFixture(
       *backend, alternate.identity, std::chrono::seconds(3), std::chrono::milliseconds(20));
-  INFO(setup_cleanup.message);
-  REQUIRE(setup_cleanup.ok);
+  info("%s", praktor_test::message([&](std::ostream& out) { out << setup_cleanup.message; }).c_str());
+  check((setup_cleanup.ok));
   ManagedProcessFixtureCleanup cleanup(*backend, alternate.identity);
   ManagedProcessController controller(*backend, std::chrono::milliseconds(20));
 
   const auto started = controller.execute(alternate);
-  INFO(started.phase << ":" << started.message);
-  REQUIRE(started.ok);
-  REQUIRE(started.changed);
+  info("%s", praktor_test::message([&](std::ostream& out) { out << started.phase << ":" << started.message; }).c_str());
+  check((started.ok));
+  check((started.changed));
 
   ManagedProcessIdentity exe_identity;
   exe_identity.image_name = "managed_process_fixture.exe";
   const auto wrong_extension = backend->query(exe_identity);
-  INFO(wrong_extension.message);
-  REQUIRE(wrong_extension.ok);
-  CHECK(wrong_extension.value.state == ManagedProcessState::NotRunning);
+  info("%s", praktor_test::message([&](std::ostream& out) { out << wrong_extension.message; }).c_str());
+  check((wrong_extension.ok));
+  check((wrong_extension.value.state == ManagedProcessState::NotRunning));
 
   const auto final_cleanup = cleanup.cleanup();
-  INFO(final_cleanup.native_error << ":" << final_cleanup.message);
-  REQUIRE(final_cleanup.ok);
+  info("%s", praktor_test::message([&](std::ostream& out) { out << final_cleanup.native_error << ":" << final_cleanup.message; }).c_str());
+  check((final_cleanup.ok));
   const auto cleaned = backend->query(alternate.identity);
-  REQUIRE(cleaned.ok);
-  CHECK(cleaned.value.state == ManagedProcessState::NotRunning);
+  check((cleaned.ok));
+  check((cleaned.value.state == ManagedProcessState::NotRunning));
 }
 
-TEST_CASE("Windows fixture guard cleans a started process on early scope exit") {
+spec("Windows managed process query does not match a different extension") {
+    it("complete case") { test_windows_managed_process_query_does_not_match_a_different_extension_20(); }
+}
+
+[[maybe_unused]] static void test_windows_fixture_guard_cleans_a_started_process_on_early_scope_exit_21() {
   auto backend = Praktor::System::createManagedProcessBackend();
-  REQUIRE(backend != nullptr);
+  check((backend != nullptr));
 
   ManagedProcessParams request = params(SystemOperation::Start);
   request.executable = PRAKTOR_MANAGED_PROCESS_FIXTURE;
@@ -948,22 +1034,26 @@ TEST_CASE("Windows fixture guard cleans a started process on early scope exit") 
 
   const auto setup_cleanup = cleanupManagedProcessFixture(
       *backend, request.identity, std::chrono::seconds(3), std::chrono::milliseconds(20));
-  INFO(setup_cleanup.message);
-  REQUIRE(setup_cleanup.ok);
+  info("%s", praktor_test::message([&](std::ostream& out) { out << setup_cleanup.message; }).c_str());
+  check((setup_cleanup.ok));
 
   {
     ManagedProcessFixtureCleanup cleanup(*backend, request.identity);
     ManagedProcessController controller(*backend, std::chrono::milliseconds(20));
     const auto started = controller.execute(request);
-    INFO(started.phase << ":" << started.message);
-    REQUIRE(started.ok);
-    REQUIRE(started.changed);
-    REQUIRE(started.snapshot.state == ManagedProcessState::Running);
+    info("%s", praktor_test::message([&](std::ostream& out) { out << started.phase << ":" << started.message; }).c_str());
+    check((started.ok));
+    check((started.changed));
+    check((started.snapshot.state == ManagedProcessState::Running));
   }
 
   const auto after_scope = backend->query(request.identity);
-  INFO(after_scope.message);
-  REQUIRE(after_scope.ok);
-  CHECK(after_scope.value.state == ManagedProcessState::NotRunning);
+  info("%s", praktor_test::message([&](std::ostream& out) { out << after_scope.message; }).c_str());
+  check((after_scope.ok));
+  check((after_scope.value.state == ManagedProcessState::NotRunning));
+}
+
+spec("Windows fixture guard cleans a started process on early scope exit") {
+    it("complete case") { test_windows_fixture_guard_cleans_a_started_process_on_early_scope_exit_21(); }
 }
 #endif

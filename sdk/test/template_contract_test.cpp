@@ -1,10 +1,10 @@
+#include "praktor_test.hpp"
 #include <dag/workflow_context.hpp>
 #include <dag/workflow_executor.hpp>
 #include <workflow_runner.hpp>
 #include <yml/task.hpp>
 #include <yml/task_parser.hpp>
 
-#include <catch2/catch_all.hpp>
 #include "data/workflow_value.hpp"
 
 #include <algorithm>
@@ -89,7 +89,7 @@ std::vector<std::filesystem::path> collectYamlFiles(const std::filesystem::path&
 std::string readTextFile(const std::filesystem::path& path)
 {
     std::ifstream stream(path, std::ios::binary);
-    REQUIRE(stream.is_open());
+    check((stream.is_open()));
     return {std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>()};
 }
 
@@ -240,7 +240,7 @@ ManagedSleepProcess startSleepProcess()
     PROCESS_INFORMATION process_info{};
     std::wstring command = L"cmd.exe /c ping -n 60 127.0.0.1 >nul";
 
-    REQUIRE(::CreateProcessW(
+    check((::CreateProcessW(
         nullptr,
         command.data(),
         nullptr,
@@ -250,14 +250,14 @@ ManagedSleepProcess startSleepProcess()
         nullptr,
         nullptr,
         &startup_info,
-        &process_info));
+        &process_info)));
 
     process.pid = static_cast<long long>(process_info.dwProcessId);
     process.process_handle = process_info.hProcess;
     process.thread_handle = process_info.hThread;
 #else
     pid_t child = ::fork();
-    REQUIRE(child >= 0);
+    check((child >= 0));
     if (child == 0) {
         ::execlp("sleep", "sleep", "60", static_cast<char*>(nullptr));
         _exit(127);
@@ -266,7 +266,7 @@ ManagedSleepProcess startSleepProcess()
     process.child_pid = child;
 #endif
 
-    REQUIRE(process.isRunning());
+    check((process.isRunning()));
     return process;
 }
 
@@ -284,16 +284,15 @@ bool waitForProcessExit(ManagedSleepProcess& process, std::chrono::milliseconds 
 
 } // namespace
 
-TEST_CASE("all SDK examples validate and build DAG", "[sdk][examples]")
-{
+[[maybe_unused]] static void test_all_sdk_examples_validate_and_build_dag_1() {
     const auto examples_dir = sdkDir() / "examples";
     const auto result_models_path = examples_dir / "result_models.tbs";
     const auto result_models = readTextFile(result_models_path);
 
-    CHECK(result_models.find("import(\"mapper\")") != std::string::npos);
-    CHECK(result_models.find("class ActionResult") != std::string::npos);
-    CHECK(result_models.find("class StatusResult") != std::string::npos);
-    CHECK(result_models.find("class ProcessResult") != std::string::npos);
+    check((result_models.find("import(\"mapper\")") != std::string::npos));
+    check((result_models.find("class ActionResult") != std::string::npos));
+    check((result_models.find("class StatusResult") != std::string::npos));
+    check((result_models.find("class ProcessResult") != std::string::npos));
 
     size_t class_count = 0;
     for (size_t position = 0;
@@ -301,42 +300,48 @@ TEST_CASE("all SDK examples validate and build DAG", "[sdk][examples]")
          position += 6) {
         ++class_count;
     }
-    CHECK(class_count == 3);
+    check((class_count == 3));
 
     const auto example_files = collectYamlFiles(examples_dir);
-    REQUIRE(!example_files.empty());
+    check((!example_files.empty()));
 
     for (const auto& path : example_files) {
-        CAPTURE(path.string());
+        info("%s", praktor_test::message([&](std::ostream& out) { out << path.string(); }).c_str());
         const auto source = readTextFile(path);
-        CHECK(source.find("json.stringify") == std::string::npos);
-        CHECK(source.find("import(\"./result_models.tbs\")") != std::string::npos);
-        CHECK(source.find("class ") == std::string::npos);
-        CHECK(source.find("mapper.write_json") != std::string::npos);
+        check((source.find("json.stringify") == std::string::npos));
+        check((source.find("import(\"./result_models.tbs\")") != std::string::npos));
+        check((source.find("class ") == std::string::npos));
+        check((source.find("mapper.write_json") != std::string::npos));
         auto workflow = TaskParser::parseFile(path.string());
-        REQUIRE_NOTHROW(TaskParser::buildGraph(workflow));
+        check_nothrow(TaskParser::buildGraph(workflow));
     }
 }
 
-TEST_CASE("process status BT workflow queries current process", "[sdk][examples]")
-{
+spec("all SDK examples validate and build DAG") {
+    it("complete case") { test_all_sdk_examples_validate_and_build_dag_1(); }
+}
+
+[[maybe_unused]] static void test_process_status_bt_workflow_queries_current_process_2() {
     const auto example_path = sdkDir() / "examples" / "process-status-example.yml";
 
     auto execution = executeWorkflow(example_path, {
         {"PROCESS_NAME", "ping"}
     });
-    REQUIRE(execution.success);
+    check((execution.success));
 
     const auto result = execution.context->getValueByPath("tasks.emit_result.outputs.result");
-    REQUIRE(result.is_string());
+    check((result.is_string()));
     const auto parsed_result = WorkflowValue::parse(result.as<std::string>());
-    CHECK(parsed_result.at("process").as<std::string>() == "ping");
-    CHECK(parsed_result.at("action").at("running").is_bool());
-    CHECK(parsed_result.at("output").is_string());
+    check((parsed_result.at("process").as<std::string>() == "ping"));
+    check((parsed_result.at("action").at("running").is_bool()));
+    check((parsed_result.at("output").is_string()));
 }
 
-TEST_CASE("ops event handler BT workflow parses JSON event and executes branch", "[sdk][examples]")
-{
+spec("process status BT workflow queries current process") {
+    it("complete case") { test_process_status_bt_workflow_queries_current_process_2(); }
+}
+
+[[maybe_unused]] static void test_ops_event_handler_bt_workflow_parses_json_event_and_executes_branch_3() {
     const auto example_path = sdkDir() / "examples" / "ops-event-handler-example.yml";
 
     auto workflow = TaskParser::parseFile(example_path.string());
@@ -350,13 +355,13 @@ TEST_CASE("ops event handler BT workflow parses JSON event and executes branch",
         workflow.tasks.begin(),
         workflow.tasks.end(),
         [](const auto& task) { return task.name == "handle_ops_event"; });
-    REQUIRE(handle_task != workflow.tasks.end());
-    REQUIRE(std::holds_alternative<OrchParams>(handle_task->specifics));
+    check((handle_task != workflow.tasks.end()));
+    check((std::holds_alternative<OrchParams>(handle_task->specifics)));
 
     auto& params = std::get<OrchParams>(handle_task->specifics);
-    REQUIRE(params.root.type == "Sequence");
-    REQUIRE(!params.root.children.empty());
-    REQUIRE(params.root.children.front().type == "WaitEvent");
+    check((params.root.type == "Sequence"));
+    check((!params.root.children.empty()));
+    check((params.root.children.front().type == "WaitEvent"));
 
     // The mock payload represents the event after WaitEvent has delivered it.
     params.root.children.erase(params.root.children.begin());
@@ -366,13 +371,17 @@ TEST_CASE("ops event handler BT workflow parses JSON event and executes branch",
     executor.execute(context);
 
     const auto status = context.getValueOrDefault<std::string>("workflow_status", "unknown");
-    REQUIRE(status != "failed");
+    check((status != "failed"));
 
     const auto result_val = context.getValueByPath("tasks.emit_result.outputs.result");
-    REQUIRE(result_val.is_string());
+    check((result_val.is_string()));
     const auto parsed_result = WorkflowValue::parse(result_val.as<std::string>());
-    CHECK(parsed_result.at("status").as<std::string>() == "completed");
-    CHECK(parsed_result.at("action").at("action").as<std::string>() == "status");
-    CHECK(parsed_result.at("action").at("target").as<std::string>() == "service-nginx");
-    CHECK(parsed_result.at("action").at("success").as<bool>());
+    check((parsed_result.at("status").as<std::string>() == "completed"));
+    check((parsed_result.at("action").at("action").as<std::string>() == "status"));
+    check((parsed_result.at("action").at("target").as<std::string>() == "service-nginx"));
+    check((parsed_result.at("action").at("success").as<bool>()));
+}
+
+spec("ops event handler BT workflow parses JSON event and executes branch") {
+    it("complete case") { test_ops_event_handler_bt_workflow_parses_json_event_and_executes_branch_3(); }
 }

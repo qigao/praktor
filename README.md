@@ -741,7 +741,7 @@ praktor/
 │   ├── include/       # Public headers
 │   ├── src/           # Implementation
 │   │   └── script/    # Script engine (re2c + lemon)
-│   └── test/          # Unit tests (Catch2)
+│   └── test/          # Unit tests (Salts::TinyTest)
 ├── docs/              # System & feature documentation
 ├── examples/          # Sample workflow files
 └── grammar.md         # Authoritative DSL specification

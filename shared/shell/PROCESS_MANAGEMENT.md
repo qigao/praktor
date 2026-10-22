@@ -1,80 +1,41 @@
-# Process Management
+# Process ownership
 
-## Decision
+All Shell and Program calls use the C11 `Salts::Process` implementation.
+The former Praktor POSIX fork/pipe/waitpid implementation and Windows
+CreateProcess/Job Object implementation have been deleted. There is no alternate
+native process backend in Praktor.
 
-Praktor uses `ManagedProcess` as the single owner of a child process, its process tree,
-standard I/O pipes, capture buffers, worker thread, and terminal result. Platform handles
-remain behind a Pimpl boundary. `ShellExecutor::execute()` and `ProcessExecutor::execute()`
-are compatibility facades implemented as `start(...).wait()`.
+`ShellExecutor`, `ProcessExecutor`, `ManagedProcess` and `ShellResult` remain C++
+call-site adapters for existing workflow, script, service and actions callers.
+They translate configuration and terminal results; they own no OS handles.
+Shell command parsing and process-tree termination belong to Salts.
 
-The lifecycle is explicit:
+The synchronous facade has one joined driver thread per invocation. Only this
+thread calls Process start/submit/run/close/destroy. Cancellation and observers
+access synchronized adapter metadata, never a native Process handle. There are
+three fixed 4096-byte I/O buffers and eight bounded request slots. Input and both
+output streams progress concurrently through Process callbacks. Captured stdout
+and stderr share `max_output_bytes` (16 MiB by default), with a bounded terminal
+error diagnostic. Stream callbacks preserve per-stream lines and trailing text.
 
-```text
-Starting -> Running -> Exited
-                    -> Signaled
-                    -> TimedOut
-                    -> Cancelled
-                    -> WaitFailed
-                    -> OutputLimitExceeded
-Starting -> SpawnFailed
-Running  -> Cancelling -> Cancelled
-```
+`start()` returns an owned handle; `execute()` is `start().wait()`. The obsolete
+unowned `executeAsync()`, raw-PID `killProcess()`, early `pid()` observer and custom
+`cancel_grace_ms` policy were removed. `ShellResult::pid` remains terminal
+observation. Cancellation policy belongs to Salts, with no Praktor signal timer.
 
-Only `ManagedProcess` owns lifecycle state. Workflow and actions statuses are derived from
-the terminal `ShellResult`; they do not independently advance OS process state.
+Destruction requests cancellation and joins the lifecycle driver. The driver
+retains every callback and I/O buffer until close, terminal acknowledgements,
+quiescence and successful destruction. Transient cleanup errors are retried by
+the same owner and reported as failure. This facade is synchronous on teardown:
+a persistent cleanup fault can keep wait/destruction blocked; it never force-frees
+live leases or detaches their storage.
 
-## Platform Strategy
+The cooperative C11 Session continues to use its separate explicit fixed-capacity
+Process retainer for bounded synchronous teardown and later owner-driven drain.
+This change does not replace or bypass that retainer contract.
 
-Windows starts the child suspended, assigns it to a Job Object configured with
-`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, and only then resumes it. Cancellation, timeout,
-destruction, and output-limit failures terminate the whole job.
-
-POSIX creates a dedicated process group. Cancellation first sends `SIGTERM`; after
-`cancel_grace_ms`, the manager sends `SIGKILL`. Timeout and output-limit failures send
-`SIGKILL` immediately. All allocating data used by `execve()` is prepared before `fork()`;
-the child only calls async-signal-safe functions before `execve()`.
-
-## I/O And Limits
-
-stdin, stdout, and stderr use separate anonymous pipes. stdin is pumped concurrently with
-stdout and stderr so duplex workloads cannot deadlock on pipe capacity. Data order is
-preserved within each stream, but stdout and stderr do not have a shared total order.
-
-Captured output is bounded by `ProcessSpec::max_output_bytes`, defaulting to 16 MiB across
-stdout and stderr. Exceeding the limit terminates the process tree and returns
-`ProcessState::OutputLimitExceeded`.
-
-## Public API And Compatibility
-
-Use `ProcessExecutor::start(spec)` for managed asynchronous execution. `ManagedProcess` is
-move-only and provides `state()`, `pid()`, `waitFor()`, `wait()`, `cancel()`, and `result()`.
-Destroying a running handle cancels and reaps the process tree.
-
-Existing synchronous calls remain source-compatible. `executeAsync()` and
-`killProcess(pid)` remain compatibility APIs, but new code should retain a
-`ManagedProcess`; a raw PID cannot provide ownership or protect against PID reuse.
-
-Actions thread-pool tasks propagate a cancellation context into shell execution, so
-`AsyncTask::cancel()` and `AsyncExecutor::cancelAll()` cancel the owned `ManagedProcess`
-instead of attempting to infer ownership from a PID.
-
-## Error Semantics
-
-`ShellResult::success()` is true only for `ProcessState::Exited` with exit code zero.
-Spawn failure, signal termination, timeout, cancellation, wait failure, and output-limit
-failure are distinct states. POSIX signal termination also records `termination_signal`.
-
-## Migration And Rollback
-
-Callers may migrate incrementally from `execute(spec)` to `start(spec)` without changing
-`ProcessSpec`. Rollback consists of changing compatibility facades back to the prior
-synchronous platform calls; no workflow configuration or persisted data format changes.
-The managed API adds fields and methods but does not remove existing source-level entry
-points.
-
-## Verification
-
-Tests cover lifecycle observation, bounded waits, explicit cancellation, destructor
-cleanup, process-tree termination, spawn failure, output limits, duplex 256 KiB I/O,
-timeouts, environment and argument handling, stream callbacks, actions cancellation, and
-workflow regressions.
+Tests use `Salts::TinyTest` and cover argv, inherited environment and overrides,
+working directories, duplex 256 KiB input/output, capture limits, stream callbacks,
+nonblocking owned start, cancellation, timeout, destructor tree cleanup and spawn
+failures. Core-only ASan/UBSan, consumer TSan and complete-source unsuppressed TSan
+also run this facade's tests.

@@ -26,7 +26,7 @@ add_custom_target(update-workflow-schema
 if(ENABLE_TESTS)
     cmake_add_test(
         SOURCES ${PROJECT_SOURCE_DIR}/praktor/test/schema_projection_test.cpp
-        LIBS Catch2::Catch2WithMain praktor_schema_projection
+        LIBS praktor_test_support praktor_schema_projection
         DEFS PRAKTOR_SCHEMA_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
         FOLDER tools/schema/test
     )

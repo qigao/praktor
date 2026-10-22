@@ -1,7 +1,7 @@
+#include "praktor_test.hpp"
 #include "executors/service_executor.hpp"
 #include "system/service_controller.hpp"
 
-#include <catch2/catch_all.hpp>
 
 #include <cstddef>
 #include <stdexcept>
@@ -82,82 +82,89 @@ ServiceParams params(SystemOperation operation) {
 }
 
 void checkArgs(const ProcessSpec& call, const StrList& expected) {
-  CHECK(call.program == "fake-service-controller");
-  CHECK(call.args == expected);
+  check((call.program == "fake-service-controller"));
+  check((call.args == expected));
 }
 
 }  // namespace
 
-TEST_CASE("service controller parses numeric Windows SCM states") {
+[[maybe_unused]] static void test_service_controller_parses_numeric_windows_scm_states_1(std::size_t row_0) {
   auto registry = profiles();
 
-  const auto expected = GENERATE(
-      table<int, std::string>({{1, "stopped"},
-                               {2, "start_pending"},
-                               {3, "stop_pending"},
-                               {4, "running"}}));
+  const auto expected = std::array{std::tuple<int, std::string>{1, "stopped"}, std::tuple<int, std::string>{2, "start_pending"}, std::tuple<int, std::string>{3, "stop_pending"}, std::tuple<int, std::string>{4, "running"}}.at(row_0);
   ScriptedProcessRunner runner({serviceState(std::get<0>(expected))});
   ServiceController controller(runner, registry);
 
   const ServiceExecutionResult result = controller.execute(params(SystemOperation::Status));
 
-  REQUIRE(result.task_result.success);
-  CHECK(result.state == std::get<1>(expected));
-  CHECK_FALSE(result.changed);
-  REQUIRE(runner.calls.size() == 1);
+  check((result.task_result.success));
+  check((result.state == std::get<1>(expected)));
+  check((!(result.changed)));
+  check((runner.calls.size() == 1));
   checkArgs(runner.calls[0], {"query", "Retro Camera Service"});
 }
 
-TEST_CASE("service start and stop are idempotent at their target state") {
+spec("service controller parses numeric Windows SCM states") {
+    for (std::size_t row_0 = 0; row_0 < 4; ++row_0) {
+        it("%s / row %zu", "complete case", row_0) { test_service_controller_parses_numeric_windows_scm_states_1(row_0); }
+    }
+}
+
+[[maybe_unused]] static void test_service_start_and_stop_are_idempotent_at_their_target_state_2(int section_index) {
   auto registry = profiles();
 
-  SECTION("start when already running") {
+  if (section_index == 0) {
     ScriptedProcessRunner runner({serviceState(4)});
     ServiceController controller(runner, registry);
 
     const auto result = controller.execute(params(SystemOperation::Start));
 
-    INFO(result.task_result.error_code << ":" << result.task_result.error_phase
-                                      << ":" << result.task_result.error_message);
-    REQUIRE(result.task_result.success);
-    CHECK(result.state == "running");
-    CHECK_FALSE(result.changed);
-    REQUIRE(runner.calls.size() == 1);
+    info("%s", praktor_test::message([&](std::ostream& out) { out << result.task_result.error_code << ":" << result.task_result.error_phase
+                                      << ":" << result.task_result.error_message; }).c_str());
+    check((result.task_result.success));
+    check((result.state == "running"));
+    check((!(result.changed)));
+    check((runner.calls.size() == 1));
     checkArgs(runner.calls[0], {"query", "Retro Camera Service"});
   }
 
-  SECTION("stop when already stopped") {
+  if (section_index == 1) {
     ScriptedProcessRunner runner({serviceState(1)});
     ServiceController controller(runner, registry);
 
     const auto result = controller.execute(params(SystemOperation::Stop));
 
-    INFO(result.task_result.error_code << ":" << result.task_result.error_phase
-                                      << ":" << result.task_result.error_message);
-    REQUIRE(result.task_result.success);
-    CHECK(result.state == "stopped");
-    CHECK_FALSE(result.changed);
-    REQUIRE(runner.calls.size() == 1);
+    info("%s", praktor_test::message([&](std::ostream& out) { out << result.task_result.error_code << ":" << result.task_result.error_phase
+                                      << ":" << result.task_result.error_message; }).c_str());
+    check((result.task_result.success));
+    check((result.state == "stopped"));
+    check((!(result.changed)));
+    check((runner.calls.size() == 1));
     checkArgs(runner.calls[0], {"query", "Retro Camera Service"});
   }
 }
 
-TEST_CASE("service transitions preserve argv entries and mutate once") {
+spec("service start and stop are idempotent at their target state") {
+    it("start when already running") { test_service_start_and_stop_are_idempotent_at_their_target_state_2(0); }
+    it("stop when already stopped") { test_service_start_and_stop_are_idempotent_at_their_target_state_2(1); }
+}
+
+[[maybe_unused]] static void test_service_transitions_preserve_argv_entries_and_mutate_once_3(int section_index) {
   auto registry = profiles();
 
-  SECTION("start") {
+  if (section_index == 0) {
     ScriptedProcessRunner runner(
         {serviceState(1), exited(), serviceState(2), serviceState(4)});
     ServiceController controller(runner, registry);
 
     const auto result = controller.execute(params(SystemOperation::Start));
 
-    INFO(result.task_result.error_code << ":" << result.task_result.error_phase
-                                      << ":" << result.task_result.error_message);
-    REQUIRE(result.task_result.success);
-    CHECK(result.state == "running");
-    CHECK(result.changed);
-    REQUIRE(runner.calls.size() == 4);
+    info("%s", praktor_test::message([&](std::ostream& out) { out << result.task_result.error_code << ":" << result.task_result.error_phase
+                                      << ":" << result.task_result.error_message; }).c_str());
+    check((result.task_result.success));
+    check((result.state == "running"));
+    check((result.changed));
+    check((runner.calls.size() == 4));
     checkArgs(runner.calls[0], {"query", "Retro Camera Service"});
     checkArgs(runner.calls[1],
               {"start", "Retro Camera Service", "--mode", "safe value"});
@@ -165,19 +172,19 @@ TEST_CASE("service transitions preserve argv entries and mutate once") {
     checkArgs(runner.calls[3], {"query", "Retro Camera Service"});
   }
 
-  SECTION("stop") {
+  if (section_index == 1) {
     ScriptedProcessRunner runner(
         {serviceState(4), exited(), serviceState(3), serviceState(1)});
     ServiceController controller(runner, registry);
 
     const auto result = controller.execute(params(SystemOperation::Stop));
 
-    INFO(result.task_result.error_code << ":" << result.task_result.error_phase
-                                      << ":" << result.task_result.error_message);
-    REQUIRE(result.task_result.success);
-    CHECK(result.state == "stopped");
-    CHECK(result.changed);
-    REQUIRE(runner.calls.size() == 4);
+    info("%s", praktor_test::message([&](std::ostream& out) { out << result.task_result.error_code << ":" << result.task_result.error_phase
+                                      << ":" << result.task_result.error_message; }).c_str());
+    check((result.task_result.success));
+    check((result.state == "stopped"));
+    check((result.changed));
+    check((runner.calls.size() == 4));
     checkArgs(runner.calls[0], {"query", "Retro Camera Service"});
     checkArgs(runner.calls[1],
               {"stop", "Retro Camera Service", "--mode", "safe value"});
@@ -186,7 +193,12 @@ TEST_CASE("service transitions preserve argv entries and mutate once") {
   }
 }
 
-TEST_CASE("service restart confirms stop before starting") {
+spec("service transitions preserve argv entries and mutate once") {
+    it("start") { test_service_transitions_preserve_argv_entries_and_mutate_once_3(0); }
+    it("stop") { test_service_transitions_preserve_argv_entries_and_mutate_once_3(1); }
+}
+
+[[maybe_unused]] static void test_service_restart_confirms_stop_before_starting_4() {
   auto registry = profiles();
   ScriptedProcessRunner runner({serviceState(4), exited(), serviceState(3),
                                 serviceState(1), exited(), serviceState(2),
@@ -195,12 +207,12 @@ TEST_CASE("service restart confirms stop before starting") {
 
   const auto result = controller.execute(params(SystemOperation::Restart));
 
-  INFO(result.task_result.error_code << ":" << result.task_result.error_phase
-                                    << ":" << result.task_result.error_message);
-  REQUIRE(result.task_result.success);
-  CHECK(result.state == "running");
-  CHECK(result.changed);
-  REQUIRE(runner.calls.size() == 7);
+  info("%s", praktor_test::message([&](std::ostream& out) { out << result.task_result.error_code << ":" << result.task_result.error_phase
+                                    << ":" << result.task_result.error_message; }).c_str());
+  check((result.task_result.success));
+  check((result.state == "running"));
+  check((result.changed));
+  check((runner.calls.size() == 7));
   checkArgs(runner.calls[0], {"query", "Retro Camera Service"});
   checkArgs(runner.calls[1],
             {"stop", "Retro Camera Service", "--mode", "safe value"});
@@ -212,10 +224,14 @@ TEST_CASE("service restart confirms stop before starting") {
   checkArgs(runner.calls[6], {"query", "Retro Camera Service"});
 }
 
-TEST_CASE("service failures distinguish profile state spawn and timeout") {
+spec("service restart confirms stop before starting") {
+    it("complete case") { test_service_restart_confirms_stop_before_starting_4(); }
+}
+
+[[maybe_unused]] static void test_service_failures_distinguish_profile_state_spawn_and_timeout_5(int section_index) {
   auto registry = profiles();
 
-  SECTION("unknown profile") {
+  if (section_index == 0) {
     ScriptedProcessRunner runner({});
     ServiceController controller(runner, registry);
     auto request = params(SystemOperation::Status);
@@ -223,32 +239,32 @@ TEST_CASE("service failures distinguish profile state spawn and timeout") {
 
     const auto result = controller.execute(request);
 
-    CHECK_FALSE(result.task_result.success);
-    CHECK(result.task_result.error_code == "service_state_failed");
-    CHECK(runner.calls.empty());
+    check((!(result.task_result.success)));
+    check((result.task_result.error_code == "service_state_failed"));
+    check((runner.calls.empty()));
   }
 
-  SECTION("malformed numeric state") {
+  if (section_index == 1) {
     ScriptedProcessRunner runner({exited("STATE : RUNNING\n")});
     ServiceController controller(runner, registry);
 
     const auto result = controller.execute(params(SystemOperation::Status));
 
-    CHECK_FALSE(result.task_result.success);
-    CHECK(result.task_result.error_code == "service_state_failed");
+    check((!(result.task_result.success)));
+    check((result.task_result.error_code == "service_state_failed"));
   }
 
-  SECTION("numeric state with a malformed suffix") {
+  if (section_index == 2) {
     ScriptedProcessRunner runner({exited("STATE : 4oops\n")});
     ServiceController controller(runner, registry);
 
     const auto result = controller.execute(params(SystemOperation::Status));
 
-    CHECK_FALSE(result.task_result.success);
-    CHECK(result.task_result.error_code == "service_state_failed");
+    check((!(result.task_result.success)));
+    check((result.task_result.error_code == "service_state_failed"));
   }
 
-  SECTION("spawn failure") {
+  if (section_index == 3) {
     ShellResult spawn_failure;
     spawn_failure.state = ProcessState::SpawnFailed;
     spawn_failure.exit_code = -1;
@@ -258,11 +274,11 @@ TEST_CASE("service failures distinguish profile state spawn and timeout") {
 
     const auto result = controller.execute(params(SystemOperation::Status));
 
-    CHECK_FALSE(result.task_result.success);
-    CHECK(result.task_result.error_code == "process_spawn_failed");
+    check((!(result.task_result.success)));
+    check((result.task_result.error_code == "process_spawn_failed"));
   }
 
-  SECTION("bounded polling timeout") {
+  if (section_index == 4) {
     ScriptedProcessRunner runner(
         {serviceState(1), exited(), serviceState(2)}, true);
     ServiceController controller(runner, registry);
@@ -271,25 +287,26 @@ TEST_CASE("service failures distinguish profile state spawn and timeout") {
 
     const auto result = controller.execute(request);
 
-    CHECK_FALSE(result.task_result.success);
-    CHECK(result.task_result.error_code == "timeout");
-    CHECK(result.state == "start_pending");
-    REQUIRE(runner.calls.size() >= 3);
+    check((!(result.task_result.success)));
+    check((result.task_result.error_code == "timeout"));
+    check((result.state == "start_pending"));
+    check((runner.calls.size() >= 3));
     checkArgs(runner.calls[1],
               {"start", "Retro Camera Service", "--mode", "safe value"});
   }
 }
 
-TEST_CASE("service controller maps every terminal ShellResult state") {
-  const auto expected = GENERATE(table<ProcessState, int, std::string>({
-      {ProcessState::TimedOut, -1, "timeout"},
-      {ProcessState::Cancelled, -1, "cancelled"},
-      {ProcessState::WaitFailed, -1, "service_state_failed"},
-      {ProcessState::OutputLimitExceeded, -1, "service_state_failed"},
-      {ProcessState::Signaled, -1, "service_state_failed"},
-      {ProcessState::Exited, 17, "service_state_failed"},
-  }));
-  CAPTURE(Praktor::Shell::processStateName(std::get<0>(expected)));
+spec("service failures distinguish profile state spawn and timeout") {
+    it("unknown profile") { test_service_failures_distinguish_profile_state_spawn_and_timeout_5(0); }
+    it("malformed numeric state") { test_service_failures_distinguish_profile_state_spawn_and_timeout_5(1); }
+    it("numeric state with a malformed suffix") { test_service_failures_distinguish_profile_state_spawn_and_timeout_5(2); }
+    it("spawn failure") { test_service_failures_distinguish_profile_state_spawn_and_timeout_5(3); }
+    it("bounded polling timeout") { test_service_failures_distinguish_profile_state_spawn_and_timeout_5(4); }
+}
+
+[[maybe_unused]] static void test_service_controller_maps_every_terminal_shellresult_state_6(std::size_t row_0) {
+  const auto expected = std::array{std::tuple<ProcessState, int, std::string>{ProcessState::TimedOut, -1, "timeout"}, std::tuple<ProcessState, int, std::string>{ProcessState::Cancelled, -1, "cancelled"}, std::tuple<ProcessState, int, std::string>{ProcessState::WaitFailed, -1, "service_state_failed"}, std::tuple<ProcessState, int, std::string>{ProcessState::OutputLimitExceeded, -1, "service_state_failed"}, std::tuple<ProcessState, int, std::string>{ProcessState::Signaled, -1, "service_state_failed"}, std::tuple<ProcessState, int, std::string>{ProcessState::Exited, 17, "service_state_failed"}}.at(row_0);
+  info("%s", praktor_test::message([&](std::ostream& out) { out << Praktor::Shell::processStateName(std::get<0>(expected)); }).c_str());
 
   ShellResult terminal;
   terminal.state = std::get<0>(expected);
@@ -299,18 +316,24 @@ TEST_CASE("service controller maps every terminal ShellResult state") {
 
   const auto result = controller.execute(params(SystemOperation::Status));
 
-  CHECK_FALSE(result.task_result.success);
-  CHECK(result.task_result.error_code == std::get<2>(expected));
-  CHECK(result.task_result.error_phase == "query");
+  check((!(result.task_result.success)));
+  check((result.task_result.error_code == std::get<2>(expected)));
+  check((result.task_result.error_phase == "query"));
   if (result.task_result.error_code == "service_state_failed") {
-    CHECK(result.task_result.error_details["process_state"].as<std::string>() ==
-          Praktor::Shell::processStateName(terminal.state));
-    CHECK(result.task_result.error_details["exit_code"].as<std::int64_t>() ==
-          terminal.exit_code);
+    check((result.task_result.error_details["process_state"].as<std::string>() ==
+          Praktor::Shell::processStateName(terminal.state)));
+    check((result.task_result.error_details["exit_code"].as<std::int64_t>() ==
+          terminal.exit_code));
   }
 }
 
-TEST_CASE("service controller rejects unsupported operations before querying") {
+spec("service controller maps every terminal ShellResult state") {
+    for (std::size_t row_0 = 0; row_0 < 6; ++row_0) {
+        it("%s / row %zu", "complete case", row_0) { test_service_controller_maps_every_terminal_shellresult_state_6(row_0); }
+    }
+}
+
+[[maybe_unused]] static void test_service_controller_rejects_unsupported_operations_before_querying_7() {
   auto registry = profiles();
   ScriptedProcessRunner runner({serviceState(4)});
   ServiceController controller(runner, registry);
@@ -319,12 +342,16 @@ TEST_CASE("service controller rejects unsupported operations before querying") {
 
   const auto result = controller.execute(request);
 
-  CHECK_FALSE(result.task_result.success);
-  CHECK(result.task_result.error_code == "schema_invalid");
-  CHECK(runner.calls.empty());
+  check((!(result.task_result.success)));
+  check((result.task_result.error_code == "schema_invalid"));
+  check((runner.calls.empty()));
 }
 
-TEST_CASE("service executor maps controller outputs into task context") {
+spec("service controller rejects unsupported operations before querying") {
+    it("complete case") { test_service_controller_rejects_unsupported_operations_before_querying_7(); }
+}
+
+[[maybe_unused]] static void test_service_executor_maps_controller_outputs_into_task_context_8() {
   auto registry = profiles();
   ScriptedProcessRunner runner({serviceState(4)});
   Praktor::Execution::ServiceExecutor executor(runner, registry);
@@ -338,29 +365,37 @@ TEST_CASE("service executor maps controller outputs into task context") {
 
   const auto result = executor.execute(task, context);
 
-  REQUIRE(result.success);
-  CHECK(context.getValueByPath("tasks.__root__.outputs.name").as<std::string>() ==
-        "Retro Camera Service");
-  CHECK(context.getValueByPath("tasks.__root__.outputs.operation").as<std::string>() ==
-        "status");
-  CHECK(context.getValueByPath("tasks.__root__.outputs.state").as<std::string>() ==
-        "running");
-  CHECK_FALSE(context.getValueByPath("tasks.__root__.outputs.changed").as<bool>());
-  CHECK(context.getValueByPath("tasks.__root__.outputs.duration_ms").as<int64_t>() >= 0);
+  check((result.success));
+  check((context.getValueByPath("tasks.__root__.outputs.name").as<std::string>() ==
+        "Retro Camera Service"));
+  check((context.getValueByPath("tasks.__root__.outputs.operation").as<std::string>() ==
+        "status"));
+  check((context.getValueByPath("tasks.__root__.outputs.state").as<std::string>() ==
+        "running"));
+  check((!(context.getValueByPath("tasks.__root__.outputs.changed").as<bool>())));
+  check((context.getValueByPath("tasks.__root__.outputs.duration_ms").as<int64_t>() >= 0));
 }
 
-TEST_CASE("built-in service profile uses sc.exe") {
+spec("service executor maps controller outputs into task context") {
+    it("complete case") { test_service_executor_maps_controller_outputs_into_task_context_8(); }
+}
+
+[[maybe_unused]] static void test_built_in_service_profile_uses_sc_exe_9() {
   ServiceProfileRegistry registry;
   const auto* profile = registry.findProfile("windows_scm");
 
-  REQUIRE(profile != nullptr);
-  CHECK(profile->program == "sc.exe");
-  CHECK(profile->status_args == StrList{"query", "{service_name}"});
-  CHECK(profile->start_args == StrList{"start", "{service_name}", "{arguments}"});
-  CHECK(profile->stop_args == StrList{"stop", "{service_name}", "{arguments}"});
+  check((profile != nullptr));
+  check((profile->program == "sc.exe"));
+  check((profile->status_args == StrList{"query", "{service_name}"}));
+  check((profile->start_args == StrList{"start", "{service_name}", "{arguments}"}));
+  check((profile->stop_args == StrList{"stop", "{service_name}", "{arguments}"}));
 }
 
-TEST_CASE("service controller owns a frozen profile registry snapshot") {
+spec("built-in service profile uses sc.exe") {
+    it("complete case") { test_built_in_service_profile_uses_sc_exe_9(); }
+}
+
+[[maybe_unused]] static void test_service_controller_owns_a_frozen_profile_registry_snapshot_10() {
   auto registry = profiles();
   ScriptedProcessRunner runner({serviceState(4)});
   ServiceController controller(runner, registry);
@@ -374,20 +409,28 @@ TEST_CASE("service controller owns a frozen profile registry snapshot") {
   request.profile = "late";
   const auto result = controller.execute(request);
 
-  CHECK_FALSE(result.task_result.success);
-  CHECK(result.task_result.error_code == "service_state_failed");
-  CHECK(result.task_result.error_phase == "profile");
-  CHECK(runner.calls.empty());
+  check((!(result.task_result.success)));
+  check((result.task_result.error_code == "service_state_failed"));
+  check((result.task_result.error_phase == "profile"));
+  check((runner.calls.empty()));
 }
 
-TEST_CASE("service controller safely owns a temporary profile registry") {
+spec("service controller owns a frozen profile registry snapshot") {
+    it("complete case") { test_service_controller_owns_a_frozen_profile_registry_snapshot_10(); }
+}
+
+[[maybe_unused]] static void test_service_controller_safely_owns_a_temporary_profile_registry_11() {
   ScriptedProcessRunner runner({serviceState(4)});
   ServiceController controller(runner, profiles());
 
   const auto result = controller.execute(params(SystemOperation::Status));
 
-  REQUIRE(result.task_result.success);
-  CHECK(result.state == "running");
-  REQUIRE(runner.calls.size() == 1);
+  check((result.task_result.success));
+  check((result.state == "running"));
+  check((runner.calls.size() == 1));
   checkArgs(runner.calls[0], {"query", "Retro Camera Service"});
+}
+
+spec("service controller safely owns a temporary profile registry") {
+    it("complete case") { test_service_controller_safely_owns_a_temporary_profile_registry_11(); }
 }

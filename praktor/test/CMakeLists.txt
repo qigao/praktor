@@ -47,7 +47,7 @@ list(APPEND TEST_SOURCES
 
 cmake_add_test(
     SOURCES ${TEST_SOURCES}
-    LIBS Catch2::Catch2WithMain ${TARGET_NAME_LIB}
+    LIBS praktor_test_support ${TARGET_NAME_LIB}
     TARGET_SUFFIX ".${TARGET_NAME_LIB}"
     FOLDER "${folder_name}/test"
     OUT_TARGETS PRAKTOR_TEST_TARGETS

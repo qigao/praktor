@@ -1,3 +1,4 @@
+#include "praktor_test.hpp"
 #include "workflow_runner.hpp"
 #include "dag/workflow_executor.hpp"
 #include "execution/execution_control.hpp"
@@ -9,7 +10,6 @@
 #include "system/managed_process.hpp"
 #include "util/file_utils.hpp"
 
-#include <catch2/catch_all.hpp>
 
 #include <filesystem>
 #include <fstream>
@@ -252,8 +252,7 @@ std::string managedProcessCacheWorkflow(const ManagedProcessCacheSpec& spec)
 
 }
 
-TEST_CASE("run simple workflow")
-{
+[[maybe_unused]] static void test_run_simple_workflow_1() {
     auto dir = createTempDir();
     auto workflow_path = dir / "workflow.yml";
     auto output_path = dir / "out.txt";
@@ -266,14 +265,17 @@ tasks:
     );
 
     WorkflowRunner runner(workflow_path.string());
-    REQUIRE(runner.run());
+    check((runner.run()));
     auto content = FileUtils::readFile("out.txt" );
-    CHECK(content.find("hello") != std::string::npos);
+    check((content.find("hello") != std::string::npos));
     std::filesystem::remove_all(dir);
 }
 
-TEST_CASE("when condition skips task")
-{
+spec("run simple workflow") {
+    it("complete case") { test_run_simple_workflow_1(); }
+}
+
+[[maybe_unused]] static void test_when_condition_skips_task_2() {
     auto dir = createTempDir();
     auto workflow_path = dir / "workflow.yml";
 
@@ -289,11 +291,14 @@ tasks:
     );
 
     WorkflowRunner runner(workflow_path.string());
-    REQUIRE(runner.run());
+    check((runner.run()));
 }
 
-TEST_CASE("uses executes nested workflow and exposes outputs")
-{
+spec("when condition skips task") {
+    it("complete case") { test_when_condition_skips_task_2(); }
+}
+
+[[maybe_unused]] static void test_uses_executes_nested_workflow_and_exposes_outputs_3() {
     auto dir = createTempDir();
     auto reusable_path = dir / "reusable.yml";
     auto workflow_path = dir / "main.yml";
@@ -320,12 +325,14 @@ tasks:
     );
 
     WorkflowRunner runner(workflow_path.string());
-    REQUIRE(runner.run());
+    check((runner.run()));
 }
 
-TEST_CASE("uses propagates execution control into isolated nested workflow",
-          "[workflow][uses][execution-control]")
-{
+spec("uses executes nested workflow and exposes outputs") {
+    it("complete case") { test_uses_executes_nested_workflow_and_exposes_outputs_3(); }
+}
+
+[[maybe_unused]] static void test_uses_propagates_execution_control_into_isolated_nested_workflow_4() {
     using Control = Praktor::Execution::ExecutionControl;
 
     const auto dir = createTempDir();
@@ -353,19 +360,22 @@ tasks:
     Praktor::Execution::UsesExecutor executor({}, 1);
     const auto result = executor.execute(task, context);
 
-    CHECK_FALSE(result.success);
-    CHECK(result.error_code == "cancelled");
-    CHECK(result.error_phase == "execution_control");
-    CHECK(context.getValueByPath("tasks.call.outputs.workflow_status").as<std::string>() ==
-          "cancelled");
-    CHECK(context.getValueByPath("tasks.call.outputs.nested_tasks.should_not_run.outputs.ran")
-              .is_null());
+    check((!(result.success)));
+    check((result.error_code == "cancelled"));
+    check((result.error_phase == "execution_control"));
+    check((context.getValueByPath("tasks.call.outputs.workflow_status").as<std::string>() ==
+          "cancelled"));
+    check((context.getValueByPath("tasks.call.outputs.nested_tasks.should_not_run.outputs.ran")
+              .is_null()));
 
     std::filesystem::remove_all(dir);
 }
 
-TEST_CASE("uses exports nested task summary")
-{
+spec("uses propagates execution control into isolated nested workflow") {
+    it("complete case") { test_uses_propagates_execution_control_into_isolated_nested_workflow_4(); }
+}
+
+[[maybe_unused]] static void test_uses_exports_nested_task_summary_5() {
     auto dir = createTempDir();
     auto reusable_path = dir / "reusable.yml";
     auto workflow_path = dir / "main.yml";
@@ -398,11 +408,14 @@ tasks:
     );
 
     WorkflowRunner runner(workflow_path.string());
-    REQUIRE(runner.run());
+    check((runner.run()));
 }
 
-TEST_CASE("uses resolves nested workflow relative paths from declaring files")
-{
+spec("uses exports nested task summary") {
+    it("complete case") { test_uses_exports_nested_task_summary_5(); }
+}
+
+[[maybe_unused]] static void test_uses_resolves_nested_workflow_relative_paths_from_declaring_files_6() {
     auto dir = createTempDir();
     auto nested_dir = dir / "nested";
     auto nested_workdir = nested_dir / "work";
@@ -430,17 +443,20 @@ tasks:
     );
 
     WorkflowRunner runner(workflow_path.string());
-    REQUIRE(runner.run());
-    REQUIRE(std::filesystem::exists(nested_output));
-    CHECK_FALSE(std::filesystem::exists(misplaced_output));
+    check((runner.run()));
+    check((std::filesystem::exists(nested_output)));
+    check((!(std::filesystem::exists(misplaced_output))));
 
     auto content = FileUtils::readFile(nested_output.string());
-    CHECK(content.find("nested") != std::string::npos);
+    check((content.find("nested") != std::string::npos));
     std::filesystem::remove_all(dir);
 }
 
-TEST_CASE("uses rejects alias collision with nested task names")
-{
+spec("uses resolves nested workflow relative paths from declaring files") {
+    it("complete case") { test_uses_resolves_nested_workflow_relative_paths_from_declaring_files_6(); }
+}
+
+[[maybe_unused]] static void test_uses_rejects_alias_collision_with_nested_task_names_7() {
     auto dir = createTempDir();
     auto reusable_path = dir / "reusable.yml";
     auto workflow_path = dir / "main.yml";
@@ -455,11 +471,14 @@ tasks:
     writeFile(workflow_path, std::string("tasks:\n  - name: call\n    uses: ") + reusable_path.string() + "\n");
 
     WorkflowRunner runner(workflow_path.string());
-    REQUIRE_FALSE(runner.run());
+    check_false(runner.run());
 }
 
-TEST_CASE("failing command marks workflow failed")
-{
+spec("uses rejects alias collision with nested task names") {
+    it("complete case") { test_uses_rejects_alias_collision_with_nested_task_names_7(); }
+}
+
+[[maybe_unused]] static void test_failing_command_marks_workflow_failed_8() {
     auto dir = createTempDir();
     auto workflow_path = dir / "workflow.yml";
 
@@ -471,11 +490,14 @@ tasks:
     );
 
     WorkflowRunner runner(workflow_path.string());
-    REQUIRE_FALSE(runner.run());
+    check_false(runner.run());
 }
 
-TEST_CASE("command tasks honor working_dir")
-{
+spec("failing command marks workflow failed") {
+    it("complete case") { test_failing_command_marks_workflow_failed_8(); }
+}
+
+[[maybe_unused]] static void test_command_tasks_honor_working_dir_9() {
     auto dir = createTempDir();
     auto workdir = dir / "build";
     std::filesystem::create_directories(workdir);
@@ -491,15 +513,18 @@ tasks:
     );
 
     WorkflowRunner runner(workflow_path.string());
-    REQUIRE(runner.run());
-    REQUIRE(std::filesystem::exists(output_path));
+    check((runner.run()));
+    check((std::filesystem::exists(output_path)));
     auto content = FileUtils::readFile(output_path.string());
-    CHECK(content.find("hello") != std::string::npos);
+    check((content.find("hello") != std::string::npos));
     std::filesystem::remove_all(dir);
 }
 
-TEST_CASE("command and explicit actions expose equivalent structured outputs")
-{
+spec("command tasks honor working_dir") {
+    it("complete case") { test_command_tasks_honor_working_dir_9(); }
+}
+
+[[maybe_unused]] static void test_command_and_explicit_actions_expose_equivalent_structured_outputs_10() {
     auto dir = createTempDir();
     auto workflow_path = dir / "workflow.yml";
 
@@ -535,12 +560,15 @@ TEST_CASE("command and explicit actions expose equivalent structured outputs")
               "      ctx.output(\"matched\", true);\n");
 
     WorkflowRunner runner(workflow_path.string());
-    REQUIRE(runner.run());
+    check((runner.run()));
     std::filesystem::remove_all(dir);
 }
 
-TEST_CASE("program tasks run raw process with args env stdin and structured output")
-{
+spec("command and explicit actions expose equivalent structured outputs") {
+    it("complete case") { test_command_and_explicit_actions_expose_equivalent_structured_outputs_10(); }
+}
+
+[[maybe_unused]] static void test_program_tasks_run_raw_process_with_args_env_stdin_and_structured_output_11() {
     auto dir = createTempDir();
     auto workflow_path = dir / "workflow.yml";
     auto script_path = dir / "program_probe.ps1";
@@ -568,12 +596,15 @@ TEST_CASE("program tasks run raw process with args env stdin and structured outp
               "      ctx.output(\"matched\", true);\n");
 
     WorkflowRunner runner(workflow_path.string());
-    REQUIRE(runner.run());
+    check((runner.run()));
     std::filesystem::remove_all(dir);
 }
 
-TEST_CASE("script-only tasks run after dependencies")
-{
+spec("program tasks run raw process with args env stdin and structured output") {
+    it("complete case") { test_program_tasks_run_raw_process_with_args_env_stdin_and_structured_output_11(); }
+}
+
+[[maybe_unused]] static void test_script_only_tasks_run_after_dependencies_12() {
     auto dir = createTempDir();
     auto workflow_path = dir / "workflow.yml";
     auto report_path = dir / "report.txt";
@@ -596,15 +627,18 @@ TEST_CASE("script-only tasks run after dependencies")
               "    command: \"echo {{ tasks.finish_report.outputs.report_message }} > " + report_path.generic_string() + "\"\n");
 
     WorkflowRunner runner(workflow_path.string());
-    REQUIRE(runner.run());
-    REQUIRE(std::filesystem::exists(report_path));
+    check((runner.run()));
+    check((std::filesystem::exists(report_path)));
     auto report = FileUtils::readFile(report_path.string());
-    CHECK(report.find("Build of target all completed successfully.") != std::string::npos);
+    check((report.find("Build of target all completed successfully.") != std::string::npos));
     std::filesystem::remove_all(dir);
 }
 
-TEST_CASE("failure triggers receive failure context")
-{
+spec("script-only tasks run after dependencies") {
+    it("complete case") { test_script_only_tasks_run_after_dependencies_12(); }
+}
+
+[[maybe_unused]] static void test_failure_triggers_receive_failure_context_13() {
     auto dir = createTempDir();
     auto workflow_path = dir / "workflow.yml";
     auto output_path = dir / "failure.txt";
@@ -622,17 +656,20 @@ tasks:
     );
 
     WorkflowRunner runner(workflow_path.string());
-    REQUIRE_FALSE(runner.run());
-    REQUIRE(std::filesystem::exists(output_path));
+    check_false(runner.run());
+    check((std::filesystem::exists(output_path)));
     auto content = FileUtils::readFile(output_path.string());
-    CHECK_FALSE(content.empty());
-    CHECK(content.find("name=crash") != std::string::npos);
-    CHECK(content.find("type=command") != std::string::npos);
+    check((!(content.empty())));
+    check((content.find("name=crash") != std::string::npos));
+    check((content.find("type=command") != std::string::npos));
     std::filesystem::remove_all(dir);
 }
 
-TEST_CASE("failure context preserves declared command runner")
-{
+spec("failure triggers receive failure context") {
+    it("complete case") { test_failure_triggers_receive_failure_context_13(); }
+}
+
+[[maybe_unused]] static void test_failure_context_preserves_declared_command_runner_14() {
     auto dir = createTempDir();
     auto workflow_path = dir / "workflow.yml";
     auto output_path = dir / "failure_type.txt";
@@ -650,15 +687,18 @@ tasks:
     );
 
     WorkflowRunner runner(workflow_path.string());
-    REQUIRE_FALSE(runner.run());
-    REQUIRE(std::filesystem::exists(output_path));
+    check_false(runner.run());
+    check((std::filesystem::exists(output_path)));
     auto content = FileUtils::readFile(output_path.string());
-    CHECK(content.find("command") != std::string::npos);
+    check((content.find("command") != std::string::npos));
     std::filesystem::remove_all(dir);
 }
 
-TEST_CASE("explicit actions tasks use the same failure trigger lifecycle")
-{
+spec("failure context preserves declared command runner") {
+    it("complete case") { test_failure_context_preserves_declared_command_runner_14(); }
+}
+
+[[maybe_unused]] static void test_explicit_actions_tasks_use_the_same_failure_trigger_lifecycle_15() {
     auto dir = createTempDir();
     auto workflow_path = dir / "workflow.yml";
     auto output_path = dir / "bt_failure.txt";
@@ -681,17 +721,20 @@ tasks:
     );
 
     WorkflowRunner runner(workflow_path.string());
-    REQUIRE_FALSE(runner.run());
-    REQUIRE(std::filesystem::exists(output_path));
+    check_false(runner.run());
+    check((std::filesystem::exists(output_path)));
     auto content = FileUtils::readFile(output_path.string());
-    CHECK(content.find("name=tree_fail") != std::string::npos);
-    CHECK(content.find("type=actions") != std::string::npos);
-    CHECK(content.find("status=failed") != std::string::npos);
+    check((content.find("name=tree_fail") != std::string::npos));
+    check((content.find("type=actions") != std::string::npos));
+    check((content.find("status=failed") != std::string::npos));
     std::filesystem::remove_all(dir);
 }
 
-TEST_CASE("dynamic_tasks failure triggers expose inner failed task")
-{
+spec("explicit actions tasks use the same failure trigger lifecycle") {
+    it("complete case") { test_explicit_actions_tasks_use_the_same_failure_trigger_lifecycle_15(); }
+}
+
+[[maybe_unused]] static void test_dynamic_tasks_failure_triggers_expose_inner_failed_task_16() {
     auto dir = createTempDir();
     auto workflow_path = dir / "workflow.yml";
     auto output_path = dir / "dynamic_failure.txt";
@@ -716,17 +759,20 @@ TEST_CASE("dynamic_tasks failure triggers expose inner failed task")
               "      on_failure: [notify]\n");
 
     WorkflowRunner runner(workflow_path.string());
-    REQUIRE_FALSE(runner.run());
-    REQUIRE(std::filesystem::exists(output_path));
+    check_false(runner.run());
+    check((std::filesystem::exists(output_path)));
     auto content = FileUtils::readFile(output_path.string());
-    CHECK(content.find("outer=deploy_all") != std::string::npos);
-    CHECK(content.find("inner=deploy_fail") != std::string::npos);
-    CHECK(content.find("type=command") != std::string::npos);
+    check((content.find("outer=deploy_all") != std::string::npos));
+    check((content.find("inner=deploy_fail") != std::string::npos));
+    check((content.find("type=command") != std::string::npos));
     std::filesystem::remove_all(dir);
 }
 
-TEST_CASE("uses failure triggers expose inner failed task")
-{
+spec("dynamic_tasks failure triggers expose inner failed task") {
+    it("complete case") { test_dynamic_tasks_failure_triggers_expose_inner_failed_task_16(); }
+}
+
+[[maybe_unused]] static void test_uses_failure_triggers_expose_inner_failed_task_17() {
     auto dir = createTempDir();
     auto reusable_path = dir / "reusable.yml";
     auto workflow_path = dir / "main.yml";
@@ -758,17 +804,20 @@ tasks:
     writeFile(workflow_path, workflow_content);
 
     WorkflowRunner runner(workflow_path.string());
-    REQUIRE_FALSE(runner.run());
-    REQUIRE(std::filesystem::exists(output_path));
+    check_false(runner.run());
+    check((std::filesystem::exists(output_path)));
     auto content = FileUtils::readFile(output_path.string());
-    CHECK(content.find("outer=call") != std::string::npos);
-    CHECK(content.find("inner=inner_crash") != std::string::npos);
-    CHECK(content.find("type=command") != std::string::npos);
+    check((content.find("outer=call") != std::string::npos));
+    check((content.find("inner=inner_crash") != std::string::npos));
+    check((content.find("type=command") != std::string::npos));
     std::filesystem::remove_all(dir);
 }
 
-TEST_CASE("trigger handlers observe finalized task status")
-{
+spec("uses failure triggers expose inner failed task") {
+    it("complete case") { test_uses_failure_triggers_expose_inner_failed_task_17(); }
+}
+
+[[maybe_unused]] static void test_trigger_handlers_observe_finalized_task_status_18() {
     auto dir = createTempDir();
     auto workflow_path = dir / "workflow.yml";
     auto output_path = dir / "trigger_status.txt";
@@ -786,16 +835,19 @@ tasks:
     );
 
     WorkflowRunner runner(workflow_path.string());
-    REQUIRE_FALSE(runner.run());
-    REQUIRE(std::filesystem::exists(output_path));
+    check_false(runner.run());
+    check((std::filesystem::exists(output_path)));
     auto content = FileUtils::readFile(output_path.string());
-    CHECK(content.find("failed") != std::string::npos);
-    CHECK(content.find("running") == std::string::npos);
+    check((content.find("failed") != std::string::npos));
+    check((content.find("running") == std::string::npos));
     std::filesystem::remove_all(dir);
 }
 
-TEST_CASE("finally runs through on_complete even when DAG stops on failure")
-{
+spec("trigger handlers observe finalized task status") {
+    it("complete case") { test_trigger_handlers_observe_finalized_task_status_18(); }
+}
+
+[[maybe_unused]] static void test_finally_runs_through_on_complete_even_when_dag_stops_on_failure_19() {
     auto dir = createTempDir();
     auto workflow_path = dir / "workflow.yml";
     auto cleanup_path = dir / "cleanup.txt";
@@ -813,15 +865,18 @@ tasks:
     );
 
     WorkflowRunner runner(workflow_path.string());
-    REQUIRE_FALSE(runner.run());
-    REQUIRE(std::filesystem::exists(cleanup_path));
+    check_false(runner.run());
+    check((std::filesystem::exists(cleanup_path)));
     auto content = FileUtils::readFile(cleanup_path.string());
-    CHECK(content.find("cleanup") != std::string::npos);
+    check((content.find("cleanup") != std::string::npos));
     std::filesystem::remove_all(dir);
 }
 
-TEST_CASE("trigger handlers are not auto-scheduled as regular root tasks")
-{
+spec("finally runs through on_complete even when DAG stops on failure") {
+    it("complete case") { test_finally_runs_through_on_complete_even_when_dag_stops_on_failure_19(); }
+}
+
+[[maybe_unused]] static void test_trigger_handlers_are_not_auto_scheduled_as_regular_root_tasks_20() {
     auto dir = createTempDir();
     auto workflow_path = dir / "workflow.yml";
     auto output_path = dir / "trigger_count.txt";
@@ -839,17 +894,20 @@ tasks:
     );
 
     WorkflowRunner runner(workflow_path.string());
-    REQUIRE(runner.run());
-    REQUIRE(std::filesystem::exists(output_path));
+    check((runner.run()));
+    check((std::filesystem::exists(output_path)));
     auto content = FileUtils::readFile(output_path.string());
     auto first = content.find("hit");
-    REQUIRE(first != std::string::npos);
-    CHECK(content.find("hit", first + 1) == std::string::npos);
+    check((first != std::string::npos));
+    check((content.find("hit", first + 1) == std::string::npos));
     std::filesystem::remove_all(dir);
 }
 
-TEST_CASE("failed trigger handlers fail the workflow without rewriting the source task status")
-{
+spec("trigger handlers are not auto-scheduled as regular root tasks") {
+    it("complete case") { test_trigger_handlers_are_not_auto_scheduled_as_regular_root_tasks_20(); }
+}
+
+[[maybe_unused]] static void test_failed_trigger_handlers_fail_the_workflow_without_rewriting_the_source_task_status_21() {
     auto dir = createTempDir();
     auto workflow_path = dir / "workflow.yml";
 
@@ -871,14 +929,17 @@ tasks:
     WorkflowExecutor executor(graph, workflow.tasks, {}, 1, false);
     executor.execute(context);
 
-    CHECK(context.getValueOrDefault<std::string>("workflow_status", "") == "failed");
-    CHECK(context.getTaskStatus("build") == "success");
-    CHECK(context.getTaskStatus("notify") == "failed");
+    check((context.getValueOrDefault<std::string>("workflow_status", "") == "failed"));
+    check((context.getTaskStatus("build") == "success"));
+    check((context.getTaskStatus("notify") == "failed"));
     std::filesystem::remove_all(dir);
 }
 
-TEST_CASE("each tasks fire triggers once after aggregate completion")
-{
+spec("failed trigger handlers fail the workflow without rewriting the source task status") {
+    it("complete case") { test_failed_trigger_handlers_fail_the_workflow_without_rewriting_the_source_task_status_21(); }
+}
+
+[[maybe_unused]] static void test_each_tasks_fire_triggers_once_after_aggregate_completion_22() {
     auto dir = createTempDir();
     auto workflow_path = dir / "workflow.yml";
     auto output_path = dir / "each_trigger_count.txt";
@@ -899,17 +960,20 @@ tasks:
     );
 
     WorkflowRunner runner(workflow_path.string());
-    REQUIRE(runner.run());
-    REQUIRE(std::filesystem::exists(output_path));
+    check((runner.run()));
+    check((std::filesystem::exists(output_path)));
     auto content = FileUtils::readFile(output_path.string());
     auto first = content.find("hit");
-    REQUIRE(first != std::string::npos);
-    CHECK(content.find("hit", first + 1) == std::string::npos);
+    check((first != std::string::npos));
+    check((content.find("hit", first + 1) == std::string::npos));
     std::filesystem::remove_all(dir);
 }
 
-TEST_CASE("each failures fire on_failure once with aggregate task context")
-{
+spec("each tasks fire triggers once after aggregate completion") {
+    it("complete case") { test_each_tasks_fire_triggers_once_after_aggregate_completion_22(); }
+}
+
+[[maybe_unused]] static void test_each_failures_fire_on_failure_once_with_aggregate_task_context_23() {
     auto dir = createTempDir();
     auto workflow_path = dir / "workflow.yml";
     auto output_path = dir / "each_failure.txt";
@@ -930,18 +994,21 @@ TEST_CASE("each failures fire on_failure once with aggregate task context")
     writeFile(workflow_path, workflow_content);
 
     WorkflowRunner runner(workflow_path.string());
-    REQUIRE_FALSE(runner.run());
-    REQUIRE(std::filesystem::exists(output_path));
+    check_false(runner.run());
+    check((std::filesystem::exists(output_path)));
     auto content = FileUtils::readFile(output_path.string());
     auto first = content.find("name=fanout");
-    REQUIRE(first != std::string::npos);
-    CHECK(content.find("status=failed") != std::string::npos);
-    CHECK(content.find("name=fanout", first + 1) == std::string::npos);
+    check((first != std::string::npos));
+    check((content.find("status=failed") != std::string::npos));
+    check((content.find("name=fanout", first + 1) == std::string::npos));
     std::filesystem::remove_all(dir);
 }
 
-TEST_CASE("trigger handlers honor unmet dependencies before execution")
-{
+spec("each failures fire on_failure once with aggregate task context") {
+    it("complete case") { test_each_failures_fire_on_failure_once_with_aggregate_task_context_23(); }
+}
+
+[[maybe_unused]] static void test_trigger_handlers_honor_unmet_dependencies_before_execution_24() {
     auto dir = createTempDir();
     auto workflow_path = dir / "workflow.yml";
     auto output_path = dir / "trigger_chain.txt";
@@ -963,23 +1030,26 @@ TEST_CASE("trigger handlers honor unmet dependencies before execution")
     writeFile(workflow_path, workflow_content);
 
     WorkflowRunner runner(workflow_path.string());
-    REQUIRE(runner.run());
-    REQUIRE(std::filesystem::exists(output_path));
+    check((runner.run()));
+    check((std::filesystem::exists(output_path)));
 
     auto output_content = FileUtils::readFile(output_path.string());
     auto prepare_pos = output_content.find("prepare");
     auto notify_pos = output_content.find("notify");
 
-    REQUIRE(prepare_pos != std::string::npos);
-    REQUIRE(notify_pos != std::string::npos);
-    CHECK(prepare_pos < notify_pos);
-    CHECK(output_content.find("prepare", prepare_pos + 1) == std::string::npos);
-    CHECK(output_content.find("notify", notify_pos + 1) == std::string::npos);
+    check((prepare_pos != std::string::npos));
+    check((notify_pos != std::string::npos));
+    check((prepare_pos < notify_pos));
+    check((output_content.find("prepare", prepare_pos + 1) == std::string::npos));
+    check((output_content.find("notify", notify_pos + 1) == std::string::npos));
     std::filesystem::remove_all(dir);
 }
 
-TEST_CASE("dynamic_tasks reject generated names that collide with static tasks")
-{
+spec("trigger handlers honor unmet dependencies before execution") {
+    it("complete case") { test_trigger_handlers_honor_unmet_dependencies_before_execution_24(); }
+}
+
+[[maybe_unused]] static void test_dynamic_tasks_reject_generated_names_that_collide_with_static_tasks_25() {
     auto dir = createTempDir();
     auto workflow_path = dir / "workflow.yml";
     auto output_path = dir / "static_notify.txt";
@@ -1008,30 +1078,36 @@ TEST_CASE("dynamic_tasks reject generated names that collide with static tasks")
               "        command: \"echo {{ item }}\"\n");
 
     WorkflowRunner runner(workflow_path.string());
-    REQUIRE_FALSE(runner.run());
-    CHECK_FALSE(std::filesystem::exists(output_path));
+    check_false(runner.run());
+    check((!(std::filesystem::exists(output_path))));
     std::filesystem::remove_all(dir);
 }
 
-TEST_CASE("controlled process timeout follows workflow deadline",
-          "[workflow][execution-control][process]") {
+spec("dynamic_tasks reject generated names that collide with static tasks") {
+    it("complete case") { test_dynamic_tasks_reject_generated_names_that_collide_with_static_tasks_25(); }
+}
+
+[[maybe_unused]] static void test_controlled_process_timeout_follows_workflow_deadline_26() {
     using Control = Praktor::Execution::ExecutionControl;
     using namespace std::chrono_literals;
 
-    CHECK(Praktor::Execution::clampProcessTimeoutMs(5000, {}) == 5000);
+    check((Praktor::Execution::clampProcessTimeoutMs(5000, {}) == 5000));
 
     auto future = std::make_shared<Control>(Control::Clock::now() + 10s);
     const int bounded =
         Praktor::Execution::clampProcessTimeoutMs(30000, future);
-    CHECK(bounded > 0);
-    CHECK(bounded <= 10000);
+    check((bounded > 0));
+    check((bounded <= 10000));
 
     auto expired = std::make_shared<Control>(Control::Clock::now() - 1ms);
-    CHECK(Praktor::Execution::clampProcessTimeoutMs(30000, expired) == 1);
+    check((Praktor::Execution::clampProcessTimeoutMs(30000, expired) == 1));
 }
 
-TEST_CASE("ProgramExecutor rejects cancellation before process spawn",
-          "[workflow][execution-control][program]") {
+spec("controlled process timeout follows workflow deadline") {
+    it("complete case") { test_controlled_process_timeout_follows_workflow_deadline_26(); }
+}
+
+[[maybe_unused]] static void test_programexecutor_rejects_cancellation_before_process_spawn_27() {
     using Control = Praktor::Execution::ExecutionControl;
 
     Task task;
@@ -1049,14 +1125,16 @@ TEST_CASE("ProgramExecutor rejects cancellation before process spawn",
     Praktor::Execution::ProgramExecutor executor;
     const auto result = executor.execute(task, context);
 
-    CHECK_FALSE(result.success);
-    CHECK(result.error_code == "cancelled");
-    CHECK(result.error_phase == "execution_control");
+    check((!(result.success)));
+    check((result.error_code == "cancelled"));
+    check((result.error_phase == "execution_control"));
 }
 
-TEST_CASE("workflow executor honors pre-start execution control",
-          "[workflow][execution-control]")
-{
+spec("ProgramExecutor rejects cancellation before process spawn") {
+    it("complete case") { test_programexecutor_rejects_cancellation_before_process_spawn_27(); }
+}
+
+[[maybe_unused]] static void test_workflow_executor_honors_pre_start_execution_control_28(int section_index) {
     using Control = Praktor::Execution::ExecutionControl;
     using namespace std::chrono_literals;
 
@@ -1078,29 +1156,32 @@ tasks:
 
         WorkflowExecutor executor(graph, workflow.tasks, {}, 1, false);
         executor.execute(context);
-        CHECK_FALSE(context.hasKey("executed"));
+        check((!(context.hasKey("executed"))));
         return context.getValueOrDefault<std::string>("workflow_status", "unknown");
     };
 
-    SECTION("cancellation prevents initial task scheduling") {
+    if (section_index == 0) {
         auto control = std::make_shared<Control>();
         control->requestCancel();
 
-        CHECK(run_controlled(control) == "cancelled");
+        check((run_controlled(control) == "cancelled"));
     }
 
-    SECTION("expired deadline prevents initial task scheduling") {
+    if (section_index == 1) {
         auto control = std::make_shared<Control>(Control::Clock::now() - 1ms);
 
-        CHECK(run_controlled(control) == "timed_out");
+        check((run_controlled(control) == "timed_out"));
     }
 
     std::filesystem::remove_all(dir);
 }
 
-TEST_CASE("WorkflowRunner injects controlled terminal state",
-          "[workflow][execution-control][runner]")
-{
+spec("workflow executor honors pre-start execution control") {
+    it("cancellation prevents initial task scheduling") { test_workflow_executor_honors_pre_start_execution_control_28(0); }
+    it("expired deadline prevents initial task scheduling") { test_workflow_executor_honors_pre_start_execution_control_28(1); }
+}
+
+[[maybe_unused]] static void test_workflowrunner_injects_controlled_terminal_state_29(int section_index) {
     using Control = Praktor::Execution::ExecutionControl;
     using namespace std::chrono_literals;
 
@@ -1113,37 +1194,41 @@ tasks:
       ctx.output("ran", true);
 )");
 
-    SECTION("pre-cancelled runner returns cancelled") {
+    if (section_index == 0) {
         auto control = std::make_shared<Control>();
         control->requestCancel();
 
         const auto result =
             WorkflowRunner(workflow_path.string()).executeWithControl(control);
 
-        CHECK_FALSE(result.success);
-        CHECK(result.value["workflow_status"].as<std::string>() == "cancelled");
-        CHECK(result.error_message == "Workflow execution cancelled");
-        CHECK_FALSE(result.value["tasks"].contains("should_not_run"));
+        check((!(result.success)));
+        check((result.value["workflow_status"].as<std::string>() == "cancelled"));
+        check((result.error_message == "Workflow execution cancelled"));
+        check((!(result.value["tasks"].contains("should_not_run"))));
     }
 
-    SECTION("expired runner deadline returns timed_out") {
+    if (section_index == 1) {
         auto control =
             std::make_shared<Control>(Control::Clock::now() - 1ms);
 
         const auto result =
             WorkflowRunner(workflow_path.string()).executeWithControl(control);
 
-        CHECK_FALSE(result.success);
-        CHECK(result.value["workflow_status"].as<std::string>() == "timed_out");
-        CHECK(result.error_message == "Workflow execution timed out");
-        CHECK_FALSE(result.value["tasks"].contains("should_not_run"));
+        check((!(result.success)));
+        check((result.value["workflow_status"].as<std::string>() == "timed_out"));
+        check((result.error_message == "Workflow execution timed out"));
+        check((!(result.value["tasks"].contains("should_not_run"))));
     }
 
     std::filesystem::remove_all(dir);
 }
 
-TEST_CASE("workflow env is exposed through ctx.env")
-{
+spec("WorkflowRunner injects controlled terminal state") {
+    it("pre-cancelled runner returns cancelled") { test_workflowrunner_injects_controlled_terminal_state_29(0); }
+    it("expired runner deadline returns timed_out") { test_workflowrunner_injects_controlled_terminal_state_29(1); }
+}
+
+[[maybe_unused]] static void test_workflow_env_is_exposed_through_ctx_env_30() {
     auto dir = createTempDir();
     auto workflow_path = dir / "workflow.yml";
     auto output_path = dir / "env.txt";
@@ -1165,15 +1250,18 @@ tasks:
     );
 
     WorkflowRunner runner(workflow_path.string());
-    REQUIRE(runner.run());
-    REQUIRE(std::filesystem::exists(output_path));
+    check((runner.run()));
+    check((std::filesystem::exists(output_path)));
     auto content = FileUtils::readFile(output_path.string());
-    CHECK(content.find("scoped-token") != std::string::npos);
+    check((content.find("scoped-token") != std::string::npos));
     std::filesystem::remove_all(dir);
 }
 
-TEST_CASE("workflow env does not leak into the host process")
-{
+spec("workflow env is exposed through ctx.env") {
+    it("complete case") { test_workflow_env_is_exposed_through_ctx_env_30(); }
+}
+
+[[maybe_unused]] static void test_workflow_env_does_not_leak_into_the_host_process_31() {
     auto dir = createTempDir();
     auto workflow_path = dir / "workflow.yml";
     auto output_path = dir / "scope.txt";
@@ -1191,21 +1279,24 @@ TEST_CASE("workflow env does not leak into the host process")
         "    command: \"echo " + shellEnvRef(env_name) + " > scope.txt\"\n");
 
     WorkflowRunner runner(workflow_path.string());
-    REQUIRE(runner.run());
-    REQUIRE(std::filesystem::exists(output_path));
+    check((runner.run()));
+    check((std::filesystem::exists(output_path)));
 
     auto content = FileUtils::readFile(output_path.string());
-    CHECK(content.find("inside") != std::string::npos);
+    check((content.find("inside") != std::string::npos));
 
     const char* current = std::getenv(env_name.c_str());
-    REQUIRE(current != nullptr);
-    CHECK(std::string(current) == "outside");
+    check((current != nullptr));
+    check((std::string(current) == "outside"));
 
     std::filesystem::remove_all(dir);
 }
 
-TEST_CASE("workflow runner preserves structured inputs and returns task results")
-{
+spec("workflow env does not leak into the host process") {
+    it("complete case") { test_workflow_env_does_not_leak_into_the_host_process_31(); }
+}
+
+[[maybe_unused]] static void test_workflow_runner_preserves_structured_inputs_and_returns_task_results_32() {
     auto dir = createTempDir();
     auto workflow_path = dir / "structured-input.yml";
 
@@ -1223,17 +1314,20 @@ tasks:
     WorkflowRunner runner(workflow_path.string(), std::move(inputs));
 
     const auto result = runner.execute();
-    REQUIRE(result.success);
-    CHECK(result.value["workflow_status"].as<std::string>() == "success");
-    CHECK(result.value["tasks"]["inspect"]["status"].as<std::string>() == "success");
-    CHECK(result.value["tasks"]["inspect"]["outputs"]["count"].as<int>() == 7);
-    CHECK_FALSE(result.value.contains("error"));
+    check((result.success));
+    check((result.value["workflow_status"].as<std::string>() == "success"));
+    check((result.value["tasks"]["inspect"]["status"].as<std::string>() == "success"));
+    check((result.value["tasks"]["inspect"]["outputs"]["count"].as<int>() == 7));
+    check((!(result.value.contains("error"))));
 
     std::filesystem::remove_all(dir);
 }
 
-TEST_CASE("dynamic trigger cycles fail fast instead of recursing forever")
-{
+spec("workflow runner preserves structured inputs and returns task results") {
+    it("complete case") { test_workflow_runner_preserves_structured_inputs_and_returns_task_results_32(); }
+}
+
+[[maybe_unused]] static void test_dynamic_trigger_cycles_fail_fast_instead_of_recursing_forever_33() {
     auto dir = createTempDir();
     auto workflow_path = dir / "trigger-cycle.yml";
 
@@ -1257,12 +1351,15 @@ tasks:
 )" );
 
     WorkflowRunner runner(workflow_path.string());
-    REQUIRE_FALSE(runner.run());
+    check_false(runner.run());
     std::filesystem::remove_all(dir);
 }
 
-TEST_CASE("multi-hop trigger chains complete without being mistaken for cycles")
-{
+spec("dynamic trigger cycles fail fast instead of recursing forever") {
+    it("complete case") { test_dynamic_trigger_cycles_fail_fast_instead_of_recursing_forever_33(); }
+}
+
+[[maybe_unused]] static void test_multi_hop_trigger_chains_complete_without_being_mistaken_for_cycles_34() {
     auto dir = createTempDir();
     auto workflow_path = dir / "trigger-chain.yml";
 
@@ -1292,26 +1389,29 @@ tasks:
 )" );
 
     WorkflowRunner runner(workflow_path.string());
-    REQUIRE(runner.run());
+    check((runner.run()));
     std::filesystem::remove_all(dir);
 }
 
-TEST_CASE("system actions execute through WorkflowRunner and preserve failure metadata")
-{
+spec("multi-hop trigger chains complete without being mistaken for cycles") {
+    it("complete case") { test_multi_hop_trigger_chains_complete_without_being_mistaken_for_cycles_34(); }
+}
+
+[[maybe_unused]] static void test_system_actions_execute_through_workflowrunner_and_preserve_failure_metadata_35() {
 #ifdef _WIN32
     const auto workflow_path = std::filesystem::path(PRAKTOR_TEST_SOURCE_DIR)
         / "workflows" / "system-actions.yml";
     const auto fixture_path = std::filesystem::path(PRAKTOR_MANAGED_PROCESS_FIXTURE);
-    REQUIRE(std::filesystem::exists(workflow_path));
-    REQUIRE(std::filesystem::exists(fixture_path));
+    check((std::filesystem::exists(workflow_path)));
+    check((std::filesystem::exists(fixture_path)));
 
     auto backend = Praktor::System::createManagedProcessBackend();
-    REQUIRE(backend != nullptr);
+    check((backend != nullptr));
     ManagedProcessIdentity identity;
     identity.image_name = fixture_path.filename().string();
     const auto setup_cleanup = cleanupManagedProcessFixture(*backend, identity);
-    INFO(setup_cleanup.native_error << ":" << setup_cleanup.message);
-    REQUIRE(setup_cleanup.ok);
+    info("%s", praktor_test::message([&](std::ostream& out) { out << setup_cleanup.native_error << ":" << setup_cleanup.message; }).c_str());
+    check((setup_cleanup.ok));
     ManagedProcessFixtureCleanup cleanup(*backend, identity);
 
     WorkflowInputs inputs;
@@ -1323,66 +1423,74 @@ TEST_CASE("system actions execute through WorkflowRunner and preserve failure me
     WorkflowRunner runner(workflow_path.string(), std::move(inputs));
     const auto result = runner.execute();
 
-    CHECK_FALSE(result.success);
-    CHECK(result.value["workflow_status"].as<std::string>() == "failed");
-    CHECK(result.error_message == "Workflow execution failed");
+    check((!(result.success)));
+    check((result.value["workflow_status"].as<std::string>() == "failed"));
+    check((result.error_message == "Workflow execution failed"));
     const WorkflowValue tasks = result.value["tasks"];
 
     const auto check_process = [&](const std::string& name,
                                    const std::string& operation,
                                    const std::string& state,
                                    bool changed) {
-        INFO(name);
-        CHECK(tasks[name]["status"].as<std::string>() == "success");
+        info("%s", praktor_test::message([&](std::ostream& out) { out << name; }).c_str());
+        check((tasks[name]["status"].as<std::string>() == "success"));
         const WorkflowValue outputs = tasks[name]["outputs"];
-        CHECK(outputs["image_name"].as<std::string>() == identity.image_name);
-        CHECK(outputs["operation"].as<std::string>() == operation);
-        CHECK(outputs["state"].as<std::string>() == state);
-        CHECK(outputs["changed"].as<bool>() == changed);
-        CHECK(outputs["duration_ms"].as<std::int64_t>() >= 0);
-        CHECK(outputs["pid"].as<std::int64_t>() >= 0);
+        check((outputs["image_name"].as<std::string>() == identity.image_name));
+        check((outputs["operation"].as<std::string>() == operation));
+        check((outputs["state"].as<std::string>() == state));
+        check((outputs["changed"].as<bool>() == changed));
+        check((outputs["duration_ms"].as<std::int64_t>() >= 0));
+        check((outputs["pid"].as<std::int64_t>() >= 0));
     };
 
     check_process("process_initial_status", "status", "not_running", false);
     check_process("process_start", "start", "running", true);
-    CHECK(tasks["process_start"]["outputs"]["pid"].as<std::int64_t>() > 0);
+    check((tasks["process_start"]["outputs"]["pid"].as<std::int64_t>() > 0));
     check_process("process_running_status", "status", "running", false);
     check_process("process_restart", "restart", "running", true);
-    CHECK(tasks["process_restart"]["outputs"]["pid"].as<std::int64_t>() > 0);
+    check((tasks["process_restart"]["outputs"]["pid"].as<std::int64_t>() > 0));
     check_process("process_stop", "stop", "not_running", true);
     check_process("process_final_status", "status", "not_running", false);
 
-    CHECK(tasks["service_profile_failure"]["status"].as<std::string>() == "failed");
+    check((tasks["service_profile_failure"]["status"].as<std::string>() == "failed"));
     const WorkflowValue service_outputs = tasks["service_profile_failure"]["outputs"];
-    CHECK(service_outputs["name"].as<std::string>() == "PraktorContractService");
-    CHECK(service_outputs["operation"].as<std::string>() == "status");
-    CHECK(service_outputs["state"].as<std::string>().empty());
-    CHECK_FALSE(service_outputs["changed"].as<bool>());
-    CHECK(service_outputs["duration_ms"].as<std::int64_t>() >= 0);
+    check((service_outputs["name"].as<std::string>() == "PraktorContractService"));
+    check((service_outputs["operation"].as<std::string>() == "status"));
+    check((service_outputs["state"].as<std::string>().empty()));
+    check((!(service_outputs["changed"].as<bool>())));
+    check((service_outputs["duration_ms"].as<std::int64_t>() >= 0));
 
-    CHECK(tasks["capture_service_failure"]["status"].as<std::string>() == "success");
+    check((tasks["capture_service_failure"]["status"].as<std::string>() == "success"));
     const WorkflowValue failure = tasks["capture_service_failure"]["outputs"];
-    CHECK(failure["task_name"].as<std::string>() == "service_profile_failure");
-    CHECK(failure["task_type"].as<std::string>() == "service");
-    CHECK(failure["error_code"].as<std::string>() == "service_state_failed");
-    CHECK(failure["error_phase"].as<std::string>() == "profile");
-    CHECK(failure["error_details"]["name"].as<std::string>() ==
-          "PraktorContractService");
-    CHECK(failure["error_details"]["profile"].as<std::string>() ==
-          "praktor_missing_profile");
-    CHECK(failure["error_details"]["operation"].as<std::string>() == "status");
-    CHECK(failure["failed_outputs"]["operation"].as<std::string>() == "status");
+    check((failure["task_name"].as<std::string>() == "service_profile_failure"));
+    check((failure["task_type"].as<std::string>() == "service"));
+    check((failure["error_code"].as<std::string>() == "service_state_failed"));
+    check((failure["error_phase"].as<std::string>() == "profile"));
+    check((failure["error_details"]["name"].as<std::string>() ==
+          "PraktorContractService"));
+    check((failure["error_details"]["profile"].as<std::string>() ==
+          "praktor_missing_profile"));
+    check((failure["error_details"]["operation"].as<std::string>() == "status"));
+    check((failure["failed_outputs"]["operation"].as<std::string>() == "status"));
 
     const auto final_cleanup = cleanupManagedProcessFixture(*backend, identity);
-    INFO(final_cleanup.native_error << ":" << final_cleanup.message);
-    REQUIRE(final_cleanup.ok);
+    info("%s", praktor_test::message([&](std::ostream& out) { out << final_cleanup.native_error << ":" << final_cleanup.message; }).c_str());
+    check((final_cleanup.ok));
 #else
-    SKIP("managed_process WorkflowRunner integration is Windows-only");
+    info("%s", praktor_test::message([&](std::ostream& out) { out << "managed_process WorkflowRunner integration is Windows-only"; }).c_str());
 #endif
 }
 
-TEST_CASE("nested uses preserves the inner structured service failure snapshot")
-{
+spec("system actions execute through WorkflowRunner and preserve failure metadata") {
+#ifdef _WIN32
+    it("complete case")
+#else
+    it_skip("complete case")
+#endif
+ { test_system_actions_execute_through_workflowrunner_and_preserve_failure_metadata_35(); }
+}
+
+[[maybe_unused]] static void test_nested_uses_preserves_the_inner_structured_service_failure_snapshot_36() {
     const auto dir = createTempDir();
     const auto inner_path = dir / "inner.yml";
     const auto outer_path = dir / "outer.yml";
@@ -1417,26 +1525,29 @@ tasks:
 
     const auto result = WorkflowRunner(outer_path.string()).execute();
 
-    CHECK_FALSE(result.success);
+    check((!(result.success)));
     const WorkflowValue tasks = result.value["tasks"];
-    CHECK(tasks["invoke_nested"]["status"].as<std::string>() == "failed");
-    REQUIRE(tasks["capture_nested_failure"]["status"].as<std::string>() == "success");
+    check((tasks["invoke_nested"]["status"].as<std::string>() == "failed"));
+    check((tasks["capture_nested_failure"]["status"].as<std::string>() == "success"));
     const WorkflowValue captured = tasks["capture_nested_failure"]["outputs"];
-    CHECK(captured["error_code"].as<std::string>() == "service_state_failed");
-    CHECK(captured["error_phase"].as<std::string>() == "profile");
-    CHECK(captured["error_details"]["name"].as<std::string>() ==
-          "NestedContractService");
-    CHECK(captured["error_details"]["profile"].as<std::string>() ==
-          "praktor_nested_missing_profile");
-    CHECK(captured["error_details"]["operation"].as<std::string>() == "status");
-    CHECK(captured["legacy_error"].as<std::string>() ==
-          "unknown service command profile: praktor_nested_missing_profile");
+    check((captured["error_code"].as<std::string>() == "service_state_failed"));
+    check((captured["error_phase"].as<std::string>() == "profile"));
+    check((captured["error_details"]["name"].as<std::string>() ==
+          "NestedContractService"));
+    check((captured["error_details"]["profile"].as<std::string>() ==
+          "praktor_nested_missing_profile"));
+    check((captured["error_details"]["operation"].as<std::string>() == "status"));
+    check((captured["legacy_error"].as<std::string>() ==
+          "unknown service command profile: praktor_nested_missing_profile"));
 
     std::filesystem::remove_all(dir);
 }
 
-TEST_CASE("managed process cache invalidates when every action parameter changes")
-{
+spec("nested uses preserves the inner structured service failure snapshot") {
+    it("complete case") { test_nested_uses_preserves_the_inner_structured_service_failure_snapshot_36(); }
+}
+
+[[maybe_unused]] static void test_managed_process_cache_invalidates_when_every_action_parameter_changes_37() {
 #ifdef _WIN32
     const auto dir = createTempDir();
     const auto workflow_path = dir / "managed-process-cache.yml";
@@ -1464,35 +1575,43 @@ TEST_CASE("managed process cache invalidates when every action parameter changes
     add_variant("force_terminate", [](auto& value) { value.force_terminate = true; });
 
     for (const auto& [field, variant] : variants) {
-        INFO("changed field: " << field);
+        info("%s", praktor_test::message([&](std::ostream& out) { out << "changed field: " << field; }).c_str());
         std::filesystem::remove(dir / ".praktor_cache");
         writeFile(workflow_path, managedProcessCacheWorkflow(baseline));
 
         const auto first = WorkflowRunner(workflow_path.string()).execute();
-        REQUIRE(first.success);
-        CHECK(first.value["tasks"]["cached_process_status"]["status"].as<std::string>() ==
-              "success");
+        check((first.success));
+        check((first.value["tasks"]["cached_process_status"]["status"].as<std::string>() ==
+              "success"));
 
         const auto cached = WorkflowRunner(workflow_path.string()).execute();
-        REQUIRE(cached.success);
-        CHECK(cached.value["tasks"]["cached_process_status"]["status"].as<std::string>() ==
-              "skipped");
+        check((cached.success));
+        check((cached.value["tasks"]["cached_process_status"]["status"].as<std::string>() ==
+              "skipped"));
 
         writeFile(workflow_path, managedProcessCacheWorkflow(variant));
         const auto changed = WorkflowRunner(workflow_path.string()).execute();
-        REQUIRE(changed.success);
-        CHECK(changed.value["tasks"]["cached_process_status"]["status"].as<std::string>() ==
-              "success");
+        check((changed.success));
+        check((changed.value["tasks"]["cached_process_status"]["status"].as<std::string>() ==
+              "success"));
     }
 
     std::filesystem::remove_all(dir);
 #else
-    SKIP("managed_process cache integration is Windows-only");
+    info("%s", praktor_test::message([&](std::ostream& out) { out << "managed_process cache integration is Windows-only"; }).c_str());
 #endif
 }
 
-TEST_CASE("service action hash changes for every cache-relevant parameter")
-{
+spec("managed process cache invalidates when every action parameter changes") {
+#ifdef _WIN32
+    it("complete case")
+#else
+    it_skip("complete case")
+#endif
+ { test_managed_process_cache_invalidates_when_every_action_parameter_changes_37(); }
+}
+
+[[maybe_unused]] static void test_service_action_hash_changes_for_every_cache_relevant_parameter_38() {
     Task baseline;
     baseline.name = "cached_service_status";
     baseline.action = TaskAction::Service;
@@ -1528,10 +1647,14 @@ TEST_CASE("service action hash changes for every cache-relevant parameter")
     });
 
     for (const auto& [field, variant] : variants) {
-        INFO("changed field: " << field);
+        info("%s", praktor_test::message([&](std::ostream& out) { out << "changed field: " << field; }).c_str());
         Task changed = baseline;
         changed.specifics = variant;
-        CHECK(Praktor::Execution::Internal::computeTaskActionHash(changed) !=
-              baseline_hash);
+        check((Praktor::Execution::Internal::computeTaskActionHash(changed) !=
+              baseline_hash));
     }
+}
+
+spec("service action hash changes for every cache-relevant parameter") {
+    it("complete case") { test_service_action_hash_changes_for_every_cache_relevant_parameter_38(); }
 }

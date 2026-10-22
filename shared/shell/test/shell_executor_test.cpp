@@ -1,7 +1,7 @@
+#include "praktor_test.hpp"
 #include "praktor/shell/shell_executor.hpp"
 #include "praktor/shell/process_executor.hpp"
 
-#include <catch2/catch_all.hpp>
 
 #include <chrono>
 #include <algorithm>
@@ -58,15 +58,15 @@ bool containsLineFragment(const std::vector<std::string>& lines, const std::stri
 void writeTextFile(const std::filesystem::path& path, const std::string& content)
 {
     std::ofstream output(path, std::ios::binary);
-    REQUIRE(output.good());
+    check((output.good()));
     output << content;
-    REQUIRE(output.good());
+    check((output.good()));
 }
 
 std::string readTextFile(const std::filesystem::path& path)
 {
     std::ifstream input(path, std::ios::binary);
-    REQUIRE(input.good());
+    check((input.good()));
     return std::string((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
 }
 
@@ -101,18 +101,18 @@ std::string repeatedCharacter(char ch, std::size_t count)
 void setProcessEnvironment(const std::string& name, const std::string& value)
 {
 #ifdef _WIN32
-    REQUIRE(_putenv_s(name.c_str(), value.c_str()) == 0);
+    check((_putenv_s(name.c_str(), value.c_str()) == 0));
 #else
-    REQUIRE(::setenv(name.c_str(), value.c_str(), 1) == 0);
+    check((::setenv(name.c_str(), value.c_str(), 1) == 0));
 #endif
 }
 
 void unsetProcessEnvironment(const std::string& name)
 {
 #ifdef _WIN32
-    REQUIRE(_putenv_s(name.c_str(), "") == 0);
+    check((_putenv_s(name.c_str(), "") == 0));
 #else
-    REQUIRE(::unsetenv(name.c_str()) == 0);
+    check((::unsetenv(name.c_str()) == 0));
 #endif
 }
 
@@ -425,38 +425,50 @@ struct StreamCallbackGuard {
 
 } // namespace
 
-TEST_CASE("shell executor captures stdout stderr and exit code", "[shell]") {
+[[maybe_unused]] static void test_shell_executor_captures_stdout_stderr_and_exit_code_1() {
     const auto result = Praktor::Shell::ShellExecutor::execute(stdoutStderrCommand(), "", "", 30000, {}, false);
 
-    CHECK(result.exit_code == 7);
-    CHECK_FALSE(result.success());
-    CHECK(result.stdout_output.find("stdout_line") != std::string::npos);
-    CHECK(result.stderr_output.find("stderr_line") != std::string::npos);
-    CHECK_FALSE(result.output_streamed_live);
+    check((result.exit_code == 7));
+    check((!(result.success())));
+    check((result.stdout_output.find("stdout_line") != std::string::npos));
+    check((result.stderr_output.find("stderr_line") != std::string::npos));
+    check((!(result.output_streamed_live)));
 }
 
-TEST_CASE("shell executor respects working directory", "[shell]") {
+spec("shell executor captures stdout stderr and exit code") {
+    it("complete case") { test_shell_executor_captures_stdout_stderr_and_exit_code_1(); }
+}
+
+[[maybe_unused]] static void test_shell_executor_respects_working_directory_2() {
     const auto dir = createTempDir();
 
     const auto result = Praktor::Shell::ShellExecutor::execute(
         printWorkingDirCommand(), "", dir.string(), 30000, {}, false);
 
-    REQUIRE(result.success());
-    CHECK(std::filesystem::equivalent(trim_newlines(result.stdout_output), dir));
+    check((result.success()));
+    check((std::filesystem::equivalent(trim_newlines(result.stdout_output), dir)));
 
     std::filesystem::remove_all(dir);
 }
 
-TEST_CASE("shell executor passes environment overrides", "[shell]") {
+spec("shell executor respects working directory") {
+    it("complete case") { test_shell_executor_respects_working_directory_2(); }
+}
+
+[[maybe_unused]] static void test_shell_executor_passes_environment_overrides_3() {
     constexpr const char* env_name = "PRAKTOR_SHELL_ENV_TEST";
     const auto result = Praktor::Shell::ShellExecutor::execute(
         envEchoCommand(env_name), "", "", 30000, {{env_name, "inside"}}, false);
 
-    REQUIRE(result.success());
-    CHECK(trim_newlines(result.stdout_output) == "inside");
+    check((result.success()));
+    check((trim_newlines(result.stdout_output) == "inside"));
 }
 
-TEST_CASE("shell executor preserves inherited environment when overriding variables", "[shell]") {
+spec("shell executor passes environment overrides") {
+    it("complete case") { test_shell_executor_passes_environment_overrides_3(); }
+}
+
+[[maybe_unused]] static void test_shell_executor_preserves_inherited_environment_when_overriding_variables_4() {
     constexpr const char* inherited_name = "PRAKTOR_SHELL_ENV_INHERITED";
     constexpr const char* override_name = "PRAKTOR_SHELL_ENV_OVERRIDE";
     ScopedEnvironmentVariable inherited(inherited_name, "outside");
@@ -469,20 +481,28 @@ TEST_CASE("shell executor preserves inherited environment when overriding variab
         {{override_name, "inside"}},
         false);
 
-    REQUIRE(result.success());
-    CHECK(trim_newlines(result.stdout_output) == "inside,outside");
+    check((result.success()));
+    check((trim_newlines(result.stdout_output) == "inside,outside"));
 }
 
-TEST_CASE("shell executor enforces timeout", "[shell]") {
+spec("shell executor preserves inherited environment when overriding variables") {
+    it("complete case") { test_shell_executor_preserves_inherited_environment_when_overriding_variables_4(); }
+}
+
+[[maybe_unused]] static void test_shell_executor_enforces_timeout_5() {
     const auto result = Praktor::Shell::ShellExecutor::execute(
         sleepCommand(), "", "", 100, {}, false);
 
-    CHECK(result.exit_code == -1);
-    CHECK_FALSE(result.success());
-    CHECK(result.stderr_output.find("timed out") != std::string::npos);
+    check((result.exit_code == -1));
+    check((!(result.success())));
+    check((result.stderr_output.find("timed out") != std::string::npos));
 }
 
-TEST_CASE("shell executor timeout terminates the spawned process", "[shell]") {
+spec("shell executor enforces timeout") {
+    it("complete case") { test_shell_executor_enforces_timeout_5(); }
+}
+
+[[maybe_unused]] static void test_shell_executor_timeout_terminates_the_spawned_process_6() {
     const auto dir = createTempDir();
     const auto pid_file = dir / "timeout.pid";
     const auto finished_file = dir / "finished.txt";
@@ -492,20 +512,24 @@ TEST_CASE("shell executor timeout terminates the spawned process", "[shell]") {
         Praktor::Shell::ShellExecutor::execute(
             commandForScript(script), "", "", kProcessTreeTimeoutMs, {}, false);
 
-    CHECK(result.exit_code == -1);
-    CHECK_FALSE(result.success());
-    CHECK(result.stderr_output.find("timed out") != std::string::npos);
-    REQUIRE(std::filesystem::exists(pid_file));
+    check((result.exit_code == -1));
+    check((!(result.success())));
+    check((result.stderr_output.find("timed out") != std::string::npos));
+    check((std::filesystem::exists(pid_file)));
 
     const int pid = readPidFile(pid_file);
-    REQUIRE(pid > 0);
-    CHECK(waitUntil([&]() { return !isProcessAlive(pid); }, 5000));
-    CHECK_FALSE(std::filesystem::exists(finished_file));
+    check((pid > 0));
+    check((waitUntil([&]() { return !isProcessAlive(pid); }, 5000)));
+    check((!(std::filesystem::exists(finished_file))));
 
     std::filesystem::remove_all(dir);
 }
 
-TEST_CASE("shell executor forwards stdin to the child process", "[shell]") {
+spec("shell executor timeout terminates the spawned process") {
+    it("complete case") { test_shell_executor_timeout_terminates_the_spawned_process_6(); }
+}
+
+[[maybe_unused]] static void test_shell_executor_forwards_stdin_to_the_child_process_7() {
     const auto dir = createTempDir();
     const auto script = createEchoInputScript(dir);
     const std::string input = "first line\nsecond line\n";
@@ -513,13 +537,17 @@ TEST_CASE("shell executor forwards stdin to the child process", "[shell]") {
     const auto result =
         Praktor::Shell::ShellExecutor::execute(commandForScript(script), input, "", 30000, {}, false);
 
-    REQUIRE(result.success());
-    CHECK(result.stdout_output == input);
+    check((result.success()));
+    check((result.stdout_output == input));
 
     std::filesystem::remove_all(dir);
 }
 
-TEST_CASE("shell executor streams lines through callback", "[shell]") {
+spec("shell executor forwards stdin to the child process") {
+    it("complete case") { test_shell_executor_forwards_stdin_to_the_child_process_7(); }
+}
+
+[[maybe_unused]] static void test_shell_executor_streams_lines_through_callback_8() {
     StreamCallbackGuard guard;
     std::mutex mutex;
     std::vector<std::string> lines;
@@ -531,13 +559,17 @@ TEST_CASE("shell executor streams lines through callback", "[shell]") {
 
     const auto result = Praktor::Shell::ShellExecutor::execute(stdoutStderrCommand(), "", "", 30000, {}, true);
 
-    REQUIRE_FALSE(lines.empty());
-    CHECK(result.output_streamed_live);
-    CHECK(containsLineFragment(lines, "stdout_line"));
-    CHECK(containsLineFragment(lines, "stderr_line"));
+    check_false(lines.empty());
+    check((result.output_streamed_live));
+    check((containsLineFragment(lines, "stdout_line")));
+    check((containsLineFragment(lines, "stderr_line")));
 }
 
-TEST_CASE("shell executor flushes fragmented and trailing callback lines", "[shell]") {
+spec("shell executor streams lines through callback") {
+    it("complete case") { test_shell_executor_streams_lines_through_callback_8(); }
+}
+
+[[maybe_unused]] static void test_shell_executor_flushes_fragmented_and_trailing_callback_lines_9() {
     StreamCallbackGuard guard;
     const auto dir = createTempDir();
     const auto script = createFragmentedOutputScript(dir);
@@ -553,17 +585,21 @@ TEST_CASE("shell executor flushes fragmented and trailing callback lines", "[she
     const auto result =
         Praktor::Shell::ShellExecutor::execute(commandForScript(script), "", "", 30000, {}, true);
 
-    REQUIRE(result.success());
-    CHECK(result.output_streamed_live);
-    CHECK(containsExactLine(lines, long_line));
-    CHECK(containsExactLine(lines, kTailFragment));
-    CHECK(result.stdout_output.find(long_line) != std::string::npos);
-    CHECK(result.stdout_output.find(kTailFragment) != std::string::npos);
+    check((result.success()));
+    check((result.output_streamed_live));
+    check((containsExactLine(lines, long_line)));
+    check((containsExactLine(lines, kTailFragment)));
+    check((result.stdout_output.find(long_line) != std::string::npos));
+    check((result.stdout_output.find(kTailFragment) != std::string::npos));
 
     std::filesystem::remove_all(dir);
 }
 
-TEST_CASE("shell executor pumps large stdin and stdout without deadlock", "[shell][pipes]") {
+spec("shell executor flushes fragmented and trailing callback lines") {
+    it("complete case") { test_shell_executor_flushes_fragmented_and_trailing_callback_lines_9(); }
+}
+
+[[maybe_unused]] static void test_shell_executor_pumps_large_stdin_and_stdout_without_deadlock_10() {
     const auto dir = createTempDir();
     const auto script = createDuplexPipeScript(dir);
     const std::string input(kDuplexPayloadSize, 'I');
@@ -571,14 +607,18 @@ TEST_CASE("shell executor pumps large stdin and stdout without deadlock", "[shel
     const auto result = Praktor::Shell::ShellExecutor::execute(
         commandForScript(script), input, "", 10000, {}, false);
 
-    REQUIRE(result.success());
-    CHECK(result.stdout_output.size() >= kDuplexPayloadSize);
-    CHECK(result.stdout_output.find("|INPUT=" + std::to_string(kDuplexPayloadSize)) !=
-          std::string::npos);
+    check((result.success()));
+    check((result.stdout_output.size() >= kDuplexPayloadSize));
+    check((result.stdout_output.find("|INPUT=" + std::to_string(kDuplexPayloadSize)) !=
+          std::string::npos));
     std::filesystem::remove_all(dir);
 }
 
-TEST_CASE("stream callback updates are synchronized with concurrent emission", "[shell][concurrency]") {
+spec("shell executor pumps large stdin and stdout without deadlock") {
+    it("complete case") { test_shell_executor_pumps_large_stdin_and_stdout_without_deadlock_10(); }
+}
+
+[[maybe_unused]] static void test_stream_callback_updates_are_synchronized_with_concurrent_emission_11() {
     StreamCallbackGuard guard;
     constexpr int kEmitterThreads = 4;
     constexpr int kMessagesPerThread = 1000;
@@ -603,60 +643,81 @@ TEST_CASE("stream callback updates are synchronized with concurrent emission", "
         emitter.join();
     }
 
-    CHECK(first_count.load() == (kEmitterThreads / 2) * kMessagesPerThread);
-    CHECK(second_count.load() == (kEmitterThreads / 2) * kMessagesPerThread);
+    check((first_count.load() == (kEmitterThreads / 2) * kMessagesPerThread));
+    check((second_count.load() == (kEmitterThreads / 2) * kMessagesPerThread));
 }
 
-TEST_CASE("shell executor kills a running process by pid", "[shell]") {
+spec("stream callback updates are synchronized with concurrent emission") {
+    it("complete case") { test_stream_callback_updates_are_synchronized_with_concurrent_emission_11(); }
+}
+
+[[maybe_unused]] static void test_shell_executor_kills_a_running_process_by_pid_12() {
     const auto dir = createTempDir();
     const auto pid_file = dir / "shell.pid";
     const auto finished_file = dir / "finished.txt";
     const auto script = createKillScript(dir, pid_file, finished_file);
 
-    Praktor::Shell::ShellExecutor::executeAsync(commandForScript(script), "", "", {}, false);
+    auto process = Praktor::Shell::ShellExecutor::start(commandForScript(script), "", "", 30000, {}, false);
 
-    REQUIRE(waitUntil([&]() {
+    check((waitUntil([&]() {
         return std::filesystem::exists(pid_file) && !trim_newlines(readTextFile(pid_file)).empty();
-    }, 5000));
+    }, 5000)));
 
     const int pid = readPidFile(pid_file);
-    REQUIRE(pid > 0);
-    REQUIRE(isProcessAlive(pid));
-    REQUIRE(Praktor::Shell::ShellExecutor::killProcess(pid));
-    CHECK(waitUntil([&]() { return !isProcessAlive(pid); }, 5000));
-    CHECK_FALSE(std::filesystem::exists(finished_file));
+    check((pid > 0));
+    check((isProcessAlive(pid)));
+    check((process.cancel()));
+    check((process.wait().state == Praktor::Shell::ProcessState::Cancelled));
+    check((waitUntil([&]() { return !isProcessAlive(pid); }, 5000)));
+    check((!(std::filesystem::exists(finished_file))));
 
     std::filesystem::remove_all(dir);
 }
 
-TEST_CASE("shell executor rejects invalid pids", "[shell]") {
-    CHECK_FALSE(Praktor::Shell::ShellExecutor::killProcess(0));
-    CHECK_FALSE(Praktor::Shell::ShellExecutor::killProcess(-1));
+spec("Salts Process cancellation terminates the owned process tree") {
+    it("complete case") { test_shell_executor_kills_a_running_process_by_pid_12(); }
 }
 
-TEST_CASE("shell executor runs async commands without blocking the caller", "[shell]") {
+[[maybe_unused]] static void test_shell_executor_rejects_invalid_pids_13() {
+    Praktor::Shell::ManagedProcess empty;
+    check_false(empty.valid());
+    check_false(empty.cancel());
+    check_false(empty.result().has_value());
+    check_throws_as(empty.wait(), std::logic_error);
+}
+
+spec("Salts Process facade rejects empty owners") {
+    it("complete case") { test_shell_executor_rejects_invalid_pids_13(); }
+}
+
+[[maybe_unused]] static void test_shell_executor_runs_async_commands_without_blocking_the_caller_14() {
     const auto dir = createTempDir();
     const auto output_file = dir / "async_output.txt";
     const auto script = createAsyncWriteInputScript(dir, output_file);
     const std::string input = "async input payload\n";
 
     const auto start = std::chrono::steady_clock::now();
-    Praktor::Shell::ShellExecutor::executeAsync(commandForScript(script), input, "", {}, false);
+    auto process = Praktor::Shell::ShellExecutor::start(commandForScript(script), input, "", 30000, {}, false);
     const auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                                 std::chrono::steady_clock::now() - start)
                                 .count();
 
-    CHECK(elapsed_ms < 250);
-    CHECK_FALSE(std::filesystem::exists(output_file));
-    REQUIRE(waitUntil([&]() {
+    check((elapsed_ms < 250));
+    check((!(std::filesystem::exists(output_file))));
+    check((waitUntil([&]() {
         return std::filesystem::exists(output_file) && readTextFile(output_file) == input;
-    }, 5000));
-    CHECK(readTextFile(output_file) == input);
+    }, 5000)));
+    check((readTextFile(output_file) == input));
+    check((process.wait().success()));
 
     std::filesystem::remove_all(dir);
 }
 
-TEST_CASE("process executor runs program args env stdin and working directory without shell parsing", "[process]") {
+spec("Salts Process owned start does not block the caller") {
+    it("complete case") { test_shell_executor_runs_async_commands_without_blocking_the_caller_14(); }
+}
+
+[[maybe_unused]] static void test_process_executor_runs_program_args_env_stdin_and_working_directory_without_shell_parsing_15() {
     const auto dir = createTempDir();
     const auto working_dir = dir / "work";
     std::filesystem::create_directories(working_dir);
@@ -664,29 +725,37 @@ TEST_CASE("process executor runs program args env stdin and working directory wi
 
     const auto result = Praktor::Shell::ProcessExecutor::execute(processProbeSpec(script, working_dir));
 
-    REQUIRE(result.success());
-    CHECK(result.stdout_output == "raw|alpha beta|payload|work");
-    CHECK(result.stderr_output.empty());
-    CHECK_FALSE(result.output_streamed_live);
+    check((result.success()));
+    check((result.stdout_output == "raw|alpha beta|payload|work"));
+    check((result.stderr_output.empty()));
+    check((!(result.output_streamed_live)));
 
     std::filesystem::remove_all(dir);
 }
 
-TEST_CASE("process executor pumps large stdin and stdout without deadlock", "[process][pipes]") {
+spec("process executor runs program args env stdin and working directory without shell parsing") {
+    it("complete case") { test_process_executor_runs_program_args_env_stdin_and_working_directory_without_shell_parsing_15(); }
+}
+
+[[maybe_unused]] static void test_process_executor_pumps_large_stdin_and_stdout_without_deadlock_16() {
     const auto dir = createTempDir();
     const auto script = createDuplexPipeScript(dir);
     const std::string input(kDuplexPayloadSize, 'I');
 
     const auto result = Praktor::Shell::ProcessExecutor::execute(duplexProcessSpec(script, input));
 
-    REQUIRE(result.success());
-    CHECK(result.stdout_output.size() >= kDuplexPayloadSize);
-    CHECK(result.stdout_output.find("|INPUT=" + std::to_string(kDuplexPayloadSize)) !=
-          std::string::npos);
+    check((result.success()));
+    check((result.stdout_output.size() >= kDuplexPayloadSize));
+    check((result.stdout_output.find("|INPUT=" + std::to_string(kDuplexPayloadSize)) !=
+          std::string::npos));
     std::filesystem::remove_all(dir);
 }
 
-TEST_CASE("managed process exposes lifecycle and supports bounded waits", "[process][managed]") {
+spec("process executor pumps large stdin and stdout without deadlock") {
+    it("complete case") { test_process_executor_pumps_large_stdin_and_stdout_without_deadlock_16(); }
+}
+
+[[maybe_unused]] static void test_managed_process_exposes_lifecycle_and_supports_bounded_waits_17() {
     const auto dir = createTempDir();
     const auto pid_file = dir / "managed.pid";
     const auto finished_file = dir / "finished.txt";
@@ -695,24 +764,28 @@ TEST_CASE("managed process exposes lifecycle and supports bounded waits", "[proc
     auto process = Praktor::Shell::ShellExecutor::start(
         commandForScript(script), "", "", 10000, {}, false);
 
-    REQUIRE(process.valid());
-    REQUIRE(waitUntil([&]() { return process.pid() > 0; }, 5000));
-    CHECK(process.isRunning());
-    CHECK_FALSE(process.waitFor(std::chrono::milliseconds(25)));
-    CHECK_FALSE(process.result().has_value());
+    check((process.valid()));
+    check((waitUntil([&]() { return process.state() == Praktor::Shell::ProcessState::Running; }, 5000)));
+    check((process.isRunning()));
+    check((!(process.waitFor(std::chrono::milliseconds(25)))));
+    check((!(process.result().has_value())));
 
-    REQUIRE(process.cancel());
+    check((process.cancel()));
     const auto result = process.wait();
-    CHECK(result.state == Praktor::Shell::ProcessState::Cancelled);
-    CHECK_FALSE(result.success());
-    CHECK_FALSE(process.cancel());
-    CHECK(process.result().has_value());
-    CHECK_FALSE(std::filesystem::exists(finished_file));
+    check((result.state == Praktor::Shell::ProcessState::Cancelled));
+    check((!(result.success())));
+    check((!(process.cancel())));
+    check((process.result().has_value()));
+    check((!(std::filesystem::exists(finished_file))));
 
     std::filesystem::remove_all(dir);
 }
 
-TEST_CASE("managed process destructor terminates its process tree", "[process][managed]") {
+spec("managed process exposes lifecycle and supports bounded waits") {
+    it("complete case") { test_managed_process_exposes_lifecycle_and_supports_bounded_waits_17(); }
+}
+
+[[maybe_unused]] static void test_managed_process_destructor_terminates_its_process_tree_18() {
     const auto dir = createTempDir();
     const auto pid_file = dir / "managed_destructor.pid";
     const auto finished_file = dir / "finished.txt";
@@ -722,17 +795,22 @@ TEST_CASE("managed process destructor terminates its process tree", "[process][m
     {
         auto process = Praktor::Shell::ShellExecutor::start(
             commandForScript(script), "", "", 10000, {}, false);
-        REQUIRE(waitUntil([&]() { return process.pid() > 0; }, 5000));
-        managed_pid = process.pid();
-        REQUIRE(isProcessAlive(managed_pid));
+        check((waitUntil([&]() { return process.state() == Praktor::Shell::ProcessState::Running; }, 5000)));
+        check((waitUntil([&]() { return std::filesystem::exists(pid_file) && !readTextFile(pid_file).empty(); }, 5000)));
+        managed_pid = readPidFile(pid_file);
+        check((isProcessAlive(managed_pid)));
     }
 
-    CHECK(waitUntil([&]() { return !isProcessAlive(managed_pid); }, 5000));
-    CHECK_FALSE(std::filesystem::exists(finished_file));
+    check((waitUntil([&]() { return !isProcessAlive(managed_pid); }, 5000)));
+    check((!(std::filesystem::exists(finished_file))));
     std::filesystem::remove_all(dir);
 }
 
-TEST_CASE("managed process reports spawn failures distinctly", "[process][managed]") {
+spec("managed process destructor terminates its process tree") {
+    it("complete case") { test_managed_process_destructor_terminates_its_process_tree_18(); }
+}
+
+[[maybe_unused]] static void test_managed_process_reports_spawn_failures_distinctly_19() {
     Praktor::Shell::ProcessSpec spec;
     spec.program = "definitely_missing_managed_process_97531";
     spec.stream_output = false;
@@ -740,13 +818,17 @@ TEST_CASE("managed process reports spawn failures distinctly", "[process][manage
     auto process = Praktor::Shell::ProcessExecutor::start(spec);
     const auto result = process.wait();
 
-    CHECK(result.state == Praktor::Shell::ProcessState::SpawnFailed);
-    CHECK(result.exit_code == -1);
-    CHECK_FALSE(result.success());
-    CHECK_FALSE(result.stderr_output.empty());
+    check((result.state == Praktor::Shell::ProcessState::SpawnFailed));
+    check((result.exit_code == -1));
+    check((!(result.success())));
+    check((!(result.stderr_output.empty())));
 }
 
-TEST_CASE("managed process enforces captured output limits", "[process][managed][limits]") {
+spec("managed process reports spawn failures distinctly") {
+    it("complete case") { test_managed_process_reports_spawn_failures_distinctly_19(); }
+}
+
+[[maybe_unused]] static void test_managed_process_enforces_captured_output_limits_20() {
     const auto dir = createTempDir();
     const auto script = createDuplexPipeScript(dir);
     auto spec = duplexProcessSpec(script, "");
@@ -755,10 +837,59 @@ TEST_CASE("managed process enforces captured output limits", "[process][managed]
 
     const auto result = Praktor::Shell::ProcessExecutor::execute(spec);
 
-    CHECK(result.state == Praktor::Shell::ProcessState::OutputLimitExceeded);
-    CHECK(result.exit_code == -1);
-    CHECK(result.stdout_output.size() + result.stderr_output.size() <=
-          kOutputLimit + std::string("\nCaptured process output exceeded the configured limit").size());
-    CHECK_FALSE(result.success());
+    check((result.state == Praktor::Shell::ProcessState::OutputLimitExceeded));
+    check((result.exit_code == -1));
+    check((result.stdout_output.size() + result.stderr_output.size() <=
+          kOutputLimit + std::string("\nCaptured process output exceeded the configured limit").size()));
+    check((!(result.success())));
     std::filesystem::remove_all(dir);
+}
+
+spec("managed process enforces captured output limits") {
+    it("complete case") { test_managed_process_enforces_captured_output_limits_20(); }
+}
+
+spec("Salts Process facade failure and ownership boundaries") {
+    it("cancellation during admission is safe with concurrent observers") {
+        auto process = Praktor::Shell::ShellExecutor::start(sleepCommand(), "", "", 10000, {}, false);
+        std::atomic<bool> stop{false};
+        std::thread observer([&] {
+            while (!stop.load()) {
+                (void)process.state();
+                (void)process.result();
+                (void)process.waitFor(std::chrono::milliseconds(0));
+                std::this_thread::yield();
+            }
+        });
+        const bool accepted = process.cancel();
+        const auto result = process.wait();
+        stop.store(true);
+        observer.join();
+        check(accepted);
+        check(result.state == Praktor::Shell::ProcessState::Cancelled);
+        check_false(process.cancel());
+    }
+
+    it("a child may exit successfully without consuming large stdin") {
+        const auto result = Praktor::Shell::ShellExecutor::execute(
+#ifdef _WIN32
+            "echo input-not-required",
+#else
+            "printf 'input-not-required'",
+#endif
+            std::string(kDuplexPayloadSize, 'I'), "", 10000, {}, false);
+        info("state=%s stderr=%s", Praktor::Shell::processStateName(result.state), result.stderr_output.c_str());
+        check(result.success());
+        check(result.stdout_output.find("input-not-required") != std::string::npos);
+    }
+
+    it("a throwing stream callback fails closed after native teardown") {
+        StreamCallbackGuard guard;
+        Praktor::Shell::ShellExecutor::setStreamCallback([](const std::string&) {
+            throw std::runtime_error("consumer rejected output");
+        });
+        const auto result = Praktor::Shell::ShellExecutor::execute(stdoutStderrCommand());
+        check(result.state == Praktor::Shell::ProcessState::WaitFailed);
+        check_false(result.success());
+    }
 }

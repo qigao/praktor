@@ -7,6 +7,8 @@ name: C11 Process complete-source TSan qualification
       - '.github/workflows/c11-source-tsan.yml'
       - 'actions/CMakeLists.txt'
       - 'actions/c11/**'
+      - 'shared/**'
+      - 'CMakeLists.txt'
       - 'praktor/src/dag/workflow_executor.cpp'
       - 'praktor/src/executors/declarative_tree_executor.cpp'
       - 'praktor/src/workflow_runner.cpp'
@@ -225,8 +227,14 @@ jobs:
             "-DCMAKE_EXE_LINKER_FLAGS=-fsanitize=thread" \
             "-DCMAKE_SHARED_LINKER_FLAGS=-fsanitize=thread"
           cmake --build build/p1-praktor-tsan \
-            --target core_only_workflow_test.praktor_lib actions_c11_tree_executor_session_test actions_c11_session_yaml_differential_test \
+            --target shell_executor_test core_only_workflow_test.praktor_lib actions_c11_tree_executor_session_test actions_c11_session_yaml_differential_test \
             --parallel 2
+
+      - name: Reject an alternative Praktor native process backend
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 cmake/ci/audit-process-adapter.py build/p1-praktor-tsan/shared/shell/libpraktor_shell.a
 
       - name: Require fully instrumented Salts dynamic linkage
         shell: bash
@@ -252,7 +260,7 @@ jobs:
           export LD_LIBRARY_PATH="$SALTS_SOURCE_TSAN_ROOT/lib:$SALTS_UTILS_SOURCE_TSAN_ROOT/lib:$CHTTP_ROOT/lib:${LD_LIBRARY_PATH:-}"
           ctest --test-dir build/p1-praktor-tsan \
             --no-tests=error --output-on-failure --parallel 1 --timeout 90 \
-            -R '^(core_only_workflow_test\.praktor_lib|actions_c11_tree_executor_session_test|actions_c11_session_yaml_differential_test)$'
+            -R '^(shell_executor_test|core_only_workflow_test\.praktor_lib|actions_c11_tree_executor_session_test|actions_c11_session_yaml_differential_test)$'
 
       - uses: actions/upload-artifact@v4
         if: always()

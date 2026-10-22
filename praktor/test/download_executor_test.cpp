@@ -1,7 +1,7 @@
+#include "praktor_test.hpp"
 #include "executors/download_executor.hpp"
 #include "executors/download_executor_internal.hpp"
 
-#include <catch2/catch_all.hpp>
 
 #include <chrono>
 #include <filesystem>
@@ -22,7 +22,7 @@ Task makeDownloadTask(DownloadParams params) {
 
 }  // namespace
 
-TEST_CASE("download executor rejects non-HTTPS URLs before I/O") {
+[[maybe_unused]] static void test_download_executor_rejects_non_https_urls_before_i_o_1() {
     DownloadParams params;
     params.url = "http://example.test/package.zip";
     params.path = "package.zip";
@@ -31,11 +31,15 @@ TEST_CASE("download executor rejects non-HTTPS URLs before I/O") {
     Praktor::Execution::DownloadExecutor executor;
     const auto result = executor.execute(makeDownloadTask(std::move(params)), context);
 
-    CHECK_FALSE(result.success);
-    CHECK(result.error_message.find("absolute HTTPS URL") != std::string::npos);
+    check((!(result.success)));
+    check((result.error_message.find("absolute HTTPS URL") != std::string::npos));
 }
 
-TEST_CASE("download executor honors overwrite guard before network I/O") {
+spec("download executor rejects non-HTTPS URLs before I/O") {
+    it("complete case") { test_download_executor_rejects_non_https_urls_before_i_o_1(); }
+}
+
+[[maybe_unused]] static void test_download_executor_honors_overwrite_guard_before_network_i_o_2() {
     const auto unique = std::to_string(
         std::chrono::steady_clock::now().time_since_epoch().count());
     const auto destination = std::filesystem::temp_directory_path() /
@@ -56,11 +60,15 @@ TEST_CASE("download executor honors overwrite guard before network I/O") {
     std::error_code ec;
     std::filesystem::remove(destination, ec);
 
-    CHECK_FALSE(result.success);
-    CHECK(result.error_message.find("overwrite is false") != std::string::npos);
+    check((!(result.success)));
+    check((result.error_message.find("overwrite is false") != std::string::npos));
 }
 
-TEST_CASE("download checksum accepts complete files and SHA-256 block boundaries") {
+spec("download executor honors overwrite guard before network I/O") {
+    it("complete case") { test_download_executor_honors_overwrite_guard_before_network_i_o_2(); }
+}
+
+[[maybe_unused]] static void test_download_checksum_accepts_complete_files_and_sha_256_block_boundaries_3() {
     struct Vector {
         std::string bytes;
         const char* digest;
@@ -82,25 +90,33 @@ TEST_CASE("download checksum accepts complete files and SHA-256 block boundaries
     } file;
 
     for (const auto& vector : vectors) {
-        INFO("file bytes: " << vector.bytes.size());
+        info("%s", praktor_test::message([&](std::ostream& out) { out << "file bytes: " << vector.bytes.size(); }).c_str());
         {
             std::ofstream output(file.path, std::ios::binary | std::ios::trunc);
-            REQUIRE(output.is_open());
+            check((output.is_open()));
             output.write(vector.bytes.data(), static_cast<std::streamsize>(vector.bytes.size()));
-            REQUIRE(output.good());
+            check((output.good()));
         }
         std::string error;
         const auto digest = Praktor::Execution::Internal::sha256File(file.path, &error);
-        CHECK(error.empty());
-        CHECK(digest == vector.digest);
+        check((error.empty()));
+        check((digest == vector.digest));
     }
 }
 
-TEST_CASE("download checksum reports a missing file instead of an empty-file digest") {
+spec("download checksum accepts complete files and SHA-256 block boundaries") {
+    it("complete case") { test_download_checksum_accepts_complete_files_and_sha_256_block_boundaries_3(); }
+}
+
+[[maybe_unused]] static void test_download_checksum_reports_a_missing_file_instead_of_an_empty_file_digest_4() {
     const auto path = std::filesystem::temp_directory_path() /
         ("praktor-missing-checksum-" + std::to_string(
             std::chrono::steady_clock::now().time_since_epoch().count()));
     std::string error;
-    CHECK(Praktor::Execution::Internal::sha256File(path, &error).empty());
-    CHECK(error.find("failed to open") != std::string::npos);
+    check((Praktor::Execution::Internal::sha256File(path, &error).empty()));
+    check((error.find("failed to open") != std::string::npos));
+}
+
+spec("download checksum reports a missing file instead of an empty-file digest") {
+    it("complete case") { test_download_checksum_reports_a_missing_file_instead_of_an_empty_file_digest_4(); }
 }

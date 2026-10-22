@@ -202,6 +202,13 @@ jobs:
           cmake --build --preset "install-%CMAKE_PRESET%" --parallel 2
           if errorlevel 1 exit /b 1
 
+      - name: Audit that Shell uses the C11 Process owner
+        if: matrix.platform == 'linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 cmake/ci/audit-process-adapter.py build/ci-sdk/shared/shell/libpraktor_shell.a
+
       # Independent C-only project, with no C++ compiler or actions library.
       - name: C11 BehaviorTree adapter standalone C-only link
         if: matrix.platform == 'linux' && matrix.sdk == 'behavior-tree'

@@ -1,8 +1,8 @@
+#include "praktor_test.hpp"
 #include "script/script_engine.hpp"
 #include "dag/workflow_context.hpp"
 #include "turbo_script.h"
 
-#include <catch2/catch_all.hpp>
 #include <atomic>
 #include <barrier>
 #include <charconv>
@@ -178,7 +178,7 @@ server.serve_forever()
         const auto ready = ready_path.wstring();
         std::wstring command = L"\"" + exe + L"\" \"" + script + L"\" \"" + ready + L"\"";
 
-        REQUIRE(::CreateProcessW(
+        check((::CreateProcessW(
             nullptr,
             command.data(),
             nullptr,
@@ -188,7 +188,7 @@ server.serve_forever()
             nullptr,
             nullptr,
             &startup_info,
-            &process_info));
+            &process_info)));
 
         process_handle = process_info.hProcess;
         thread_handle = process_info.hThread;
@@ -201,12 +201,12 @@ server.serve_forever()
         char *argv[] = {exe.data(), script.data(), ready.data(), nullptr};
         const int spawn_error = ::posix_spawnp(&child_pid, exe.c_str(), nullptr,
                                                nullptr, argv, environ);
-        REQUIRE(spawn_error == 0);
+        check((spawn_error == 0));
 #endif
 
         // Bound fixture startup independently of HTTP request assertions.
         // This bounds fixture readiness; HTTP behavior is still asserted below.
-        INFO("HTTP fixture interpreter: " << pythonExecutable());
+        info("%s", praktor_test::message([&](std::ostream& out) { out << "HTTP fixture interpreter: " << pythonExecutable(); }).c_str());
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
         while (std::chrono::steady_clock::now() < deadline) {
             if (std::filesystem::exists(ready_path)) {
@@ -224,20 +224,20 @@ server.serve_forever()
             }
 #ifdef _WIN32
             DWORD exit_code = STILL_ACTIVE;
-            REQUIRE(::GetExitCodeProcess(process_handle, &exit_code));
-            INFO("HTTP fixture process exit code: " << exit_code);
-            REQUIRE(exit_code == STILL_ACTIVE);
+            check((::GetExitCodeProcess(process_handle, &exit_code)));
+            info("%s", praktor_test::message([&](std::ostream& out) { out << "HTTP fixture process exit code: " << exit_code; }).c_str());
+            check((exit_code == STILL_ACTIVE));
 #else
             int status = 0;
             const auto exited = ::waitpid(child_pid, &status, WNOHANG);
             if (exited == child_pid) child_pid = -1;
-            INFO("HTTP fixture waitpid result: " << exited << ", status: " << status);
-            REQUIRE(exited == 0);
+            info("%s", praktor_test::message([&](std::ostream& out) { out << "HTTP fixture waitpid result: " << exited << ", status: " << status; }).c_str());
+            check((exited == 0));
 #endif
             std::this_thread::sleep_for(std::chrono::milliseconds(50));
         }
 
-        REQUIRE(port > 0);
+        check((port > 0));
     }
 
     void stop()
@@ -340,22 +340,21 @@ turbo_script_status_t hostAbiDouble(
 
 } // namespace
 
-TEST_CASE("TurboScript public Host ABI supports JIT callbacks and interruption",
-          "[script][host-abi]") {
+[[maybe_unused]] static void test_turboscript_public_host_abi_supports_jit_callbacks_and_interruption_1() {
     turbo_script_ctx_t* ctx = turbo_script_init(TURBO_SCRIPT_INIT_DEFAULT);
-    REQUIRE(ctx != nullptr);
+    check((ctx != nullptr));
 
     turbo_script_result_t* result = nullptr;
-    REQUIRE(turbo_script_result_create(ctx, &result) == TURBO_SCRIPT_STATUS_OK);
-    REQUIRE(result != nullptr);
+    check((turbo_script_result_create(ctx, &result) == TURBO_SCRIPT_STATUS_OK));
+    check((result != nullptr));
 
     turbo_script_host_function_descriptor_t descriptor{};
     descriptor.struct_size = sizeof(descriptor);
     descriptor.name = {"host_double", sizeof("host_double") - 1};
     descriptor.min_arity = 1;
     descriptor.max_arity = 1;
-    REQUIRE(turbo_script_context_register_host_function(
-                ctx, &descriptor, hostAbiDouble, nullptr, result) == TURBO_SCRIPT_STATUS_OK);
+    check((turbo_script_context_register_host_function(
+                ctx, &descriptor, hostAbiDouble, nullptr, result) == TURBO_SCRIPT_STATUS_OK));
 
     constexpr char kSource[] =
         "func host_entry(){return host_double(21);};"
@@ -368,52 +367,52 @@ TEST_CASE("TurboScript public Host ABI supports JIT callbacks and interruption",
                                   sizeof("praktor-host-abi-contract") - 1};
 
     turbo_script_module_t* module = nullptr;
-    REQUIRE(turbo_script_module_compile(
+    check((turbo_script_module_compile(
                 ctx,
                 {kSource, sizeof(kSource) - 1},
                 &module_options,
                 result,
-                &module) == TURBO_SCRIPT_STATUS_OK);
-    REQUIRE(module != nullptr);
+                &module) == TURBO_SCRIPT_STATUS_OK));
+    check((module != nullptr));
 
     turbo_script_instance_options_t instance_options{};
     turbo_script_instance_options_init(&instance_options);
     instance_options.mode = TURBO_SCRIPT_EXEC_JIT;
 
     turbo_script_instance_t* instance = nullptr;
-    REQUIRE(turbo_script_instance_create(
-                module, &instance_options, result, &instance) == TURBO_SCRIPT_STATUS_OK);
-    REQUIRE(instance != nullptr);
+    check((turbo_script_instance_create(
+                module, &instance_options, result, &instance) == TURBO_SCRIPT_STATUS_OK));
+    check((instance != nullptr));
 
     turbo_script_export_handle_t host_handle = 0;
-    REQUIRE(turbo_script_instance_resolve_export(
+    check((turbo_script_instance_resolve_export(
                 instance,
                 {"host_entry", sizeof("host_entry") - 1},
                 result,
-                &host_handle) == TURBO_SCRIPT_STATUS_OK);
+                &host_handle) == TURBO_SCRIPT_STATUS_OK));
 
     turbo_script_call_options_t call_options{};
     turbo_script_call_options_init(&call_options);
-    REQUIRE(turbo_script_instance_call(
+    check((turbo_script_instance_call(
                 instance, host_handle, nullptr, 0, &call_options, result) ==
-            TURBO_SCRIPT_STATUS_OK);
+            TURBO_SCRIPT_STATUS_OK));
 
     turbo_script_value_view_t value{};
-    REQUIRE(turbo_script_result_get_value(result, &value) == TURBO_SCRIPT_STATUS_OK);
-    REQUIRE((value.kind == TURBO_SCRIPT_VALUE_INT64 ||
-             value.kind == TURBO_SCRIPT_VALUE_NUMBER));
+    check((turbo_script_result_get_value(result, &value) == TURBO_SCRIPT_STATUS_OK));
+    check(((value.kind == TURBO_SCRIPT_VALUE_INT64 ||
+             value.kind == TURBO_SCRIPT_VALUE_NUMBER)));
     if (value.kind == TURBO_SCRIPT_VALUE_INT64) {
-        CHECK(value.as.integer == 42);
+        check((value.as.integer == 42));
     } else {
-        CHECK(value.as.number == Catch::Approx(42.0));
+        check_within(value.as.number, 42.0, 100.0 * std::numeric_limits<float>::epsilon() * std::abs(42.0));
     }
 
     turbo_script_export_handle_t loop_handle = 0;
-    REQUIRE(turbo_script_instance_resolve_export(
+    check((turbo_script_instance_resolve_export(
                 instance,
                 {"loop", sizeof("loop") - 1},
                 result,
-                &loop_handle) == TURBO_SCRIPT_STATUS_OK);
+                &loop_handle) == TURBO_SCRIPT_STATUS_OK));
 
     HostAbiInterruptProbe probe;
     turbo_script_call_options_init(&call_options);
@@ -425,48 +424,57 @@ TEST_CASE("TurboScript public Host ABI supports JIT callbacks and interruption",
     turbo_script_value_view_t loop_count{};
     loop_count.kind = TURBO_SCRIPT_VALUE_INT64;
     loop_count.as.integer = 100000;
-    REQUIRE(turbo_script_instance_call(
+    check((turbo_script_instance_call(
                 instance, loop_handle, &loop_count, 1, &call_options, result) ==
-            TURBO_SCRIPT_STATUS_INTERRUPTED);
-    CHECK(probe.checks.load(std::memory_order_relaxed) >= probe.request_after);
+            TURBO_SCRIPT_STATUS_INTERRUPTED));
+    check((probe.checks.load(std::memory_order_relaxed) >= probe.request_after));
 
     turbo_script_error_info_t error{};
     error.struct_size = sizeof(error);
-    REQUIRE(turbo_script_result_get_error(result, &error) == TURBO_SCRIPT_STATUS_OK);
-    CHECK(error.status == TURBO_SCRIPT_STATUS_INTERRUPTED);
-    CHECK(error.phase == TURBO_SCRIPT_ERROR_PHASE_INTERRUPT);
+    check((turbo_script_result_get_error(result, &error) == TURBO_SCRIPT_STATUS_OK));
+    check((error.status == TURBO_SCRIPT_STATUS_INTERRUPTED));
+    check((error.phase == TURBO_SCRIPT_ERROR_PHASE_INTERRUPT));
 
-    REQUIRE(turbo_script_instance_destroy(instance, result) == TURBO_SCRIPT_STATUS_OK);
-    REQUIRE(turbo_script_module_destroy(module, result) == TURBO_SCRIPT_STATUS_OK);
+    check((turbo_script_instance_destroy(instance, result) == TURBO_SCRIPT_STATUS_OK));
+    check((turbo_script_module_destroy(module, result) == TURBO_SCRIPT_STATUS_OK));
     turbo_script_result_destroy(result);
     turbo_script_free(ctx);
 }
 
-TEST_CASE("Script engine: basics", "[script]") {
+spec("TurboScript public Host ABI supports JIT callbacks and interruption") {
+    it("complete case") { test_turboscript_public_host_abi_supports_jit_callbacks_and_interruption_1(); }
+}
+
+[[maybe_unused]] static void test_script_engine_basics_2(int section_index) {
     WorkflowContext context;
 
-    SECTION("variable assignment and context read") {
+    if (section_index == 0) {
         // TurboScript uses '=' for assignment.
         // We use ctx_set to write to workflow context.
         auto r = Praktor::Script::execute("x = 10; ctx_set(\"x_val\", x);", context);
         if (!r.success) {
-            INFO("Error: " << r.error_message);
+            info("%s", praktor_test::message([&](std::ostream& out) { out << "Error: " << r.error_message; }).c_str());
         }
-        REQUIRE(r.success);
-        CHECK(context.getValue<double>("x_val") == Catch::Approx(10.0));
+        check((r.success));
+        check_within(context.getValue<double>("x_val"), 10.0, 100.0 * std::numeric_limits<float>::epsilon() * std::abs(10.0));
     }
 
-    SECTION("arithmetic") {
+    if (section_index == 1) {
         auto r = Praktor::Script::execute("ctx_set(\"res\", 2 + 3 * 4);", context);
         if (!r.success) {
-            INFO("Error: " << r.error_message);
+            info("%s", praktor_test::message([&](std::ostream& out) { out << "Error: " << r.error_message; }).c_str());
         }
-        REQUIRE(r.success);
-        CHECK(context.getValue<double>("res") == Catch::Approx(14.0));
+        check((r.success));
+        check_within(context.getValue<double>("res"), 14.0, 100.0 * std::numeric_limits<float>::epsilon() * std::abs(14.0));
     }
 }
 
-TEST_CASE("Script engine: concurrent executions stay stable", "[script][concurrency]") {
+spec("Script engine: basics") {
+    it("variable assignment and context read") { test_script_engine_basics_2(0); }
+    it("arithmetic") { test_script_engine_basics_2(1); }
+}
+
+[[maybe_unused]] static void test_script_engine_concurrent_executions_stay_stable_3() {
     constexpr int kThreadCount = 8;
     constexpr int kIterationsPerThread = 16;
 
@@ -501,15 +509,18 @@ TEST_CASE("Script engine: concurrent executions stay stable", "[script][concurre
         worker.join();
     }
 
-    REQUIRE(failures.load(std::memory_order_relaxed) == 0);
+    check((failures.load(std::memory_order_relaxed) == 0));
 }
 
-TEST_CASE("Script engine: context execution control",
-          "[script][execution-control]") {
+spec("Script engine: concurrent executions stay stable") {
+    it("complete case") { test_script_engine_concurrent_executions_stay_stable_3(); }
+}
+
+[[maybe_unused]] static void test_script_engine_context_execution_control_4(int section_index) {
     using Control = Praktor::Execution::ExecutionControl;
     using namespace std::chrono_literals;
 
-    SECTION("pre-cancel prevents script side effects while preserving legacy run path") {
+    if (section_index == 0) {
         WorkflowContext context;
         auto control = std::make_shared<Control>();
         control->requestCancel();
@@ -520,12 +531,12 @@ TEST_CASE("Script engine: context execution control",
             ctx.set("should_not_run", 1);
         )script", context);
 
-        CHECK_FALSE(result.success);
-        CHECK(result.error_message.find("cancel") != std::string::npos);
-        CHECK_FALSE(context.hasKey("should_not_run"));
+        check((!(result.success)));
+        check((result.error_message.find("cancel") != std::string::npos));
+        check((!(context.hasKey("should_not_run"))));
     }
 
-    SECTION("expired deadline is reported distinctly") {
+    if (section_index == 1) {
         WorkflowContext context;
         auto control = std::make_shared<Control>(Control::Clock::now() - 1ms);
         context.setExecutionControl(control);
@@ -533,12 +544,12 @@ TEST_CASE("Script engine: context execution control",
         const auto result =
             Praktor::Script::execute("ctx.set(\"should_not_run\", 1);", context);
 
-        CHECK_FALSE(result.success);
-        CHECK(result.error_message.find("timed out") != std::string::npos);
-        CHECK_FALSE(context.hasKey("should_not_run"));
+        check((!(result.success)));
+        check((result.error_message.find("timed out") != std::string::npos));
+        check((!(context.hasKey("should_not_run"))));
     }
 
-    SECTION("running JIT loop observes cooperative cancellation") {
+    if (section_index == 2) {
         WorkflowContext context;
         auto control = std::make_shared<Control>();
         context.setExecutionControl(control);
@@ -560,15 +571,20 @@ TEST_CASE("Script engine: context execution control",
         const auto elapsed = std::chrono::steady_clock::now() - started;
         canceller.join();
 
-        CHECK_FALSE(result.success);
-        CHECK(result.error_message.find("cancel") != std::string::npos);
-        CHECK_FALSE(context.hasKey("should_not_run"));
-        CHECK(elapsed < 5s);
+        check((!(result.success)));
+        check((result.error_message.find("cancel") != std::string::npos));
+        check((!(context.hasKey("should_not_run"))));
+        check((elapsed < 5s));
     }
 }
 
-TEST_CASE("Script engine: execution control cancels running shell process",
-          "[script][execution-control][shell]") {
+spec("Script engine: context execution control") {
+    it("pre-cancel prevents script side effects while preserving legacy run path") { test_script_engine_context_execution_control_4(0); }
+    it("expired deadline is reported distinctly") { test_script_engine_context_execution_control_4(1); }
+    it("running JIT loop observes cooperative cancellation") { test_script_engine_context_execution_control_4(2); }
+}
+
+[[maybe_unused]] static void test_script_engine_execution_control_cancels_running_shell_process_5() {
     using Control = Praktor::Execution::ExecutionControl;
     using namespace std::chrono_literals;
 
@@ -594,15 +610,19 @@ TEST_CASE("Script engine: execution control cancels running shell process",
     const auto elapsed = std::chrono::steady_clock::now() - started;
     canceller.join();
 
-    CHECK_FALSE(result.success);
-    CHECK(result.error_message.find("cancel") != std::string::npos);
-    CHECK(elapsed < 5s);
+    check((!(result.success)));
+    check((result.error_message.find("cancel") != std::string::npos));
+    check((elapsed < 5s));
 }
 
-TEST_CASE("Script engine: control flow", "[script]") {
+spec("Script engine: execution control cancels running shell process") {
+    it("complete case") { test_script_engine_execution_control_cancels_running_shell_process_5(); }
+}
+
+[[maybe_unused]] static void test_script_engine_control_flow_6(int section_index) {
     WorkflowContext context;
 
-    SECTION("while loop") {
+    if (section_index == 0) {
         auto r = Praktor::Script::execute(R"(
             i = 0;
             sum = 0;
@@ -612,11 +632,11 @@ TEST_CASE("Script engine: control flow", "[script]") {
             }
             ctx_set("sum", sum);
         )", context);
-        REQUIRE(r.success);
-        CHECK(context.getValue<double>("sum") == Catch::Approx(10.0));
+        check((r.success));
+        check_within(context.getValue<double>("sum"), 10.0, 100.0 * std::numeric_limits<float>::epsilon() * std::abs(10.0));
     }
 
-    SECTION("if/else") {
+    if (section_index == 1) {
         auto r = Praktor::Script::execute(R"(
             x = 10;
             if (x > 5) {
@@ -625,47 +645,52 @@ TEST_CASE("Script engine: control flow", "[script]") {
                 ctx_set("branch", "else");
             }
         )", context);
-        REQUIRE(r.success);
-        CHECK(context.getValue<std::string>("branch") == "then");
+        check((r.success));
+        check((context.getValue<std::string>("branch") == "then"));
     }
 }
 
-TEST_CASE("Script engine: context integration", "[script]") {
+spec("Script engine: control flow") {
+    it("while loop") { test_script_engine_control_flow_6(0); }
+    it("if/else") { test_script_engine_control_flow_6(1); }
+}
+
+[[maybe_unused]] static void test_script_engine_context_integration_7(int section_index) {
     WorkflowContext context;
     context.setValue("input", 42.0);
     context.setValue("BUILD_TARGET", "all");
     context.setValue("variables.BUILD_TARGET", "all");
 
-    SECTION("ctx_get reads from context") {
+    if (section_index == 0) {
         auto r = Praktor::Script::execute(R"(
             val = ctx_get("input");
             ctx_set("output", val * 2);
         )", context);
-        REQUIRE(r.success);
-        CHECK(context.getValue<double>("output") == Catch::Approx(84.0));
+        check((r.success));
+        check_within(context.getValue<double>("output"), 84.0, 100.0 * std::numeric_limits<float>::epsilon() * std::abs(84.0));
     }
 
-    SECTION("dot syntax is normalized before execution") {
+    if (section_index == 1) {
         auto r = Praktor::Script::execute(R"(
             val = ctx.get("input");
             ctx.set("copied", val);
             log.info("copied input");
         )", context);
-        REQUIRE(r.success);
-        CHECK(context.getValue<double>("copied") == Catch::Approx(42.0));
+        check((r.success));
+        check_within(context.getValue<double>("copied"), 42.0, 100.0 * std::numeric_limits<float>::epsilon() * std::abs(42.0));
     }
 
-    SECTION("ctx.get returns stable strings") {
+    if (section_index == 2) {
         auto r = Praktor::Script::execute(R"(
             target = ctx.get("BUILD_TARGET");
             ctx.set("copied_target", target);
             log.info("Build of target '" + target + "' completed successfully.");
         )", context);
-        REQUIRE(r.success);
-        CHECK(context.getValue<std::string>("copied_target") == "all");
+        check((r.success));
+        check((context.getValue<std::string>("copied_target") == "all"));
     }
 
-    SECTION("native strings compare by content in conditions") {
+    if (section_index == 3) {
         context.setValue("EMPTY_TARGET", "");
 
         auto r = Praktor::Script::execute(R"(
@@ -682,43 +707,43 @@ TEST_CASE("Script engine: context integration", "[script]") {
             }
         )", context);
 
-        REQUIRE(r.success);
-        CHECK(context.getValue<std::string>("non_empty_branch") == "non-empty");
-        CHECK(context.getValue<std::string>("empty_branch") == "empty");
+        check((r.success));
+        check((context.getValue<std::string>("non_empty_branch") == "non-empty"));
+        check((context.getValue<std::string>("empty_branch") == "empty"));
     }
 
-    SECTION("ctx.set stores structured values") {
+    if (section_index == 4) {
         auto r = Praktor::Script::execute(R"(
             ctx.set("payload", "{\"name\":\"demo\",\"code\":7,\"items\":[\"one\",\"two\"]}");
         )", context);
-        REQUIRE(r.success);
+        check((r.success));
         auto payload = context.getValueByPath("payload");
-        CHECK(payload["name"].as<std::string>() == "demo");
-        CHECK(payload["code"].as<int>() == 7);
-        CHECK(payload["items"][0].as<std::string>() == "one");
-        CHECK(payload["items"][1].as<std::string>() == "two");
+        check((payload["name"].as<std::string>() == "demo"));
+        check((payload["code"].as<int>() == 7));
+        check((payload["items"][0].as<std::string>() == "one"));
+        check((payload["items"][1].as<std::string>() == "two"));
     }
 
-    SECTION("ctx.set rejects reserved runtime paths") {
+    if (section_index == 5) {
         context.setTaskStatus("build", "running");
         context.setValue("workflow_status", "running");
 
         auto task_status = Praktor::Script::execute(R"(
             ctx.set("tasks.build.status", "success");
         )", context);
-        CHECK_FALSE(task_status.success);
-        CHECK(task_status.error_message.find("reserved runtime path") != std::string::npos);
-        CHECK(context.getTaskStatus("build") == "running");
+        check((!(task_status.success)));
+        check((task_status.error_message.find("reserved runtime path") != std::string::npos));
+        check((context.getTaskStatus("build") == "running"));
 
         auto workflow_status = Praktor::Script::execute(R"(
             ctx.set("workflow_status", "success");
         )", context);
-        CHECK_FALSE(workflow_status.success);
-        CHECK(workflow_status.error_message.find("reserved runtime path") != std::string::npos);
-        CHECK(context.getValue<std::string>("workflow_status") == "running");
+        check((!(workflow_status.success)));
+        check((workflow_status.error_message.find("reserved runtime path") != std::string::npos));
+        check((context.getValue<std::string>("workflow_status") == "running"));
     }
 
-    SECTION("ctx.output stores structured task outputs") {
+    if (section_index == 6) {
         context.pushTaskScope("emit");
         auto r = Praktor::Script::execute(R"(
             ctx.output("payload", "{\"status\":\"ok\",\"value\":3}");
@@ -726,15 +751,15 @@ TEST_CASE("Script engine: context integration", "[script]") {
             ctx.output("count", 7);
         )", context);
         context.popTaskScope();
-        REQUIRE(r.success);
+        check((r.success));
         auto payload = context.getValueByPath("tasks.emit.outputs.payload");
-        CHECK(payload["status"].as<std::string>() == "ok");
-        CHECK(payload["value"].as<int>() == 3);
-        CHECK(context.getValueByPath("tasks.emit.outputs.enabled").as<bool>());
-        CHECK(context.getValueByPath("tasks.emit.outputs.count").as<int64_t>() == 7);
+        check((payload["status"].as<std::string>() == "ok"));
+        check((payload["value"].as<int>() == 3));
+        check((context.getValueByPath("tasks.emit.outputs.enabled").as<bool>()));
+        check((context.getValueByPath("tasks.emit.outputs.count").as<int64_t>() == 7));
     }
 
-    SECTION("ctx.get returns structured arrays for iteration") {
+    if (section_index == 7) {
         context.setValue("items", WorkflowValue::parse(R"([{"name":"alpha"},{"name":"beta"}])"));
 
         auto r = Praktor::Script::execute(R"script(
@@ -750,12 +775,12 @@ TEST_CASE("Script engine: context integration", "[script]") {
             ctx.set("count", json.query(items, "length(@)"));
         )script", context);
 
-        REQUIRE(r.success);
-        CHECK(context.getValue<std::string>("names") == "alpha,beta");
-        CHECK(context.getValue<double>("count") == Catch::Approx(2.0));
+        check((r.success));
+        check((context.getValue<std::string>("names") == "alpha,beta"));
+        check_within(context.getValue<double>("count"), 2.0, 100.0 * std::numeric_limits<float>::epsilon() * std::abs(2.0));
     }
 
-    SECTION("ctx.get returns structured objects for member access") {
+    if (section_index == 8) {
         context.setValue("payload", WorkflowValue::parse(R"({"name":"demo","meta":{"ok":true}})"));
 
         auto r = Praktor::Script::execute(R"(
@@ -764,12 +789,12 @@ TEST_CASE("Script engine: context integration", "[script]") {
             ctx.set("payload_ok", payload.meta.ok);
         )", context);
 
-        REQUIRE(r.success);
-        CHECK(context.getValue<std::string>("payload_name") == "demo");
-        CHECK(context.getValue<bool>("payload_ok"));
+        check((r.success));
+        check((context.getValue<std::string>("payload_name") == "demo"));
+        check((context.getValue<bool>("payload_ok")));
     }
 
-    SECTION("ctx.get parses JSON-like strings into structured values") {
+    if (section_index == 9) {
         context.setValue("payload_json", R"({"name":"demo","items":[1,2]})");
 
         auto r = Praktor::Script::execute(R"script(
@@ -778,12 +803,12 @@ TEST_CASE("Script engine: context integration", "[script]") {
             ctx.set("item_count", json.query(payload.items, "length(@)"));
         )script", context);
 
-        REQUIRE(r.success);
-        CHECK(context.getValue<std::string>("payload_name") == "demo");
-        CHECK(context.getValue<double>("item_count") == Catch::Approx(2.0));
+        check((r.success));
+        check((context.getValue<std::string>("payload_name") == "demo"));
+        check_within(context.getValue<double>("item_count"), 2.0, 100.0 * std::numeric_limits<float>::epsilon() * std::abs(2.0));
     }
 
-    SECTION("json.parse returns structured values") {
+    if (section_index == 10) {
         auto r = Praktor::Script::execute(R"(
             parsed_object = json.parse("{\"name\":\"demo\"}");
             parsed_number = json.parse("7");
@@ -791,65 +816,85 @@ TEST_CASE("Script engine: context integration", "[script]") {
             ctx.set("parsed_number", parsed_number);
         )", context);
 
-        REQUIRE(r.success);
-        CHECK(context.getValue<std::string>("parsed_name") == "demo");
-        CHECK(context.getValue<double>("parsed_number") == Catch::Approx(7.0));
+        check((r.success));
+        check((context.getValue<std::string>("parsed_name") == "demo"));
+        check_within(context.getValue<double>("parsed_number"), 7.0, 100.0 * std::numeric_limits<float>::epsilon() * std::abs(7.0));
     }
 
-    SECTION("maps support bracket access for dashed keys") {
+    if (section_index == 11) {
         auto r = Praktor::Script::execute(R"(
             headers = json.parse("{\"Authorization\":\"Bearer demo\",\"Content-Type\":\"application/json\"}");
             ctx.set("auth_header", headers["Authorization"]);
             ctx.set("content_type", headers["Content-Type"]);
         )", context);
 
-        REQUIRE(r.success);
-        CHECK(context.getValue<std::string>("auth_header") == "Bearer demo");
-        CHECK(context.getValue<std::string>("content_type") == "application/json");
+        check((r.success));
+        check((context.getValue<std::string>("auth_header") == "Bearer demo"));
+        check((context.getValue<std::string>("content_type") == "application/json"));
     }
 }
 
-TEST_CASE("Script engine: builtins and imported modules", "[script]") {
+spec("Script engine: context integration") {
+    it("ctx_get reads from context") { test_script_engine_context_integration_7(0); }
+    it("dot syntax is normalized before execution") { test_script_engine_context_integration_7(1); }
+    it("ctx.get returns stable strings") { test_script_engine_context_integration_7(2); }
+    it("native strings compare by content in conditions") { test_script_engine_context_integration_7(3); }
+    it("ctx.set stores structured values") { test_script_engine_context_integration_7(4); }
+    it("ctx.set rejects reserved runtime paths") { test_script_engine_context_integration_7(5); }
+    it("ctx.output stores structured task outputs") { test_script_engine_context_integration_7(6); }
+    it("ctx.get returns structured arrays for iteration") { test_script_engine_context_integration_7(7); }
+    it("ctx.get returns structured objects for member access") { test_script_engine_context_integration_7(8); }
+    it("ctx.get parses JSON-like strings into structured values") { test_script_engine_context_integration_7(9); }
+    it("json.parse returns structured values") { test_script_engine_context_integration_7(10); }
+    it("maps support bracket access for dashed keys") { test_script_engine_context_integration_7(11); }
+}
+
+[[maybe_unused]] static void test_script_engine_builtins_and_imported_modules_8(int section_index) {
     WorkflowContext context;
 
-    SECTION("fail marks the script as failed with message") {
+    if (section_index == 0) {
         auto r = Praktor::Script::execute(R"(
             fail("boom");
         )", context);
 
-        REQUIRE_FALSE(r.success);
-        CHECK(r.error_message == "boom");
+        check_false(r.success);
+        check((r.error_message == "boom"));
     }
 
-    SECTION("math functions are available by default") {
+    if (section_index == 1) {
         auto r = Praktor::Script::execute(R"(
             ctx_set("s", sin(0));
             ctx_set("c", cos(0));
         )", context);
         if (!r.success) {
-            INFO("Error: " << r.error_message);
+            info("%s", praktor_test::message([&](std::ostream& out) { out << "Error: " << r.error_message; }).c_str());
         }
-        REQUIRE(r.success);
-        CHECK(context.getValue<double>("s") == Catch::Approx(0.0));
-        CHECK(context.getValue<double>("c") == Catch::Approx(1.0));
+        check((r.success));
+        check_within(context.getValue<double>("s"), 0.0, 100.0 * std::numeric_limits<float>::epsilon() * std::abs(0.0));
+        check_within(context.getValue<double>("c"), 1.0, 100.0 * std::numeric_limits<float>::epsilon() * std::abs(1.0));
     }
 
-    SECTION("json query (from feeds)") {
+    if (section_index == 2) {
         auto r = Praktor::Script::execute(R"(
             js = "{\"score\": 42}";
             res = json.query(js, "score");
             ctx_set("score", res);
         )", context);
         if (!r.success) {
-            INFO("Error: " << r.error_message);
+            info("%s", praktor_test::message([&](std::ostream& out) { out << "Error: " << r.error_message; }).c_str());
         }
-        REQUIRE(r.success);
-        CHECK(context.getValue<double>("score") == Catch::Approx(42.0));
+        check((r.success));
+        check_within(context.getValue<double>("score"), 42.0, 100.0 * std::numeric_limits<float>::epsilon() * std::abs(42.0));
     }
 }
 
-TEST_CASE("Script engine resolves relative tbs imports from workflow source",
-          "[script][import]") {
+spec("Script engine: builtins and imported modules") {
+    it("fail marks the script as failed with message") { test_script_engine_builtins_and_imported_modules_8(0); }
+    it("math functions are available by default") { test_script_engine_builtins_and_imported_modules_8(1); }
+    it("json query (from feeds)") { test_script_engine_builtins_and_imported_modules_8(2); }
+}
+
+[[maybe_unused]] static void test_script_engine_resolves_relative_tbs_imports_from_workflow_source_9() {
     const auto dir = createTempDir();
     const auto module_path = dir / "result_models.tbs";
     writeFile(module_path, R"script(
@@ -867,15 +912,18 @@ TEST_CASE("Script engine resolves relative tbs imports from workflow source",
         ctx.set("imported_value", payload.value);
     )script", context);
 
-    INFO(result.error_message);
-    REQUIRE(result.success);
-    CHECK(context.getValue<std::string>("imported_value") == "resolved");
+    info("%s", praktor_test::message([&](std::ostream& out) { out << result.error_message; }).c_str());
+    check((result.success));
+    check((context.getValue<std::string>("imported_value") == "resolved"));
 
     std::filesystem::remove_all(dir);
 }
 
-TEST_CASE("Script engine prefers task source for relative tbs imports",
-          "[script][import]") {
+spec("Script engine resolves relative tbs imports from workflow source") {
+    it("complete case") { test_script_engine_resolves_relative_tbs_imports_from_workflow_source_9(); }
+}
+
+[[maybe_unused]] static void test_script_engine_prefers_task_source_for_relative_tbs_imports_10() {
     const auto dir = createTempDir();
     const auto task_dir = dir / "included";
     writeFile(task_dir / "task_models.tbs", R"script(
@@ -891,33 +939,37 @@ TEST_CASE("Script engine prefers task source for relative tbs imports",
         ctx.set("imported_value", imported_value());
     )script", context, (task_dir / "task.yml").string());
 
-    INFO(result.error_message);
-    REQUIRE(result.success);
-    CHECK(context.getValue<std::string>("imported_value") == "task-source");
+    info("%s", praktor_test::message([&](std::ostream& out) { out << result.error_message; }).c_str());
+    check((result.success));
+    check((context.getValue<std::string>("imported_value") == "task-source"));
 
     std::filesystem::remove_all(dir);
 }
 
-TEST_CASE("Script engine: shell module", "[script][shell]") {
+spec("Script engine prefers task source for relative tbs imports") {
+    it("complete case") { test_script_engine_prefers_task_source_for_relative_tbs_imports_10(); }
+}
+
+[[maybe_unused]] static void test_script_engine_shell_module_11(int section_index) {
     WorkflowContext context;
 
-    SECTION("shell.exec returns structured execution results") {
+    if (section_index == 0) {
         const std::string script =
             "ctx.set(\"shell_result\", shell.exec(\"" + escape_script_string(shell_failure_command()) + "\"));";
 
         auto r = Praktor::Script::execute(script, context);
-        REQUIRE(r.success);
+        check((r.success));
 
         auto result = context.getValueByPath("shell_result");
-        REQUIRE(result.is_object());
-        CHECK(result["exit_code"].as<int>() == 7);
-        CHECK(result["success"].as<bool>() == false);
-        CHECK(result["stdout"].as<std::string>().find("stdout_line") != std::string::npos);
-        CHECK(result["stderr"].as<std::string>().find("stderr_line") != std::string::npos);
-        CHECK(result["output_streamed_live"].as<bool>() == false);
+        check((result.is_object()));
+        check((result["exit_code"].as<int>() == 7));
+        check((result["success"].as<bool>() == false));
+        check((result["stdout"].as<std::string>().find("stdout_line") != std::string::npos));
+        check((result["stderr"].as<std::string>().find("stderr_line") != std::string::npos));
+        check((result["output_streamed_live"].as<bool>() == false));
     }
 
-    SECTION("shell.exec resolves working_dir from workflow source path") {
+    if (section_index == 1) {
         const auto dir = createTempDir();
         const auto working_dir = dir / "work";
         std::filesystem::create_directories(working_dir);
@@ -929,17 +981,17 @@ TEST_CASE("Script engine: shell module", "[script][shell]") {
             "\", \"" + escape_script_string(options) + "\"));";
 
         auto r = Praktor::Script::execute(script, context);
-        REQUIRE(r.success);
+        check((r.success));
 
         auto result = context.getValueByPath("shell_result");
-        REQUIRE(result.is_object());
-        CHECK(result["working_dir"].as<std::string>() == working_dir.lexically_normal().string());
-        CHECK(std::filesystem::equivalent(trim_newlines(result["stdout"].as<std::string>()), working_dir));
+        check((result.is_object()));
+        check((result["working_dir"].as<std::string>() == working_dir.lexically_normal().string()));
+        check((std::filesystem::equivalent(trim_newlines(result["stdout"].as<std::string>()), working_dir)));
 
         std::filesystem::remove_all(dir);
     }
 
-    SECTION("shell.exec merges env overrides onto the current process environment") {
+    if (section_index == 2) {
         const std::string env_name = "PRAKTOR_SCRIPT_SHELL_TEST";
         const std::string options = "{\"env\":{\"" + env_name + "\":\"inside\"}}";
         const std::string script =
@@ -947,21 +999,27 @@ TEST_CASE("Script engine: shell module", "[script][shell]") {
             "\", \"" + escape_script_string(options) + "\"));";
 
         auto r = Praktor::Script::execute(script, context);
-        REQUIRE(r.success);
+        check((r.success));
 
         auto result = context.getValueByPath("shell_result");
-        REQUIRE(result.is_object());
-        CHECK(trim_newlines(result["stdout"].as<std::string>()) == "inside");
-        CHECK(result["success"].as<bool>() == true);
+        check((result.is_object()));
+        check((trim_newlines(result["stdout"].as<std::string>()) == "inside"));
+        check((result["success"].as<bool>() == true));
     }
 }
 
-TEST_CASE("Script engine: http module", "[script][http]") {
+spec("Script engine: shell module") {
+    it("shell.exec returns structured execution results") { test_script_engine_shell_module_11(0); }
+    it("shell.exec resolves working_dir from workflow source path") { test_script_engine_shell_module_11(1); }
+    it("shell.exec merges env overrides onto the current process environment") { test_script_engine_shell_module_11(2); }
+}
+
+[[maybe_unused]] static void test_script_engine_http_module_12(int section_index) {
     WorkflowContext context;
     PythonHttpServer server;
     server.start();
 
-    SECTION("http.get with options returns structured response") {
+    if (section_index == 0) {
         const std::string script = R"script(
             import("net");
             resp = http.get("http://127.0.0.1:PORT/data", map{
@@ -984,16 +1042,16 @@ TEST_CASE("Script engine: http module", "[script][http]") {
         rendered.replace(pos, 4, port);
 
         auto r = Praktor::Script::execute(rendered, context);
-        CAPTURE(r.error_message);
-        REQUIRE(r.success);
-        CHECK(context.getValue<double>("http_status") == Catch::Approx(200.0));
-        CHECK(context.getValue<std::string>("http_auth") == "Bearer demo");
-        CHECK(context.getValue<std::string>("http_accept") == "application/json");
-        CHECK(context.getValue<std::string>("http_path") == "/data");
-        CHECK(context.getValue<std::string>("server_header") == "praktor-test");
+        info("%s", praktor_test::message([&](std::ostream& out) { out << r.error_message; }).c_str());
+        check((r.success));
+        check_within(context.getValue<double>("http_status"), 200.0, 100.0 * std::numeric_limits<float>::epsilon() * std::abs(200.0));
+        check((context.getValue<std::string>("http_auth") == "Bearer demo"));
+        check((context.getValue<std::string>("http_accept") == "application/json"));
+        check((context.getValue<std::string>("http_path") == "/data"));
+        check((context.getValue<std::string>("server_header") == "praktor-test"));
     }
 
-    SECTION("http.post with options returns structured JSON data") {
+    if (section_index == 1) {
         const std::string script = R"script(
             import("net");
             body = json.stringify(map{name: "demo"});
@@ -1015,12 +1073,17 @@ TEST_CASE("Script engine: http module", "[script][http]") {
         rendered.replace(pos, 4, port);
 
         auto r = Praktor::Script::execute(rendered, context);
-        CAPTURE(r.error_message);
-        REQUIRE(r.success);
-        CHECK(context.getValue<double>("post_status") == Catch::Approx(201.0));
-        CHECK(context.getValue<std::string>("post_auth") == "Bearer post");
-        CHECK(context.getValue<std::string>("post_type").find("application/json") != std::string::npos);
-        CHECK(context.getValue<std::string>("post_name") == "demo");
-        CHECK(context.getValue<std::string>("post_path") == "/submit");
+        info("%s", praktor_test::message([&](std::ostream& out) { out << r.error_message; }).c_str());
+        check((r.success));
+        check_within(context.getValue<double>("post_status"), 201.0, 100.0 * std::numeric_limits<float>::epsilon() * std::abs(201.0));
+        check((context.getValue<std::string>("post_auth") == "Bearer post"));
+        check((context.getValue<std::string>("post_type").find("application/json") != std::string::npos));
+        check((context.getValue<std::string>("post_name") == "demo"));
+        check((context.getValue<std::string>("post_path") == "/submit"));
     }
+}
+
+spec("Script engine: http module") {
+    it("http.get with options returns structured response") { test_script_engine_http_module_12(0); }
+    it("http.post with options returns structured JSON data") { test_script_engine_http_module_12(1); }
 }

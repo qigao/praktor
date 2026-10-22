@@ -1,7 +1,7 @@
+#include "praktor_test.hpp"
 #include "workflow_runner.hpp"
 #include "executors/declarative_tree_executor.hpp"
 
-#include <catch2/catch_test_macros.hpp>
 
 #include <atomic>
 #include <chrono>
@@ -29,7 +29,7 @@ std::filesystem::path createCoreOnlyTempDir() {
 
 void writeText(const std::filesystem::path& path, const std::string& text) {
     std::ofstream out(path);
-    REQUIRE(out.is_open());
+    check((out.is_open()));
     out << text;
 }
 
@@ -38,12 +38,16 @@ void writeText(const std::filesystem::path& path, const std::string& text) {
 static_assert(PRAKTOR_SCRIPT_ENGINE_ENABLED == 0,
               "core_only_workflow_test must only build with scripts disabled");
 
-TEST_CASE("workflow value converts integral decimal JSON numbers") {
+[[maybe_unused]] static void test_workflow_value_converts_integral_decimal_json_numbers_1() {
     const auto value = WorkflowValue::parse(R"({"count":7.0})");
-    CHECK(value["count"].as<int>() == 7);
+    check((value["count"].as<int>() == 7));
 }
 
-TEST_CASE("core-only build executes workflows without script tasks") {
+spec("workflow value converts integral decimal JSON numbers") {
+    it("complete case") { test_workflow_value_converts_integral_decimal_json_numbers_1(); }
+}
+
+[[maybe_unused]] static void test_core_only_build_executes_workflows_without_script_tasks_2() {
     const auto dir = createCoreOnlyTempDir();
     const auto workflow = dir / "command.yml";
 
@@ -56,13 +60,17 @@ tasks:
     WorkflowRunner runner(workflow.string());
     const auto result = runner.execute();
 
-    CHECK(result.success);
-    CHECK(result.value["workflow_status"].as<std::string>() == "success");
+    check((result.success));
+    check((result.value["workflow_status"].as<std::string>() == "success"));
 
     std::filesystem::remove_all(dir);
 }
 
-TEST_CASE("core-only build rejects script workflows before scheduling") {
+spec("core-only build executes workflows without script tasks") {
+    it("complete case") { test_core_only_build_executes_workflows_without_script_tasks_2(); }
+}
+
+[[maybe_unused]] static void test_core_only_build_rejects_script_workflows_before_scheduling_3() {
     const auto dir = createCoreOnlyTempDir();
     const auto side_effect = dir / "should-not-exist.txt";
     const auto workflow = dir / "script.yml";
@@ -89,13 +97,17 @@ TEST_CASE("core-only build rejects script workflows before scheduling") {
     WorkflowRunner runner(workflow.string());
     const auto result = runner.execute();
 
-    CHECK_FALSE(result.success);
-    CHECK(result.error_message.find("ENABLE_SCRIPT_ENGINE=OFF") != std::string::npos);
-    CHECK(result.value["workflow_status"].as<std::string>() == "failed");
-    CHECK(result.value["tasks"].size() == 0);
-    CHECK_FALSE(std::filesystem::exists(side_effect));
+    check((!(result.success)));
+    check((result.error_message.find("ENABLE_SCRIPT_ENGINE=OFF") != std::string::npos));
+    check((result.value["workflow_status"].as<std::string>() == "failed"));
+    check((result.value["tasks"].size() == 0));
+    check((!(std::filesystem::exists(side_effect))));
 
     std::filesystem::remove_all(dir);
+}
+
+spec("core-only build rejects script workflows before scheduling") {
+    it("complete case") { test_core_only_build_rejects_script_workflows_before_scheduling_3(); }
 }
 
 namespace {
@@ -112,7 +124,7 @@ Task makeCoreOnlyActionTask(const std::string& name, OrchNode root) {
 
 } // namespace
 
-TEST_CASE("core-only default action backend remains legacy") {
+[[maybe_unused]] static void test_core_only_default_action_backend_remains_legacy_4() {
     // The production factory must retain its current default while the C11
     // integration gate is still experimental.
     WorkflowContext context;
@@ -123,10 +135,14 @@ TEST_CASE("core-only default action backend remains legacy") {
     auto task = makeCoreOnlyActionTask("default_backend", std::move(node));
     Praktor::Execution::DeclarativeTreeExecutor executor;
     const auto result = executor.execute(task, context);
-    REQUIRE(result.success);
+    check((result.success));
     const auto output = context.getValueByPath("tasks.default_backend.outputs.answer");
-    REQUIRE(output.is_string());
-    CHECK(output.as<std::string>() == "legacy-default");
+    check((output.is_string()));
+    check((output.as<std::string>() == "legacy-default"));
+}
+
+spec("core-only default action backend remains legacy") {
+    it("complete case") { test_core_only_default_action_backend_remains_legacy_4(); }
 }
 
 #if PRAKTOR_C11_ACTIONS_ENABLED
@@ -156,7 +172,7 @@ struct ScopedWorkflowProcessOwner {
 };
 } // namespace
 
-TEST_CASE("C11 WorkflowProcessOwner executes and closes only after owner drain") {
+[[maybe_unused]] static void test_c11_workflowprocessowner_executes_and_closes_only_after_owner_drain_5() {
     const auto dir = createCoreOnlyTempDir();
     const auto workflow = dir / "owner-workflow.yml";
     const auto marker = dir / "owner-produced.txt";
@@ -174,19 +190,23 @@ TEST_CASE("C11 WorkflowProcessOwner executes and closes only after owner drain")
     WorkflowRunner runner(workflow.string());
     Praktor::Execution::C11WorkflowProcessOwner host(1u);
     const auto result = host.execute(runner);
-    CHECK(result.success);
-    CHECK(std::filesystem::exists(marker));
+    check((result.success));
+    check((std::filesystem::exists(marker)));
     std::size_t reaped = 0u, pending = 0u;
-    CHECK(host.runReady(64u, &reaped, &pending) == SALTS_OK);
-    CHECK(pending == 0u);
-    CHECK(host.close() == SALTS_OK);
+    check((host.runReady(64u, &reaped, &pending) == SALTS_OK));
+    check((pending == 0u));
+    check((host.close() == SALTS_OK));
     const auto denied = host.execute(runner);
-    CHECK_FALSE(denied.success);
-    CHECK(denied.error_message.find("closed") != std::string::npos);
+    check((!(denied.success)));
+    check((denied.error_message.find("closed") != std::string::npos));
     std::filesystem::remove_all(dir);
 }
 
-TEST_CASE("C11 WorkflowProcessOwner serializes concurrent execution and recovery") {
+spec("C11 WorkflowProcessOwner executes and closes only after owner drain") {
+    it("complete case") { test_c11_workflowprocessowner_executes_and_closes_only_after_owner_drain_5(); }
+}
+
+[[maybe_unused]] static void test_c11_workflowprocessowner_serializes_concurrent_execution_and_recovery_6() {
     const auto dir = createCoreOnlyTempDir();
     const auto workflow = dir / "serialized-owner.yml";
     const auto marker = dir / "started.txt";
@@ -228,31 +248,35 @@ TEST_CASE("C11 WorkflowProcessOwner serializes concurrent execution and recovery
     const bool admitted = std::filesystem::exists(marker);
     std::size_t reaped = 0u, pending = 0u;
     if (admitted) {
-        CHECK(host.runReady(64u, &reaped, &pending) == SALTS_EBUSY);
-        CHECK(host.close() == SALTS_EBUSY);
+        check((host.runReady(64u, &reaped, &pending) == SALTS_EBUSY));
+        check((host.close() == SALTS_EBUSY));
         const auto rejected = host.execute(runner);
-        CHECK_FALSE(rejected.success);
-        CHECK(rejected.error_message.find("active driver") != std::string::npos);
+        check((!(rejected.success)));
+        check((rejected.error_message.find("active driver") != std::string::npos));
     }
     control->requestCancel();
     running.join();
-    CHECK(admitted);
-    CHECK_FALSE(running_result.success);
+    check((admitted));
+    check((!(running_result.success)));
 
     const auto finished_deadline = std::chrono::steady_clock::now() +
                                    std::chrono::seconds(8);
     for (;;) {
         const int status = host.runReady(64u, &reaped, &pending);
-        CHECK((status == SALTS_OK || status == SALTS_EBUSY));
+        check(((status == SALTS_OK || status == SALTS_EBUSY)));
         if (pending == 0u) break;
-        CHECK(std::chrono::steady_clock::now() < finished_deadline);
+        check((std::chrono::steady_clock::now() < finished_deadline));
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
-    CHECK(host.close() == SALTS_OK);
+    check((host.close() == SALTS_OK));
     std::filesystem::remove_all(dir);
 }
 
-TEST_CASE("WorkflowRunner selects C11 only with a live single-driver Process host") {
+spec("C11 WorkflowProcessOwner serializes concurrent execution and recovery") {
+    it("complete case") { test_c11_workflowprocessowner_serializes_concurrent_execution_and_recovery_6(); }
+}
+
+[[maybe_unused]] static void test_workflowrunner_selects_c11_only_with_a_live_single_driver_process_host_7() {
     const auto dir = createCoreOnlyTempDir();
     const auto workflow = dir / "hosted-shell.yml";
     const auto marker = dir / "c11-entry.txt";
@@ -275,38 +299,42 @@ TEST_CASE("WorkflowRunner selects C11 only with a live single-driver Process hos
     // Neither a missing owner nor a parallel scheduler may silently choose
     // legacy Shell or touch the filesystem.
     const auto without_owner = runner.executeWithC11ProcessOwner(nullptr);
-    CHECK_FALSE(without_owner.success);
-    CHECK(without_owner.error_message.find("Process recovery owner") !=
-          std::string::npos);
-    CHECK_FALSE(std::filesystem::exists(marker));
+    check((!(without_owner.success)));
+    check((without_owner.error_message.find("Process recovery owner") !=
+          std::string::npos));
+    check((!(std::filesystem::exists(marker))));
 
     const auto concurrently = runner.executeObservedWithHostTools(
         {}, {}, {}, true, 2, Praktor::Execution::ActionTreeBackend::C11,
         &recovery.owner);
-    CHECK_FALSE(concurrently.success);
-    CHECK(concurrently.error_message.find("single driver") !=
-          std::string::npos);
-    CHECK_FALSE(std::filesystem::exists(marker));
+    check((!(concurrently.success)));
+    check((concurrently.error_message.find("single driver") !=
+          std::string::npos));
+    check((!(std::filesystem::exists(marker))));
 
     const auto result = runner.executeWithC11ProcessOwner(&recovery.owner);
-    REQUIRE(result.success);
-    CHECK(result.value["workflow_status"].as<std::string>() == "success");
-    REQUIRE(std::filesystem::exists(marker));
+    check((result.success));
+    check((result.value["workflow_status"].as<std::string>() == "success"));
+    check((std::filesystem::exists(marker)));
     {
         std::ifstream in(marker);
         std::string content((std::istreambuf_iterator<char>(in)),
                             std::istreambuf_iterator<char>());
-        CHECK(content.find("hosted-c11") != std::string::npos);
+        check((content.find("hosted-c11") != std::string::npos));
     }
 
     size_t reaped = 0u, pending = 0u;
-    CHECK(cflow_process_retainer_run_ready(
-        &recovery.owner, 64u, &reaped, &pending) == SALTS_OK);
-    CHECK(pending == 0u);
+    check((cflow_process_retainer_run_ready(
+        &recovery.owner, 64u, &reaped, &pending) == SALTS_OK));
+    check((pending == 0u));
     std::filesystem::remove_all(dir);
 }
 
-TEST_CASE("C11 WorkflowRunner rejects nested Uses without silently running Legacy") {
+spec("WorkflowRunner selects C11 only with a live single-driver Process host") {
+    it("complete case") { test_workflowrunner_selects_c11_only_with_a_live_single_driver_process_host_7(); }
+}
+
+[[maybe_unused]] static void test_c11_workflowrunner_rejects_nested_uses_without_silently_running_legacy_8() {
     const auto dir = createCoreOnlyTempDir();
     const auto parent = dir / "outer.yml";
     const auto child = dir / "nested.yml";
@@ -331,19 +359,23 @@ TEST_CASE("C11 WorkflowRunner rejects nested Uses without silently running Legac
     WorkflowRunner runner(parent.string());
     ScopedWorkflowProcessOwner recovery;
     const auto result = runner.executeWithC11ProcessOwner(&recovery.owner);
-    CHECK_FALSE(result.success);
-    CHECK(result.error_message.find(
+    check((!(result.success)));
+    check((result.error_message.find(
         "nested uses requires explicit recovery-owner propagation") !=
-        std::string::npos);
-    CHECK_FALSE(std::filesystem::exists(marker));
+        std::string::npos));
+    check((!(std::filesystem::exists(marker))));
     size_t reaped = 0u, pending = 0u;
-    CHECK(cflow_process_retainer_run_ready(
-        &recovery.owner, 64u, &reaped, &pending) == SALTS_OK);
-    CHECK(pending == 0u);
+    check((cflow_process_retainer_run_ready(
+        &recovery.owner, 64u, &reaped, &pending) == SALTS_OK));
+    check((pending == 0u));
     std::filesystem::remove_all(dir);
 }
 
-TEST_CASE("WorkflowRunner cancellation retains active Shell leases after workflow return") {
+spec("C11 WorkflowRunner rejects nested Uses without silently running Legacy") {
+    it("complete case") { test_c11_workflowrunner_rejects_nested_uses_without_silently_running_legacy_8(); }
+}
+
+[[maybe_unused]] static void test_workflowrunner_cancellation_retains_active_shell_leases_after_workflow_return_9() {
     const auto dir = createCoreOnlyTempDir();
     const auto workflow = dir / "cancel-hosted-shell.yml";
     const auto started = dir / "child-admitted.txt";
@@ -393,10 +425,10 @@ TEST_CASE("WorkflowRunner cancellation retains active Shell leases after workflo
         result = recovery.execute(runner, control);
     } // WorkflowRunner and its task-scoped ExecutionContext are now destroyed.
     canceller.join();
-    CHECK(observed_start.load(std::memory_order_relaxed));
-    CHECK_FALSE(result.success);
-    CHECK(std::chrono::steady_clock::now() - began <
-          std::chrono::seconds(12));
+    check((observed_start.load(std::memory_order_relaxed)));
+    check((!(result.success)));
+    check((std::chrono::steady_clock::now() - began <
+          std::chrono::seconds(12)));
 
     // The original WorkflowRunner and all its DAG/Executor/Blackboard state
     // are gone. Only the persistent host owner can drive and release leases.
@@ -408,12 +440,12 @@ TEST_CASE("WorkflowRunner cancellation retains active Shell leases after workflo
         size_t reaped = 0u;
         const int status = recovery.runReady(64u, &reaped, &pending);
         total_reaped += reaped;
-        CHECK((status == SALTS_OK || status == SALTS_EBUSY));
+        check(((status == SALTS_OK || status == SALTS_EBUSY)));
         if (pending == 0u) {
-            CHECK(status == SALTS_OK);
+            check((status == SALTS_OK));
             break;
         }
-        CHECK(std::chrono::steady_clock::now() < deadline);
+        check((std::chrono::steady_clock::now() < deadline));
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
     // Release of a retained callback owner must return recovery capacity to
@@ -437,28 +469,32 @@ TEST_CASE("WorkflowRunner cancellation retains active Shell leases after workflo
     {
         WorkflowRunner next_runner(next_workflow.string());
         const auto next_result = recovery.execute(next_runner);
-        CHECK(next_result.success);
+        check((next_result.success));
     }
-    CHECK(std::filesystem::exists(next_marker));
+    check((std::filesystem::exists(next_marker)));
 
     const auto next_deadline = std::chrono::steady_clock::now() +
                                std::chrono::seconds(8);
     for (;;) {
         size_t reaped = 0u;
         const int status = recovery.runReady(64u, &reaped, &pending);
-        CHECK((status == SALTS_OK || status == SALTS_EBUSY));
+        check(((status == SALTS_OK || status == SALTS_EBUSY)));
         if (pending == 0u) {
-            CHECK(status == SALTS_OK);
+            check((status == SALTS_OK));
             break;
         }
-        CHECK(std::chrono::steady_clock::now() < next_deadline);
+        check((std::chrono::steady_clock::now() < next_deadline));
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
-    CHECK(recovery.close() == SALTS_OK);
+    check((recovery.close() == SALTS_OK));
     std::filesystem::remove_all(dir);
 }
 
-TEST_CASE("opt-in C11 action backend preserves workflow context and task output") {
+spec("WorkflowRunner cancellation retains active Shell leases after workflow return") {
+    it("complete case") { test_workflowrunner_cancellation_retains_active_shell_leases_after_workflow_return_9(); }
+}
+
+[[maybe_unused]] static void test_opt_in_c11_action_backend_preserves_workflow_context_and_task_output_10() {
     using Praktor::Execution::ActionTreeBackend;
     using Praktor::Execution::DeclarativeTreeExecutor;
 
@@ -483,10 +519,10 @@ TEST_CASE("opt-in C11 action backend preserves workflow context and task output"
 
         DeclarativeTreeExecutor executor({}, backend);
         const auto result = executor.execute(task, context);
-        REQUIRE(result.success);
-        CHECK(result.error_message.empty());
-        CHECK(result.stdout_data.empty());
-        CHECK(result.stderr_data.empty());
+        check((result.success));
+        check((result.error_message.empty()));
+        check((result.stdout_data.empty()));
+        check((result.stderr_data.empty()));
 
         const auto description = context.getValueByPath(
             "tasks.shared_contract.outputs.description");
@@ -494,16 +530,20 @@ TEST_CASE("opt-in C11 action backend preserves workflow context and task output"
             "tasks.shared_contract.outputs.result");
         const auto status = context.getValueByPath(
             "tasks.shared_contract.outputs.node_status");
-        REQUIRE(description.is_string());
-        REQUIRE(resolved.is_string());
-        REQUIRE(status.is_string());
-        CHECK(description.as<std::string>() == "build-Release");
-        CHECK(resolved.as<std::string>() == "build-Release");
-        CHECK(status.as<std::string>() == "SUCCESS");
+        check((description.is_string()));
+        check((resolved.is_string()));
+        check((status.is_string()));
+        check((description.as<std::string>() == "build-Release"));
+        check((resolved.as<std::string>() == "build-Release"));
+        check((status.as<std::string>() == "SUCCESS"));
     }
 }
 
-TEST_CASE("opt-in C11 explicitly differs on an empty Shell command") {
+spec("opt-in C11 action backend preserves workflow context and task output") {
+    it("complete case") { test_opt_in_c11_action_backend_preserves_workflow_context_and_task_output_10(); }
+}
+
+[[maybe_unused]] static void test_opt_in_c11_explicitly_differs_on_an_empty_shell_command_11() {
     using Praktor::Execution::ActionTreeBackend;
     using Praktor::Execution::DeclarativeTreeExecutor;
 
@@ -518,22 +558,26 @@ TEST_CASE("opt-in C11 explicitly differs on an empty Shell command") {
     WorkflowContext legacy_context;
     DeclarativeTreeExecutor legacy({}, ActionTreeBackend::Legacy);
     const auto legacy_result = legacy.execute(task, legacy_context);
-    REQUIRE(legacy_result.success);
-    CHECK(legacy_result.stdout_data.empty());
-    CHECK(legacy_result.stderr_data.empty());
+    check((legacy_result.success));
+    check((legacy_result.stdout_data.empty()));
+    check((legacy_result.stderr_data.empty()));
 
     WorkflowContext c11_context;
     DeclarativeTreeExecutor c11({}, ActionTreeBackend::C11);
     const auto c11_result = c11.execute(task, c11_context);
-    CHECK_FALSE(c11_result.success);
-    CHECK(c11_result.exit_code == -1);
-    CHECK(c11_result.error_message.find("Shell requires parameter 'cmd'") !=
-          std::string::npos);
-    CHECK(c11_result.stdout_data.empty());
-    CHECK(c11_result.stderr_data.empty());
+    check((!(c11_result.success)));
+    check((c11_result.exit_code == -1));
+    check((c11_result.error_message.find("Shell requires parameter 'cmd'") !=
+          std::string::npos));
+    check((c11_result.stdout_data.empty()));
+    check((c11_result.stderr_data.empty()));
 }
 
-TEST_CASE("opt-in C11 shell result reaches TaskResult without legacy fallback") {
+spec("opt-in C11 explicitly differs on an empty Shell command") {
+    it("complete case") { test_opt_in_c11_explicitly_differs_on_an_empty_shell_command_11(); }
+}
+
+[[maybe_unused]] static void test_opt_in_c11_shell_result_reaches_taskresult_without_legacy_fallback_12() {
     using Praktor::Execution::ActionTreeBackend;
     using Praktor::Execution::DeclarativeTreeExecutor;
 
@@ -548,17 +592,21 @@ TEST_CASE("opt-in C11 shell result reaches TaskResult without legacy fallback") 
         ScopedWorkflowProcessOwner recovery;
         DeclarativeTreeExecutor executor({}, backend, &recovery.owner);
         const auto result = executor.execute(task, context);
-        CHECK_FALSE(result.success);
-        CHECK(result.exit_code == 7);
-        CHECK_FALSE(result.error_message.empty());
+        check((!(result.success)));
+        check((result.exit_code == 7));
+        check((!(result.error_message.empty())));
         const auto exit_code = context.getValueByPath(
             "tasks.shell_failure.outputs.exit_code");
-        REQUIRE(exit_code.is_string());
-        CHECK(exit_code.as<std::string>() == "7");
+        check((exit_code.is_string()));
+        check((exit_code.as<std::string>() == "7"));
     }
 }
 
-TEST_CASE("opt-in C11 successful Shell output reaches workflow context") {
+spec("opt-in C11 shell result reaches TaskResult without legacy fallback") {
+    it("complete case") { test_opt_in_c11_shell_result_reaches_taskresult_without_legacy_fallback_12(); }
+}
+
+[[maybe_unused]] static void test_opt_in_c11_successful_shell_output_reaches_workflow_context_13() {
     using Praktor::Execution::ActionTreeBackend;
     using Praktor::Execution::DeclarativeTreeExecutor;
 
@@ -574,18 +622,22 @@ TEST_CASE("opt-in C11 successful Shell output reaches workflow context") {
         ScopedWorkflowProcessOwner recovery;
         DeclarativeTreeExecutor executor({}, backend, &recovery.owner);
         const auto result = executor.execute(task, context);
-        REQUIRE(result.success);
-        CHECK(result.exit_code == 0);
-        CHECK(result.stdout_data.find("workflow-c11-bridge") != std::string::npos);
+        check((result.success));
+        check((result.exit_code == 0));
+        check((result.stdout_data.find("workflow-c11-bridge") != std::string::npos));
         const auto stdout_output = context.getValueByPath(
             "tasks.shell_success.outputs.stdout");
-        REQUIRE(stdout_output.is_string());
-        CHECK(stdout_output.as<std::string>().find("workflow-c11-bridge") !=
-              std::string::npos);
+        check((stdout_output.is_string()));
+        check((stdout_output.as<std::string>().find("workflow-c11-bridge") !=
+              std::string::npos));
     }
 }
 
-TEST_CASE("opt-in C11 task deadline cancels a delayed leaf") {
+spec("opt-in C11 successful Shell output reaches workflow context") {
+    it("complete case") { test_opt_in_c11_successful_shell_output_reaches_workflow_context_13(); }
+}
+
+[[maybe_unused]] static void test_opt_in_c11_task_deadline_cancels_a_delayed_leaf_14() {
     using Praktor::Execution::ActionTreeBackend;
     using Praktor::Execution::DeclarativeTreeExecutor;
 
@@ -604,15 +656,19 @@ TEST_CASE("opt-in C11 task deadline cancels a delayed leaf") {
     DeclarativeTreeExecutor executor({}, ActionTreeBackend::C11);
     const auto started = std::chrono::steady_clock::now();
     const auto result = executor.execute(task, context);
-    CHECK_FALSE(result.success);
-    CHECK(result.error_message.find("task deadline") != std::string::npos);
-    CHECK(std::chrono::steady_clock::now() - started <
-          std::chrono::seconds(3));
-    CHECK(context.getValueByPath(
-        "tasks.deadline_guard.outputs.must_not_publish").is_null());
+    check((!(result.success)));
+    check((result.error_message.find("task deadline") != std::string::npos));
+    check((std::chrono::steady_clock::now() - started <
+          std::chrono::seconds(3)));
+    check((context.getValueByPath(
+        "tasks.deadline_guard.outputs.must_not_publish").is_null()));
 }
 
-TEST_CASE("opt-in C11 cancels a Shell after the child actually starts") {
+spec("opt-in C11 task deadline cancels a delayed leaf") {
+    it("complete case") { test_opt_in_c11_task_deadline_cancels_a_delayed_leaf_14(); }
+}
+
+[[maybe_unused]] static void test_opt_in_c11_cancels_a_shell_after_the_child_actually_starts_15() {
     using Praktor::Execution::ActionTreeBackend;
     using Praktor::Execution::DeclarativeTreeExecutor;
 
@@ -676,19 +732,23 @@ TEST_CASE("opt-in C11 cancels a Shell after the child actually starts") {
     const auto elapsed = std::chrono::steady_clock::now() - begin;
     canceller.join();
 
-    CHECK(observed_start.load(std::memory_order_relaxed));
-    CHECK_FALSE(result.success);
-    CHECK(result.error_message.find("cancelled") != std::string::npos);
-    CHECK(elapsed < std::chrono::seconds(13));
+    check((observed_start.load(std::memory_order_relaxed)));
+    check((!(result.success)));
+    check((result.error_message.find("cancelled") != std::string::npos));
+    check((elapsed < std::chrono::seconds(13)));
     const auto node_status = context.getValueByPath(
         "tasks.cancel_running_shell.outputs.node_status");
-    REQUIRE(node_status.is_string());
-    CHECK(node_status.as<std::string>() == "FAILURE");
+    check((node_status.is_string()));
+    check((node_status.as<std::string>() == "FAILURE"));
 
     std::filesystem::remove_all(dir);
 }
 
-TEST_CASE("opt-in C11 workflow rejects bad plan before leaf side effects") {
+spec("opt-in C11 cancels a Shell after the child actually starts") {
+    it("complete case") { test_opt_in_c11_cancels_a_shell_after_the_child_actually_starts_15(); }
+}
+
+[[maybe_unused]] static void test_opt_in_c11_workflow_rejects_bad_plan_before_leaf_side_effects_16() {
     using Praktor::Execution::ActionTreeBackend;
     using Praktor::Execution::DeclarativeTreeExecutor;
 
@@ -712,13 +772,17 @@ TEST_CASE("opt-in C11 workflow rejects bad plan before leaf side effects") {
 
     auto task = makeCoreOnlyActionTask("reject_plan", std::move(root));
     DeclarativeTreeExecutor executor({}, ActionTreeBackend::C11);
-    CHECK_THROWS_AS(executor.execute(task, context), std::invalid_argument);
+    check_throws_as(executor.execute(task, context), std::invalid_argument);
     const auto absent = context.getValueByPath(
         "tasks.reject_plan.outputs.should_not_publish");
-    CHECK(absent.is_null());
+    check((absent.is_null()));
 }
 
-TEST_CASE("opt-in C11 respects cancellation before leaf entry") {
+spec("opt-in C11 workflow rejects bad plan before leaf side effects") {
+    it("complete case") { test_opt_in_c11_workflow_rejects_bad_plan_before_leaf_side_effects_16(); }
+}
+
+[[maybe_unused]] static void test_opt_in_c11_respects_cancellation_before_leaf_entry_17() {
     using Praktor::Execution::ActionTreeBackend;
     using Praktor::Execution::DeclarativeTreeExecutor;
 
@@ -734,13 +798,17 @@ TEST_CASE("opt-in C11 respects cancellation before leaf entry") {
 
     DeclarativeTreeExecutor executor({}, ActionTreeBackend::C11);
     const auto result = executor.execute(task, context);
-    CHECK_FALSE(result.success);
-    CHECK(result.error_message.find("cancelled") != std::string::npos);
-    CHECK(context.getValueByPath(
-        "tasks.cancelled_action.outputs.not_executed").is_null());
+    check((!(result.success)));
+    check((result.error_message.find("cancelled") != std::string::npos));
+    check((context.getValueByPath(
+        "tasks.cancelled_action.outputs.not_executed").is_null()));
 }
 
-TEST_CASE("opt-in C11 Parallel fails closed without branch-host hooks") {
+spec("opt-in C11 respects cancellation before leaf entry") {
+    it("complete case") { test_opt_in_c11_respects_cancellation_before_leaf_entry_17(); }
+}
+
+[[maybe_unused]] static void test_opt_in_c11_parallel_fails_closed_without_branch_host_hooks_18() {
     using Praktor::Execution::ActionTreeBackend;
     using Praktor::Execution::DeclarativeTreeExecutor;
 
@@ -756,13 +824,17 @@ TEST_CASE("opt-in C11 Parallel fails closed without branch-host hooks") {
     }
     auto task = makeCoreOnlyActionTask("parallel_no_host", std::move(root));
     DeclarativeTreeExecutor executor({}, ActionTreeBackend::C11);
-    CHECK_THROWS_AS(executor.execute(task, context), std::invalid_argument);
-    CHECK(context.getValueByPath("tasks.parallel_no_host.outputs.a").is_null());
+    check_throws_as(executor.execute(task, context), std::invalid_argument);
+    check((context.getValueByPath("tasks.parallel_no_host.outputs.a").is_null()));
+}
+
+spec("opt-in C11 Parallel fails closed without branch-host hooks") {
+    it("complete case") { test_opt_in_c11_parallel_fails_closed_without_branch_host_hooks_18(); }
 }
 
 #else
 
-TEST_CASE("C11 action backend selection fails closed when adapter is disabled") {
+[[maybe_unused]] static void test_c11_action_backend_selection_fails_closed_when_adapter_is_disabled_19() {
     WorkflowContext context;
     OrchNode node;
     node.type = "SetVariable";
@@ -771,9 +843,13 @@ TEST_CASE("C11 action backend selection fails closed when adapter is disabled") 
     auto task = makeCoreOnlyActionTask("disabled_c11", std::move(node));
     Praktor::Execution::DeclarativeTreeExecutor executor(
         {}, Praktor::Execution::ActionTreeBackend::C11);
-    CHECK_THROWS_AS(executor.execute(task, context), std::runtime_error);
-    CHECK(context.getValueByPath(
-        "tasks.disabled_c11.outputs.not_executed").is_null());
+    check_throws_as(executor.execute(task, context), std::runtime_error);
+    check((context.getValueByPath(
+        "tasks.disabled_c11.outputs.not_executed").is_null()));
+}
+
+spec("C11 action backend selection fails closed when adapter is disabled") {
+    it("complete case") { test_c11_action_backend_selection_fails_closed_when_adapter_is_disabled_19(); }
 }
 
 #endif

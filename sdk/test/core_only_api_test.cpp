@@ -1,6 +1,6 @@
+#include "praktor_test.hpp"
 #include "praktor.h"
 
-#include <catch2/catch_test_macros.hpp>
 
 #include <chrono>
 #include <cstring>
@@ -21,7 +21,7 @@ std::filesystem::path createApiTempDir() {
 
 void writeText(const std::filesystem::path& path, const std::string& text) {
     std::ofstream out(path);
-    REQUIRE(out.is_open());
+    check((out.is_open()));
     out << text;
 }
 
@@ -43,17 +43,21 @@ int32_t PRAKTOR_CALL alwaysCancelled(void*) {
 
 } // namespace
 
-TEST_CASE("core-only ABI advertises JSON workflows without script capability") {
+[[maybe_unused]] static void test_core_only_abi_advertises_json_workflows_without_script_capability_1() {
     const praktor_api* api = praktor_get_api();
 
-    REQUIRE(api != nullptr);
-    CHECK((api->capabilities & PRAKTOR_CAPABILITY_JSON_WORKFLOW) != 0);
-    CHECK((api->capabilities & PRAKTOR_CAPABILITY_SCRIPT_ENGINE) == 0);
-    CHECK((api->capabilities & PRAKTOR_CAPABILITY_EXECUTION_CONTROL) != 0);
-    REQUIRE(api->execute_workflow_controlled != nullptr);
+    check((api != nullptr));
+    check(((api->capabilities & PRAKTOR_CAPABILITY_JSON_WORKFLOW) != 0));
+    check(((api->capabilities & PRAKTOR_CAPABILITY_SCRIPT_ENGINE) == 0));
+    check(((api->capabilities & PRAKTOR_CAPABILITY_EXECUTION_CONTROL) != 0));
+    check((api->execute_workflow_controlled != nullptr));
 }
 
-TEST_CASE("core-only ABI executes command workflow and rejects script workflow") {
+spec("core-only ABI advertises JSON workflows without script capability") {
+    it("complete case") { test_core_only_abi_advertises_json_workflows_without_script_capability_1(); }
+}
+
+[[maybe_unused]] static void test_core_only_abi_executes_command_workflow_and_rejects_script_workflow_2() {
     const auto dir = createApiTempDir();
     const auto command_workflow = dir / "command.yml";
     const auto script_workflow = dir / "script.yml";
@@ -74,9 +78,9 @@ tasks:
         praktor_owned_json output = PRAKTOR_OWNED_JSON_INIT;
         praktor_error error = PRAKTOR_ERROR_INIT;
 
-        CHECK(executeFile(command_workflow, output, error) == PRAKTOR_RESULT_SUCCESS);
-        REQUIRE(output.data != nullptr);
-        CHECK(std::strstr(output.data, "\"workflow_status\":\"success\"") != nullptr);
+        check((executeFile(command_workflow, output, error) == PRAKTOR_RESULT_SUCCESS));
+        check((output.data != nullptr));
+        check((std::strstr(output.data, "\"workflow_status\":\"success\"") != nullptr));
         praktor_release_json(&output);
     }
 
@@ -84,18 +88,22 @@ tasks:
         praktor_owned_json output = PRAKTOR_OWNED_JSON_INIT;
         praktor_error error = PRAKTOR_ERROR_INIT;
 
-        CHECK(executeFile(script_workflow, output, error) == PRAKTOR_RESULT_EXECUTION_FAILED);
-        REQUIRE(output.data != nullptr);
-        CHECK(std::strstr(output.data, "\"workflow_status\":\"failed\"") != nullptr);
-        CHECK(std::strstr(output.data, "ENABLE_SCRIPT_ENGINE=OFF") != nullptr);
+        check((executeFile(script_workflow, output, error) == PRAKTOR_RESULT_EXECUTION_FAILED));
+        check((output.data != nullptr));
+        check((std::strstr(output.data, "\"workflow_status\":\"failed\"") != nullptr));
+        check((std::strstr(output.data, "ENABLE_SCRIPT_ENGINE=OFF") != nullptr));
         praktor_release_json(&output);
     }
 
     std::filesystem::remove_all(dir);
 }
 
+spec("core-only ABI executes command workflow and rejects script workflow") {
+    it("complete case") { test_core_only_abi_executes_command_workflow_and_rejects_script_workflow_2(); }
+}
 
-TEST_CASE("core-only ABI honors pre-start cancellation") {
+
+[[maybe_unused]] static void test_core_only_abi_honors_pre_start_cancellation_3() {
     const auto dir = createApiTempDir();
     const auto workflow = dir / "cancelled.yml";
     writeText(workflow, R"(
@@ -116,13 +124,17 @@ tasks:
 
     praktor_owned_json output = PRAKTOR_OWNED_JSON_INIT;
     praktor_error error = PRAKTOR_ERROR_INIT;
-    REQUIRE(praktor_execute_workflow_controlled(
+    check((praktor_execute_workflow_controlled(
                 &request, &control, &output, &error) ==
-            PRAKTOR_RESULT_CANCELLED);
-    REQUIRE(output.data != nullptr);
-    CHECK(std::strstr(output.data, "\"workflow_status\":\"cancelled\"") != nullptr);
-    CHECK(std::string(error.message) == "Workflow execution cancelled");
+            PRAKTOR_RESULT_CANCELLED));
+    check((output.data != nullptr));
+    check((std::strstr(output.data, "\"workflow_status\":\"cancelled\"") != nullptr));
+    check((std::string(error.message) == "Workflow execution cancelled"));
     praktor_release_json(&output);
 
     std::filesystem::remove_all(dir);
+}
+
+spec("core-only ABI honors pre-start cancellation") {
+    it("complete case") { test_core_only_abi_honors_pre_start_cancellation_3(); }
 }
