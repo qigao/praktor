@@ -587,7 +587,7 @@ int testShellUsesSaltsProcessByDefaultAndAllowsExplicitOverride() {
 }
 
 
-int testShellRejectsZeroTimeoutBeforeSpawningProcess {
+int testShellRejectsZeroTimeoutBeforeSpawningProcess() {
   actions::Tree tree;
   tree.root.id = "Shell";
   tree.root.params.emplace("cmd", actions::Value{std::string("echo must-not-run")});
