@@ -2083,9 +2083,14 @@ int testRunOnceAndKeepRunningStateMatchExecutor() {
 }
 
 int testHostOnlySessionHasNoLegacyRuntimeObjects() {
+  actions::Tree inner;
+  inner.name = "inner";
+  inner.root.id = "HostTask";
   actions::Tree tree;
-  tree.root.id = "Observe";
-  actions::c11::SubTreeRegistry registry(0u);
+  tree.root.id = "SubTree";
+  tree.root.params.emplace("tree", actions::Value{std::string("inner")});
+  actions::c11::SubTreeRegistry registry(1u);
+  CHECK(registry.add(inner));
   HostValueMap values{{"seed", "host-owned"}};
   int host_calls = 0;
   praktor_c11_bt_host hooks{};
@@ -2096,9 +2101,11 @@ int testHostOnlySessionHasNoLegacyRuntimeObjects() {
   hooks.value_set = &hostValueSet;
   hooks.value_contains = &hostValueContains;
   hooks.value_user = &values;
-  actions::c11::TreeExecutorSession session(
-      tree, registry.resolver(), limits(), hooks);
+  auto resolver = registry.resolver();
+  actions::c11::TreeExecutorSession session(tree, resolver, limits(), hooks);
   CHECK(session.validate() == SALTS_OK);
+  CHECK(session.plan().nodes.size() == 1u);
+  CHECK(session.sourceNode(0u)->id == "HostTask");
   salts_bt_node_status status = SALTS_BT_FAILURE;
   CHECK(session.tick(&status) == SALTS_OK);
   CHECK(status == SALTS_BT_SUCCESS);
