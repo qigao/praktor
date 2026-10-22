@@ -43,12 +43,10 @@ cmake --build "$build_dir" \
 # The separately instrumented C11 Session smoke test remains useful here.
 case "$mode" in
   address)
-    test_regex='^(actions_c11_tree_executor_session_test|core_only_workflow_test\.praktor_lib)
-
+    test_regex='^(actions_c11_tree_executor_session_test|core_only_workflow_test\.praktor_lib)$'
     ;;
   thread)
-    test_regex='^actions_c11_tree_executor_session_test
-
+    test_regex='^actions_c11_tree_executor_session_test$'
     ;;
 esac
 ctest --test-dir "$build_dir" \
