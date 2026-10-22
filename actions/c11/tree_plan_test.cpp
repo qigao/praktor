@@ -1,3 +1,4 @@
+#include "core/executor.hpp"
 #include "tree_plan.hpp"
 
 #include <cstdio>
