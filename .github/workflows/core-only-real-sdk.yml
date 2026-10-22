@@ -25,6 +25,7 @@ on:
       - "tools/**"
       - "vcpkg.json"
       - ".github/workflows/core-only-real-sdk.yml"
+      - ".github/workflows/c11-source-tsan.yml"
 
 permissions:
   contents: read
@@ -245,3 +246,15 @@ jobs:
         with:
           path: ${{ env.CCACHE_DIR }}
           key: ${{ steps.ccache.outputs.cache-primary-key }}
+
+  # Required P1 owner/lease TSan gate. A released Salts.Native binary hides
+  # its logger's atomic release/acquire from TSan; instead compile and audit
+  # Salts + SaltsUtils + real Praktor YAML/Session from source under TSan.
+  # This is one reusable job per Core-only run, not another PR-triggered run.
+  complete-source-tsan:
+    name: C11 full-source TSan (real workflow and Process leases)
+    uses: ./.github/workflows/c11-source-tsan.yml
+    permissions:
+      contents: read
+      packages: read
+    secrets: inherit
