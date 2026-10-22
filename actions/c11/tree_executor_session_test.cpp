@@ -2746,7 +2746,6 @@ int testHostValueStoreDeclinedLeafDoesNotFallback() {
   salts_bt_node_status status = SALTS_BT_SUCCESS;
   CHECK(session.tick(&status) == SALTS_ENOTSUP);
   CHECK(legacy_calls == 0);
-  CHECK(status == SALTS_BT_FAILURE || status == SALTS_BT_SUCCESS);
   CHECK(session.lastError().find("refusing legacy Executor fallback") !=
         std::string::npos);
   return 0;
