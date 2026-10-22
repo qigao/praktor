@@ -488,7 +488,79 @@ struct TreeExecutorSession::Impl : std::enable_shared_from_this<Impl> {
     }
   }
 
+  std::string getValue(const std::string& key) const {
+    if (hooks.value_get == nullptr) return blackboard.get(key);
+    constexpr size_t kMaximumHostValueBytes = 16u * 1024u * 1024u;
+    size_t required = 0u;
+    int status = hooks.value_get(hooks.value_user, key.c_str(), nullptr, 0u,
+                                 &required);
+    if (status == PRAKTOR_C11_BT_VALUE_NOT_FOUND) {
+      throw std::out_of_range("C11 host value not found: " + key);
+    }
+    if (status == PRAKTOR_C11_BT_VALUE_OK && required == 0u) return {};
+    if (status != PRAKTOR_C11_BT_VALUE_BUFFER_TOO_SMALL ||
+        required > kMaximumHostValueBytes) {
+      throw std::runtime_error("C11 host value size query failed: " + key);
+    }
+    std::string value(required + 1u, '\0');
+    size_t actual = 0u;
+    status = hooks.value_get(hooks.value_user, key.c_str(), value.data(),
+                             value.size(), &actual);
+    if (status != PRAKTOR_C11_BT_VALUE_OK || actual != required) {
+      throw std::runtime_error("C11 host value read failed: " + key);
+    }
+    value.resize(actual);
+    return value;
+  }
+
+  bool hasValue(const std::string& key) const {
+    if (hooks.value_contains == nullptr) return blackboard.has(key);
+    int contains = 0;
+    const int status = hooks.value_contains(hooks.value_user, key.c_str(),
+                                            &contains);
+    if (status != PRAKTOR_C11_BT_VALUE_OK) {
+      throw std::runtime_error("C11 host value contains query failed: " + key);
+    }
+    return contains != 0;
+  }
+
+  void setValue(const std::string& key, const std::string& value) {
+    if (hooks.value_set == nullptr) {
+      blackboard.set(key, value);
+      return;
+    }
+    if (hooks.value_set(hooks.value_user, key.c_str(), value.c_str()) !=
+        PRAKTOR_C11_BT_VALUE_OK) {
+      throw std::runtime_error("C11 host value write failed: " + key);
+    }
+  }
+
+  ValueGetter valueGetter() const {
+    return [this](const std::string& key) { return getValue(key); };
+  }
+
+  ValueContains valueContains() const {
+    return [this](const std::string& key) { return hasValue(key); };
+  }
+
+  std::string resolveValue(const actions::Value& value) const {
+    return resolveStringValue(value, valueGetter());
+  }
+
+  int resolveSwitch(const actions::Node& source) const {
+    return resolveSwitchValue(source, valueGetter(), valueContains());
+  }
+
   void validateHostContracts() const {
+    const bool has_value_get = hooks.value_get != nullptr;
+    const bool has_value_set = hooks.value_set != nullptr;
+    const bool has_value_contains = hooks.value_contains != nullptr;
+    if ((has_value_get || has_value_set || has_value_contains) &&
+        (!has_value_get || !has_value_set || !has_value_contains ||
+         hooks.value_user == nullptr)) {
+      throw std::invalid_argument(
+          "C11 host value store requires get/set/contains callbacks and value_user");
+    }
     for (size_t i = 0u; i < compiled_plan.nodes.size(); ++i) {
       const auto& desc = compiled_plan.nodes[i];
       const auto* source = nodeAt(i);
@@ -725,13 +797,13 @@ struct TreeExecutorSession::Impl : std::enable_shared_from_this<Impl> {
   }
 
   void publishShellResult(ShellState& state, int exit_code, bool success) {
-    blackboard.set(state.output_key, state.stdout_data);
-    blackboard.set(state.stderr_key, state.stderr_data);
-    blackboard.set(state.exit_code_key, std::to_string(exit_code));
+    setValue(state.output_key, state.stdout_data);
+    setValue(state.stderr_key, state.stderr_data);
+    setValue(state.exit_code_key, std::to_string(exit_code));
     if (!success) {
       // Legacy Executor always publishes captured stderr here, even when the
       // process fails with no stderr output. Keep diagnostics in lastError().
-      blackboard.set("shell_error", state.stderr_data);
+      setValue("shell_error", state.stderr_data);
     }
   }
 
@@ -807,7 +879,7 @@ struct TreeExecutorSession::Impl : std::enable_shared_from_this<Impl> {
       return SALTS_EINVAL;
     }
 
-    state.command = resolveStringValue(command_it->second, blackboard);
+    state.command = resolveValue(command_it->second);
     if (state.command.empty()) {
       state.failure_reason = "Shell command must not be empty";
       return SALTS_EINVAL;
@@ -815,25 +887,25 @@ struct TreeExecutorSession::Impl : std::enable_shared_from_this<Impl> {
     state.input.clear();
     const auto input_it = source.params.find("input");
     if (input_it != source.params.end()) {
-      state.input = resolveStringValue(input_it->second, blackboard);
+      state.input = resolveValue(input_it->second);
     }
     state.working_dir.clear();
     const auto cwd_it = source.params.find("working_dir");
     if (cwd_it != source.params.end()) {
-      state.working_dir = resolveStringValue(cwd_it->second, blackboard);
+      state.working_dir = resolveValue(cwd_it->second);
     }
     state.output_key = "shell_output";
     state.stderr_key = "shell_stderr";
     state.exit_code_key = "shell_exit_code";
     const auto output_it = source.params.find("output_key");
-    if (output_it != source.params.end()) state.output_key = resolveStringValue(output_it->second, blackboard);
+    if (output_it != source.params.end()) state.output_key = resolveValue(output_it->second);
     const auto stderr_it = source.params.find("stderr_key");
-    if (stderr_it != source.params.end()) state.stderr_key = resolveStringValue(stderr_it->second, blackboard);
+    if (stderr_it != source.params.end()) state.stderr_key = resolveValue(stderr_it->second);
     const auto exit_it = source.params.find("exit_code_key");
-    if (exit_it != source.params.end()) state.exit_code_key = resolveStringValue(exit_it->second, blackboard);
+    if (exit_it != source.params.end()) state.exit_code_key = resolveValue(exit_it->second);
     state.stream_output = true;
     const auto stream_it = source.params.find("stream_output");
-    if (stream_it != source.params.end()) state.stream_output = shellBooleanValue(stream_it->second, blackboard);
+    if (stream_it != source.params.end()) state.stream_output = shellBooleanValue(stream_it->second, valueGetter());
 
     uint64_t timeout_ms = UINT64_C(30000);
     const auto timeout_it = source.params.find("timeout");
@@ -846,7 +918,7 @@ struct TreeExecutorSession::Impl : std::enable_shared_from_this<Impl> {
       if (std::holds_alternative<double>(timeout_it->second)) {
         timeout_text = std::to_string(std::get<double>(timeout_it->second));
       } else {
-        timeout_text = resolveStringValue(timeout_it->second, blackboard);
+        timeout_text = resolveValue(timeout_it->second);
       }
       const int64_t timeout = parseInteger(timeout_text);
       if (timeout <= 0) {
@@ -1065,7 +1137,7 @@ struct TreeExecutorSession::Impl : std::enable_shared_from_this<Impl> {
           }
           if (active_stage_index == descendant &&
               state.input_restore_tick != tick_generation) {
-            blackboard.set("pipeline_input", state.data);
+            setValue("pipeline_input", state.data);
             state.input_restore_tick = tick_generation;
             return;
           }
@@ -1098,7 +1170,7 @@ struct TreeExecutorSession::Impl : std::enable_shared_from_this<Impl> {
           if (source == nullptr) return SALTS_EINVAL;
           // Preserve legacy ordering: validate the selector before concluding
           // that an empty Switch has no child and therefore fails.
-          (void)resolveSwitchValue(*source, blackboard);
+          (void)resolveSwitch(*source);
           *out_status = SALTS_BT_FAILURE;
           return SALTS_OK;
         } catch (...) {
@@ -1351,7 +1423,7 @@ struct TreeExecutorSession::Impl : std::enable_shared_from_this<Impl> {
         last_error = "condition callback requested without scalar condition parameter";
         return SALTS_EINVAL;
       }
-      *out_status = conditionValue(it->second, blackboard)
+      *out_status = conditionValue(it->second, valueGetter())
                         ? SALTS_BT_SUCCESS
                         : SALTS_BT_FAILURE;
       return SALTS_OK;
@@ -1374,7 +1446,7 @@ struct TreeExecutorSession::Impl : std::enable_shared_from_this<Impl> {
       }
       const auto* source = nodeAt(index);
       if (source == nullptr) return SALTS_EINVAL;
-      const int parsed = resolveSwitchValue(*source, blackboard);
+      const int parsed = resolveSwitch(*source);
       *out_child_index = parsed < 0 ? source->children.size()
                                     : static_cast<size_t>(parsed);
       return SALTS_OK;
@@ -1464,18 +1536,18 @@ struct TreeExecutorSession::Impl : std::enable_shared_from_this<Impl> {
         std::string input_key = "pipeline_input";
         const auto input = source->params.find("input_key");
         if (input != source->params.end()) {
-          input_key = resolveStringValue(input->second, blackboard);
+          input_key = resolveValue(input->second);
         }
         state.output_key = "pipeline_result";
         const auto output = source->params.find("output_key");
         if (output != source->params.end()) {
-          state.output_key = resolveStringValue(output->second, blackboard);
+          state.output_key = resolveValue(output->second);
         }
-        state.data = blackboard.has(input_key) ? blackboard.get(input_key) : "";
+        state.data = hasValue(input_key) ? getValue(input_key) : "";
         state.initialized = true;
       }
       state.active_child = child;
-      blackboard.set("pipeline_input", state.data);
+      setValue("pipeline_input", state.data);
       return SALTS_OK;
     } catch (...) {
       rememberCurrentException("C11 PipelineSequence prepare failed");
@@ -1503,11 +1575,11 @@ struct TreeExecutorSession::Impl : std::enable_shared_from_this<Impl> {
       if (!state.initialized) return SALTS_EINVAL;
 
       if (status == SALTS_BT_SUCCESS) {
-        if (blackboard.has("pipeline_output")) {
-          state.data = blackboard.get("pipeline_output");
+        if (hasValue("pipeline_output")) {
+          state.data = getValue("pipeline_output");
         }
         if (child + 1u == source->children.size()) {
-          blackboard.set(state.output_key, state.data);
+          setValue(state.output_key, state.data);
           state = PipelineState{};
         }
       } else {
@@ -1552,14 +1624,14 @@ struct TreeExecutorSession::Impl : std::enable_shared_from_this<Impl> {
         last_error = "EntryUpdated requires parameter 'watch_key'";
         return SALTS_EINVAL;
       }
-      const std::string key = resolveStringValue(key_it->second, blackboard);
+      const std::string key = resolveValue(key_it->second);
       if (key.empty()) {
         // Legacy EntryUpdated rejects an empty watch_key before its child runs.
         // The same fail-closed rule applies to late-bound Blackboard values.
         last_error = "EntryUpdated requires a non-empty 'watch_key'";
         return SALTS_EINVAL;
       }
-      const std::string current = blackboard.has(key) ? blackboard.get(key) : "";
+      const std::string current = hasValue(key) ? getValue(key) : "";
       auto& state = entry_updated_states[node];
       *changed = !state.observed || current != state.value;
       state.value = current;
@@ -1593,9 +1665,9 @@ struct TreeExecutorSession::Impl : std::enable_shared_from_this<Impl> {
       std::string queue_key = "task_queue";
       const auto queue_key_it = source->params.find("queue_key");
       if (queue_key_it != source->params.end()) {
-        queue_key = resolveStringValue(queue_key_it->second, blackboard);
+        queue_key = resolveValue(queue_key_it->second);
       }
-      if (!blackboard.has(queue_key)) {
+      if (!hasValue(queue_key)) {
         *has_item = false;
         return SALTS_OK;
       }
@@ -1604,7 +1676,7 @@ struct TreeExecutorSession::Impl : std::enable_shared_from_this<Impl> {
       std::string remaining;
       bool has_more = false;
       bool queue_is_empty = false;
-      if (!consumeJsonArrayFront(blackboard.get(queue_key), item, remaining,
+      if (!consumeJsonArrayFront(getValue(queue_key), item, remaining,
                                  has_more, queue_is_empty)) {
         if (!queue_is_empty) return SALTS_EIO;
         *has_item = false;
@@ -1614,13 +1686,13 @@ struct TreeExecutorSession::Impl : std::enable_shared_from_this<Impl> {
       std::string item_key = "current_item";
       const auto item_key_it = source->params.find("item_key");
       if (item_key_it != source->params.end()) {
-        item_key = resolveStringValue(item_key_it->second, blackboard);
+        item_key = resolveValue(item_key_it->second);
       }
 
       // Match the legacy Executor: dequeue and publish the current item before
       // invoking the child, including when that child later fails or is halted.
-      blackboard.set(queue_key, remaining);
-      blackboard.set(item_key, item);
+      setValue(queue_key, remaining);
+      setValue(item_key, item);
       state.active = true;
       state.has_more = has_more;
       *has_item = true;
