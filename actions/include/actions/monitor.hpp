@@ -20,7 +20,7 @@ struct NodeMetrics {
   int failure_count = 0;
   int running_count = 0;
   std::chrono::milliseconds total_duration{0};
-  std::chrono::milliseconds min_duration{std::chrono::milliseconds::max()};
+  std::chrono::milliseconds min_duration{(std::chrono::milliseconds::max)()};
   std::chrono::milliseconds max_duration{0};
   std::chrono::milliseconds avg_duration{0};
   
