@@ -547,15 +547,15 @@ int testShellUsesSaltsProcessByDefaultAndAllowsExplicitOverride() {
     actions::ExecutionContext context;
     ScopedProcessRetainer owner;
     int unused_user = 0;
-    HostValueMap values;
+    ScopedC11ValueStore values;
     praktor_c11_bt_host hooks{};
     hooks.tick_leaf = &hostDeclineLeaf;
     hooks.halt_leaf = &noOpHalt;
     hooks.user = &unused_user;
-    hooks.value_get = &hostValueGet;
-    hooks.value_set = &hostValueSet;
-    hooks.value_contains = &hostValueContains;
-    hooks.value_user = &values;
+    hooks.value_get = &c11ValueStoreGet;
+    hooks.value_set = &c11ValueStoreSet;
+    hooks.value_contains = &c11ValueStoreContains;
+    hooks.value_user = &values.store;
     actions::c11::TreeExecutorSession session(
         tree, executor, legacy_blackboard, context, limits(), &hooks,
         &owner.owner);
@@ -569,8 +569,17 @@ int testShellUsesSaltsProcessByDefaultAndAllowsExplicitOverride() {
             std::chrono::seconds(5));
     } while (status == SALTS_BT_RUNNING);
     CHECK(status == SALTS_BT_SUCCESS);
-    CHECK(values["shell_output"].find("host-store") != std::string::npos);
-    CHECK(values["shell_exit_code"] == "0");
+    char output[256] = {};
+    char exit_code[32] = {};
+    size_t output_size = 0u, exit_size = 0u;
+    CHECK(praktor_c11_value_store_get(&values.store, "shell_output",
+                                      output, sizeof(output), &output_size) ==
+          PRAKTOR_C11_VALUE_OK);
+    CHECK(std::string(output).find("host-store") != std::string::npos);
+    CHECK(praktor_c11_value_store_get(&values.store, "shell_exit_code",
+                                      exit_code, sizeof(exit_code), &exit_size) ==
+          PRAKTOR_C11_VALUE_OK);
+    CHECK(std::string(exit_code) == "0");
     CHECK(!legacy_blackboard.has("shell_output"));
     CHECK(!legacy_blackboard.has("shell_exit_code"));
   }
