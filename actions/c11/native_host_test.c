@@ -10,7 +10,7 @@ int main(void) {
   praktor_c11_leaf_parameter params[2] = {
       {"key", PRAKTOR_C11_LEAF_STRING, "answer", 0.0, false},
       {"value", PRAKTOR_C11_LEAF_STRING, "{source}", 0.0, false}};
-  praktor_c11_leaf_request request = {0u, "SetVariable", params, 2u};
+  praktor_c11_leaf_request request = {0u, "SetVariable", params, 2u, false};
   salts_bt_node_status status = SALTS_BT_FAILURE;
   char text[65]; size_t size = 0u;
   CHECK(praktor_c11_native_host_init(&host, 2u, 32u, 64u) == SALTS_OK);
@@ -20,6 +20,9 @@ int main(void) {
   CHECK(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_OK && status == SALTS_BT_SUCCESS);
   CHECK(praktor_c11_value_store_get(values, "answer", text, sizeof(text), &size) == PRAKTOR_C11_VALUE_OK);
   CHECK(strcmp(text, "value") == 0);
+  request.in_parallel_branch = true;
+  CHECK(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_ENOTSUP);
+  request.in_parallel_branch = false;
   params[1].kind = PRAKTOR_C11_LEAF_NUMBER; params[1].number = NAN;
   CHECK(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_EINVAL);
   CHECK(praktor_c11_value_store_get(values, "answer", text, sizeof(text), &size) == PRAKTOR_C11_VALUE_OK && strcmp(text, "value") == 0);

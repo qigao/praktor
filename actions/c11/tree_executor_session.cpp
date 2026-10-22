@@ -560,7 +560,8 @@ struct TreeExecutorSession::Impl : std::enable_shared_from_this<Impl> {
     if (hooks.tick_typed_leaf != nullptr) {
       const auto& parameters = leaf_parameters[index];
       const praktor_c11_leaf_request request{
-          index, nodeAt(index)->id.c_str(), parameters.data(), parameters.size()};
+          index, nodeAt(index)->id.c_str(), parameters.data(), parameters.size(),
+          isInsideParallelBranch(index)};
       return hooks.tick_typed_leaf(hooks.user, &request, out_status);
     }
     return hooks.tick_leaf == nullptr ? SALTS_ENOTSUP

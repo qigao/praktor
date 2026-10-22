@@ -7,7 +7,7 @@ extern "C" {
 #endif
 /* Single-driver owner: fixed-capacity values and preallocated parameter scratch.
  * No legacy objects or per-tick allocations. Borrow hooks only until destroy.
- * Unsupported actions return ENOTSUP; there is no implicit legacy dispatch. */
+ * Parallel-branch requests and unsupported actions return ENOTSUP; there is no implicit legacy dispatch. */
 typedef struct praktor_c11_native_host { void *impl; } praktor_c11_native_host;
 int praktor_c11_native_host_init(praktor_c11_native_host *host, size_t capacity,
                                  size_t max_key_bytes, size_t max_value_bytes);

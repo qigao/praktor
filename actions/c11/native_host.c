@@ -96,6 +96,8 @@ static int tick_leaf(void *user, const praktor_c11_leaf_request *request,
   size_t required = 0u, i, j;
   if (impl == NULL || request == NULL || request->action == NULL || status == NULL ||
       (request->parameter_count != 0u && request->parameters == NULL)) return SALTS_EINVAL;
+  /* This host owns one root store, not branch-local transactions. */
+  if (request->in_parallel_branch) return SALTS_ENOTSUP;
   for (i = 0u; i < request->parameter_count; ++i) {
     if (request->parameters[i].name == NULL) return SALTS_EINVAL;
     for (j = 0u; j < i; ++j)

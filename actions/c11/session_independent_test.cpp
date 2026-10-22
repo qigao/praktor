@@ -65,6 +65,21 @@ int nativeValuesAndCapacity() {
   CHECK(declined.tick(&status) == SALTS_ENOTSUP);
   return 0;
 }
+int parallelScopeFailsClosed() {
+  Host host;
+  host.hooks.parallel_enter = [](void*, size_t, size_t, bool) -> int { return SALTS_OK; };
+  host.hooks.parallel_step = [](void*, size_t, size_t, salts_bt_node_status) -> int { return SALTS_OK; };
+  host.hooks.parallel_join = [](void*, size_t, salts_bt_node_status) -> int { return SALTS_OK; };
+  host.hooks.parallel_finish = [](void*, size_t, size_t, salts_bt_node_status) -> int { return SALTS_OK; };
+  host.hooks.parallel_abort = [](void*, size_t, size_t) {};
+  actions::Tree tree; tree.root.id = "Parallel";
+  tree.root.children.push_back(setVariable("root-must-stay-empty", std::string("branch-value")));
+  actions::c11::TreeExecutorSession session(tree, {}, limits(), host.hooks);
+  salts_bt_node_status status = SALTS_BT_FAILURE;
+  CHECK(session.tick(&status) == SALTS_ENOTSUP);
+  CHECK(praktor_c11_value_store_size(praktor_c11_native_host_values(&host.state)) == 0u);
+  return 0;
+}
 struct RunningHost {
   int ticks = 0, halts = 0;
   bool decline = false;
@@ -154,5 +169,6 @@ int realProcessAndRetainer() {
 int main() {
   if (nativeValuesAndCapacity() != 0) return 1;
   if (typedCancellationAndTimeout() != 0) return 1;
+  if (parallelScopeFailsClosed() != 0) return 1;
   return realProcessAndRetainer();
 }

@@ -73,6 +73,9 @@ typedef struct praktor_c11_leaf_request {
   const char *action;
   const praktor_c11_leaf_parameter *parameters;
   size_t parameter_count;
+  /* Root-scoped helpers must decline this request. A branch-aware host routes
+   * it to its own branch state using the stable node index and compiled plan. */
+  bool in_parallel_branch;
 } praktor_c11_leaf_request;
 
 typedef struct praktor_c11_bt_host {
