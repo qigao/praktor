@@ -33,7 +33,7 @@ cmake --preset "$CMAKE_PRESET" -B "$build_dir" \
   "-DCMAKE_SHARED_LINKER_FLAGS=$sanitizer_flags"
 
 cmake --build "$build_dir" \
-  --target shell_executor_test praktor_process_driver_test actions_c11_tree_executor_session_test actions_c11_session_independent_test actions_c11_native_host_test actions_c11_session_yaml_differential_test core_only_workflow_test.praktor_lib \
+  --target shell_executor_test praktor_process_driver_test actions_c11_tree_executor_session_test actions_c11_session_c_test actions_c11_session_independent_test actions_c11_native_host_test actions_c11_session_yaml_differential_test core_only_workflow_test.praktor_lib \
   --parallel 2
 # Released Salts.Native is not TSan-instrumented. Consumer-only TSan
 # cannot see its async logger's release/acquire edges and reports an invalid
@@ -43,10 +43,10 @@ cmake --build "$build_dir" \
 # The separately instrumented C11 Session smoke test remains useful here.
 case "$mode" in
   address)
-    test_regex='^(shell_executor_test|praktor_process_driver_test|actions_c11_tree_executor_session_test|actions_c11_session_independent_test|actions_c11_native_host_test|actions_c11_session_yaml_differential_test|core_only_workflow_test\.praktor_lib)$'
+    test_regex='^(shell_executor_test|praktor_process_driver_test|actions_c11_tree_executor_session_test|actions_c11_session_c_test|actions_c11_session_independent_test|actions_c11_native_host_test|actions_c11_session_yaml_differential_test|core_only_workflow_test\.praktor_lib)$'
     ;;
   thread)
-    test_regex='^(shell_executor_test|praktor_process_driver_test|actions_c11_tree_executor_session_test|actions_c11_session_independent_test|actions_c11_native_host_test)$'
+    test_regex='^(shell_executor_test|praktor_process_driver_test|actions_c11_tree_executor_session_test|actions_c11_session_c_test|actions_c11_session_independent_test|actions_c11_native_host_test)$'
     ;;
 esac
 ctest --test-dir "$build_dir" \

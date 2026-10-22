@@ -207,9 +207,21 @@ jobs:
           cmake -S shared/process/standalone -B build/p1-process-c-tsan -G Ninja \
             -DCMAKE_BUILD_TYPE=Debug "-DCMAKE_C_FLAGS=$flags" -DCMAKE_EXE_LINKER_FLAGS=-fsanitize=thread
           cmake --build build/p1-process-c-tsan --parallel 2
-          python3 cmake/ci/audit-c11-process-link.py build/p1-process-c-tsan/praktor_process_driver_test
+          python3 cmake/ci/audit-c11-runtime-link.py build/p1-process-c-tsan/praktor_process_driver_test
           export LD_LIBRARY_PATH="$SALTS_SOURCE_TSAN_ROOT/lib:$SALTS_UTILS_SOURCE_TSAN_ROOT/lib:$CHTTP_ROOT/lib:${LD_LIBRARY_PATH:-}"
           ctest --test-dir build/p1-process-c-tsan --no-tests=error --output-on-failure --timeout 90
+
+      - name: Prove C-only Session under complete-source TSan
+        shell: bash
+        run: |
+          set -euo pipefail
+          flags="-fsanitize=thread -fno-omit-frame-pointer -O1 -g"
+          cmake -S actions/c11/session-c-standalone -B build/p1-session-c-tsan -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug "-DCMAKE_C_FLAGS=$flags" -DCMAKE_EXE_LINKER_FLAGS=-fsanitize=thread
+          cmake --build build/p1-session-c-tsan --parallel 2
+          python3 cmake/ci/audit-c11-runtime-link.py build/p1-session-c-tsan/actions_c11_session_c_test
+          export LD_LIBRARY_PATH="$SALTS_SOURCE_TSAN_ROOT/lib:$SALTS_UTILS_SOURCE_TSAN_ROOT/lib:$CHTTP_ROOT/lib:${LD_LIBRARY_PATH:-}"
+          ctest --test-dir build/p1-session-c-tsan --no-tests=error --output-on-failure --timeout 90
 
       - name: Prove independent Session against complete-source TSan SDK
         shell: bash
@@ -283,6 +295,7 @@ jobs:
           retention-days: 14
           path: |
             build/p1-session-standalone-tsan/Testing/Temporary/LastTest.log
+            build/p1-session-c-tsan/Testing/Temporary/LastTest.log
             build/p1-source-tsan-audit.json
             build/p1-source-tsan-linked-libraries.txt
             build/p1-salts-tsan/compile_commands.json

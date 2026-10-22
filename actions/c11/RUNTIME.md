@@ -9,13 +9,23 @@ production switch is implied by these independent execution targets.
 | `praktor_c11_value_store` | Fixed-capacity C11 values and optimistic transactions |
 | `praktor_c11_native_host` | C11 value-store owner and preallocated parameter scratch; typed `SetVariable`, `CheckExitCode`, cooperative `Sleep` and unfiltered `ParseLines` leaves |
 | `praktor_process_driver` | C11 Process I/O, bounded capture, close and explicit retainer handoff; no C++ state, thread or runtime dependency |
-| `praktor_c11_session` | C++ AST compiler/session over C11 state, JSON queue hooks and Salts::Process; no legacy execution symbols |
+| `praktor_c11_session_core` | Entire C11 Session runtime: owned bounded typed plan, dispatch/activation ownership, dynamic controls, pipeline/entry/JSON queue state and Salts::Process; no C++ compiler or runtime |
+| `praktor_c11_session` | Construction-only C++ AST compiler and exception boundary over `praktor_c11_session_core`; no legacy execution symbols |
 | `praktor_actions_c11` | Explicit compatibility constructors, legacy Blackboard access, Executor dispatch, environment and Shell log adaptation |
 
 The independent Session uses the host-only constructor, a construction-only
 SubTree resolver and `praktor_c11_native_host_bind()` (or explicit host hooks).
+C callers instead use `session.h` directly and link `praktor_c11_session_core`.
+`praktor_c11_session_init()` deep-copies a validated preorder plan and typed
+parameters. Construction storage can be released immediately after init. The
+configuration bounds plan bytes, parameters per node, each resolved value and
+aggregate cached state; tree limits bound node/depth/iteration counts. Scratch
+and caches grow within these budgets; JSON queue parsing allocates per visit.
+This is bounded memory, not an allocation-free tick guarantee. Host callbacks
+and the external Process retainer remain borrowed for the Session lifetime.
+
 Typed requests preserve string/number/boolean ports. Payloads refer to the
-session-owned AST and must not be retained past their callback. A dispatcher
+C-owned compiled plan and must not be retained past their callback. A dispatcher
 returning RUNNING owns that activation until completion or `halt_leaf`; it
 cannot decline on resume and transfer ownership. Select either typed or indexed
 leaf dispatch, and provide exactly one indexed or typed halt callback. Unsupported native leaves fail closed;
@@ -80,7 +90,15 @@ Validation projects:
 - `shared/process/standalone`: C compiler/linker only, real duplex child I/O,
   capture limits, callback failure, saturation and zero-budget handoff after
   callback-user destruction. A link audit rejects C++ ABI/runtime dependencies.
-- `actions/c11/session-standalone`: independent Session link/run, including typed
+- `actions/c11/session-c-standalone`: a `LANGUAGES C` project that rejects C++
+  compiler/target loading. TinyTest exercises owned plan lifetime, bounded state,
+  Switch/conditions/dynamic Retry and Timeout, pipeline/entry/JSON queue semantics,
+  pinned Host owners, first-tick failure cleanup, reentrancy, Sleep cancellation,
+  real Shell execution and retainer transfer after Host destruction. The shared
+  `audit-c11-runtime-link.py` rejects C++ execution symbols and runtime libraries.
+  Core-only and complete-source TSan run this project; Native SDK and ASan/UBSan
+  run the same C tests through the root build.
+- `actions/c11/session-standalone`: independent C++ construction bridge link/run, including typed
   dispatch, values/capacity, cancellation/dynamic Timeout and real Process
   handoff after host destruction. Legacy targets do not exist in this project.
 - `cmake/ci/audit-c11-session-link.py`: rejects legacy execution symbols in that
@@ -97,8 +115,15 @@ Validation projects:
   The value-store, Native Host, independent Session and YAML differential runners
   use Salts::TinyTest, including native C tests in the C-only build.
 
-The C++ AST compiler/Session bridge and explicit Legacy facade (including its
-observer synchronization and scheduling thread) remain. This removes Process
-execution state from C++, not all C++ files or the default Legacy backend.
+`tree_executor_session.cpp` has been removed. Its runtime no longer exists in
+C++; the construction-only `session_ast_bridge.cpp` delegates every operation to
+the same C implementation used by direct C callers. C++ exceptions are contained
+in the facade and cannot unwind through the C runtime. Compatibility dispatch is
+an explicit optional callback group; the C archive has no Executor, Blackboard,
+ExecutionContext or C++ ABI dependency.
+
+The C++ AST compiler, YAML/Workflow/SDK/CLI layers and explicit Legacy facade
+(including observer synchronization and scheduling) still remain. Removing all
+C++ is the migration goal; this step does not yet replace the default backend.
 Full WorkflowContext migration, all built-in leaves, native event queues,
 branch-transaction integration and complete YAML/node parity remain open.

@@ -65,7 +65,9 @@ private:
  * An opt-in execution bridge for the compiled C11 tree.
  *
  * Link praktor_c11_session for the host-only constructor. This independent
- * target owns the AST/Salts state but has no legacy execution link dependency.
+ * target owns construction AST metadata and a C Session handle, with no legacy
+ * execution link dependency. `session.h` / praktor_c11_session_core provide the
+ * same runtime directly to C callers without an AST or C++ compiler.
  * The C11 native_host helper supplies bounded values plus typed SetVariable /
  * CheckExitCode dispatch and explicitly budgeted cooperative Sleep. Other
  * actions need explicit host dispatch or Shell.

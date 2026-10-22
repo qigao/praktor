@@ -230,8 +230,18 @@ jobs:
           set -euo pipefail
           cmake -S shared/process/standalone -B build/ci-process-c -G Ninja -DCMAKE_BUILD_TYPE=Release
           cmake --build build/ci-process-c --parallel 2
-          python3 cmake/ci/audit-c11-process-link.py build/ci-process-c/praktor_process_driver_test
+          python3 cmake/ci/audit-c11-runtime-link.py build/ci-process-c/praktor_process_driver_test
           ctest --test-dir build/ci-process-c --no-tests=error --output-on-failure
+
+      - name: C11 Session without a C++ compiler or runtime
+        if: matrix.platform == 'linux' && matrix.sdk == 'behavior-tree'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S actions/c11/session-c-standalone -B build/ci-session-c -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/ci-session-c --parallel 2
+          python3 cmake/ci/audit-c11-runtime-link.py build/ci-session-c/actions_c11_session_c_test
+          ctest --test-dir build/ci-session-c --no-tests=error --output-on-failure
 
       - name: Independent Session link and run without legacy targets
         if: matrix.platform == 'linux' && matrix.sdk == 'behavior-tree'
@@ -277,6 +287,7 @@ jobs:
           name: core-diagnostics-${{ matrix.rid }}-${{ matrix.sdk }}
           path: |
             build/ci-session-standalone/Testing/Temporary/LastTest.log
+            build/ci-session-c/Testing/Temporary/LastTest.log
             build/ci-sdk/ctest.xml
             build/ci-sdk/Testing/Temporary/LastTest.log
             build/ci-c11-address/Testing/Temporary/LastTest.log
