@@ -1,0 +1,5 @@
+#include "value_store.h"
+#include <stdio.h>
+#include <string.h>
+#define C(x) do{if(!(x)){fprintf(stderr,"failed %d: %s\n",__LINE__,#x);return 1;}}while(0)
+int main(void){praktor_c11_value_store s={0};char b[9];size_t n=0;int y=0;C(praktor_c11_value_store_init(&s,2,8,8)==0);C(praktor_c11_value_store_set(&s,"a","one")==0);C(praktor_c11_value_store_set(&s,"a","two")==0);C(praktor_c11_value_store_get(&s,"a",b,sizeof b,&n)==0&&n==3&&!strcmp(b,"two"));C(praktor_c11_value_store_set(&s,"b","2")==0);C(praktor_c11_value_store_set(&s,"c","3")==3);C(praktor_c11_value_store_set(&s,"a","123456789")==4);C(praktor_c11_value_store_get(&s,"a",b,3,&n)==4&&n==3);C(praktor_c11_value_store_contains(&s,"b",&y)==0&&y);C(praktor_c11_value_store_erase(&s,"b")==0);C(praktor_c11_value_store_set(&s,"c","3")==0);C(praktor_c11_value_store_get(&s,"missing",b,sizeof b,&n)==5);C(praktor_c11_value_store_size(&s)==2);praktor_c11_value_store_destroy(&s);C(!s.impl&&praktor_c11_value_store_size(&s)==0);praktor_c11_value_store_destroy(&s);return 0;}

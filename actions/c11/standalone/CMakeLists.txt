@@ -21,6 +21,8 @@ endif()
 add_library(praktor_c11_bt_core STATIC
     ../tree_adapter.c
     ../tree_adapter.h
+    ../value_store.c
+    ../value_store.h
 )
 target_include_directories(praktor_c11_bt_core PUBLIC
     "${CMAKE_CURRENT_LIST_DIR}/.."
@@ -49,3 +51,8 @@ set_target_properties(actions_c11_tree_adapter_standalone_test PROPERTIES
 add_test(NAME actions_c11_tree_adapter_standalone_test
     COMMAND actions_c11_tree_adapter_standalone_test
 )
+add_executable(actions_c11_value_store_standalone_test ../value_store_test.c)
+target_link_libraries(actions_c11_value_store_standalone_test PRIVATE praktor_c11_bt_core)
+target_compile_features(actions_c11_value_store_standalone_test PRIVATE c_std_11)
+set_target_properties(actions_c11_value_store_standalone_test PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF LINKER_LANGUAGE C)
+add_test(NAME actions_c11_value_store_standalone_test COMMAND actions_c11_value_store_standalone_test)

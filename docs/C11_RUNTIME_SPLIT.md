@@ -65,3 +65,9 @@ Salts Process usage requirements. Its translation unit intentionally omits
 `core/executor.hpp`, guarding this boundary against accidental transitive
 reintroduction. It is a compile-contract test; the runtime session still has
 legacy Executor references until the next implementation cut.
+
+## Bounded C11 Blackboard foundation
+
+Added a fixed-capacity C11 string store. Initialization reserves all entry/key/value storage; writes never grow the store, and capacity/value-size exhaustion returns explicit errors. It has no dependency on the legacy actions runtime. The normal C11 target and independent C-only SDK project compile and run negative-capacity/size regression tests.
+
+This is a foundation, not yet the production Blackboard replacement: TreeExecutorSession still uses actions::Blackboard for compatibility. The next step is to adapt C11 built-in stateful controls and Shell output mapping to a typed host value interface, then differential-test semantics before removing the legacy Blackboard from the session constructor.
