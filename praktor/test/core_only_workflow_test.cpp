@@ -365,8 +365,9 @@ TEST_CASE("WorkflowRunner cancellation retains active Shell leases after workflo
         "            " + command + "\n"
         "          stream_output: false\n"
         "          timeout: 30000\n");
-    WorkflowRunner runner(workflow.string());
-    ScopedWorkflowProcessOwner recovery;
+    // The persistent host, rather than any WorkflowRunner or Session,
+    // owns late Process completions and schedules subsequent recovery turns.
+    Praktor::Execution::C11WorkflowProcessOwner recovery(1u);
     auto control = std::make_shared<Praktor::Execution::ExecutionControl>();
     std::atomic<bool> observed_start{false};
     std::thread canceller([&] {
@@ -386,23 +387,26 @@ TEST_CASE("WorkflowRunner cancellation retains active Shell leases after workflo
         ~ThreadJoinGuard() { if (worker.joinable()) worker.join(); }
     } join_guard{canceller};
     const auto began = std::chrono::steady_clock::now();
-    const auto result = runner.executeWithC11ProcessOwner(&recovery.owner, control);
+    WorkflowExecutionResult result{};
+    {
+        WorkflowRunner runner(workflow.string());
+        result = recovery.execute(runner, control);
+    } // WorkflowRunner and its task-scoped ExecutionContext are now destroyed.
     canceller.join();
     CHECK(observed_start.load(std::memory_order_relaxed));
     CHECK_FALSE(result.success);
     CHECK(std::chrono::steady_clock::now() - began <
           std::chrono::seconds(12));
 
-    // This is after WorkflowRunner's DAG, its forked context, local Executor
-    // and action Session have exited. The retainer alone owns callbacks now.
+    // The original WorkflowRunner and all its DAG/Executor/Blackboard state
+    // are gone. Only the persistent host owner can drive and release leases.
     size_t total_reaped = 0u;
     size_t pending = 0u;
     const auto deadline = std::chrono::steady_clock::now() +
                           std::chrono::seconds(8);
     for (;;) {
         size_t reaped = 0u;
-        const int status = cflow_process_retainer_run_ready(
-            &recovery.owner, 64u, &reaped, &pending);
+        const int status = recovery.runReady(64u, &reaped, &pending);
         total_reaped += reaped;
         CHECK((status == SALTS_OK || status == SALTS_EBUSY));
         if (pending == 0u) {
@@ -412,7 +416,45 @@ TEST_CASE("WorkflowRunner cancellation retains active Shell leases after workflo
         CHECK(std::chrono::steady_clock::now() < deadline);
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
-    CHECK(cflow_process_retainer_destroy(&recovery.owner) == SALTS_OK);
+    // Release of a retained callback owner must return recovery capacity to
+    // the same host. A second, distinct WorkflowRunner must be admissible
+    // without an extra Process owner or any legacy action fallback.
+    const auto next_workflow = dir / "after-recovery.yml";
+    const auto next_marker = dir / "after-recovery.txt";
+#ifdef _WIN32
+    const std::string next_cmd = "echo recovered > \"" + next_marker.string() + "\"";
+#else
+    const std::string next_cmd = "printf recovered > '" + next_marker.string() + "'";
+#endif
+    writeText(next_workflow,
+        "tasks:\n"
+        "  - name: after_recovery\n"
+        "    sequence:\n"
+        "      - shell:\n"
+        "          cmd: |-\n"
+        "            " + next_cmd + "\n"
+        "          stream_output: false\n");
+    {
+        WorkflowRunner next_runner(next_workflow.string());
+        const auto next_result = recovery.execute(next_runner);
+        CHECK(next_result.success);
+    }
+    CHECK(std::filesystem::exists(next_marker));
+
+    const auto next_deadline = std::chrono::steady_clock::now() +
+                               std::chrono::seconds(8);
+    for (;;) {
+        size_t reaped = 0u;
+        const int status = recovery.runReady(64u, &reaped, &pending);
+        CHECK((status == SALTS_OK || status == SALTS_EBUSY));
+        if (pending == 0u) {
+            CHECK(status == SALTS_OK);
+            break;
+        }
+        CHECK(std::chrono::steady_clock::now() < next_deadline);
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    CHECK(recovery.close() == SALTS_OK);
     std::filesystem::remove_all(dir);
 }
 
