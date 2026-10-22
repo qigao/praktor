@@ -68,8 +68,9 @@ before its own storage is released.
 - [SaltsUtils Process PR #674](https://github.com/qigao/salts-utils/pull/674):
   bounded non-destructive `shutdown_step`, typed recovery owner, injected
   NativeIO/Actor close/ack faults.
-- [SaltsUtils qualification PR #675](https://github.com/qigao/salts-utils/pull/675):
-  experimental BehaviorTree + Process ABI combination.
+- [SaltsUtils Process PR #674 exact source](https://github.com/qigao/salts-utils/commit/cacc97c9568e02aeb1e244ac9a477a77e180ac82):
+  merged BehaviorTree from master plus candidate lease-safe Process/retainer;
+  this replaces the older #675 qualification pin but is not a release.
 - [Praktor PR #78](https://github.com/qigao/praktor/pull/78):
   real YAML WorkflowRunner positive/negative tests, cancel-after-child-start,
   Process-owner capacity and concurrent-turn rejection, delayed callbacks.
@@ -81,8 +82,11 @@ before its own storage is released.
   mixed-instrumentation TSan diagnostics.
 
 Remaining production gate: sustained host event-loop scheduling, long-lived
-recovery on permanently faulted providers, and latest-exact-HEAD ASan/UBSan
-and complete source-instrumented TSan across relevant error interleavings.
+recovery on permanently faulted providers, exact-source ASan/UBSan and
+complete source-instrumented TSan across relevant error interleavings.
+The source-pinned fault test exercises NativeIO/Actor/executor destruction
+refusal and permanent acknowledgment faults; success on a newer Praktor
+HEAD must be confirmed independently before closing #673.
 
 The stable `sdk/api/praktor.h` is a separate C interface. This C++ owner
 is currently a source-tree experimental API; do not claim it is exposed by

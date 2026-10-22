@@ -29,7 +29,7 @@ jobs:
     timeout-minutes: 120
     env:
       SALTS_RC17_SHA: 6d6fd387cb245be8d7b0d866f9babad026a26832
-      SALTS_UTILS_SHA: d576cf5e0132052669c8385c2ce1f05782e44483
+      SALTS_UTILS_SHA: cacc97c9568e02aeb1e244ac9a477a77e180ac82
       QIGAO_SDK_RID: linux-x64
       QIGAO_TARGET_TRIPLET: x64-linux
       RID: linux-x64
@@ -57,7 +57,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: qigao/salts-utils
-          ref: d576cf5e0132052669c8385c2ce1f05782e44483
+          ref: cacc97c9568e02aeb1e244ac9a477a77e180ac82
           path: build/p1-salts-utils-source
           persist-credentials: false
 
@@ -108,7 +108,7 @@ jobs:
           echo "SALTS_ROOT=$stage" >> "$GITHUB_ENV"
           echo "SALTS_SOURCE_TSAN_ROOT=$stage" >> "$GITHUB_ENV"
 
-      - name: Build and install fully instrumented combined SaltsUtils
+      - name: Build and install fully instrumented Process P1 plus merged BehaviorTree SaltsUtils
         shell: bash
         run: |
           set -euo pipefail
@@ -163,6 +163,25 @@ jobs:
                   attestation[suffix] = {"owner": name, "tsan": True}
           print(json.dumps(attestation, indent=2))
           PY
+
+      # Source-included production Process and retainer (private fault
+      # shims), not the ABI-stable installed library's happy path. Running
+      # alongside fully instrumented Salts avoids mixed-runtime TSan noise.
+      - name: Qualify real Process fault injection under full-source TSan
+        shell: bash
+        env:
+          TSAN_OPTIONS: halt_on_error=1:exitcode=66
+        run: |
+          set -euo pipefail
+          cmake -S build/p1-salts-utils-source -B build/p1-salts-utils-tsan \
+            -DBUILD_TESTS=ON -DBUILD_BENCHMARKS=OFF -DBUILD_EXAMPLES=OFF
+          cmake --build build/p1-salts-utils-tsan \
+            --target cflow_process_fault_test cflow_process_test --parallel 2
+          export LD_LIBRARY_PATH="$SALTS_SOURCE_TSAN_ROOT/lib:$SALTS_UTILS_SOURCE_TSAN_ROOT/lib:$CHTTP_ROOT/lib:${LD_LIBRARY_PATH:-}"
+          ctest --test-dir build/p1-salts-utils-tsan \
+            -R '^(cflow_process_fault_test|cflow_process_test)$' \
+            --no-tests=error --output-on-failure --parallel 1 \
+            --repeat until-fail:3 --timeout 90
 
       - name: Prove pure-C11 adapter under full-source TSan
         shell: bash
@@ -232,6 +251,7 @@ jobs:
             build/p1-source-tsan-linked-libraries.txt
             build/p1-salts-tsan/compile_commands.json
             build/p1-salts-utils-tsan/compile_commands.json
+            build/p1-salts-utils-tsan/Testing/Temporary/LastTest.log
             build/p1-praktor-tsan/Testing/Temporary/LastTest.log
             build/p1-salts-tsan/CMakeFiles/CMakeConfigureLog.yaml
             build/p1-salts-utils-tsan/CMakeFiles/CMakeConfigureLog.yaml
