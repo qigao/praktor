@@ -1,16 +1,211 @@
 #include "value_store.h"
+
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-typedef struct entry { char *key,*value; size_t value_size; int occupied; } entry;
-typedef struct impl { size_t cap,mk,mv,size; entry *e; char *keys,*values; } impl;
-static impl *get(const praktor_c11_value_store*s){return s?(impl*)s->impl:NULL;}
-static size_t len(const char*s,size_t max){size_t n=0;if(!s)return SIZE_MAX;while(n<=max&&s[n]!='\0')++n;return n;}
-static entry *find(impl*p,const char*k,size_t n){size_t i;for(i=0;i<p->cap;++i)if(p->e[i].occupied&&strlen(p->e[i].key)==n&&!memcmp(p->e[i].key,k,n))return &p->e[i];return NULL;}
-int praktor_c11_value_store_init(praktor_c11_value_store*s,size_t cap,size_t mk,size_t mv){impl*p;size_t i;if(!s||s->impl||!cap||!mk||!mv||mk==SIZE_MAX||mv==SIZE_MAX||cap>SIZE_MAX/sizeof(entry)||cap>SIZE_MAX/(mk+1)||cap>SIZE_MAX/(mv+1))return PRAKTOR_C11_VALUE_EINVAL;p=calloc(1,sizeof(*p));if(!p)return PRAKTOR_C11_VALUE_ENOMEM;p->e=calloc(cap,sizeof(entry));p->keys=calloc(cap,mk+1);p->values=calloc(cap,mv+1);if(!p->e||!p->keys||!p->values){free(p->e);free(p->keys);free(p->values);free(p);return PRAKTOR_C11_VALUE_ENOMEM;}p->cap=cap;p->mk=mk;p->mv=mv;for(i=0;i<cap;++i){p->e[i].key=p->keys+i*(mk+1);p->e[i].value=p->values+i*(mv+1);}s->impl=p;return 0;}
-void praktor_c11_value_store_destroy(praktor_c11_value_store*s){impl*p=get(s);if(!p)return;free(p->e);free(p->keys);free(p->values);free(p);s->impl=NULL;}
-int praktor_c11_value_store_set(praktor_c11_value_store*s,const char*k,const char*v){impl*p=get(s);size_t kn,vn,i;entry*e;if(!p)return 1;kn=len(k,p->mk);vn=len(v,p->mv);if(!kn||kn==SIZE_MAX)return 1;if(kn>p->mk||vn>p->mv)return 4;e=find(p,k,kn);if(!e){for(i=0;i<p->cap&&!e;++i)if(!p->e[i].occupied)e=&p->e[i];if(!e)return 3;memcpy(e->key,k,kn);e->key[kn]=0;e->occupied=1;++p->size;}memcpy(e->value,v,vn);e->value[vn]=0;e->value_size=vn;return 0;}
-int praktor_c11_value_store_get(const praktor_c11_value_store*s,const char*k,char*out,size_t cap,size_t*n){impl*p=get(s);size_t kn;entry*e;if(!p||!n)return 1;kn=len(k,p->mk);if(!kn||kn>p->mk||kn==SIZE_MAX)return 1;e=find(p,k,kn);if(!e)return 5;*n=e->value_size;if(!out||cap<=e->value_size)return 4;memcpy(out,e->value,e->value_size+1);return 0;}
-int praktor_c11_value_store_contains(const praktor_c11_value_store*s,const char*k,int*y){impl*p=get(s);size_t n;if(!p||!y)return 1;n=len(k,p->mk);if(!n||n>p->mk||n==SIZE_MAX)return 1;*y=find(p,k,n)!=NULL;return 0;}
-int praktor_c11_value_store_erase(praktor_c11_value_store*s,const char*k){impl*p=get(s);size_t n;entry*e;if(!p)return 1;n=len(k,p->mk);if(!n||n>p->mk||n==SIZE_MAX)return 1;e=find(p,k,n);if(!e)return 5;memset(e->key,0,p->mk+1);memset(e->value,0,p->mv+1);e->value_size=0;e->occupied=0;--p->size;return 0;}
-size_t praktor_c11_value_store_size(const praktor_c11_value_store*s){impl*p=get(s);return p?p->size:0;}
+
+typedef struct praktor_c11_value_entry {
+  char *key;
+  char *value;
+  size_t value_size;
+  int occupied;
+} praktor_c11_value_entry;
+
+typedef struct praktor_c11_value_store_impl {
+  size_t capacity;
+  size_t max_key_bytes;
+  size_t max_value_bytes;
+  size_t size;
+  praktor_c11_value_entry *entries;
+  char *key_storage;
+  char *value_storage;
+} praktor_c11_value_store_impl;
+
+static praktor_c11_value_store_impl *store_impl(
+    const praktor_c11_value_store *store) {
+  return store == NULL ? NULL
+                       : (praktor_c11_value_store_impl *)store->impl;
+}
+
+/* Return SIZE_MAX for NULL; otherwise stop after max_bytes + 1 bytes. */
+static size_t bounded_length(const char *text, size_t max_bytes) {
+  size_t length = 0u;
+  if (text == NULL) return SIZE_MAX;
+  while (length <= max_bytes && text[length] != '\0') ++length;
+  return length;
+}
+
+static praktor_c11_value_entry *find_entry(
+    praktor_c11_value_store_impl *impl, const char *key, size_t key_size) {
+  size_t i;
+  for (i = 0u; i < impl->capacity; ++i) {
+    praktor_c11_value_entry *entry = &impl->entries[i];
+    if (entry->occupied && strlen(entry->key) == key_size &&
+        memcmp(entry->key, key, key_size) == 0) {
+      return entry;
+    }
+  }
+  return NULL;
+}
+
+int praktor_c11_value_store_init(praktor_c11_value_store *store,
+                                 size_t capacity,
+                                 size_t max_key_bytes,
+                                 size_t max_value_bytes) {
+  praktor_c11_value_store_impl *impl;
+  size_t i;
+
+  if (store == NULL || store->impl != NULL || capacity == 0u ||
+      max_key_bytes == 0u || max_value_bytes == 0u ||
+      max_key_bytes == SIZE_MAX || max_value_bytes == SIZE_MAX ||
+      capacity > SIZE_MAX / sizeof(praktor_c11_value_entry) ||
+      capacity > SIZE_MAX / (max_key_bytes + 1u) ||
+      capacity > SIZE_MAX / (max_value_bytes + 1u)) {
+    return PRAKTOR_C11_VALUE_EINVAL;
+  }
+
+  impl = (praktor_c11_value_store_impl *)calloc(1u, sizeof(*impl));
+  if (impl == NULL) return PRAKTOR_C11_VALUE_ENOMEM;
+
+  impl->entries = (praktor_c11_value_entry *)calloc(
+      capacity, sizeof(*impl->entries));
+  impl->key_storage = (char *)calloc(capacity, max_key_bytes + 1u);
+  impl->value_storage = (char *)calloc(capacity, max_value_bytes + 1u);
+  if (impl->entries == NULL || impl->key_storage == NULL ||
+      impl->value_storage == NULL) {
+    free(impl->entries);
+    free(impl->key_storage);
+    free(impl->value_storage);
+    free(impl);
+    return PRAKTOR_C11_VALUE_ENOMEM;
+  }
+
+  impl->capacity = capacity;
+  impl->max_key_bytes = max_key_bytes;
+  impl->max_value_bytes = max_value_bytes;
+  for (i = 0u; i < capacity; ++i) {
+    impl->entries[i].key = impl->key_storage + i * (max_key_bytes + 1u);
+    impl->entries[i].value = impl->value_storage + i * (max_value_bytes + 1u);
+  }
+  store->impl = impl;
+  return PRAKTOR_C11_VALUE_OK;
+}
+
+void praktor_c11_value_store_destroy(praktor_c11_value_store *store) {
+  praktor_c11_value_store_impl *impl = store_impl(store);
+  if (impl == NULL) return;
+  free(impl->entries);
+  free(impl->key_storage);
+  free(impl->value_storage);
+  free(impl);
+  store->impl = NULL;
+}
+
+int praktor_c11_value_store_set(praktor_c11_value_store *store,
+                                const char *key, const char *value) {
+  praktor_c11_value_store_impl *impl = store_impl(store);
+  size_t key_size, value_size, i;
+  praktor_c11_value_entry *entry;
+
+  if (impl == NULL || key == NULL || value == NULL)
+    return PRAKTOR_C11_VALUE_EINVAL;
+
+  key_size = bounded_length(key, impl->max_key_bytes);
+  value_size = bounded_length(value, impl->max_value_bytes);
+  if (key_size == 0u || key_size == SIZE_MAX)
+    return PRAKTOR_C11_VALUE_EINVAL;
+  if (key_size > impl->max_key_bytes ||
+      value_size > impl->max_value_bytes) {
+    return PRAKTOR_C11_VALUE_ENOBUFS;
+  }
+
+  entry = find_entry(impl, key, key_size);
+  if (entry == NULL) {
+    for (i = 0u; i < impl->capacity; ++i) {
+      if (!impl->entries[i].occupied) {
+        entry = &impl->entries[i];
+        break;
+      }
+    }
+    if (entry == NULL) return PRAKTOR_C11_VALUE_ENOSPC;
+    memcpy(entry->key, key, key_size);
+    entry->key[key_size] = '\0';
+    entry->occupied = 1;
+    ++impl->size;
+  }
+
+  /* All input/capacity validation precedes mutation: failed update is atomic. */
+  memcpy(entry->value, value, value_size);
+  entry->value[value_size] = '\0';
+  entry->value_size = value_size;
+  return PRAKTOR_C11_VALUE_OK;
+}
+
+int praktor_c11_value_store_get(const praktor_c11_value_store *store,
+                                const char *key, char *out_value,
+                                size_t out_capacity, size_t *out_size) {
+  praktor_c11_value_store_impl *impl = store_impl(store);
+  size_t key_size;
+  praktor_c11_value_entry *entry;
+
+  if (impl == NULL || key == NULL || out_size == NULL)
+    return PRAKTOR_C11_VALUE_EINVAL;
+  key_size = bounded_length(key, impl->max_key_bytes);
+  if (key_size == 0u || key_size > impl->max_key_bytes ||
+      key_size == SIZE_MAX) {
+    return PRAKTOR_C11_VALUE_EINVAL;
+  }
+
+  entry = find_entry(impl, key, key_size);
+  if (entry == NULL) return PRAKTOR_C11_VALUE_ENOTFOUND;
+  *out_size = entry->value_size;
+  if (out_value == NULL || out_capacity <= entry->value_size)
+    return PRAKTOR_C11_VALUE_ENOBUFS;
+  memcpy(out_value, entry->value, entry->value_size + 1u);
+  return PRAKTOR_C11_VALUE_OK;
+}
+
+int praktor_c11_value_store_contains(const praktor_c11_value_store *store,
+                                     const char *key, int *out_contains) {
+  praktor_c11_value_store_impl *impl = store_impl(store);
+  size_t key_size;
+
+  if (impl == NULL || key == NULL || out_contains == NULL)
+    return PRAKTOR_C11_VALUE_EINVAL;
+  key_size = bounded_length(key, impl->max_key_bytes);
+  if (key_size == 0u || key_size > impl->max_key_bytes ||
+      key_size == SIZE_MAX) {
+    return PRAKTOR_C11_VALUE_EINVAL;
+  }
+  *out_contains = find_entry(impl, key, key_size) != NULL;
+  return PRAKTOR_C11_VALUE_OK;
+}
+
+int praktor_c11_value_store_erase(praktor_c11_value_store *store,
+                                  const char *key) {
+  praktor_c11_value_store_impl *impl = store_impl(store);
+  size_t key_size;
+  praktor_c11_value_entry *entry;
+
+  if (impl == NULL || key == NULL) return PRAKTOR_C11_VALUE_EINVAL;
+  key_size = bounded_length(key, impl->max_key_bytes);
+  if (key_size == 0u || key_size > impl->max_key_bytes ||
+      key_size == SIZE_MAX) {
+    return PRAKTOR_C11_VALUE_EINVAL;
+  }
+  entry = find_entry(impl, key, key_size);
+  if (entry == NULL) return PRAKTOR_C11_VALUE_ENOTFOUND;
+
+  memset(entry->key, 0, impl->max_key_bytes + 1u);
+  memset(entry->value, 0, impl->max_value_bytes + 1u);
+  entry->value_size = 0u;
+  entry->occupied = 0;
+  --impl->size;
+  return PRAKTOR_C11_VALUE_OK;
+}
+
+size_t praktor_c11_value_store_size(const praktor_c11_value_store *store) {
+  const praktor_c11_value_store_impl *impl =
+      store == NULL ? NULL : (const praktor_c11_value_store_impl *)store->impl;
+  return impl == NULL ? 0u : impl->size;
+}
