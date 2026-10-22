@@ -1,9 +1,9 @@
 #include "native_host.h"
+#include <tinytest.h>
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
-#define CHECK(e) do { if (!(e)) { fprintf(stderr, "%s:%d: %s\n", __FILE__, __LINE__, #e); return 1; } } while (0)
-static int stateless_leaves(void) {
+static void stateless_leaves(void) {
   praktor_c11_native_host host = {0};
   praktor_c11_bt_host hooks = {0};
   praktor_c11_value_store *values;
@@ -13,45 +13,44 @@ static int stateless_leaves(void) {
   praktor_c11_leaf_request request = {0u, "SetVariable", params, 2u, false, NULL};
   salts_bt_node_status status = SALTS_BT_FAILURE;
   char text[65]; size_t size = 0u;
-  CHECK(praktor_c11_native_host_init(&host, 2u, 32u, 64u) == SALTS_OK);
-  CHECK(praktor_c11_native_host_bind(&host, &hooks) == SALTS_OK);
+  check(praktor_c11_native_host_init(&host, 2u, 32u, 64u) == SALTS_OK);
+  check(praktor_c11_native_host_bind(&host, &hooks) == SALTS_OK);
   values = praktor_c11_native_host_values(&host);
-  CHECK(praktor_c11_value_store_set(values, "source", "value") == PRAKTOR_C11_VALUE_OK);
-  CHECK(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_OK && status == SALTS_BT_SUCCESS);
-  CHECK(praktor_c11_value_store_get(values, "answer", text, sizeof(text), &size) == PRAKTOR_C11_VALUE_OK);
-  CHECK(strcmp(text, "value") == 0);
+  check(praktor_c11_value_store_set(values, "source", "value") == PRAKTOR_C11_VALUE_OK);
+  check(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_OK && status == SALTS_BT_SUCCESS);
+  check(praktor_c11_value_store_get(values, "answer", text, sizeof(text), &size) == PRAKTOR_C11_VALUE_OK);
+  check(strcmp(text, "value") == 0);
   request.in_parallel_branch = true;
-  CHECK(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_ENOTSUP);
+  check(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_ENOTSUP);
   request.in_parallel_branch = false;
   params[1].kind = PRAKTOR_C11_LEAF_NUMBER; params[1].number = NAN;
-  CHECK(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_EINVAL);
-  CHECK(praktor_c11_value_store_get(values, "answer", text, sizeof(text), &size) == PRAKTOR_C11_VALUE_OK && strcmp(text, "value") == 0);
+  check(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_EINVAL);
+  check(praktor_c11_value_store_get(values, "answer", text, sizeof(text), &size) == PRAKTOR_C11_VALUE_OK && strcmp(text, "value") == 0);
   params[1].number = 7.0;
-  CHECK(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_OK);
-  CHECK(praktor_c11_value_store_get(values, "answer", text, sizeof(text), &size) == PRAKTOR_C11_VALUE_OK && strcmp(text, "7.000000") == 0);
+  check(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_OK);
+  check(praktor_c11_value_store_get(values, "answer", text, sizeof(text), &size) == PRAKTOR_C11_VALUE_OK && strcmp(text, "7.000000") == 0);
   params[0].text = "overflow";
-  CHECK(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_ENOBUFS);
-  CHECK(praktor_c11_value_store_size(values) == 2u);
+  check(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_ENOBUFS);
+  check(praktor_c11_value_store_size(values) == 2u);
   request.action = "CheckExitCode";
   params[0].name = "input_key"; params[0].text = "answer";
   params[1].name = "expected"; params[1].number = 7.0;
-  CHECK(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_OK && status == SALTS_BT_SUCCESS);
+  check(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_OK && status == SALTS_BT_SUCCESS);
   params[1].number = 7.25;
-  CHECK(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_EINVAL);
+  check(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_EINVAL);
   params[1].kind = PRAKTOR_C11_LEAF_BOOLEAN;
-  CHECK(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_EINVAL);
+  check(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_EINVAL);
   params[1].name = NULL;
-  CHECK(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_EINVAL);
+  check(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_EINVAL);
   request.parameter_count = 0u; request.action = "Unregistered";
-  CHECK(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_ENOTSUP);
+  check(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_ENOTSUP);
   praktor_c11_native_host_destroy(&host);
-  CHECK(host.impl == NULL);
-  return 0;
+  check(host.impl == NULL);
 }
 
 static uint64_t fake_now(void *user) { return *(uint64_t *)user; }
 
-static int sleep_leaves(void) {
+static void sleep_leaves(void) {
   praktor_c11_native_host host = {0};
   praktor_c11_bt_host hooks = {0};
   uint64_t now = 0u;
@@ -67,64 +66,151 @@ static int sleep_leaves(void) {
       {"0.01m", UINT64_C(600000000)}, {"0.001h", UINT64_C(3600000000)},
       {" 1.9", UINT64_C(1000000)}, {"2147483647ms", UINT64_C(2147483647000000)}};
   size_t i;
-  CHECK(praktor_c11_native_host_init_with_config(&host, &config) == SALTS_OK);
-  CHECK(praktor_c11_native_host_bind(&host, &hooks) == SALTS_OK);
-  CHECK(hooks.halt_leaf == NULL && hooks.halt_typed_leaf != NULL);
-  CHECK(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_OK && status == SALTS_BT_RUNNING);
+  check(praktor_c11_native_host_init_with_config(&host, &config) == SALTS_OK);
+  check(praktor_c11_native_host_bind(&host, &hooks) == SALTS_OK);
+  check(hooks.halt_leaf == NULL && hooks.halt_typed_leaf != NULL);
+  check(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_OK && status == SALTS_BT_RUNNING);
   now = UINT64_C(1999000000);
   duration.text = "0ms";
-  CHECK(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_OK && status == SALTS_BT_RUNNING);
+  check(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_OK && status == SALTS_BT_RUNNING);
   now = UINT64_C(2000000000);
-  CHECK(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_OK && status == SALTS_BT_SUCCESS);
+  check(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_OK && status == SALTS_BT_SUCCESS);
   for (i = 0u; i < sizeof(supported) / sizeof(supported[0]); ++i) {
     now = 0u; duration.text = supported[i].text;
-    CHECK(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_OK && status == SALTS_BT_RUNNING);
+    check(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_OK && status == SALTS_BT_RUNNING);
     now = supported[i].ns - 1u;
-    CHECK(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_OK && status == SALTS_BT_RUNNING);
+    check(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_OK && status == SALTS_BT_RUNNING);
     ++now;
-    CHECK(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_OK && status == SALTS_BT_SUCCESS);
+    check(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_OK && status == SALTS_BT_SUCCESS);
   }
   for (i = 0u; i < sizeof(invalid) / sizeof(invalid[0]); ++i) {
     duration.text = invalid[i];
-    CHECK(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_EINVAL);
+    check(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_EINVAL);
   }
   duration.kind = PRAKTOR_C11_LEAF_NUMBER; duration.number = NAN;
-  CHECK(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_EINVAL);
+  check(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_EINVAL);
   duration.number = -1.0;
-  CHECK(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_EINVAL);
+  check(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_EINVAL);
   duration.number = 0.9;
-  CHECK(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_OK && status == SALTS_BT_SUCCESS);
+  check(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_OK && status == SALTS_BT_SUCCESS);
   duration.kind = PRAKTOR_C11_LEAF_BOOLEAN;
-  CHECK(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_EINVAL);
+  check(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_EINVAL);
   duration.kind = PRAKTOR_C11_LEAF_STRING; duration.text = "1s";
   now = 100u;
-  CHECK(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_OK && status == SALTS_BT_RUNNING);
+  check(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_OK && status == SALTS_BT_RUNNING);
   other.session_owner = &owner_b;
-  CHECK(hooks.tick_typed_leaf(hooks.user, &other, &status) == SALTS_ENOBUFS);
+  check(hooks.tick_typed_leaf(hooks.user, &other, &status) == SALTS_ENOBUFS);
   hooks.halt_typed_leaf(hooks.user, &other);
-  CHECK(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_OK && status == SALTS_BT_RUNNING);
+  check(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_OK && status == SALTS_BT_RUNNING);
   now = 99u;
-  CHECK(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_EINVAL);
+  check(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_EINVAL);
   hooks.halt_typed_leaf(hooks.user, &request);
-  CHECK(hooks.tick_typed_leaf(hooks.user, &other, &status) == SALTS_OK && status == SALTS_BT_RUNNING);
+  check(hooks.tick_typed_leaf(hooks.user, &other, &status) == SALTS_OK && status == SALTS_BT_RUNNING);
   hooks.halt_typed_leaf(hooks.user, &other);
   request.session_owner = NULL;
-  CHECK(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_EINVAL);
+  check(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_EINVAL);
   request.session_owner = &owner_a; request.in_parallel_branch = true;
-  CHECK(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_ENOTSUP);
+  check(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_ENOTSUP);
   praktor_c11_native_host_destroy(&host);
   config.max_running_leaves = 0u;
-  CHECK(praktor_c11_native_host_init_with_config(&host, &config) == SALTS_OK);
-  CHECK(praktor_c11_native_host_bind(&host, &hooks) == SALTS_OK);
+  check(praktor_c11_native_host_init_with_config(&host, &config) == SALTS_OK);
+  check(praktor_c11_native_host_bind(&host, &hooks) == SALTS_OK);
   request.in_parallel_branch = false;
-  CHECK(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_ENOBUFS);
+  check(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_ENOBUFS);
   duration.text = "0ms";
-  CHECK(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_OK && status == SALTS_BT_SUCCESS);
+  check(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_OK && status == SALTS_BT_SUCCESS);
   praktor_c11_native_host_destroy(&host);
-  return 0;
 }
 
-int main(void) {
-  if (stateless_leaves() != 0) return 1;
-  return sleep_leaves();
+static void parse_lines(void) {
+  praktor_c11_native_host host = {0};
+  praktor_c11_bt_host hooks = {0};
+  praktor_c11_value_store *values;
+  praktor_c11_leaf_parameter params[3] = {
+      {"input_key", PRAKTOR_C11_LEAF_STRING, "{source_key}", 0.0, false},
+      {"output_key", PRAKTOR_C11_LEAF_STRING, "{destination}", 0.0, false},
+      {"filter", PRAKTOR_C11_LEAF_STRING, "{filter}", 0.0, false}};
+  praktor_c11_leaf_request request = {0u, "ParseLines", params, 3u, false, NULL};
+  salts_bt_node_status status = SALTS_BT_FAILURE;
+  char text[129]; size_t size = 0u, i;
+  const struct { const char *input; const char *output; const char *count; } cases[] = {
+      {"", "", "0"}, {"\n", "", "1"}, {"\n\n", "", "2"},
+      {"one\n", "one", "1"}, {"one\n\n", "one\n", "2"},
+      {"\n\none\n\ntwo\n", "one\n\ntwo", "5"},
+      {"one\r\ntwo\r\n", "one\r\ntwo\r", "2"},
+      {"  \n\t\n\xc3\xa9", "  \n\t\n\xc3\xa9", "3"}};
+  check(praktor_c11_native_host_init(&host, 8u, 64u, 128u) == SALTS_OK);
+  check(praktor_c11_native_host_bind(&host, &hooks) == SALTS_OK);
+  values = praktor_c11_native_host_values(&host);
+  check(praktor_c11_value_store_set(values, "source_key", "source") == PRAKTOR_C11_VALUE_OK);
+  check(praktor_c11_value_store_set(values, "destination", "lines") == PRAKTOR_C11_VALUE_OK);
+  check(praktor_c11_value_store_set(values, "filter", "") == PRAKTOR_C11_VALUE_OK);
+  for (i = 0u; i < sizeof(cases) / sizeof(cases[0]); ++i) {
+    check(praktor_c11_value_store_set(values, "source", cases[i].input) == PRAKTOR_C11_VALUE_OK);
+    check(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_OK && status == SALTS_BT_SUCCESS);
+    check(praktor_c11_value_store_get(values, "lines", text, sizeof(text), &size) == PRAKTOR_C11_VALUE_OK && strcmp(text, cases[i].output) == 0);
+    check(praktor_c11_value_store_get(values, "lines_count", text, sizeof(text), &size) == PRAKTOR_C11_VALUE_OK && strcmp(text, cases[i].count) == 0);
+  }
+  /* The output may replace its own input; parsing used a private snapshot. */
+  check(praktor_c11_value_store_set(values, "destination", "source") == PRAKTOR_C11_VALUE_OK);
+  check(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_OK && status == SALTS_BT_SUCCESS);
+  check(praktor_c11_value_store_get(values, "source_count", text, sizeof(text), &size) == PRAKTOR_C11_VALUE_OK && strcmp(text, "3") == 0);
+  check(praktor_c11_value_store_set(values, "filter", "^one$") == PRAKTOR_C11_VALUE_OK);
+  check(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_ENOTSUP);
+  check(praktor_c11_value_store_set(values, "filter", "[") == PRAKTOR_C11_VALUE_OK);
+  check(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_ENOTSUP);
+  request.in_parallel_branch = true;
+  check(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_ENOTSUP);
+  request.in_parallel_branch = false;
+  check(praktor_c11_value_store_set(values, "filter", "") == PRAKTOR_C11_VALUE_OK);
+  check(praktor_c11_value_store_erase(values, "source") == PRAKTOR_C11_VALUE_OK);
+  check(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_OK && status == SALTS_BT_FAILURE);
+  check(praktor_c11_value_store_get(values, "source_count", text, sizeof(text), &size) == PRAKTOR_C11_VALUE_OK && strcmp(text, "3") == 0);
+  praktor_c11_native_host_destroy(&host);
+}
+
+static void parse_lines_atomic_failure(void) {
+  praktor_c11_native_host host = {0};
+  praktor_c11_bt_host hooks = {0};
+  praktor_c11_value_store *values;
+  praktor_c11_leaf_parameter output = {"output_key", PRAKTOR_C11_LEAF_STRING, "lines", 0.0, false};
+  praktor_c11_leaf_request request = {0u, "ParseLines", &output, 1u, false, NULL};
+  salts_bt_node_status status = SALTS_BT_FAILURE;
+  char text[17]; size_t size = 0u;
+  check(praktor_c11_native_host_init(&host, 3u, 12u, 16u) == SALTS_OK);
+  check(praktor_c11_native_host_bind(&host, &hooks) == SALTS_OK);
+  values = praktor_c11_native_host_values(&host);
+  check(praktor_c11_value_store_set(values, "shell_output", "one\ntwo") == PRAKTOR_C11_VALUE_OK);
+  check(praktor_c11_value_store_set(values, "lines", "old") == PRAKTOR_C11_VALUE_OK);
+  check(praktor_c11_value_store_set(values, "full", "occupied") == PRAKTOR_C11_VALUE_OK);
+  check(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_ENOBUFS);
+  check(praktor_c11_value_store_get(values, "lines", text, sizeof(text), &size) == PRAKTOR_C11_VALUE_OK && strcmp(text, "old") == 0);
+  check(praktor_c11_value_store_erase(values, "full") == PRAKTOR_C11_VALUE_OK);
+  output.text = "toolong"; /* derived count key is 13 bytes, key bound is 12 */
+  check(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_ENOBUFS);
+  check(praktor_c11_value_store_size(values) == 2u);
+  output.text = "";
+  check(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_EINVAL);
+  output.text = "lines";
+  check(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_OK && status == SALTS_BT_SUCCESS);
+  check(praktor_c11_value_store_get(values, "lines", text, sizeof(text), &size) == PRAKTOR_C11_VALUE_OK && strcmp(text, "one\ntwo") == 0);
+  check(praktor_c11_value_store_get(values, "lines_count", text, sizeof(text), &size) == PRAKTOR_C11_VALUE_OK && strcmp(text, "2") == 0);
+  praktor_c11_native_host_destroy(&host);
+  /* Parameter scratch follows the larger key bound; actual values still
+   * respect the smaller value bound. */
+  check(praktor_c11_native_host_init(&host, 3u, 32u, 1u) == SALTS_OK);
+  check(praktor_c11_native_host_bind(&host, &hooks) == SALTS_OK);
+  values = praktor_c11_native_host_values(&host);
+  check(praktor_c11_value_store_set(values, "shell_output", "x") == PRAKTOR_C11_VALUE_OK);
+  request.parameter_count = 0u;
+  check(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_OK && status == SALTS_BT_SUCCESS);
+  check(praktor_c11_value_store_get(values, "parsed_lines_count", text, sizeof(text), &size) == PRAKTOR_C11_VALUE_OK && strcmp(text, "1") == 0);
+  praktor_c11_native_host_destroy(&host);
+}
+
+spec("C11 Native Host") {
+  it("dispatches bounded typed values and fails closed") { stateless_leaves(); }
+  it("owns cooperative Sleep activations per Session") { sleep_leaves(); }
+  it("parses lines with Legacy newline and parameter semantics") { parse_lines(); }
+  it("publishes line content and count atomically within bounds") { parse_lines_atomic_failure(); }
 }

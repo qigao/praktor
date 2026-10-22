@@ -7,7 +7,7 @@ production switch is implied by these independent execution targets.
 | --- | --- |
 | `praktor_c11_bt_core` | C11 topology/state and Salts::BehaviorTree; no C++ compiler required |
 | `praktor_c11_value_store` | Fixed-capacity C11 values and optimistic transactions |
-| `praktor_c11_native_host` | C11 value-store owner and preallocated parameter scratch; typed `SetVariable`, `CheckExitCode` and cooperative `Sleep` leaves |
+| `praktor_c11_native_host` | C11 value-store owner and preallocated parameter scratch; typed `SetVariable`, `CheckExitCode`, cooperative `Sleep` and unfiltered `ParseLines` leaves |
 | `praktor_c11_session` | C++ AST compiler/session over C11 state, JSON queue hooks and Salts::Process; no legacy execution symbols |
 | `praktor_actions_c11` | Explicit compatibility constructors, legacy Blackboard access, Executor dispatch, environment and Shell log adaptation |
 
@@ -48,6 +48,23 @@ as milliseconds; those behaviors are intentionally not copied. Differential
 validation compares supported terminal outcomes and values, while native tests
 cover cooperative RUNNING, cancellation and exact deadlines independently.
 
+Native `ParseLines` supports omitted/empty `filter`, including exact `{key}`
+substitution. It uses existing bounded scratch, with no per-tick allocation.
+`input_key` / `output_key` default to `shell_output` / `parsed_lines`, as in
+Executor (YAML still requires `input_key`). It preserves Legacy's actual
+`getline` and join behavior: CR is retained, a final LF does not add a line,
+leading empty lines contribute to the count but not leading separators, and
+subsequent empty lines retain their separators. A missing input is FAILURE.
+Content and the derived `<output_key>_count` are published together through
+the allocation-free `praktor_c11_value_store_set_many` preflight API. Capacity,
+key/value length or invalid-key errors publish neither output; a Sequence stops
+before downstream effects. Duplicate batch keys are rejected.
+
+Legacy filters use `std::regex_search` (and ignore invalid regexes), rather than
+substring matching. Native nonempty filters return `SALTS_ENOTSUP` before any
+write. Regex support remains open; the independent Session cannot fall back to
+Executor. Parallel branch requests remain explicitly unsupported by this Host.
+
 The legacy adapter borrows Executor, Blackboard and ExecutionContext until
 session destruction. Retained Process callbacks touch only stable ShellState;
 they never call the adapter or host value hooks after the session is destroyed.
@@ -68,6 +85,11 @@ Validation projects:
   Blackboard effects with Legacy; a controlled native clock also verifies waiting,
   cancel-before-next-leaf, and fresh admission after cancel. Existing workflow /
   lifecycle tests continue exercising the compatibility entry point.
+  ParseLines additionally compares 1,093 exhaustive short data/LF/CR strings
+  through actual YAML, dynamic ports, empty filters and unchanged source values;
+  native tests cover capacity/key-bound atomicity and cancellation before parse.
+  The value-store, Native Host, independent Session and YAML differential runners
+  use Salts::TinyTest, including native C tests in the C-only build.
 
 Full WorkflowContext migration, all built-in leaves, native event queues,
 branch-transaction integration and complete YAML/node parity remain open.

@@ -137,7 +137,7 @@ if(PRAKTOR_ENABLE_C11_ACTIONS)
     add_executable(actions_c11_session_yaml_differential_test
         ${CMAKE_CURRENT_SOURCE_DIR}/../../actions/c11/session_yaml_differential_test.cpp)
     target_link_libraries(actions_c11_session_yaml_differential_test PRIVATE
-        ${TARGET_NAME_LIB} actions praktor_c11_session praktor_c11_native_host)
+        ${TARGET_NAME_LIB} actions praktor_c11_session praktor_c11_native_host praktor_test_support)
     add_test(NAME actions_c11_session_yaml_differential_test
         COMMAND actions_c11_session_yaml_differential_test)
     set_tests_properties(actions_c11_session_yaml_differential_test PROPERTIES TIMEOUT 30)

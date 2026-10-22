@@ -169,6 +169,38 @@ int praktor_c11_value_store_set(praktor_c11_value_store *store,
   return PRAKTOR_C11_VALUE_OK;
 }
 
+int praktor_c11_value_store_set_many(praktor_c11_value_store *store,
+                                     const praktor_c11_value_write *writes,
+                                     size_t count) {
+  praktor_c11_value_store_impl *impl = store_impl(store);
+  size_t i, j, needed = 0u;
+  if (impl == NULL || (count != 0u && writes == NULL))
+    return PRAKTOR_C11_VALUE_EINVAL;
+  /* Distinct keys cannot fit in fewer slots than the write count. This also
+   * bounds the quadratic duplicate check by the store's configured capacity. */
+  if (count > impl->capacity) return PRAKTOR_C11_VALUE_ENOSPC;
+  for (i = 0u; i < count; ++i) {
+    size_t key_size, value_size;
+    if (writes[i].key == NULL || writes[i].value == NULL)
+      return PRAKTOR_C11_VALUE_EINVAL;
+    key_size = bounded_length(writes[i].key, impl->max_key_bytes);
+    value_size = bounded_length(writes[i].value, impl->max_value_bytes);
+    if (key_size == 0u) return PRAKTOR_C11_VALUE_EINVAL;
+    if (key_size > impl->max_key_bytes || value_size > impl->max_value_bytes)
+      return PRAKTOR_C11_VALUE_ENOBUFS;
+    for (j = 0u; j < i; ++j)
+      if (strcmp(writes[i].key, writes[j].key) == 0)
+        return PRAKTOR_C11_VALUE_EINVAL;
+    if (find_entry(impl, writes[i].key, key_size) == NULL) ++needed;
+  }
+  if (needed > impl->capacity - impl->size) return PRAKTOR_C11_VALUE_ENOSPC;
+  /* All inputs and capacity are now valid. Single-driver ownership prevents
+   * any interleaved observation or mutation during publication. */
+  for (i = 0u; i < count; ++i)
+    (void)praktor_c11_value_store_set(store, writes[i].key, writes[i].value);
+  return PRAKTOR_C11_VALUE_OK;
+}
+
 int praktor_c11_value_store_get(const praktor_c11_value_store *store,
                                 const char *key, char *out_value,
                                 size_t out_capacity, size_t *out_size) {

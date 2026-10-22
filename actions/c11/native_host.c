@@ -179,6 +179,72 @@ static int tick_sleep(native_host_impl *impl, const praktor_c11_leaf_request *re
   return SALTS_OK;
 }
 
+static int tick_parse_lines(native_host_impl *impl,
+                             const praktor_c11_leaf_request *request,
+                             salts_bt_node_status *status) {
+  const praktor_c11_leaf_parameter *param;
+  char *key = impl->scratch;
+  char *input = key + impl->scratch_capacity;
+  char *temporary = input + impl->scratch_capacity;
+  char count_text[3u * sizeof(size_t) + 1u];
+  char *cursor;
+  size_t required = 0u, key_size, written = 0u, count = 0u;
+  int result, count_size;
+  praktor_c11_value_write writes[2];
+  param = parameter(request, "filter");
+  if (param != NULL) {
+    result = resolve(impl, param, input, temporary);
+    if (result != SALTS_OK) return result;
+    /* Legacy uses std::regex_search, including its invalid-regex fallback.
+     * Never silently substitute a different matching language. */
+    if (*input != '\0') return SALTS_ENOTSUP;
+  }
+  param = parameter(request, "input_key");
+  result = param == NULL ? copy_text(key, impl->scratch_capacity, "shell_output")
+                         : resolve(impl, param, key, temporary);
+  if (result != SALTS_OK) return result;
+  result = praktor_c11_value_store_get(&impl->values, key, input,
+                                       impl->scratch_capacity, &required);
+  if (result == PRAKTOR_C11_VALUE_ENOTFOUND) {
+    *status = SALTS_BT_FAILURE;
+    return SALTS_OK;
+  }
+  if (result != PRAKTOR_C11_VALUE_OK) return SALTS_EINVAL;
+  param = parameter(request, "output_key");
+  result = param == NULL ? copy_text(key, impl->scratch_capacity, "parsed_lines")
+                         : resolve(impl, param, key, temporary);
+  if (result != SALTS_OK) return result;
+  key_size = strlen(key);
+  if (impl->scratch_capacity - key_size <= sizeof("_count") - 1u)
+    return SALTS_ENOBUFS;
+  memcpy(temporary, key, key_size);
+  memcpy(temporary + key_size, "_count", sizeof("_count"));
+  /* Match getline + Legacy's !result.empty() join exactly: CR is retained,
+   * a final LF is not another line, and leading empty lines count but do not
+   * add separators before the first nonempty line. Compact in place. */
+  cursor = input;
+  while (*cursor != '\0') {
+    char *end = strchr(cursor, '\n');
+    size_t length = end == NULL ? strlen(cursor) : (size_t)(end - cursor);
+    char *next = end == NULL ? cursor + length : end + 1;
+    ++count;
+    if (written != 0u) input[written++] = '\n';
+    memmove(input + written, cursor, length);
+    written += length;
+    cursor = next;
+  }
+  input[written] = '\0';
+  count_size = snprintf(count_text, sizeof(count_text), "%zu", count);
+  if (count_size < 0 || (size_t)count_size >= sizeof(count_text)) return SALTS_ENOBUFS;
+  writes[0].key = key; writes[0].value = input;
+  writes[1].key = temporary; writes[1].value = count_text;
+  result = praktor_c11_value_store_set_many(&impl->values, writes, 2u);
+  if (result != PRAKTOR_C11_VALUE_OK)
+    return result == PRAKTOR_C11_VALUE_EINVAL ? SALTS_EINVAL : SALTS_ENOBUFS;
+  *status = SALTS_BT_SUCCESS;
+  return SALTS_OK;
+}
+
 static int tick_leaf(void *user, const praktor_c11_leaf_request *request,
                       salts_bt_node_status *status) {
   native_host_impl *impl = (native_host_impl *)user;
@@ -197,6 +263,7 @@ static int tick_leaf(void *user, const praktor_c11_leaf_request *request,
   }
   if (strcmp(request->action, "Sleep") == 0) return tick_sleep(impl, request, status);
   if (find_sleep(impl, request) != NULL) return SALTS_EINVAL;
+  if (strcmp(request->action, "ParseLines") == 0) return tick_parse_lines(impl, request, status);
   key = impl->scratch;
   value = key + impl->scratch_capacity;
   temporary = value + impl->scratch_capacity;

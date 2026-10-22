@@ -1,4 +1,5 @@
 #include "tree_executor_session.hpp"
+#include "praktor_test.hpp"
 #include "native_host.h"
 #include <chrono>
 #include <cstdio>
@@ -6,7 +7,6 @@
 #include <stdexcept>
 #include <thread>
 
-#define CHECK(expr) do { if (!(expr)) { std::fprintf(stderr, "%s:%d: %s\n", __FILE__, __LINE__, #expr); return 1; } } while (0)
 namespace {
 struct Host {
   praktor_c11_native_host state{};
@@ -35,9 +35,9 @@ actions::Node setVariable(const char* key, actions::Value value) {
   actions::Node node; node.id = "SetVariable";
   node.params["key"] = std::string(key); node.params["value"] = std::move(value); return node;
 }
-int nativeValuesAndCapacity() {
+void nativeValuesAndCapacity() {
   Host host;
-  CHECK(host.set("source", "42") == PRAKTOR_C11_VALUE_OK);
+  check(host.set("source", "42") == PRAKTOR_C11_VALUE_OK);
   actions::Tree tree; tree.root.id = "Sequence";
   tree.root.children.push_back(setVariable("copy", std::string("{source}")));
   tree.root.children.push_back(setVariable("flag", true));
@@ -49,26 +49,25 @@ int nativeValuesAndCapacity() {
   tree.root.children.push_back(check);
   actions::c11::TreeExecutorSession session(tree, {}, limits(), host.hooks);
   salts_bt_node_status status = SALTS_BT_FAILURE;
-  CHECK(session.tick(&status) == SALTS_OK && status == SALTS_BT_SUCCESS);
-  CHECK(host.get("copy") == "42" && host.get("flag") == "true" && host.get("number") == "7.000000");
-  CHECK(session.reset() == SALTS_OK);
-  CHECK(host.set("source", "43") == PRAKTOR_C11_VALUE_OK);
-  CHECK(session.tick(&status) == SALTS_OK && status == SALTS_BT_FAILURE);
-  CHECK(host.get("copy") == "43");
-  CHECK(host.set("extra1", "one") == PRAKTOR_C11_VALUE_OK);
-  CHECK(host.set("extra2", "two") == PRAKTOR_C11_VALUE_OK);
-  CHECK(host.set("extra3", "three") == PRAKTOR_C11_VALUE_OK);
+  check(session.tick(&status) == SALTS_OK && status == SALTS_BT_SUCCESS);
+  check(host.get("copy") == "42" && host.get("flag") == "true" && host.get("number") == "7.000000");
+  check(session.reset() == SALTS_OK);
+  check(host.set("source", "43") == PRAKTOR_C11_VALUE_OK);
+  check(session.tick(&status) == SALTS_OK && status == SALTS_BT_FAILURE);
+  check(host.get("copy") == "43");
+  check(host.set("extra1", "one") == PRAKTOR_C11_VALUE_OK);
+  check(host.set("extra2", "two") == PRAKTOR_C11_VALUE_OK);
+  check(host.set("extra3", "three") == PRAKTOR_C11_VALUE_OK);
   actions::Tree full; full.root = setVariable("rejected", std::string("must-not-publish"));
   actions::c11::TreeExecutorSession capacity(full, {}, limits(), host.hooks);
-  CHECK(capacity.tick(&status) == SALTS_ENOBUFS);
-  CHECK(praktor_c11_value_store_size(praktor_c11_native_host_values(&host.state)) == 8u);
-  CHECK(host.get("source") == "43");
+  check(capacity.tick(&status) == SALTS_ENOBUFS);
+  check(praktor_c11_value_store_size(praktor_c11_native_host_values(&host.state)) == 8u);
+  check(host.get("source") == "43");
   actions::Tree unknown; unknown.root.id = "Unregistered";
   actions::c11::TreeExecutorSession declined(unknown, {}, limits(), host.hooks);
-  CHECK(declined.tick(&status) == SALTS_ENOTSUP);
-  return 0;
+  check(declined.tick(&status) == SALTS_ENOTSUP);
 }
-int parallelScopeFailsClosed() {
+void parallelScopeFailsClosed() {
   Host host;
   host.hooks.parallel_enter = [](void*, size_t, size_t, bool) -> int { return SALTS_OK; };
   host.hooks.parallel_step = [](void*, size_t, size_t, salts_bt_node_status) -> int { return SALTS_OK; };
@@ -79,9 +78,65 @@ int parallelScopeFailsClosed() {
   tree.root.children.push_back(setVariable("root-must-stay-empty", std::string("branch-value")));
   actions::c11::TreeExecutorSession session(tree, {}, limits(), host.hooks);
   salts_bt_node_status status = SALTS_BT_FAILURE;
-  CHECK(session.tick(&status) == SALTS_ENOTSUP);
-  CHECK(praktor_c11_value_store_size(praktor_c11_native_host_values(&host.state)) == 0u);
-  return 0;
+  check(session.tick(&status) == SALTS_ENOTSUP);
+  check(praktor_c11_value_store_size(praktor_c11_native_host_values(&host.state)) == 0u);
+}
+void nativeParseLinesAfterCancellation() {
+  uint64_t now = 0u;
+  Host host(1u, &now);
+  check(host.set("shell_output", "\nfirst\n\nsecond\n") == PRAKTOR_C11_VALUE_OK);
+  actions::Tree tree; tree.root.id = "Sequence";
+  actions::Node sleep; sleep.id = "Sleep"; sleep.params["duration"] = 1.0;
+  actions::Node lines; lines.id = "ParseLines";
+  tree.root.children = {sleep, lines, setVariable("after", std::string("done"))};
+  actions::c11::TreeExecutorSession session(tree, {}, limits(), host.hooks);
+  salts_bt_node_status status = SALTS_BT_FAILURE;
+  check(session.tick(&status) == SALTS_OK && status == SALTS_BT_RUNNING);
+  check(session.cancel() == SALTS_OK);
+  int contains = 1;
+  auto* values = praktor_c11_native_host_values(&host.state);
+  for (const char* key : {"parsed_lines", "parsed_lines_count", "after"}) {
+    check(praktor_c11_value_store_contains(values, key, &contains) == PRAKTOR_C11_VALUE_OK && !contains);
+  }
+  check(session.tick(&status) == SALTS_OK && status == SALTS_BT_RUNNING);
+  now = 1000000u;
+  check(session.tick(&status) == SALTS_OK && status == SALTS_BT_SUCCESS);
+  check(host.get("parsed_lines") == "first\n\nsecond");
+  check(host.get("parsed_lines_count") == "4" && host.get("after") == "done");
+  // A claimed but unsupported regex may not run a compatibility fallback or
+  // publish a new count. The independent binary contains no such fallback.
+  tree.root.children[1].params["filter"] = std::string("^first$");
+  tree.root.children.erase(tree.root.children.begin());
+  check(praktor_c11_value_store_erase(values, "after") == PRAKTOR_C11_VALUE_OK);
+  actions::c11::TreeExecutorSession rejected(tree, {}, limits(), host.hooks);
+  check(rejected.tick(&status) == SALTS_ENOTSUP);
+  check(praktor_c11_value_store_contains(values, "after", &contains) == PRAKTOR_C11_VALUE_OK && !contains);
+  check(host.get("parsed_lines_count") == "4");
+}
+
+void nativeParseLinesCapacityFailure() {
+  Host host;
+  check(host.set("shell_output", "new\nlines") == PRAKTOR_C11_VALUE_OK);
+  check(host.set("parsed_lines", "old") == PRAKTOR_C11_VALUE_OK);
+  for (const char* key : {"a", "b", "c", "d", "e", "f"})
+    check(host.set(key, "occupied") == PRAKTOR_C11_VALUE_OK);
+  actions::Tree tree; tree.root.id = "Sequence";
+  actions::Node lines; lines.id = "ParseLines";
+  tree.root.children = {lines, setVariable("after", std::string("done"))};
+  actions::c11::TreeExecutorSession session(tree, {}, limits(), host.hooks);
+  salts_bt_node_status status = SALTS_BT_FAILURE;
+  check(session.tick(&status) == SALTS_ENOBUFS);
+  check(host.get("parsed_lines") == "old");
+  auto* values = praktor_c11_native_host_values(&host.state);
+  int contains = 1;
+  for (const char* key : {"parsed_lines_count", "after"})
+    check(praktor_c11_value_store_contains(values, key, &contains) == PRAKTOR_C11_VALUE_OK && !contains);
+  check(praktor_c11_value_store_erase(values, "e") == PRAKTOR_C11_VALUE_OK);
+  check(praktor_c11_value_store_erase(values, "f") == PRAKTOR_C11_VALUE_OK);
+  check(session.reset() == SALTS_OK);
+  check(session.tick(&status) == SALTS_OK && status == SALTS_BT_SUCCESS);
+  check(host.get("parsed_lines") == "new\nlines" && host.get("parsed_lines_count") == "2");
+  check(host.get("after") == "done");
 }
 struct RunningHost {
   int ticks = 0, halts = 0;
@@ -96,7 +151,7 @@ struct RunningHost {
   }
   static void halt(void* user, size_t) { ++static_cast<RunningHost*>(user)->halts; }
 };
-int typedCancellationAndTimeout() {
+void typedCancellationAndTimeout() {
   Host host; RunningHost running;
   host.hooks.user = &running; host.hooks.tick_typed_leaf = &RunningHost::tick;
   host.hooks.halt_typed_leaf = nullptr;
@@ -105,120 +160,115 @@ int typedCancellationAndTimeout() {
   tree.root.params["timeout_ms"] = std::string("{deadline}");
   actions::Node pending; pending.id = "Pending"; pending.params["enabled"] = true;
   tree.root.children.push_back(pending);
-  CHECK(host.set("deadline", "10000") == PRAKTOR_C11_VALUE_OK);
+  check(host.set("deadline", "10000") == PRAKTOR_C11_VALUE_OK);
   actions::c11::TreeExecutorSession session(tree, {}, limits(), host.hooks);
   salts_bt_node_status status = SALTS_BT_FAILURE;
-  CHECK(session.tick(&status) == SALTS_OK && status == SALTS_BT_RUNNING);
-  CHECK(host.set("deadline", "0") == PRAKTOR_C11_VALUE_OK);
-  CHECK(session.tick(&status) == SALTS_OK && status == SALTS_BT_FAILURE);
-  CHECK(running.ticks == 1 && running.halts == 1);
-  CHECK(session.reset() == SALTS_OK);
-  CHECK(host.set("deadline", "10000") == PRAKTOR_C11_VALUE_OK);
-  CHECK(session.tick(&status) == SALTS_OK && status == SALTS_BT_RUNNING);
-  CHECK(session.cancel() == SALTS_OK && running.halts == 2);
-  CHECK(session.cancel() == SALTS_OK && running.halts == 2);
-  CHECK(session.tick(&status) == SALTS_OK && status == SALTS_BT_RUNNING);
+  check(session.tick(&status) == SALTS_OK && status == SALTS_BT_RUNNING);
+  check(host.set("deadline", "0") == PRAKTOR_C11_VALUE_OK);
+  check(session.tick(&status) == SALTS_OK && status == SALTS_BT_FAILURE);
+  check(running.ticks == 1 && running.halts == 1);
+  check(session.reset() == SALTS_OK);
+  check(host.set("deadline", "10000") == PRAKTOR_C11_VALUE_OK);
+  check(session.tick(&status) == SALTS_OK && status == SALTS_BT_RUNNING);
+  check(session.cancel() == SALTS_OK && running.halts == 2);
+  check(session.cancel() == SALTS_OK && running.halts == 2);
+  check(session.tick(&status) == SALTS_OK && status == SALTS_BT_RUNNING);
   running.decline = true;
-  CHECK(session.tick(&status) == SALTS_ENOTSUP && running.halts == 3);
-  return 0;
+  check(session.tick(&status) == SALTS_ENOTSUP && running.halts == 3);
 }
-int nativeSleepLifecycleAndOwnership() {
+void nativeSleepLifecycleAndOwnership() {
   uint64_t now = 0u;
   Host host(1u, &now);
-  CHECK(host.set("duration", "100ms") == PRAKTOR_C11_VALUE_OK);
+  check(host.set("duration", "100ms") == PRAKTOR_C11_VALUE_OK);
   actions::Tree tree; tree.root.id = "Sleep";
   tree.root.params["duration"] = std::string("{duration}");
   actions::c11::TreeExecutorSession session(tree, {}, limits(), host.hooks);
   salts_bt_node_status status = SALTS_BT_FAILURE;
-  CHECK(session.tick(&status) == SALTS_OK && status == SALTS_BT_RUNNING);
-  CHECK(host.set("duration", "0ms") == PRAKTOR_C11_VALUE_OK);
-  CHECK(session.tick(&status) == SALTS_OK && status == SALTS_BT_RUNNING);
-  CHECK(session.cancel() == SALTS_OK);
-  CHECK(session.tick(&status) == SALTS_OK && status == SALTS_BT_SUCCESS);
-  CHECK(host.set("duration", "100ms") == PRAKTOR_C11_VALUE_OK);
-  CHECK(session.tick(&status) == SALTS_OK && status == SALTS_BT_RUNNING);
-  CHECK(session.reset() == SALTS_OK);
-  CHECK(host.set("duration", "0ms") == PRAKTOR_C11_VALUE_OK);
-  CHECK(session.tick(&status) == SALTS_OK && status == SALTS_BT_SUCCESS);
+  check(session.tick(&status) == SALTS_OK && status == SALTS_BT_RUNNING);
+  check(host.set("duration", "0ms") == PRAKTOR_C11_VALUE_OK);
+  check(session.tick(&status) == SALTS_OK && status == SALTS_BT_RUNNING);
+  check(session.cancel() == SALTS_OK);
+  check(session.tick(&status) == SALTS_OK && status == SALTS_BT_SUCCESS);
+  check(host.set("duration", "100ms") == PRAKTOR_C11_VALUE_OK);
+  check(session.tick(&status) == SALTS_OK && status == SALTS_BT_RUNNING);
+  check(session.reset() == SALTS_OK);
+  check(host.set("duration", "0ms") == PRAKTOR_C11_VALUE_OK);
+  check(session.tick(&status) == SALTS_OK && status == SALTS_BT_SUCCESS);
 
   actions::c11::TreeExecutorSession second(tree, {}, limits(), host.hooks);
   {
     actions::c11::TreeExecutorSession first(tree, {}, limits(), host.hooks);
-    CHECK(host.set("duration", "100ms") == PRAKTOR_C11_VALUE_OK);
-    CHECK(first.tick(&status) == SALTS_OK && status == SALTS_BT_RUNNING);
-    CHECK(second.tick(&status) == SALTS_ENOBUFS);
-    CHECK(host.set("duration", "0ms") == PRAKTOR_C11_VALUE_OK);
-    CHECK(first.tick(&status) == SALTS_OK && status == SALTS_BT_RUNNING);
+    check(host.set("duration", "100ms") == PRAKTOR_C11_VALUE_OK);
+    check(first.tick(&status) == SALTS_OK && status == SALTS_BT_RUNNING);
+    check(second.tick(&status) == SALTS_ENOBUFS);
+    check(host.set("duration", "0ms") == PRAKTOR_C11_VALUE_OK);
+    check(first.tick(&status) == SALTS_OK && status == SALTS_BT_RUNNING);
     // The rejected second Session's halt cannot erase the first's activation.
   }
-  CHECK(second.reset() == SALTS_OK);
-  CHECK(second.tick(&status) == SALTS_OK && status == SALTS_BT_SUCCESS);
-  CHECK(host.set("duration", "1s") == PRAKTOR_C11_VALUE_OK);
-  CHECK(second.tick(&status) == SALTS_OK && status == SALTS_BT_RUNNING);
-  CHECK(second.cancel() == SALTS_OK);
+  check(second.reset() == SALTS_OK);
+  check(second.tick(&status) == SALTS_OK && status == SALTS_BT_SUCCESS);
+  check(host.set("duration", "1s") == PRAKTOR_C11_VALUE_OK);
+  check(second.tick(&status) == SALTS_OK && status == SALTS_BT_RUNNING);
+  check(second.cancel() == SALTS_OK);
   now = 100u;
-  CHECK(session.tick(&status) == SALTS_OK && status == SALTS_BT_RUNNING);
+  check(session.tick(&status) == SALTS_OK && status == SALTS_BT_RUNNING);
   now = 99u;
-  CHECK(session.tick(&status) == SALTS_EINVAL);
-  CHECK(second.tick(&status) == SALTS_OK && status == SALTS_BT_RUNNING);
-  CHECK(second.cancel() == SALTS_OK);
-  return 0;
+  check(session.tick(&status) == SALTS_EINVAL);
+  check(second.tick(&status) == SALTS_OK && status == SALTS_BT_RUNNING);
+  check(second.cancel() == SALTS_OK);
 }
 
-int nativeSleepUsesRealMonotonicClock() {
+void nativeSleepUsesRealMonotonicClock() {
   Host host(1u);
   actions::Tree tree; tree.root.id = "Sleep"; tree.root.params["duration"] = 2.0;
   actions::c11::TreeExecutorSession session(tree, {}, limits(), host.hooks);
   salts_bt_node_status status = SALTS_BT_FAILURE;
-  CHECK(session.tick(&status) == SALTS_OK && status == SALTS_BT_RUNNING);
+  check(session.tick(&status) == SALTS_OK && status == SALTS_BT_RUNNING);
   const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
   do {
     std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    CHECK(session.tick(&status) == SALTS_OK);
+    check(session.tick(&status) == SALTS_OK);
   } while (status == SALTS_BT_RUNNING && std::chrono::steady_clock::now() < deadline);
-  CHECK(status == SALTS_BT_SUCCESS);
-  return 0;
+  check(status == SALTS_BT_SUCCESS);
 }
 
-int timeoutReleasesNativeSleepSlot() {
+void timeoutReleasesNativeSleepSlot() {
   uint64_t now = 0u; Host host(1u, &now);
-  CHECK(host.set("duration", "1h") == PRAKTOR_C11_VALUE_OK);
-  CHECK(host.set("deadline", "10000") == PRAKTOR_C11_VALUE_OK);
+  check(host.set("duration", "1h") == PRAKTOR_C11_VALUE_OK);
+  check(host.set("deadline", "10000") == PRAKTOR_C11_VALUE_OK);
   actions::Tree tree; tree.root.id = "Timeout";
   tree.root.params["timeout_ms"] = std::string("{deadline}");
   actions::Node sleep; sleep.id = "Sleep"; sleep.params["duration"] = std::string("{duration}");
   tree.root.children.push_back(sleep);
   actions::c11::TreeExecutorSession session(tree, {}, limits(), host.hooks);
   salts_bt_node_status status = SALTS_BT_FAILURE;
-  CHECK(session.tick(&status) == SALTS_OK && status == SALTS_BT_RUNNING);
-  CHECK(host.set("deadline", "0") == PRAKTOR_C11_VALUE_OK);
-  CHECK(session.tick(&status) == SALTS_OK && status == SALTS_BT_FAILURE);
-  CHECK(host.set("deadline", "10000") == PRAKTOR_C11_VALUE_OK);
-  CHECK(host.set("duration", "0ms") == PRAKTOR_C11_VALUE_OK);
-  CHECK(session.reset() == SALTS_OK);
-  CHECK(session.tick(&status) == SALTS_OK && status == SALTS_BT_SUCCESS);
+  check(session.tick(&status) == SALTS_OK && status == SALTS_BT_RUNNING);
+  check(host.set("deadline", "0") == PRAKTOR_C11_VALUE_OK);
+  check(session.tick(&status) == SALTS_OK && status == SALTS_BT_FAILURE);
+  check(host.set("deadline", "10000") == PRAKTOR_C11_VALUE_OK);
+  check(host.set("duration", "0ms") == PRAKTOR_C11_VALUE_OK);
+  check(session.reset() == SALTS_OK);
+  check(session.tick(&status) == SALTS_OK && status == SALTS_BT_SUCCESS);
   // Positive admission proves Timeout actually returned the sole slot.
-  CHECK(host.set("duration", "1s") == PRAKTOR_C11_VALUE_OK);
-  CHECK(session.tick(&status) == SALTS_OK && status == SALTS_BT_RUNNING);
-  CHECK(session.cancel() == SALTS_OK);
-  return 0;
+  check(host.set("duration", "1s") == PRAKTOR_C11_VALUE_OK);
+  check(session.tick(&status) == SALTS_OK && status == SALTS_BT_RUNNING);
+  check(session.cancel() == SALTS_OK);
 }
 
-int rejectAmbiguousHaltCallbacks() {
+void rejectAmbiguousHaltCallbacks() {
   Host host;
   host.hooks.halt_leaf = [](void*, size_t) {};
   actions::Tree tree; tree.root = setVariable("not-written", std::string("no"));
   bool rejected = false;
   try { actions::c11::TreeExecutorSession session(tree, {}, limits(), host.hooks); }
   catch (const std::invalid_argument&) { rejected = true; }
-  CHECK(rejected);
-  CHECK(praktor_c11_value_store_size(praktor_c11_native_host_values(&host.state)) == 0u);
-  return 0;
+  check(rejected);
+  check(praktor_c11_value_store_size(praktor_c11_native_host_values(&host.state)) == 0u);
 }
 
-int realProcessAndRetainer() {
+void realProcessAndRetainer() {
   cflow_process_retainer retainer{};
-  CHECK(cflow_process_retainer_init(&retainer, 2u) == SALTS_OK);
+  check(cflow_process_retainer_init(&retainer, 2u) == SALTS_OK);
   {
     Host host;
     actions::Tree tree; tree.root.id = "Shell";
@@ -228,7 +278,7 @@ int realProcessAndRetainer() {
     salts_bt_node_status status = SALTS_BT_RUNNING;
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
     do {
-      CHECK(session.tick(&status) == SALTS_OK);
+      check(session.tick(&status) == SALTS_OK);
       if (status == SALTS_BT_RUNNING) std::this_thread::sleep_for(std::chrono::milliseconds(1));
     } while (status == SALTS_BT_RUNNING && std::chrono::steady_clock::now() < deadline);
     if (status != SALTS_BT_SUCCESS) {
@@ -236,9 +286,9 @@ int realProcessAndRetainer() {
                    static_cast<int>(status), session.lastError().c_str(),
                    host.get("shell_exit_code").c_str(), host.get("shell_stderr").c_str());
     }
-    CHECK(status == SALTS_BT_SUCCESS);
-    CHECK(host.get("shell_output").find("independent-session") != std::string::npos);
-    CHECK(host.get("shell_exit_code") == "0");
+    check(status == SALTS_BT_SUCCESS);
+    check(host.get("shell_output").find("independent-session") != std::string::npos);
+    check(host.get("shell_exit_code") == "0");
     actions::Tree live; live.root.id = "Shell";
 #if defined(_WIN32)
     live.root.params["cmd"] = std::string("ping -n 6 127.0.0.1 > NUL");
@@ -247,30 +297,31 @@ int realProcessAndRetainer() {
 #endif
     live.root.params["stream_output"] = false;
     actions::c11::TreeExecutorSession canceled(live, {}, limits(), host.hooks, &retainer, 0u);
-    CHECK(canceled.tick(&status) == SALTS_OK && status == SALTS_BT_RUNNING);
+    check(canceled.tick(&status) == SALTS_OK && status == SALTS_BT_RUNNING);
     const int canceled_status = canceled.cancel();
-    CHECK(canceled_status == SALTS_OK || canceled_status == SALTS_EBUSY);
+    check(canceled_status == SALTS_OK || canceled_status == SALTS_EBUSY);
   } // Host value storage is gone before late Process completions are drained.
   size_t pending = 1u;
   const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
   while (pending != 0u && std::chrono::steady_clock::now() < deadline) {
     size_t reaped = 0u;
     const int result = cflow_process_retainer_run_ready(&retainer, 64u, &reaped, &pending);
-    CHECK(result == SALTS_OK || result == SALTS_EBUSY);
+    check(result == SALTS_OK || result == SALTS_EBUSY);
     if (pending != 0u) std::this_thread::sleep_for(std::chrono::milliseconds(1));
   }
-  CHECK(pending == 0u);
-  CHECK(cflow_process_retainer_destroy(&retainer) == SALTS_OK);
-  return 0;
+  check(pending == 0u);
+  check(cflow_process_retainer_destroy(&retainer) == SALTS_OK);
 }
 }
-int main() {
-  if (nativeValuesAndCapacity() != 0) return 1;
-  if (typedCancellationAndTimeout() != 0) return 1;
-  if (parallelScopeFailsClosed() != 0) return 1;
-  if (nativeSleepLifecycleAndOwnership() != 0) return 1;
-  if (nativeSleepUsesRealMonotonicClock() != 0) return 1;
-  if (timeoutReleasesNativeSleepSlot() != 0) return 1;
-  if (rejectAmbiguousHaltCallbacks() != 0) return 1;
-  return realProcessAndRetainer();
+spec("Independent C11 Session") {
+  it("parses lines after fresh admission and rejects unsupported filters") { nativeParseLinesAfterCancellation(); }
+  it("stops a Sequence before partial ParseLines publication") { nativeParseLinesCapacityFailure(); }
+  it("executes typed leaves with bounded values") { nativeValuesAndCapacity(); }
+  it("rejects root-store dispatch inside Parallel") { parallelScopeFailsClosed(); }
+  it("halts typed activations on cancel and dynamic Timeout") { typedCancellationAndTimeout(); }
+  it("scopes native Sleep lifecycle to its Session") { nativeSleepLifecycleAndOwnership(); }
+  it("uses a real monotonic clock for native Sleep") { nativeSleepUsesRealMonotonicClock(); }
+  it("returns native activation capacity after Timeout") { timeoutReleasesNativeSleepSlot(); }
+  it("rejects ambiguous halt ownership") { rejectAmbiguousHaltCallbacks(); }
+  it("executes Salts Process and retains late completions after Host destruction") { realProcessAndRetainer(); }
 }

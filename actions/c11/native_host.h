@@ -6,6 +6,7 @@
 extern "C" {
 #endif
 /* Single-driver owner: fixed-capacity values and preallocated parameter scratch.
+ * Typed SetVariable, CheckExitCode, cooperative Sleep, and unfiltered ParseLines.
  * No legacy objects or per-tick allocations. Borrow hooks only until destroy.
  * Parallel-branch requests and unsupported actions return ENOTSUP; there is no implicit legacy dispatch. */
 typedef struct praktor_c11_native_host { void *impl; } praktor_c11_native_host;

@@ -41,6 +41,16 @@ int praktor_c11_value_store_clone(praktor_c11_value_store *destination,
                                   const praktor_c11_value_store *source);
 int praktor_c11_value_store_set(praktor_c11_value_store *store,
                                 const char *key, const char *value);
+typedef struct praktor_c11_value_write {
+  const char *key;
+  const char *value;
+} praktor_c11_value_write;
+/* Single-driver, allocation-free all-or-nothing publication. Keys must be
+ * distinct; zero writes is a no-op. All lengths and new slots are validated
+ * before any existing value changes. Inputs are borrowed for this call only. */
+int praktor_c11_value_store_set_many(praktor_c11_value_store *store,
+                                     const praktor_c11_value_write *writes,
+                                     size_t count);
 int praktor_c11_value_store_get(const praktor_c11_value_store *store,
                                 const char *key, char *out_value,
                                 size_t out_capacity, size_t *out_size);
