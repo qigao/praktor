@@ -82,6 +82,32 @@ static int test_transaction_commit_conflict_and_abort(void) {
   return 0;
 }
 
+static int test_transaction_capacity_failure_is_atomic(void) {
+  praktor_c11_value_store target = {0};
+  praktor_c11_value_txn txn = {0};
+  CHECK(praktor_c11_value_store_init(&target, 4u, 16u, 32u) == PRAKTOR_C11_VALUE_OK);
+  CHECK(praktor_c11_value_store_set(&target, "base-a", "A") == PRAKTOR_C11_VALUE_OK);
+  CHECK(praktor_c11_value_store_set(&target, "base-b", "B") == PRAKTOR_C11_VALUE_OK);
+  CHECK(praktor_c11_value_txn_begin(&txn, &target) == PRAKTOR_C11_VALUE_OK);
+  CHECK(praktor_c11_value_txn_set(&txn, "branch-key", "branch") == PRAKTOR_C11_VALUE_OK);
+  CHECK(praktor_c11_value_store_set(&target, "external-c", "C") == PRAKTOR_C11_VALUE_OK);
+  CHECK(praktor_c11_value_store_set(&target, "external-d", "D") == PRAKTOR_C11_VALUE_OK);
+  CHECK(praktor_c11_value_txn_commit(&txn) == PRAKTOR_C11_VALUE_ENOSPC);
+  CHECK(praktor_c11_value_store_size(&target) == 4u);
+  CHECK(expect_value(&target, "base-a", "A"));
+  CHECK(expect_value(&target, "base-b", "B"));
+  CHECK(expect_value(&target, "external-c", "C"));
+  CHECK(expect_value(&target, "external-d", "D"));
+  { int contains = 1;
+    CHECK(praktor_c11_value_store_contains(&target, "branch-key", &contains) ==
+          PRAKTOR_C11_VALUE_OK);
+    CHECK(contains == 0);
+  }
+  praktor_c11_value_txn_abort(&txn);
+  praktor_c11_value_store_destroy(&target);
+  return 0;
+}
+
 int main(void) {
   praktor_c11_value_store store = {0};
   char output[9];
@@ -138,6 +164,7 @@ int main(void) {
 
   CHECK(test_clone_is_independent_snapshot() == 0);
   CHECK(test_transaction_commit_conflict_and_abort() == 0);
+  CHECK(test_transaction_capacity_failure_is_atomic() == 0);
   praktor_c11_value_store_destroy(&store);
   CHECK(store.impl == NULL && praktor_c11_value_store_size(&store) == 0u);
   praktor_c11_value_store_destroy(&store);
