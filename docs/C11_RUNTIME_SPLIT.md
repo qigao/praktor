@@ -71,3 +71,5 @@ legacy Executor references until the next implementation cut.
 Added a fixed-capacity C11 string store. Initialization reserves all entry/key/value storage; writes never grow the store, and capacity/value-size exhaustion returns explicit errors. It has no dependency on the legacy actions runtime. The normal C11 target and independent C-only SDK project compile and run negative-capacity/size regression tests.
 
 This is a foundation, not yet the production Blackboard replacement: TreeExecutorSession still uses actions::Blackboard for compatibility. The next step is to adapt C11 built-in stateful controls and Shell output mapping to a typed host value interface, then differential-test semantics before removing the legacy Blackboard from the session constructor.
+
+The value store is a separate `praktor_c11_value_store` target with no Salts BehaviorTree link dependency; its unit test links only this library. The standalone C-only project mirrors this separation. This keeps the future host state primitive reusable without bringing in the tree runtime or any C++ action target.

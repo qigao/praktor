@@ -65,8 +65,6 @@ if(PRAKTOR_ENABLE_C11_ACTIONS)
     add_library(praktor_c11_bt_core STATIC
         c11/tree_adapter.c
         c11/tree_adapter.h
-        c11/value_store.c
-        c11/value_store.h
     )
     target_include_directories(praktor_c11_bt_core
         PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/c11>
@@ -81,6 +79,13 @@ if(PRAKTOR_ENABLE_C11_ACTIONS)
         FOLDER "actions/c11"
     )
     cmake_config_target(praktor_c11_bt_core NO_INSTALL NO_VERSION FOLDER "actions/c11")
+
+    # Independent bounded C11 key/value storage; no BehaviorTree or actions dependency.
+    add_library(praktor_c11_value_store STATIC c11/value_store.c c11/value_store.h)
+    target_include_directories(praktor_c11_value_store PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/c11>)
+    target_compile_features(praktor_c11_value_store PUBLIC c_std_11)
+    set_target_properties(praktor_c11_value_store PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF POSITION_INDEPENDENT_CODE ON FOLDER "actions/c11")
+    cmake_config_target(praktor_c11_value_store NO_INSTALL NO_VERSION FOLDER "actions/c11")
 
     # Transitional C++ Workflow/AST bridge; remove after semantic parity.
     add_library(praktor_actions_c11 STATIC
@@ -118,7 +123,7 @@ if(PRAKTOR_ENABLE_C11_ACTIONS)
         )
         add_test(NAME actions_c11_tree_adapter_test COMMAND actions_c11_tree_adapter_test)
         add_executable(actions_c11_value_store_test c11/value_store_test.c)
-        target_link_libraries(actions_c11_value_store_test PRIVATE praktor_c11_bt_core)
+        target_link_libraries(actions_c11_value_store_test PRIVATE praktor_c11_value_store)
         target_compile_features(actions_c11_value_store_test PRIVATE c_std_11)
         set_target_properties(actions_c11_value_store_test PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF FOLDER "actions/c11/tests")
         add_test(NAME actions_c11_value_store_test COMMAND actions_c11_value_store_test)
