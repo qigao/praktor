@@ -165,6 +165,21 @@ int nativeSleepLifecycleAndOwnership() {
   return 0;
 }
 
+int nativeSleepUsesRealMonotonicClock() {
+  Host host(1u);
+  actions::Tree tree; tree.root.id = "Sleep"; tree.root.params["duration"] = 2.0;
+  actions::c11::TreeExecutorSession session(tree, {}, limits(), host.hooks);
+  salts_bt_node_status status = SALTS_BT_FAILURE;
+  CHECK(session.tick(&status) == SALTS_OK && status == SALTS_BT_RUNNING);
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+  do {
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    CHECK(session.tick(&status) == SALTS_OK);
+  } while (status == SALTS_BT_RUNNING && std::chrono::steady_clock::now() < deadline);
+  CHECK(status == SALTS_BT_SUCCESS);
+  return 0;
+}
+
 int timeoutReleasesNativeSleepSlot() {
   uint64_t now = 0u; Host host(1u, &now);
   CHECK(host.set("duration", "1h") == PRAKTOR_C11_VALUE_OK);
@@ -254,6 +269,7 @@ int main() {
   if (typedCancellationAndTimeout() != 0) return 1;
   if (parallelScopeFailsClosed() != 0) return 1;
   if (nativeSleepLifecycleAndOwnership() != 0) return 1;
+  if (nativeSleepUsesRealMonotonicClock() != 0) return 1;
   if (timeoutReleasesNativeSleepSlot() != 0) return 1;
   if (rejectAmbiguousHaltCallbacks() != 0) return 1;
   return realProcessAndRetainer();
