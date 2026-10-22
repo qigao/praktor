@@ -54,6 +54,10 @@ struct ScopedProcessRetainer {
 
 void noOpHalt(void*, size_t) {}
 
+int hostDeclineLeaf(void*, size_t, salts_bt_node_status*) {
+  return SALTS_ENOTSUP;
+}
+
 int hostSuccessLeaf(void* user, size_t, salts_bt_node_status* out_status) {
   if (user == nullptr || out_status == nullptr) return SALTS_EINVAL;
   ++*static_cast<int*>(user);
@@ -475,11 +479,49 @@ int testShellUsesSaltsProcessByDefaultAndAllowsExplicitOverride() {
     CHECK(state.tick_calls == 1);
     CHECK(legacy_shell_calls == 0);
   }
+  {
+    actions::Tree tree;
+    tree.root.id = "Shell";
+    tree.root.params.emplace("cmd", actions::Value{std::string("echo host-store")});
+    tree.root.params.emplace("timeout", actions::Value{5000.0});
+    tree.root.params.emplace("stream_output", actions::Value{false});
+    actions::Executor executor;
+    actions::Blackboard legacy_blackboard;
+    actions::ExecutionContext context;
+    ScopedProcessRetainer owner;
+    int unused_user = 0;
+    HostValueMap values;
+    praktor_c11_bt_host hooks{};
+    hooks.tick_leaf = &hostDeclineLeaf;
+    hooks.halt_leaf = &noOpHalt;
+    hooks.user = &unused_user;
+    hooks.value_get = &hostValueGet;
+    hooks.value_set = &hostValueSet;
+    hooks.value_contains = &hostValueContains;
+    hooks.value_user = &values;
+    actions::c11::TreeExecutorSession session(
+        tree, executor, legacy_blackboard, context, limits(), &hooks,
+        &owner.owner);
+    const auto started = std::chrono::steady_clock::now();
+    salts_bt_node_status status = SALTS_BT_RUNNING;
+    do {
+      CHECK(session.tick(&status) == SALTS_OK);
+      if (status == SALTS_BT_RUNNING)
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+      CHECK(std::chrono::steady_clock::now() - started <
+            std::chrono::seconds(5));
+    } while (status == SALTS_BT_RUNNING);
+    CHECK(status == SALTS_BT_SUCCESS);
+    CHECK(values["shell_output"].find("host-store") != std::string::npos);
+    CHECK(values["shell_exit_code"] == "0");
+    CHECK(!legacy_blackboard.has("shell_output"));
+    CHECK(!legacy_blackboard.has("shell_exit_code"));
+  }
   return 0;
 }
 
 
-int testShellRejectsZeroTimeoutBeforeSpawningProcess() {
+int testShellRejectsZeroTimeoutBeforeSpawningProcess {
   actions::Tree tree;
   tree.root.id = "Shell";
   tree.root.params.emplace("cmd", actions::Value{std::string("echo must-not-run")});
