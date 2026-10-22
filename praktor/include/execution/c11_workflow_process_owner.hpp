@@ -49,6 +49,12 @@ public:
     }
 
     ~C11WorkflowProcessOwner() noexcept {
+        // Never free an empty-but-currently-in-use retainer. A concurrent
+        // execute() may be between preflight and its first reservation; a
+        // plain destroy() could otherwise succeed and cause use-after-free.
+        // Callers must still stop all future invocations before destruction.
+        if (active_.test_and_set(std::memory_order_acquire))
+            std::terminate();
         if (retainer_.impl != nullptr &&
             cflow_process_retainer_destroy(&retainer_) != SALTS_OK) {
             std::terminate();
