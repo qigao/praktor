@@ -14,7 +14,11 @@ The Praktor-facing `DeclarativeTreeExecutor` public header now forward
 declares legacy AST/Blackboard types instead of importing the complete
 `core/executor.hpp`. The latter is implementation-local, and the
 legacy `actions` library is a PRIVATE link (not a public compile
-requirement) for `praktor_lib`. The standalone public-header object
+requirement) for `praktor_lib`. The distinct `praktor_shell` target is
+now declared explicitly PUBLIC because the existing
+`execution/controlled_process.hpp` public header directly includes
+`praktor/shell/shell_executor.hpp`; depending on the legacy
+`actions` link to leak this include path was incorrect. The standalone public-header object
 test compiles this contract in Legacy-default and C11-enabled builds.
 
 `actions/c11/standalone` is independently configured as `LANGUAGES C`.

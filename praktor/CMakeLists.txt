@@ -73,6 +73,7 @@ target_link_libraries(
            CHttp::Client
            Salts::CNet
            CHttp::S3
+           praktor_shell
     PRIVATE actions
 )
 if(ENABLE_SCRIPT_ENGINE)
