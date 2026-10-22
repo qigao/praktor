@@ -1432,7 +1432,7 @@ struct TreeExecutorSession::Impl : std::enable_shared_from_this<Impl> {
         }
         const int64_t value = hooks.value_get != nullptr
             ? resolveHostIntegerParameter(*source, key, default_value, required)
-            : resolveIntegerParameter(*source, blackboard, key, default_value,
+            : resolveIntegerParameter(*source, *blackboard, key, default_value,
                                       required);
         if (value < 0 ||
             static_cast<uint64_t>(value) > tree_limits.max_control_iterations) {
@@ -1454,7 +1454,7 @@ struct TreeExecutorSession::Impl : std::enable_shared_from_this<Impl> {
         }
         out_params->duration_ns = hooks.value_get != nullptr
             ? resolveHostDurationParameter(*source, key, default_ms)
-            : resolveDurationParameter(*source, blackboard, key, default_ms);
+            : resolveDurationParameter(*source, *blackboard, key, default_ms);
       } else {
         return SALTS_EINVAL;
       }
