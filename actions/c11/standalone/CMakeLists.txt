@@ -50,7 +50,6 @@ add_test(NAME actions_c11_tree_adapter_standalone_test
     COMMAND actions_c11_tree_adapter_standalone_test
 )
 add_executable(actions_c11_value_store_standalone_test ../value_store_test.c)
-target_link_libraries(actions_c11_value_store_standalone_test PRIVATE praktor_c11_bt_core)
 target_compile_features(actions_c11_value_store_standalone_test PRIVATE c_std_11)
 set_target_properties(actions_c11_value_store_standalone_test PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF LINKER_LANGUAGE C)
 add_library(praktor_c11_value_store STATIC ../value_store.c ../value_store.h)
