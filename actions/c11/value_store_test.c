@@ -10,6 +10,45 @@
   } \
 } while (0)
 
+static int expect_value(const praktor_c11_value_store *store,
+                         const char *key, const char *expected) {
+  char output[64];
+  size_t size = 0u;
+  if (praktor_c11_value_store_get(store, key, output, sizeof(output), &size) !=
+      PRAKTOR_C11_VALUE_OK) return 0;
+  return size == strlen(expected) && strcmp(output, expected) == 0;
+}
+
+static int test_clone_is_independent_snapshot(void) {
+  praktor_c11_value_store baseline = {0};
+  praktor_c11_value_store branch = {0};
+  CHECK(praktor_c11_value_store_init(&baseline, 3u, 16u, 32u) ==
+        PRAKTOR_C11_VALUE_OK);
+  CHECK(praktor_c11_value_store_set(&baseline, "input", "seed") ==
+        PRAKTOR_C11_VALUE_OK);
+  CHECK(praktor_c11_value_store_set(&baseline, "stable", "unchanged") ==
+        PRAKTOR_C11_VALUE_OK);
+  CHECK(praktor_c11_value_store_clone(&branch, &baseline) ==
+        PRAKTOR_C11_VALUE_OK);
+  CHECK(praktor_c11_value_store_clone(&branch, &baseline) ==
+        PRAKTOR_C11_VALUE_EINVAL);
+  CHECK(praktor_c11_value_store_set(&branch, "input", "branch-value") ==
+        PRAKTOR_C11_VALUE_OK);
+  CHECK(praktor_c11_value_store_set(&branch, "branch-only", "local") ==
+        PRAKTOR_C11_VALUE_OK);
+  CHECK(praktor_c11_value_store_erase(&branch, "stable") ==
+        PRAKTOR_C11_VALUE_OK);
+  CHECK(expect_value(&baseline, "input", "seed"));
+  CHECK(expect_value(&baseline, "stable", "unchanged"));
+  CHECK(praktor_c11_value_store_contains(&baseline, "branch-only", &(int){0}) ==
+        PRAKTOR_C11_VALUE_OK);
+  CHECK(!expect_value(&branch, "stable", "unchanged"));
+  CHECK(expect_value(&branch, "input", "branch-value"));
+  praktor_c11_value_store_destroy(&branch);
+  praktor_c11_value_store_destroy(&baseline);
+  return 0;
+}
+
 int main(void) {
   praktor_c11_value_store store = {0};
   char output[9];
@@ -64,6 +103,7 @@ int main(void) {
                                     &output_size) == PRAKTOR_C11_VALUE_ENOTFOUND);
   CHECK(praktor_c11_value_store_size(&store) == 2u);
 
+  CHECK(test_clone_is_independent_snapshot() == 0);
   praktor_c11_value_store_destroy(&store);
   CHECK(store.impl == NULL && praktor_c11_value_store_size(&store) == 0u);
   praktor_c11_value_store_destroy(&store);

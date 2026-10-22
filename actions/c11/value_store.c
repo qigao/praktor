@@ -91,6 +91,34 @@ int praktor_c11_value_store_init(praktor_c11_value_store *store,
   return PRAKTOR_C11_VALUE_OK;
 }
 
+int praktor_c11_value_store_clone(praktor_c11_value_store *destination,
+                                  const praktor_c11_value_store *source) {
+  const praktor_c11_value_store_impl *src = store_impl(source);
+  praktor_c11_value_store_impl *dst;
+  size_t i;
+  if (destination == NULL || source == NULL || src == NULL ||
+      destination == source || destination->impl != NULL) {
+    return PRAKTOR_C11_VALUE_EINVAL;
+  }
+  if (praktor_c11_value_store_init(destination, src->capacity,
+                                   src->max_key_bytes,
+                                   src->max_value_bytes) != PRAKTOR_C11_VALUE_OK) {
+    return PRAKTOR_C11_VALUE_ENOMEM;
+  }
+  dst = store_impl(destination);
+  for (i = 0u; i < src->capacity; ++i) {
+    const praktor_c11_value_entry *from = &src->entries[i];
+    praktor_c11_value_entry *to = &dst->entries[i];
+    if (!from->occupied) continue;
+    memcpy(to->key, from->key, strlen(from->key) + 1u);
+    memcpy(to->value, from->value, from->value_size + 1u);
+    to->value_size = from->value_size;
+    to->occupied = 1;
+    ++dst->size;
+  }
+  return PRAKTOR_C11_VALUE_OK;
+}
+
 void praktor_c11_value_store_destroy(praktor_c11_value_store *store) {
   praktor_c11_value_store_impl *impl = store_impl(store);
   if (impl == NULL) return;

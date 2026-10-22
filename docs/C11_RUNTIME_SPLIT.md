@@ -90,3 +90,7 @@ The injected resolver now has a bounded implementation, SubTreeRegistry, which r
 ## Host-only C11 session construction
 
 Added a constructor which accepts only an action-tree AST, bounded SubTree resolver, runtime limits, and a complete host callback table. It retains no legacy Executor, Blackboard, or ExecutionContext pointer. The constructor rejects incomplete host value and tick/halt contracts; a declined non-Shell leaf cannot reach legacy execution. Shell may use the existing Salts::Process path, but without an Executor it receives no inherited Executor environment (commands must use explicit parameters). The legacy constructor remains source-compatible and is the default production route. This is a C++ AST bridge with a C11 runtime—not yet a C-only public workflow API—and Parallel branch state/transaction semantics remain an explicit gate.
+
+## Independent C11 value-store snapshots
+
+Added a deep-clone operation that preserves the source store's fixed capacity and key/value limits while allocating independent backing storage. A cloned branch can update, insert, or erase values without mutating its baseline snapshot. The test covers changed values, branch-only keys, branch deletion, duplicate clone rejection, and baseline immutability. This supplies an isolation primitive for Parallel branch transactions; conflict detection, deterministic commit, and rollback remain separate requirements and are not claimed by cloning alone.

@@ -31,6 +31,9 @@ int praktor_c11_value_store_init(praktor_c11_value_store *store,
                                  size_t max_key_bytes,
                                  size_t max_value_bytes);
 void praktor_c11_value_store_destroy(praktor_c11_value_store *store);
+/* Deep-copy an immutable baseline into an independent store with equal bounds. */
+int praktor_c11_value_store_clone(praktor_c11_value_store *destination,
+                                  const praktor_c11_value_store *source);
 int praktor_c11_value_store_set(praktor_c11_value_store *store,
                                 const char *key, const char *value);
 int praktor_c11_value_store_get(const praktor_c11_value_store *store,
