@@ -530,6 +530,14 @@ void Executor::registerBuiltins() {
     }
 
     // Execute command with environment variables
+    // Preserve the Legacy action's empty-command no-op without spawning a
+    // shell. Salts::Process (and the C11 Session) reject empty commands.
+    if (cmd.empty() && timeout > 0) {
+      bb.set(output_key, "");
+      bb.set(stderr_key, "");
+      bb.set(exit_code_key, "0");
+      return NodeStatus::SUCCESS;
+    }
     auto result = ShellExecutor::execute(cmd, input, working_dir, timeout, env_vars, stream_output);
 
     // Store results in blackboard

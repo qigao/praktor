@@ -1,3 +1,7 @@
+#if defined(_WIN32) && !defined(NOMINMAX)
+#define NOMINMAX
+#endif
+
 #include "praktor/shell/process_executor.hpp"
 #include "shell_executor_internal.hpp"
 
@@ -14,10 +18,10 @@
 #include <utility>
 
 #ifdef _WIN32
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
 #include <windows.h>
+#else
+#include <pthread.h>
+#include <signal.h>
 #endif
 
 namespace Praktor::Shell {
@@ -165,7 +169,7 @@ struct ManagedProcess::Impl {
         return;
       }
       const auto used = self.output.stdout_output.size() + self.output.stderr_output.size();
-      const auto accepted = std::min(completion->bytes, self.spec.max_output_bytes - used);
+      const auto accepted = (std::min)(completion->bytes, self.spec.max_output_bytes - used);
       sink.append(buffer.data(), accepted);
       detail::mirrorWithPrefix(buffer.data(), accepted, self.spec.stream_output, line);
       if (accepted != completion->bytes) self.output_limit = true;
@@ -185,7 +189,7 @@ struct ManagedProcess::Impl {
   void submitInput() {
     if (input_pending || input_closed) return;
     if (!terminal && input_offset < spec.input.size()) {
-      input_chunk = std::min(input_buffer.size(), spec.input.size() - input_offset);
+      input_chunk = (std::min)(input_buffer.size(), spec.input.size() - input_offset);
       std::copy_n(spec.input.data() + input_offset, input_chunk, input_buffer.data());
       const auto submitted = cflow_process_try_write_stdin(&process, 1, input_buffer.data(), input_chunk);
       if (submitted.status == CFLOW_PROCESS_SUBMIT_ACCEPTED) input_pending = true;
@@ -260,6 +264,17 @@ struct ManagedProcess::Impl {
       output.stderr_output = "Salts::Process start failed (status " + std::to_string(start_status) + ")";
       return;
     }
+#ifndef _WIN32
+    // Native pipe writes can raise SIGPIPE on peer close (notably Kqueue).
+    // This dedicated driver blocks it for its remaining lifetime. Spawn has
+    // already completed, so children do not inherit this policy; the caller's
+    // signal mask and process-wide disposition are never changed. Do not
+    // unblock a pending SIGPIPE before this driver thread exits.
+    sigset_t pipe_signal;
+    sigemptyset(&pipe_signal);
+    sigaddset(&pipe_signal, SIGPIPE);
+    if (pthread_sigmask(SIG_BLOCK, &pipe_signal, nullptr) != 0) failed = true;
+#endif
     {
       std::lock_guard<std::mutex> lock(mutex);
       if (!cancel_requested) observed = ProcessState::Running;

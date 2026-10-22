@@ -3,7 +3,7 @@
 All Shell and Program calls use the C11 `Salts::Process` implementation.
 The former Praktor POSIX fork/pipe/waitpid implementation and Windows
 CreateProcess/Job Object implementation have been deleted. There is no alternate
-native process backend in Praktor.
+native Shell/Program backend in Praktor.
 
 `ShellExecutor`, `ProcessExecutor`, `ManagedProcess` and `ShellResult` remain C++
 call-site adapters for existing workflow, script, service and actions callers.
@@ -14,7 +14,10 @@ The synchronous facade has one joined driver thread per invocation. Only this
 thread calls Process start/submit/run/close/destroy. Cancellation and observers
 access synchronized adapter metadata, never a native Process handle. There are
 three fixed 4096-byte I/O buffers and eight bounded request slots. Input and both
-output streams progress concurrently through Process callbacks. Captured stdout
+output streams progress concurrently through Process callbacks. On POSIX, the
+dedicated driver blocks SIGPIPE only after spawn and keeps it blocked until
+thread exit, so early stdin peer-close becomes an I/O result without changing
+the caller or child signal policy. Captured stdout
 and stderr share `max_output_bytes` (16 MiB by default), with a bounded terminal
 error diagnostic. Stream callbacks preserve per-stream lines and trailing text.
 

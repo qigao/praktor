@@ -20,6 +20,7 @@
 #else
 #include <cerrno>
 #include <csignal>
+#include <pthread.h>
 #include <sys/stat.h>
 #endif
 
@@ -850,6 +851,25 @@ spec("managed process enforces captured output limits") {
 }
 
 spec("Salts Process facade failure and ownership boundaries") {
+#ifndef _WIN32
+    it("SIGPIPE protection changes neither the caller nor the child policy") {
+        sigset_t before_mask;
+        sigset_t after_mask;
+        struct sigaction before_action{};
+        struct sigaction after_action{};
+        check(pthread_sigmask(SIG_BLOCK, nullptr, &before_mask) == 0);
+        check(sigaction(SIGPIPE, nullptr, &before_action) == 0);
+        const auto result = Praktor::Shell::ShellExecutor::execute(
+            "kill -s PIPE $$; exit 99", "", "", 10000, {}, false);
+        check(pthread_sigmask(SIG_BLOCK, nullptr, &after_mask) == 0);
+        check(sigaction(SIGPIPE, nullptr, &after_action) == 0);
+        check(sigismember(&before_mask, SIGPIPE) == sigismember(&after_mask, SIGPIPE));
+        check(before_action.sa_handler == after_action.sa_handler);
+        check(result.state == Praktor::Shell::ProcessState::Signaled);
+        check(result.termination_signal == SIGPIPE);
+    }
+#endif
+
     it("cancellation during admission is safe with concurrent observers") {
         auto process = Praktor::Shell::ShellExecutor::start(sleepCommand(), "", "", 10000, {}, false);
         std::atomic<bool> stop{false};
