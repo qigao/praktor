@@ -240,6 +240,32 @@ int testZeroBudgetControlsStillValidateChildArity() {
   return 0;
 }
 
+int testRuntimeBoundControlsCompileWithoutBlackboard() {
+  Tree tree;
+  tree.root.id = "Sequence";
+  Node retry;
+  retry.id = "Retry";
+  retry.params.emplace("num_attempts", Value{std::string("{attempts}")});
+  Node delay;
+  delay.id = "Delay";
+  delay.params.emplace("delay_ms", Value{std::string("{delay}")});
+  Node child;
+  child.id = "Work";
+  delay.children.push_back(child);
+  retry.children.push_back(delay);
+  tree.root.children.push_back(retry);
+
+  const auto plan = compileTreePlan(tree, testLimits());
+  CHECK(plan.nodes.size() == 3u);
+  CHECK(plan.nodes[1].kind == SALTS_BT_NODE_RETRY);
+  CHECK((plan.nodes[1].dynamic_parameter_mask &
+         SALTS_BT_DYNAMIC_PARAMETER_LIMIT) != 0u);
+  CHECK(plan.nodes[2].kind == SALTS_BT_NODE_DELAY);
+  CHECK((plan.nodes[2].dynamic_parameter_mask &
+         SALTS_BT_DYNAMIC_PARAMETER_DURATION_NS) != 0u);
+  return 0;
+}
+
 int testDynamicZeroControlsStayRuntimeNodes() {
   Tree tree;
   tree.root.id = "Retry";
@@ -386,6 +412,7 @@ int main() {
   if (testZeroBudgetControlsStillValidateChildArity() != 0) return 1;
   if (testBlackboardIntegralFloatParameters() != 0) return 1;
   if (testDynamicZeroControlsStayRuntimeNodes() != 0) return 1;
+  if (testRuntimeBoundControlsCompileWithoutBlackboard() != 0) return 1;
   if (testRejectsInvalidInputs() != 0) return 1;
   return 0;
 }
