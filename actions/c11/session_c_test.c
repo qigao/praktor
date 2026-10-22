@@ -46,6 +46,21 @@ static void halt(void *user, const praktor_c11_leaf_request *req) {
   fixture *f = user; ++f->halts;
   f->native_hooks.halt_typed_leaf(f->native_hooks.user,req);
 }
+/* A C value provider can intentionally support an empty key even though the
+ * bounded Native Host rejects empty storage keys. Exercise the Session's
+ * numeric-control substitution contract independently of that policy. */
+static int empty_get(void *user, const char *key, char *out, size_t cap, size_t *size) {
+  fixture *f = user;
+  return f->native_hooks.value_get(f->native_hooks.value_user,*key ? key : "empty_control",out,cap,size);
+}
+static int empty_set(void *user, const char *key, const char *value) {
+  fixture *f = user;
+  return f->native_hooks.value_set(f->native_hooks.value_user,*key ? key : "empty_control",value);
+}
+static int empty_contains(void *user, const char *key, int *contains) {
+  fixture *f = user;
+  return f->native_hooks.value_contains(f->native_hooks.value_user,*key ? key : "empty_control",contains);
+}
 static void init(fixture *f) {
   praktor_c11_native_host_config host = {32,128,4096,2,now_ns,f};
   memset(f,0,sizeof(*f));
@@ -121,6 +136,23 @@ spec("C11 Session without a C++ compiler or runtime") {
     check(praktor_c11_session_reset(&f.session) == SALTS_OK); set(&f,"attempts","-1");
     check(praktor_c11_session_tick(&f.session,&status) == SALTS_EINVAL && f.calls == 3); destroy(&f);
   }
+  it("preserves empty-key numeric substitutions without changing ordinary string ports") {
+    fixture f; praktor_c11_leaf_parameter p = text("num_attempts","{}");
+    praktor_c11_session_node ns[] = {node("Retry",SALTS_BT_NODE_RETRY,PRAKTOR_C11_BT_NO_PARENT),node("Fail",SALTS_BT_NODE_LEAF,0)};
+    init(&f); set(&f,"empty_control","2");
+    f.config.host.value_get = empty_get; f.config.host.value_set = empty_set;
+    f.config.host.value_contains = empty_contains; f.config.host.value_user = &f;
+    ns[0].parameters = &p; ns[0].parameter_count = 1; ns[0].tree.limit = 3;
+    ns[0].tree.dynamic_parameter_mask = SALTS_BT_DYNAMIC_PARAMETER_LIMIT;
+    check(praktor_c11_session_init(&f.session,&f.config,ns,2) == SALTS_OK);
+    check(drive(&f) == SALTS_BT_FAILURE && f.calls == 2); destroy(&f);
+    init(&f); { praktor_c11_leaf_parameter ports[] = {text("key","literal"),text("value","{}")};
+      praktor_c11_session_node leaf = node("SetVariable",SALTS_BT_NODE_LEAF,PRAKTOR_C11_BT_NO_PARENT);
+      leaf.parameters = ports; leaf.parameter_count = 2;
+      check(praktor_c11_session_init(&f.session,&f.config,&leaf,1) == SALTS_OK);
+      check(drive(&f) == SALTS_BT_SUCCESS); expect(&f,"literal","{}"); destroy(&f);
+    }
+  }
   it("restores pipeline input, publishes the final value and bounds retained state") {
     fixture f; praktor_c11_session_node ns[] = {node("PipelineSequence",SALTS_BT_NODE_PIPELINE_SEQUENCE,PRAKTOR_C11_BT_NO_PARENT),node("Stage",SALTS_BT_NODE_LEAF,0),node("Stage",SALTS_BT_NODE_LEAF,0)};
     salts_bt_node_status status; init(&f); set(&f,"pipeline_input","seed");
@@ -181,9 +213,9 @@ spec("C11 Session without a C++ compiler or runtime") {
     init(&f); ns[0].parameters = &timeout; ns[0].parameter_count = 1;
     ns[0].tree.dynamic_parameter_mask = SALTS_BT_DYNAMIC_PARAMETER_DURATION_NS;
     ns[0].tree.duration_ns = UINT64_C(1000000); ns[1].parameters = &sleep; ns[1].parameter_count = 1;
-    set(&f,"deadline","1");
+    set(&f,"deadline","2147483647");
     check(praktor_c11_session_init(&f.session,&f.config,ns,2) == SALTS_OK);
-    check(drive(&f) == SALTS_BT_RUNNING); cmeta_sleep_ms(3);
+    check(drive(&f) == SALTS_BT_RUNNING); set(&f,"deadline","0");
     check(drive(&f) == SALTS_BT_FAILURE && f.halts == 1);
     check(praktor_c11_session_reset(&f.session) == SALTS_OK); set(&f,"deadline","-1");
     check(praktor_c11_session_tick(&f.session,&status) == SALTS_EINVAL && f.calls == 1); destroy(&f);

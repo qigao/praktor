@@ -139,7 +139,11 @@ int session_integer(session_impl *s, size_t node, const char *name, int fallback
       return SALTS_EINVAL;
     *out = (int)p->number; return SALTS_OK;
   }
-  r = session_resolve(s, node, name, NULL, 0u, &value);
+  /* Numeric control substitutions historically include the empty key ({}).
+   * Ordinary string ports and Switch keep their separate >=3-byte rule. */
+  if (s->text_sizes[p - s->parameters] == 2u && p->text[0] == '{' && p->text[1] == '}')
+    r = session_get(s, "", 0u, &value);
+  else r = session_resolve(s, node, name, NULL, 0u, &value);
   return r == SALTS_OK ? parse_integer(value, out) : r;
 }
 int session_switch(session_impl *s, size_t node, size_t *out) {
