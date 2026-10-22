@@ -40,8 +40,12 @@ static int test_clone_is_independent_snapshot(void) {
         PRAKTOR_C11_VALUE_OK);
   CHECK(expect_value(&baseline, "input", "seed"));
   CHECK(expect_value(&baseline, "stable", "unchanged"));
-  CHECK(praktor_c11_value_store_contains(&baseline, "branch-only", &(int){0}) ==
-        PRAKTOR_C11_VALUE_OK);
+  { int contains_branch_only = 1;
+    CHECK(praktor_c11_value_store_contains(&baseline, "branch-only",
+                                            &contains_branch_only) ==
+          PRAKTOR_C11_VALUE_OK);
+    CHECK(contains_branch_only == 0);
+  }
   CHECK(!expect_value(&branch, "stable", "unchanged"));
   CHECK(expect_value(&branch, "input", "branch-value"));
   praktor_c11_value_store_destroy(&branch);
