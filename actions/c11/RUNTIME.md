@@ -8,7 +8,7 @@ production switch is implied by these independent execution targets.
 | `praktor_c11_bt_core` | C11 topology/state and Salts::BehaviorTree; no C++ compiler required |
 | `praktor_c11_value_store` | Fixed-capacity C11 values and optimistic transactions |
 | `praktor_c11_native_host` | C11 value-store owner and preallocated parameter scratch; typed `SetVariable`, `CheckExitCode`, cooperative `Sleep` and unfiltered `ParseLines` leaves |
-| `praktor_process_driver` | C11 Process I/O, bounded capture, close and explicit retainer handoff; no C++ state, thread or runtime dependency |
+| `praktor_process_driver` | C11 Process I/O/retainer driver plus optional C11 joined worker with Salts thread, cancellation, synchronized observers and bounded admission copies; no C++ runtime |
 | `praktor_c11_session_core` | C11 control compiler and entire Session runtime: owned bounded typed plan, dispatch/activation ownership, dynamic controls, pipeline/entry/JSON queue state and Salts::Process; no C++ compiler or runtime |
 | `praktor_c11_session` | Construction-only C++ AST compiler and exception boundary over `praktor_c11_session_core`; no legacy execution symbols |
 | `praktor_actions_c11` | Explicit compatibility constructors, legacy Blackboard access, Executor dispatch, environment and Shell log adaptation |
@@ -90,7 +90,11 @@ Validation projects:
 - `actions/c11/standalone`: pure C adapter, store and Native Host tests.
 - `shared/process/standalone`: C compiler/linker only, real duplex child I/O,
   capture limits, callback failure, saturation and zero-budget handoff after
-  callback-user destruction. A link audit rejects C++ ABI/runtime dependencies.
+  callback-user destruction. The joined worker suite additionally tests copied
+  argv/environment/binary input, bounded admission, setup failure, pre-admission
+  cancellation, concurrent observers, callback reentrancy, timeout, overflow,
+  failed spawn and teardown before callback storage destruction. Both executables
+  reject C++ ABI/runtime dependencies and run against baseline and P1 profiles.
 - `actions/c11/session-c-standalone`: a `LANGUAGES C` project that rejects C++
   compiler/target loading. TinyTest exercises owned plan lifetime, bounded state,
   Switch/conditions/dynamic Retry and Timeout, pipeline/entry/JSON queue semantics,
@@ -128,8 +132,12 @@ in the facade and cannot unwind through the C runtime. Compatibility dispatch is
 an explicit optional callback group; the C archive has no Executor, Blackboard,
 ExecutionContext or C++ ABI dependency.
 
-The C++ AST traversal/conversion, YAML/Workflow/SDK/CLI layers and explicit Legacy facade
-(including observer synchronization and scheduling) still remain. Removing all
+The C++ AST traversal/conversion, YAML/Workflow/SDK/CLI layers and explicit Legacy
+value/callback facades still remain. `shared/shell/src/managed_process.cpp` has
+been removed; `process_legacy_bridge.cpp` contains only validation and C++
+value/callback conversion. All process scheduling, cancellation, synchronized
+completion and waiting now belong to `praktor_process_worker` in C. Its owner
+always joins; it never detaches a live driver or drops native leases. Removing all
 C++ is the migration goal; this step does not yet replace the default backend.
 Full WorkflowContext migration, all built-in leaves, native event queues,
 branch-transaction integration and complete YAML/node parity remain open.

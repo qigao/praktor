@@ -6,7 +6,7 @@ endif()
 include(${CMAKE_CURRENT_LIST_DIR}/../process/process_target.cmake)
 add_library(${TARGET_NAME_SHARED_SHELL}
     src/shell_executor.cpp
-    src/managed_process.cpp
+    src/process_legacy_bridge.cpp
 )
 target_link_libraries(${TARGET_NAME_SHARED_SHELL} PRIVATE praktor_process_driver)
 

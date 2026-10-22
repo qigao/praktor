@@ -231,6 +231,7 @@ jobs:
           cmake -S shared/process/standalone -B build/ci-process-c -G Ninja -DCMAKE_BUILD_TYPE=Release
           cmake --build build/ci-process-c --parallel 2
           python3 cmake/ci/audit-c11-runtime-link.py build/ci-process-c/praktor_process_driver_test
+          python3 cmake/ci/audit-c11-runtime-link.py build/ci-process-c/praktor_process_worker_test
           ctest --test-dir build/ci-process-c --no-tests=error --output-on-failure
 
       - name: C11 Session without a C++ compiler or runtime
