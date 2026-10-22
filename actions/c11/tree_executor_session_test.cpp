@@ -2082,13 +2082,25 @@ int testRunOnceAndKeepRunningStateMatchExecutor() {
   return 0;
 }
 
-int testSubTreeUsesInjectedResolver() {
+int testSubTreeUsesBoundedRegistry() {
   actions::Tree inner;
   inner.name = "inner";
   inner.root.id = "InnerTask";
+  actions::Tree duplicate = inner;
+  actions::Tree unnamed;
+  unnamed.root.id = "NoName";
   actions::Tree outer;
   outer.root.id = "SubTree";
   outer.root.params.emplace("tree", actions::Value{std::string("inner")});
+
+  actions::c11::SubTreeRegistry registry(1u);
+  CHECK(registry.add(inner));
+  CHECK(!registry.add(duplicate));
+  CHECK(!registry.add(unnamed));
+  CHECK(!registry.add(duplicate));
+  CHECK(registry.size() == 1u && registry.capacity() == 1u);
+  CHECK(registry.resolve("inner") == &inner);
+  CHECK(registry.resolve("missing") == nullptr);
 
   actions::Executor executor;
   int calls = 0;
@@ -2098,15 +2110,9 @@ int testSubTreeUsesInjectedResolver() {
   });
   actions::Blackboard blackboard;
   actions::ExecutionContext context;
-  int resolver_calls = 0;
-  actions::c11::SubTreeResolver resolver =
-      [&inner, &resolver_calls](const std::string& name) -> const actions::Tree* {
-        ++resolver_calls;
-        return name == "inner" ? &inner : nullptr;
-      };
+  auto resolver = registry.resolver();
   actions::c11::TreeExecutorSession session(
       outer, executor, blackboard, context, limits(), resolver);
-  CHECK(resolver_calls == 1);
   CHECK(session.plan().nodes.size() == 1u);
   salts_bt_node_status status = SALTS_BT_FAILURE;
   CHECK(session.tick(&status) == SALTS_OK);
@@ -3393,7 +3399,7 @@ int main() {
   if (testEmptyParallelAndReactiveSequenceMatchExecutor() != 0) return 1;
   if (testRunOnceAndKeepRunningStateMatchExecutor() != 0) return 1;
   if (testSubTreeExpansionAndCycleRejection() != 0) return 1;
-  if (testSubTreeUsesInjectedResolver() != 0) return 1;
+  if (testSubTreeUsesBoundedRegistry() != 0) return 1;
   if (testPipelineSequencePreservesInputMutationWithinStage() != 0) return 1;
   if (testPipelineSequenceResumesActiveStageAndRestoresInput() != 0) return 1;
   if (testPipelineSequenceRestoresInputBeforeNestedSwitchSelection() != 0) return 1;

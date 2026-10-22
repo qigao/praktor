@@ -13,11 +13,52 @@ class ExecutionContext;
 #include <functional>
 #include <memory>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace actions::c11 {
 
 using SubTreeResolver =
     std::function<const actions::Tree*(const std::string& tree_name)>;
+
+/*
+ * A bounded, caller-owned registry for construction-time SubTree expansion.
+ * Trees are borrowed and must outlive the session constructor call. The
+ * returned resolver captures this registry, so keep it alive until session
+ * construction returns.
+ */
+class SubTreeRegistry {
+public:
+  explicit SubTreeRegistry(size_t capacity) : capacity_(capacity) {
+    entries_.reserve(capacity);
+  }
+
+  bool add(const actions::Tree& tree) {
+    if (tree.name.empty() || entries_.size() >= capacity_) return false;
+    for (const auto& entry : entries_) {
+      if (entry.first == tree.name) return false;
+    }
+    entries_.emplace_back(tree.name, &tree);
+    return true;
+  }
+
+  const actions::Tree* resolve(const std::string& name) const noexcept {
+    for (const auto& entry : entries_) {
+      if (entry.first == name) return entry.second;
+    }
+    return nullptr;
+  }
+
+  size_t size() const noexcept { return entries_.size(); }
+  size_t capacity() const noexcept { return capacity_; }
+  SubTreeResolver resolver() const {
+    return [this](const std::string& name) { return resolve(name); };
+  }
+
+private:
+  size_t capacity_;
+  std::vector<std::pair<std::string, const actions::Tree*>> entries_;
+};
 
 /*
  * An opt-in execution bridge for the compiled C11 tree.
