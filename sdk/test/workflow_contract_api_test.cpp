@@ -155,17 +155,16 @@ spec("WorkflowPlan publishes generated input and output schemas") {
         R"({"name":"Ada","tags":[],"payload":{},"mode":"slow"})",
         R"({"name":"Ada","tags":[],"payload":{},"extra":true})"
     };
-    for (const auto& input : invalid) {
-         {
-            praktor_owned_json output = PRAKTOR_OWNED_JSON_INIT;
-            praktor_error error = PRAKTOR_ERROR_INIT;
-            check((executeContract(workflow, input, output, error) ==
-                  PRAKTOR_RESULT_INPUT_CONTRACT));
-            check((error.phase == PRAKTOR_ERROR_PHASE_INPUT_CONTRACT));
-            check((error.message[0] != '\0'));
-            check((output.data == nullptr));
-            check((output.size == 0));
-        }
+    if (section_index > 0) {
+        const auto& input = invalid.at(static_cast<std::size_t>(section_index - 1));
+        praktor_owned_json output = PRAKTOR_OWNED_JSON_INIT;
+        praktor_error error = PRAKTOR_ERROR_INIT;
+        check((executeContract(workflow, input, output, error) ==
+              PRAKTOR_RESULT_INPUT_CONTRACT));
+        check((error.phase == PRAKTOR_ERROR_PHASE_INPUT_CONTRACT));
+        check((error.message[0] != '\0'));
+        check((output.data == nullptr));
+        check((output.size == 0));
     }
 
     std::filesystem::remove_all(dir);
@@ -173,6 +172,9 @@ spec("WorkflowPlan publishes generated input and output schemas") {
 
 spec("workflow input contracts fail before task execution") {
     it("valid typed inputs execute and defaults are accepted") { test_workflow_input_contracts_fail_before_task_execution_2(0); }
+    for (int input = 1; input <= 4; ++input) {
+        it("invalid input %d", input) { test_workflow_input_contracts_fail_before_task_execution_2(input); }
+    }
 }
 
 [[maybe_unused]] static void test_empty_input_contracts_enforce_their_published_additionalproperties_policy_3(std::size_t row_0, std::size_t row_1, std::size_t row_2, std::size_t row_3) {

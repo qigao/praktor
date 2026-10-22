@@ -3,12 +3,12 @@
 Praktor tests use the installed `Salts::TinyTest` target and `tinytest.hpp`.
 Catch2 is not a build or package dependency. CTest executable names are unchanged.
 
-The migration preserves 315 original test cases as 500 independent TinyTest
+The migration preserves 315 original test cases as 505 independent TinyTest
 executions, before later additions. Each former section path has an explicit
 `it` entry. Its helper receives a section index and constructs a fresh fixture
 for that invocation. Plain `std::array` data and nested `it` enumeration replace
 generators, preserving Cartesian products and fresh setup for each row. Dynamic
-input sections use their existing per-iteration local fixtures.
+input sections likewise have separate entries and fresh workflow fixtures.
 
 All migrated assertions use native failing `check` operations. TinyTest's
 `check_warn` is diagnostic-only, so it must never replace an assertion. Former

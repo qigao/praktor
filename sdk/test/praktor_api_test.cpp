@@ -185,31 +185,28 @@ spec("Praktor C API preserves heterogeneous JSON inputs and outputs") {
     it("complete case") { test_praktor_c_api_preserves_heterogeneous_json_inputs_and_outputs_3(); }
 }
 
-[[maybe_unused]] static void test_praktor_c_api_rejects_malformed_json_and_non_object_roots_4() {
+[[maybe_unused]] static void test_praktor_c_api_rejects_malformed_json_and_non_object_roots_4(const std::string& input) {
     const auto dir = createTempDir();
     const auto workflow_path = dir / "workflow.yml";
     writeFile(workflow_path, "tasks: []\n");
     const std::string workflow_path_storage = workflow_path.string();
 
-    for (const std::string input : {std::string("{"), std::string("[]")}) {
-         {
-            const auto request = makeRequest(workflow_path_storage, input);
-            praktor_owned_json output = PRAKTOR_OWNED_JSON_INIT;
-            praktor_error error = PRAKTOR_ERROR_INIT;
-            check((praktor_execute_workflow(&request, &output, &error) ==
-                  PRAKTOR_RESULT_INVALID_JSON));
-            check((error.phase == PRAKTOR_ERROR_PHASE_INPUT_JSON));
-            check((error.message[0] != '\0'));
-            check((output.data == nullptr));
-            check((output.size == 0));
-        }
-    }
+    const auto request = makeRequest(workflow_path_storage, input);
+    praktor_owned_json output = PRAKTOR_OWNED_JSON_INIT;
+    praktor_error error = PRAKTOR_ERROR_INIT;
+    check((praktor_execute_workflow(&request, &output, &error) ==
+          PRAKTOR_RESULT_INVALID_JSON));
+    check((error.phase == PRAKTOR_ERROR_PHASE_INPUT_JSON));
+    check((error.message[0] != '\0'));
+    check((output.data == nullptr));
+    check((output.size == 0));
 
     std::filesystem::remove_all(dir);
 }
 
 spec("Praktor C API rejects malformed JSON and non-object roots") {
-    it("complete case") { test_praktor_c_api_rejects_malformed_json_and_non_object_roots_4(); }
+    it("malformed object") { test_praktor_c_api_rejects_malformed_json_and_non_object_roots_4("{"); }
+    it("array root") { test_praktor_c_api_rejects_malformed_json_and_non_object_roots_4("[]"); }
 }
 
 [[maybe_unused]] static void test_praktor_c_api_returns_canonical_json_for_workflow_failure_5() {
