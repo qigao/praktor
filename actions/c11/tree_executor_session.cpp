@@ -214,7 +214,7 @@ std::string resolveSubTreeName(const actions::Node& node) {
 
 actions::Node expandSubTreeNode(
     const actions::Node& source,
-    const actions::Executor& executor,
+    const SubTreeResolver& subtree_resolver,
     const salts_bt_tree_config& limits,
     size_t source_depth,
     size_t subtree_depth,
@@ -233,7 +233,7 @@ actions::Node expandSubTreeNode(
         active_subtrees.end()) {
       throw std::invalid_argument("recursive SubTree reference: " + name);
     }
-    const actions::Tree* registered = executor.getTree(name);
+    const actions::Tree* registered = subtree_resolver ? subtree_resolver(name) : nullptr;
     if (registered == nullptr) {
       throw std::invalid_argument("SubTree not found: " + name);
     }
@@ -241,7 +241,7 @@ actions::Node expandSubTreeNode(
     active_subtrees.push_back(name);
     try {
       actions::Node expanded = expandSubTreeNode(
-          registered->root, executor, limits, source_depth,
+          registered->root, subtree_resolver, limits, source_depth,
           subtree_depth + 1u, expanded_node_count, active_subtrees);
       active_subtrees.pop_back();
       return expanded;
@@ -260,14 +260,14 @@ actions::Node expandSubTreeNode(
   expanded.children.clear();
   for (const auto& child : source.children) {
     expanded.children.push_back(expandSubTreeNode(
-        child, executor, limits, source_depth + 1u,
+        child, subtree_resolver, limits, source_depth + 1u,
         subtree_depth, expanded_node_count, active_subtrees));
   }
   return expanded;
 }
 
 actions::Tree expandSubTrees(const actions::Tree& source,
-                             const actions::Executor& executor,
+                             const SubTreeResolver& subtree_resolver,
                              const salts_bt_tree_config& limits) {
   if (limits.max_nodes == 0u || limits.max_nodes > UINT32_MAX ||
       limits.max_depth == 0u || limits.max_depth > SALTS_BT_MAX_DEPTH ||
@@ -280,7 +280,7 @@ actions::Tree expandSubTrees(const actions::Tree& source,
   expanded.name = source.name;
   size_t expanded_node_count = 0u;
   std::vector<std::string> active_subtrees;
-  expanded.root = expandSubTreeNode(source.root, executor, limits,
+  expanded.root = expandSubTreeNode(source.root, subtree_resolver, limits,
                                     1u, 0u, expanded_node_count, active_subtrees);
   return expanded;
 }
@@ -372,10 +372,11 @@ struct TreeExecutorSession::Impl : std::enable_shared_from_this<Impl> {
        actions::Blackboard& source_blackboard,
        actions::ExecutionContext& source_execution_context,
        const salts_bt_tree_config& limits,
+       const SubTreeResolver& subtree_resolver,
        const praktor_c11_bt_host* supplied_hooks,
        cflow_process_retainer* supplied_recovery_owner,
        uint32_t supplied_shell_close_budget_ms)
-      : tree(expandSubTrees(source_tree, source_executor, limits)),
+      : tree(expandSubTrees(source_tree, subtree_resolver, limits)),
         compiled_plan(compileTreePlan(tree, limits)),
         executor(source_executor),
         blackboard(source_blackboard),
@@ -1858,9 +1859,24 @@ TreeExecutorSession::TreeExecutorSession(
     const praktor_c11_bt_host* host_hooks,
     cflow_process_retainer* recovery_owner,
     uint32_t shell_close_budget_ms)
+    : TreeExecutorSession(
+          tree, executor, blackboard, execution_context, limits,
+          [&executor](const std::string& name) { return executor.getTree(name); },
+          host_hooks, recovery_owner, shell_close_budget_ms) {}
+
+TreeExecutorSession::TreeExecutorSession(
+    const actions::Tree& tree, actions::Executor& executor,
+    actions::Blackboard& blackboard,
+    actions::ExecutionContext& execution_context,
+    const salts_bt_tree_config& limits,
+    const SubTreeResolver& subtree_resolver,
+    const praktor_c11_bt_host* host_hooks,
+    cflow_process_retainer* recovery_owner,
+    uint32_t shell_close_budget_ms)
     : impl_(std::make_shared<Impl>(tree, executor, blackboard,
-                                  execution_context, limits, host_hooks,
-                                  recovery_owner, shell_close_budget_ms)) {}
+                                  execution_context, limits, subtree_resolver,
+                                  host_hooks, recovery_owner,
+                                  shell_close_budget_ms)) {}
 
 TreeExecutorSession::~TreeExecutorSession() {
   if (!impl_) return;

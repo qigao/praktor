@@ -80,3 +80,7 @@ When optional host value callbacks are configured, the Session requires explicit
 ## Static plan compilation without Blackboard lookup
 
 The C11 session now compiles its flattened tree topology through the no-Blackboard `compileTreePlan(tree, limits)` overload. Dynamic scalar control parameters use explicit `{key}` markers and retain tick-time resolution from configured host value callbacks. The compiler receives no Blackboard pointer in this path; unresolved brace substitutions on parameters not classified as runtime-dynamic fail closed. The legacy overload remains for compatibility tests while AST/SubTree ownership is migrated separately.
+
+## Explicit SubTree registry injection
+
+Added a `SubTreeResolver` constructor overload. The expansion algorithm no longer calls `Executor::getTree` directly; the compatibility constructor supplies a short-lived resolver lambda, while hosts/tests can provide an independent bounded registry lookup. The resolver is only used during construction, and returned tree pointers must remain valid through expansion. Literal selectors, cycle detection and configured node/depth limits remain enforced. This decouples registry ownership but does not yet remove the session's legacy Executor dependency for leaf dispatch/environment, nor the compatibility Blackboard constructor parameter.

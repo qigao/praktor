@@ -2082,6 +2082,39 @@ int testRunOnceAndKeepRunningStateMatchExecutor() {
   return 0;
 }
 
+int testSubTreeUsesInjectedResolver() {
+  actions::Tree inner;
+  inner.name = "inner";
+  inner.root.id = "InnerTask";
+  actions::Tree outer;
+  outer.root.id = "SubTree";
+  outer.root.params.emplace("tree", actions::Value{std::string("inner")});
+
+  actions::Executor executor;
+  int calls = 0;
+  executor.registerTask("InnerTask", [&calls](const auto&, actions::Blackboard&) {
+    ++calls;
+    return actions::NodeStatus::SUCCESS;
+  });
+  actions::Blackboard blackboard;
+  actions::ExecutionContext context;
+  int resolver_calls = 0;
+  actions::c11::SubTreeResolver resolver =
+      [&inner, &resolver_calls](const std::string& name) -> const actions::Tree* {
+        ++resolver_calls;
+        return name == "inner" ? &inner : nullptr;
+      };
+  actions::c11::TreeExecutorSession session(
+      outer, executor, blackboard, context, limits(), resolver);
+  CHECK(resolver_calls == 1);
+  CHECK(session.plan().nodes.size() == 1u);
+  salts_bt_node_status status = SALTS_BT_FAILURE;
+  CHECK(session.tick(&status) == SALTS_OK);
+  CHECK(status == SALTS_BT_SUCCESS);
+  CHECK(calls == 1);
+  return 0;
+}
+
 int testSubTreeExpansionAndCycleRejection() {
   {
     actions::Tree registered;
@@ -3360,6 +3393,7 @@ int main() {
   if (testEmptyParallelAndReactiveSequenceMatchExecutor() != 0) return 1;
   if (testRunOnceAndKeepRunningStateMatchExecutor() != 0) return 1;
   if (testSubTreeExpansionAndCycleRejection() != 0) return 1;
+  if (testSubTreeUsesInjectedResolver() != 0) return 1;
   if (testPipelineSequencePreservesInputMutationWithinStage() != 0) return 1;
   if (testPipelineSequenceResumesActiveStageAndRestoresInput() != 0) return 1;
   if (testPipelineSequenceRestoresInputBeforeNestedSwitchSelection() != 0) return 1;

@@ -10,10 +10,14 @@ class Executor;
 class ExecutionContext;
 }
 
+#include <functional>
 #include <memory>
 #include <string>
 
 namespace actions::c11 {
+
+using SubTreeResolver =
+    std::function<const actions::Tree*(const std::string& tree_name)>;
 
 /*
  * An opt-in execution bridge for the compiled C11 tree.
@@ -76,6 +80,21 @@ public:
                       const praktor_c11_bt_host* host_hooks = nullptr,
                        cflow_process_retainer* recovery_owner = nullptr,
                        uint32_t shell_close_budget_ms = 3000u);
+
+  /*
+   * Explicit SubTree registry injection. The resolver is called only during
+   * construction; returned trees must remain valid until that expansion
+   * finishes. Literal selectors only: dynamic topology selectors fail closed.
+   */
+  TreeExecutorSession(const actions::Tree& tree,
+                      actions::Executor& executor,
+                      actions::Blackboard& blackboard,
+                      actions::ExecutionContext& execution_context,
+                      const salts_bt_tree_config& limits,
+                      const SubTreeResolver& subtree_resolver,
+                      const praktor_c11_bt_host* host_hooks = nullptr,
+                      cflow_process_retainer* recovery_owner = nullptr,
+                      uint32_t shell_close_budget_ms = 3000u);
   ~TreeExecutorSession();
 
   TreeExecutorSession(const TreeExecutorSession&) = delete;
