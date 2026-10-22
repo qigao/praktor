@@ -279,6 +279,12 @@ int praktor_c11_value_txn_commit_group(praktor_c11_value_txn *txns, size_t count
       free(items); return PRAKTOR_C11_VALUE_EINVAL;
     }
     target = items[i]->target;
+    for (j = 0u; j < i; ++j) {
+      if (items[j] == items[i]) {
+        free(items);
+        return PRAKTOR_C11_VALUE_EINVAL;
+      }
+    }
   }
   for (i = 0u; i < count; ++i) for (j = 0u; j < items[i]->op_count; ++j) {
     const praktor_c11_value_txn_op *a = &items[i]->ops[j];
