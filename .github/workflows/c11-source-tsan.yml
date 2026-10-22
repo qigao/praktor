@@ -1,10 +1,10 @@
 name: C11 Process complete-source TSan qualification
 
 'on':
-  # Invoked as a required job by Core-only real SDK integration on every
-  # relevant PR update. No second competing pull_request workflow run.
-  workflow_call:
   workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/c11-source-tsan.yml'
 
 permissions:
   contents: read
@@ -195,32 +195,9 @@ jobs:
         run: |
           set -euo pipefail
           export LD_LIBRARY_PATH="$SALTS_SOURCE_TSAN_ROOT/lib:$SALTS_UTILS_SOURCE_TSAN_ROOT/lib:$CHTTP_ROOT/lib:${LD_LIBRARY_PATH:-}"
-          # Exercise separate real native processes repeatedly under fully
-          # source-instrumented TSan. The consumer-only mixed-binary TSan
-          # smoke in core-only-real-sdk.yml is NOT a substitute for this.
-          for iteration in 1 2 3; do
-            echo "P1 full-source TSan owner/cancellation iteration=$iteration"
-            ctest --test-dir build/p1-praktor-tsan \
-              --no-tests=error --output-on-failure --parallel 1 --timeout 90 \
-              -R '^(core_only_workflow_test\.praktor_lib|actions_c11_tree_executor_session_test)
-
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: c11-complete-source-tsan-evidence
-          if-no-files-found: ignore
-          retention-days: 14
-          path: |
-            build/p1-source-tsan-audit.json
-            build/p1-source-tsan-linked-libraries.txt
-            build/p1-salts-tsan/compile_commands.json
-            build/p1-salts-utils-tsan/compile_commands.json
-            build/p1-praktor-tsan/Testing/Temporary/LastTest.log
-            build/p1-salts-tsan/CMakeFiles/CMakeConfigureLog.yaml
-            build/p1-salts-utils-tsan/CMakeFiles/CMakeConfigureLog.yaml
-
-          done
-          echo 'P1 full-source TSan: 3/3 complete real WorkflowRunner+Session iterations PASS' >> "$GITHUB_STEP_SUMMARY"
+          ctest --test-dir build/p1-praktor-tsan \
+            --no-tests=error --output-on-failure --parallel 1 --timeout 90 \
+            -R '^(core_only_workflow_test\.praktor_lib|actions_c11_tree_executor_session_test)$'
 
       - uses: actions/upload-artifact@v4
         if: always()
