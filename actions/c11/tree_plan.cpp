@@ -29,23 +29,24 @@ bool isRuntimeSubstitutedParam(const Node &node, const char *key) {
   return raw.size() >= 2u && raw.front() == '{' && raw.back() == '}';
 }
 
-std::string valueToText(const Value &value, const Blackboard &blackboard,
+std::string valueToText(const Value &value, const Blackboard *blackboard,
                         const std::string &owner, const char *key,
                         bool bare_string_may_name_key = false) {
   if (std::holds_alternative<std::string>(value)) {
     const std::string &raw = std::get<std::string>(value);
     if (raw.size() >= 2u && raw.front() == '{' && raw.back() == '}') {
       const std::string name = raw.substr(1u, raw.size() - 2u);
-      if (!blackboard.has(name)) {
+      if (blackboard == nullptr || !blackboard->has(name)) {
         throw std::invalid_argument("Parameter '" + std::string(key) +
                                     "' on node '" + owner +
                                     "' references missing blackboard key '" + name +
                                     "'");
       }
-      return blackboard.get(name);
+      return blackboard->get(name);
     }
-    if (bare_string_may_name_key && blackboard.has(raw)) {
-      return blackboard.get(raw);
+    if (bare_string_may_name_key && blackboard != nullptr &&
+        blackboard->has(raw)) {
+      return blackboard->get(raw);
     }
     return raw;
   }
@@ -92,7 +93,7 @@ int64_t parseIntegerText(const std::string &raw, const Node &node,
   }
 }
 
-int64_t readIntegerParam(const Node &node, const Blackboard &blackboard,
+int64_t readIntegerParam(const Node &node, const Blackboard *blackboard,
                          const char *key, int64_t default_value,
                          bool required = false,
                          bool bare_string_may_name_key = false) {
@@ -235,7 +236,7 @@ salts_bt_node_kind mapNodeKind(const Node &node) {
 }
 
 void appendNode(TreePlan &plan, const Node &node, size_t parent_index,
-                size_t depth, const Blackboard &blackboard,
+                size_t depth, const Blackboard *blackboard,
                 const salts_bt_tree_config &limits) {
   if (node.id.empty()) {
     throw std::invalid_argument("Action tree contains a node with an empty type");
@@ -466,14 +467,14 @@ int64_t resolveIntegerParameter(const actions::Node &node,
                                 const actions::Blackboard &blackboard,
                                 const char *key, int64_t default_value,
                                 bool required) {
-  return readIntegerParam(node, blackboard, key, default_value, required);
+  return readIntegerParam(node, &blackboard, key, default_value, required);
 }
 
 uint64_t resolveDurationParameter(const actions::Node &node,
                                   const actions::Blackboard &blackboard,
                                   const char *key, int64_t default_ms) {
   return millisecondsToNanoseconds(
-      readIntegerParam(node, blackboard, key, default_ms), node, key);
+      readIntegerParam(node, &blackboard, key, default_ms), node, key);
 }
 
 TreePlan compileTreePlan(const actions::Tree &tree,
@@ -488,8 +489,23 @@ TreePlan compileTreePlan(const actions::Tree &tree,
   TreePlan plan;
   plan.nodes.reserve(limits.max_nodes);
   plan.source_nodes.reserve(limits.max_nodes);
-  appendNode(plan, tree.root, PRAKTOR_C11_BT_NO_PARENT, 1u, blackboard,
+  appendNode(plan, tree.root, PRAKTOR_C11_BT_NO_PARENT, 1u, &blackboard,
              limits);
+  return plan;
+}
+
+TreePlan compileTreePlan(const actions::Tree &tree,
+                         const salts_bt_tree_config &limits) {
+  if (limits.max_nodes == 0u || limits.max_depth == 0u ||
+      limits.max_control_iterations == 0u ||
+      limits.max_depth > SALTS_BT_MAX_DEPTH ||
+      limits.max_control_iterations > SALTS_BT_MAX_CONTROL_ITERATIONS) {
+    throw std::invalid_argument("Invalid Salts BehaviorTree limits");
+  }
+  TreePlan plan;
+  plan.nodes.reserve(limits.max_nodes);
+  plan.source_nodes.reserve(limits.max_nodes);
+  appendNode(plan, tree.root, PRAKTOR_C11_BT_NO_PARENT, 1u, nullptr, limits);
   return plan;
 }
 

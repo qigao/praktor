@@ -378,7 +378,7 @@ struct TreeExecutorSession::Impl : std::enable_shared_from_this<Impl> {
        cflow_process_retainer* supplied_recovery_owner,
        uint32_t supplied_shell_close_budget_ms)
       : tree(expandSubTrees(source_tree, source_executor, source_blackboard, limits)),
-        compiled_plan(compileTreePlan(tree, source_blackboard, limits)),
+        compiled_plan(compileTreePlan(tree, limits)),
         executor(source_executor),
         blackboard(source_blackboard),
         execution_context(source_execution_context),

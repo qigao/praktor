@@ -75,3 +75,8 @@ This is a foundation, not yet the production Blackboard replacement: TreeExecuto
 The value store is a separate `praktor_c11_value_store` target with no Salts BehaviorTree link dependency; its unit test links only this library. The standalone C-only project mirrors this separation. This keeps the future host state primitive reusable without bringing in the tree runtime or any C++ action target.
 
 When optional host value callbacks are configured, the Session requires explicit host leaf tick/halt hooks and refuses declined non-Shell leaves instead of running them against a second legacy Blackboard. Built-in Shell remains owned by the C11 Salts::Process path and publishes output through the same host value callbacks. A Session test proves EntryUpdated reads the host store (not a conflicting legacy Blackboard value) and dispatches its child through the host callback. Dynamic numeric decorator resolution still uses the compatibility Blackboard and remains a migration item.
+
+
+## Static plan compilation without Blackboard lookup
+
+The C11 session now compiles its flattened tree topology through the no-Blackboard `compileTreePlan(tree, limits)` overload. Dynamic scalar control parameters use explicit `{key}` markers and retain tick-time resolution from configured host value callbacks. The compiler receives no Blackboard pointer in this path; unresolved brace substitutions on parameters not classified as runtime-dynamic fail closed. The legacy overload remains for compatibility tests while AST/SubTree ownership is migrated separately.

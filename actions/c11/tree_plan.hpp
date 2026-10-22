@@ -61,6 +61,11 @@ TreePlan compileTreePlan(const actions::Tree &tree,
                          const actions::Blackboard &blackboard,
                          const salts_bt_tree_config &limits);
 
+/* Runtime {key} scalar controls are validated on tick; topology compilation
+ * can therefore run without consulting a Blackboard. */
+TreePlan compileTreePlan(const actions::Tree &tree,
+                         const salts_bt_tree_config &limits);
+
 } // namespace actions::c11
 
 #endif /* PRAKTOR_ACTIONS_C11_TREE_PLAN_HPP */
