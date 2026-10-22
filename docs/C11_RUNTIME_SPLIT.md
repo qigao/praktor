@@ -58,3 +58,10 @@ still borrow legacy Executor/Blackboard/ExecutionContext. The next runtime
 cut must replace those borrowed objects with a typed C11 plan, typed bounded
 blackboard, and explicit host-leaf dispatch before `actions` can be removed
 from the production link closure.
+
+A compile-only `actions_c11_session_header_contract` object target now
+includes `tree_executor_session.hpp` while linking only the C11 core and
+Salts Process usage requirements. Its translation unit intentionally omits
+`core/executor.hpp`, guarding this boundary against accidental transitive
+reintroduction. It is a compile-contract test; the runtime session still has
+legacy Executor references until the next implementation cut.

@@ -116,6 +116,22 @@ if(PRAKTOR_ENABLE_C11_ACTIONS)
         )
         add_test(NAME actions_c11_tree_adapter_test COMMAND actions_c11_tree_adapter_test)
 
+        # Header contract: compile the C11 session API with Salts/AST
+        # model headers only, without linking or including the legacy Executor.
+        add_library(actions_c11_session_header_contract OBJECT
+            c11/session_header_contract.cpp)
+        target_include_directories(actions_c11_session_header_contract PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR})
+        target_link_libraries(actions_c11_session_header_contract PRIVATE
+            praktor_c11_bt_core Salts::Process)
+        target_compile_features(actions_c11_session_header_contract PRIVATE cxx_std_17)
+        set_target_properties(actions_c11_session_header_contract PROPERTIES
+            CXX_STANDARD 17
+            CXX_STANDARD_REQUIRED ON
+            CXX_EXTENSIONS OFF
+            FOLDER "actions/c11/tests"
+        )
+
         add_executable(actions_c11_tree_plan_test c11/tree_plan_test.cpp)
         target_link_libraries(actions_c11_tree_plan_test PRIVATE praktor_actions_c11 actions)
         target_compile_features(actions_c11_tree_plan_test PRIVATE cxx_std_17)
