@@ -62,6 +62,8 @@ int praktor_c11_value_txn_set(praktor_c11_value_txn *txn, const char *key, const
 int praktor_c11_value_txn_erase(praktor_c11_value_txn *txn, const char *key);
 int praktor_c11_value_txn_commit(praktor_c11_value_txn *txn);
 void praktor_c11_value_txn_abort(praktor_c11_value_txn *txn);
+/* All-or-nothing commit of disjoint transactions sharing one target. */
+int praktor_c11_value_txn_commit_group(praktor_c11_value_txn *txns, size_t count);
 
 #ifdef __cplusplus
 }

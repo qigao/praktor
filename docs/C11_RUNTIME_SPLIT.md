@@ -98,3 +98,7 @@ Added a deep-clone operation that preserves the source store's fixed capacity an
 ## Optimistic branch transaction primitive
 
 Added bounded transactions over the C11 value store. Each transaction snapshots a baseline and private working copy, tracks a bounded set of touched keys, detects write/write conflicts per key, stages the merged result in a separate fixed-capacity store, and swaps the target only after all writes fit. Disjoint transactions can commit in sequence; conflicting writes fail with ECONFLICT and leave the target unchanged; abort discards the working copy. This primitive is not yet wired to Parallel hooks; branch ordering, whole-Parallel commit policy, and cancel/abort integration remain to be implemented and tested at the tree level.
+
+## Atomic multi-branch commit primitive
+
+Added a group-commit API for transactions sharing one target. It validates each branch baseline and rejects overlapping touched keys before staging writes, applies deletions before inserts, stages the merged result in one bounded copy, then swaps the target once. Any conflict or capacity error publishes nothing. The transaction array order is deterministic for disjoint keys. This primitive is not yet wired to BehaviorTree Parallel hooks; branch lifecycle and cancellation integration remain open.

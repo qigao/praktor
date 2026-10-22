@@ -261,3 +261,71 @@ size_t praktor_c11_value_store_size(const praktor_c11_value_store *store) {
       store == NULL ? NULL : (const praktor_c11_value_store_impl *)store->impl;
   return impl == NULL ? 0u : impl->size;
 }
+
+int praktor_c11_value_txn_commit_group(praktor_c11_value_txn *txns, size_t count) {
+  praktor_c11_value_txn_impl **items;
+  praktor_c11_value_store staged = {0};
+  praktor_c11_value_store *target = NULL;
+  size_t i, j, k;
+  int status;
+  if (txns == NULL || count == 0u || count > SIZE_MAX / sizeof(*items))
+    return PRAKTOR_C11_VALUE_EINVAL;
+  items = (praktor_c11_value_txn_impl **)calloc(count, sizeof(*items));
+  if (items == NULL) return PRAKTOR_C11_VALUE_ENOMEM;
+  for (i = 0u; i < count; ++i) {
+    items[i] = get_txn(&txns[i]);
+    if (items[i] == NULL || store_impl(items[i]->target) == NULL ||
+        (target != NULL && items[i]->target != target)) {
+      free(items); return PRAKTOR_C11_VALUE_EINVAL;
+    }
+    target = items[i]->target;
+  }
+  for (i = 0u; i < count; ++i) for (j = 0u; j < items[i]->op_count; ++j) {
+    const praktor_c11_value_txn_op *a = &items[i]->ops[j];
+    if (!same_key(target, &items[i]->baseline, a->key, a->key_size)) {
+      free(items); return PRAKTOR_C11_VALUE_ECONFLICT;
+    }
+    for (k = i + 1u; k < count; ++k) {
+      size_t m;
+      for (m = 0u; m < items[k]->op_count; ++m) {
+        const praktor_c11_value_txn_op *b = &items[k]->ops[m];
+        if (a->key_size == b->key_size &&
+            memcmp(a->key, b->key, a->key_size) == 0) {
+          free(items); return PRAKTOR_C11_VALUE_ECONFLICT;
+        }
+      }
+    }
+  }
+  status = praktor_c11_value_store_clone(&staged, target);
+  if (status != PRAKTOR_C11_VALUE_OK) { free(items); return status; }
+  /* Deletions first allow fixed-capacity slots to be reused. */
+  for (i = 0u; i < count; ++i) for (j = 0u; j < items[i]->op_count; ++j) {
+    const praktor_c11_value_txn_op *op = &items[i]->ops[j];
+    if (find_entry(store_impl(&items[i]->working), op->key, op->key_size) == NULL) {
+      int present = 0;
+      status = praktor_c11_value_store_contains(&staged, op->key, &present);
+      if (status == PRAKTOR_C11_VALUE_OK && present)
+        status = praktor_c11_value_store_erase(&staged, op->key);
+      if (status != PRAKTOR_C11_VALUE_OK) {
+        praktor_c11_value_store_destroy(&staged); free(items); return status;
+      }
+    }
+  }
+  /* Array order is deterministic for disjoint writes; no last-writer policy. */
+  for (i = 0u; i < count; ++i) for (j = 0u; j < items[i]->op_count; ++j) {
+    const praktor_c11_value_txn_op *op = &items[i]->ops[j];
+    praktor_c11_value_entry *entry =
+        find_entry(store_impl(&items[i]->working), op->key, op->key_size);
+    if (entry != NULL) {
+      status = praktor_c11_value_store_set(&staged, op->key, entry->value);
+      if (status != PRAKTOR_C11_VALUE_OK) {
+        praktor_c11_value_store_destroy(&staged); free(items); return status;
+      }
+    }
+  }
+  { void *old_impl = target->impl; target->impl = staged.impl; staged.impl = old_impl; }
+  praktor_c11_value_store_destroy(&staged);
+  for (i = 0u; i < count; ++i) praktor_c11_value_txn_abort(&txns[i]);
+  free(items);
+  return PRAKTOR_C11_VALUE_OK;
+}
