@@ -46,6 +46,14 @@ typedef struct praktor_c11_bt_node_desc {
  * asynchronous completion. Shell/process leaves should delegate process
  * ownership to Salts::Process, not create another process owner.
  */
+/* Optional host-owned value store callback results. */
+typedef enum praktor_c11_bt_value_result {
+  PRAKTOR_C11_BT_VALUE_OK = 0,
+  PRAKTOR_C11_BT_VALUE_NOT_FOUND = 1,
+  PRAKTOR_C11_BT_VALUE_BUFFER_TOO_SMALL = 2,
+  PRAKTOR_C11_BT_VALUE_ERROR = 3
+} praktor_c11_bt_value_result;
+
 typedef struct praktor_c11_bt_host {
   int (*tick_leaf)(void *user, size_t node_index,
                    salts_bt_node_status *out_status);
@@ -83,6 +91,18 @@ typedef struct praktor_c11_bt_host {
   void (*queue_abort)(void *user, size_t node_index);
 
   void *user;
+
+  /*
+   * Optional host-owned value store. Supply all three callbacks together and
+   * a non-NULL value_user. value_get with NULL/zero output is a size query:
+   * return BUFFER_TOO_SMALL and write required bytes (excluding NUL), or
+   * NOT_FOUND. Normal reads require capacity > required bytes and NUL-terminate.
+   */
+  int (*value_get)(void *value_user, const char *key, char *out_value,
+                   size_t out_capacity, size_t *out_size);
+  int (*value_set)(void *value_user, const char *key, const char *value);
+  int (*value_contains)(void *value_user, const char *key, int *out_contains);
+  void *value_user;
 
   /* Resolve Blackboard-backed decorator values on each node tick. */
   int (*resolve_dynamic_parameters)(void *user, size_t node_index,
