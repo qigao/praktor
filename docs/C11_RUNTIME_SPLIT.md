@@ -43,3 +43,18 @@ Remaining cuts before the C++ action runtime can be removed:
    and verify the installed public C ABI.
 
 No C++ runtime removal is claimed for the current C++ WorkflowRunner.
+
+## Header dependency cut — C11 session API
+
+The C11 tree-plan/session public headers now depend on the action AST model
+and forward declarations for `Blackboard`, `Executor`, and
+`ExecutionContext`; they no longer transitively include the full legacy
+`core/executor.hpp`. Implementation and compatibility tests include the
+legacy runtime explicitly where they still use it.
+
+This is an include-graph boundary only, not a claim that the C11 session
+is already runtime-independent: its constructor and registered-leaf path
+still borrow legacy Executor/Blackboard/ExecutionContext. The next runtime
+cut must replace those borrowed objects with a typed C11 plan, typed bounded
+blackboard, and explicit host-leaf dispatch before `actions` can be removed
+from the production link closure.

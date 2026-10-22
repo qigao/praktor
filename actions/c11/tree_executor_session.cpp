@@ -1,4 +1,5 @@
 #include "tree_executor_session.hpp"
+#include "core/executor.hpp"
 
 #include <json_parser.h>
 #include <salts/process.h>

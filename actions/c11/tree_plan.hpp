@@ -2,8 +2,11 @@
 #define PRAKTOR_ACTIONS_C11_TREE_PLAN_HPP
 
 #include "core/ast.hpp"
-#include "core/executor.hpp"
 #include "tree_adapter.h"
+
+namespace actions {
+class Blackboard;
+}
 
 #include <vector>
 

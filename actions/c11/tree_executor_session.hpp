@@ -2,8 +2,13 @@
 #define PRAKTOR_ACTIONS_C11_TREE_EXECUTOR_SESSION_HPP
 
 #include "tree_plan.hpp"
-#include "core/executor.hpp"
 #include <salts/process_retainer.h>
+
+namespace actions {
+class Blackboard;
+class Executor;
+class ExecutionContext;
+}
 
 #include <memory>
 #include <string>
