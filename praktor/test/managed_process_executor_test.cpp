@@ -29,6 +29,8 @@ ManagedProcessResult<bool> matchesManagedProcessSnapshot(
     const ManagedProcessSnapshot& expected,
     const ManagedProcessSnapshot& observed,
     std::uint32_t current_session_id);
+ManagedProcessResult<ManagedProcessSnapshot> observeManagedProcessEvidenceFailure(
+    HANDLE process, std::uint32_t pid, DWORD evidence_error, std::string message);
 
 }  // namespace Praktor::System::WinDetail
 #endif
@@ -590,6 +592,27 @@ spec("managed process executor maps outputs and structured failures") {
 }
 
 #ifdef _WIN32
+spec("Windows evidence lookup failure requires a signaled process object") {
+  it("preserves a live lookup failure and accepts only confirmed exit") {
+    using Praktor::System::WinDetail::observeManagedProcessEvidenceFailure;
+    // A manual-reset event gives deterministic pending/signaled kernel wait
+    // states without racing the native process scheduler in this contract test.
+    std::unique_ptr<void, decltype(&CloseHandle)> event(
+        CreateEventW(nullptr, TRUE, FALSE, nullptr), &CloseHandle);
+    check((event != nullptr));
+    const auto pending = observeManagedProcessEvidenceFailure(
+        event.get(), 42, ERROR_ACCESS_DENIED, "identity unavailable");
+    check((!pending.ok && pending.native_error == ERROR_ACCESS_DENIED));
+    check((pending.message.find("identity unavailable for pid 42; wait_result=258") != std::string::npos));
+    check((SetEvent(event.get()) != FALSE));
+    const auto exited = observeManagedProcessEvidenceFailure(
+        event.get(), 42, ERROR_ACCESS_DENIED, "identity unavailable");
+    check((exited.ok && exited.value.state == ManagedProcessState::NotRunning));
+    const auto invalid = observeManagedProcessEvidenceFailure(
+        nullptr, 42, ERROR_ACCESS_DENIED, "identity unavailable");
+    check((!invalid.ok && invalid.native_error == ERROR_INVALID_HANDLE));
+  }
+}
 namespace {
 
 constexpr auto kFixtureWindowReadyTimeout = std::chrono::seconds(3);

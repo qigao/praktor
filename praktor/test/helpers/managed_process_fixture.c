@@ -1,11 +1,10 @@
+#include <stddef.h>
 #ifdef _WIN32
 #include <windows.h>
 
-namespace {
+static const wchar_t kWindowClassName[] = L"PraktorManagedProcessFixtureWindow";
 
-constexpr wchar_t kWindowClassName[] = L"PraktorManagedProcessFixtureWindow";
-
-LRESULT CALLBACK fixtureWindowProc(HWND window,
+static LRESULT CALLBACK fixtureWindowProc(HWND window,
                                    UINT message,
                                    WPARAM wparam,
                                    LPARAM lparam) {
@@ -21,11 +20,9 @@ LRESULT CALLBACK fixtureWindowProc(HWND window,
   }
 }
 
-}  // namespace
-
-int main() {
-  const HINSTANCE instance = GetModuleHandleW(nullptr);
-  WNDCLASSW window_class{};
+int main(void) {
+  const HINSTANCE instance = GetModuleHandleW(NULL);
+  WNDCLASSW window_class = {0};
   window_class.lpfnWndProc = fixtureWindowProc;
   window_class.hInstance = instance;
   window_class.lpszClassName = kWindowClassName;
@@ -35,19 +32,19 @@ int main() {
 
   const HWND window = CreateWindowExW(
       0, kWindowClassName, L"Praktor managed process fixture",
-      WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 320, 200, nullptr,
-      nullptr, instance, nullptr);
-  if (window == nullptr) {
+      WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 320, 200, NULL,
+      NULL, instance, NULL);
+  if (window == NULL) {
     return 3;
   }
 
-  MSG message{};
-  while (GetMessageW(&message, nullptr, 0, 0) > 0) {
+  MSG message = {0};
+  while (GetMessageW(&message, NULL, 0, 0) > 0) {
     TranslateMessage(&message);
     DispatchMessageW(&message);
   }
-  return static_cast<int>(message.wParam);
+  return (int)message.wParam;
 }
 #else
-int main() { return 0; }
+int main(void) { return 0; }
 #endif

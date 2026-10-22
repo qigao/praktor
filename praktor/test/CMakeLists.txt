@@ -85,8 +85,10 @@ if(ENABLE_SCRIPT_ENGINE)
 endif()
 
 if(WIN32)
-    add_executable(managed_process_fixture helpers/managed_process_fixture.cpp)
-    add_executable(managed_process_fixture_alt helpers/managed_process_fixture.cpp)
+    add_executable(managed_process_fixture helpers/managed_process_fixture.c)
+    add_executable(managed_process_fixture_alt helpers/managed_process_fixture.c)
+    set_target_properties(managed_process_fixture managed_process_fixture_alt PROPERTIES
+        C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF LINKER_LANGUAGE C)
     set_target_properties(managed_process_fixture_alt PROPERTIES
         OUTPUT_NAME "managed_process_fixture"
         SUFFIX ".com"

@@ -28,6 +28,8 @@ ManagedProcessResult<bool> matchesManagedProcessSnapshot(
     const ManagedProcessSnapshot& expected,
     const ManagedProcessSnapshot& observed,
     std::uint32_t current_session_id);
+ManagedProcessResult<ManagedProcessSnapshot> observeManagedProcessEvidenceFailure(
+    HANDLE process, std::uint32_t pid, DWORD evidence_error, std::string message);
 
 }  // namespace WinDetail
 namespace {
@@ -177,16 +179,25 @@ std::uint64_t processInstanceToken(const FILETIME &creation_time) {
   return value.QuadPart;
 }
 
-ManagedProcessResult<ManagedProcessSnapshot> evidenceFailureOrExited(
+} // namespace
+
+namespace WinDetail {
+ManagedProcessResult<ManagedProcessSnapshot> observeManagedProcessEvidenceFailure(
     HANDLE process, std::uint32_t pid, DWORD evidence_error,
     std::string message) {
-  const DWORD wait_result = WaitForSingleObject(process, 0);
+  // Image/session evidence can disappear during teardown before the process
+  // object is signaled. Confirm exit on this SAME handle with a bounded wait;
+  // a live/unobservable process remains a failure, never an assumed exit.
+  // The C controller charges this native call against its polling deadline.
+  constexpr DWORD kFailedEvidenceExitProbeTimeoutMs = 25;
+  const DWORD wait_result = WaitForSingleObject(process, kFailedEvidenceExitProbeTimeoutMs);
   if (wait_result == WAIT_OBJECT_0) {
     return {true, {}, 0, {}};
   }
   if (wait_result == WAIT_FAILED) {
+    const int wait_error = static_cast<int>(GetLastError());
     return failure<ManagedProcessSnapshot>(
-        static_cast<int>(GetLastError()),
+        wait_error,
         "failed to observe managed process " + std::to_string(pid) +
             " after evidence lookup failed");
   }
@@ -196,6 +207,9 @@ ManagedProcessResult<ManagedProcessSnapshot> evidenceFailureOrExited(
                                              "; wait_result=" +
                                              std::to_string(wait_result));
 }
+} // namespace WinDetail
+
+namespace {
 
 ManagedProcessResult<ManagedProcessSnapshot> queryProcessEvidence(HANDLE process,
                                                                   std::uint32_t pid) {
@@ -212,7 +226,7 @@ ManagedProcessResult<ManagedProcessSnapshot> queryProcessEvidence(HANDLE process
   DWORD full_path_size = static_cast<DWORD>(full_path.size());
   if (!QueryFullProcessImageNameW(process, 0, full_path.data(), &full_path_size)) {
     const DWORD error = GetLastError();
-    return evidenceFailureOrExited(
+    return WinDetail::observeManagedProcessEvidenceFailure(
         process, pid, error, "failed to query managed process image identity");
   }
   full_path.resize(full_path_size);
@@ -225,7 +239,7 @@ ManagedProcessResult<ManagedProcessSnapshot> queryProcessEvidence(HANDLE process
   DWORD session_id = 0;
   if (!ProcessIdToSessionId(static_cast<DWORD>(pid), &session_id)) {
     const DWORD error = GetLastError();
-    return evidenceFailureOrExited(
+    return WinDetail::observeManagedProcessEvidenceFailure(
         process, pid, error,
         "failed to query managed process session identity");
   }
@@ -236,7 +250,7 @@ ManagedProcessResult<ManagedProcessSnapshot> queryProcessEvidence(HANDLE process
   FILETIME user_time{};
   if (!GetProcessTimes(process, &creation_time, &exit_time, &kernel_time, &user_time)) {
     const DWORD error = GetLastError();
-    return evidenceFailureOrExited(
+    return WinDetail::observeManagedProcessEvidenceFailure(
         process, pid, error,
         "failed to query managed process instance token");
   }

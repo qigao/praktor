@@ -165,3 +165,9 @@ complete-source TSan slice include this bridge suite. The C application-control
 test additionally links and runs without any C++ compiler/runtime in both SDK
 profiles. The Windows identity/native backend in `managed_process_win.cpp`
 still remains C++; migrating that backend is separate unfinished work.
+Windows evidence loss during teardown gets one bounded 25 ms wait on the same
+process handle before classification; only a signaled handle means exited.
+Timeout/wait failure still returns the native error. The controller charges
+the wait against its deadline. Windows tests cover pending/signaled/invalid
+kernel objects and the real graceful-stop path. Their fixture is now compiled
+and linked as C (`managed_process_fixture.c`), without a C++ entry point.
