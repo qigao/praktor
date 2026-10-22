@@ -53,6 +53,35 @@ static int test_clone_is_independent_snapshot(void) {
   return 0;
 }
 
+static int test_transaction_commit_conflict_and_abort(void) {
+  praktor_c11_value_store target = {0};
+  praktor_c11_value_txn a = {0}, b = {0}, c = {0};
+  CHECK(praktor_c11_value_store_init(&target, 4u, 16u, 32u) == PRAKTOR_C11_VALUE_OK);
+  CHECK(praktor_c11_value_store_set(&target, "left", "base") == PRAKTOR_C11_VALUE_OK);
+  CHECK(praktor_c11_value_store_set(&target, "right", "base") == PRAKTOR_C11_VALUE_OK);
+  CHECK(praktor_c11_value_txn_begin(&a, &target) == PRAKTOR_C11_VALUE_OK);
+  CHECK(praktor_c11_value_txn_begin(&b, &target) == PRAKTOR_C11_VALUE_OK);
+  CHECK(praktor_c11_value_txn_set(&a, "left", "A") == PRAKTOR_C11_VALUE_OK);
+  CHECK(praktor_c11_value_txn_set(&b, "right", "B") == PRAKTOR_C11_VALUE_OK);
+  CHECK(praktor_c11_value_txn_commit(&a) == PRAKTOR_C11_VALUE_OK);
+  CHECK(praktor_c11_value_txn_commit(&b) == PRAKTOR_C11_VALUE_OK);
+  CHECK(expect_value(&target, "left", "A") && expect_value(&target, "right", "B"));
+  CHECK(praktor_c11_value_txn_begin(&a, &target) == PRAKTOR_C11_VALUE_OK);
+  CHECK(praktor_c11_value_txn_begin(&c, &target) == PRAKTOR_C11_VALUE_OK);
+  CHECK(praktor_c11_value_txn_set(&a, "left", "winner") == PRAKTOR_C11_VALUE_OK);
+  CHECK(praktor_c11_value_txn_set(&c, "left", "loser") == PRAKTOR_C11_VALUE_OK);
+  CHECK(praktor_c11_value_txn_commit(&a) == PRAKTOR_C11_VALUE_OK);
+  CHECK(praktor_c11_value_txn_commit(&c) == PRAKTOR_C11_VALUE_ECONFLICT);
+  CHECK(expect_value(&target, "left", "winner"));
+  praktor_c11_value_txn_abort(&c);
+  CHECK(praktor_c11_value_txn_begin(&a, &target) == PRAKTOR_C11_VALUE_OK);
+  CHECK(praktor_c11_value_txn_set(&a, "left", "discard") == PRAKTOR_C11_VALUE_OK);
+  praktor_c11_value_txn_abort(&a);
+  CHECK(expect_value(&target, "left", "winner"));
+  praktor_c11_value_store_destroy(&target);
+  return 0;
+}
+
 int main(void) {
   praktor_c11_value_store store = {0};
   char output[9];
@@ -108,6 +137,7 @@ int main(void) {
   CHECK(praktor_c11_value_store_size(&store) == 2u);
 
   CHECK(test_clone_is_independent_snapshot() == 0);
+  CHECK(test_transaction_commit_conflict_and_abort() == 0);
   praktor_c11_value_store_destroy(&store);
   CHECK(store.impl == NULL && praktor_c11_value_store_size(&store) == 0u);
   praktor_c11_value_store_destroy(&store);

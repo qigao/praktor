@@ -232,6 +232,30 @@ int praktor_c11_value_store_erase(praktor_c11_value_store *store,
   return PRAKTOR_C11_VALUE_OK;
 }
 
+typedef struct praktor_c11_value_txn_op {
+  char *key;
+  size_t key_size;
+  char *baseline_value;
+  size_t baseline_value_size;
+  int baseline_exists;
+} praktor_c11_value_txn_op;
+typedef struct praktor_c11_value_txn_impl {
+  praktor_c11_value_store *target;
+  praktor_c11_value_store baseline, working;
+  size_t op_count, op_capacity;
+  praktor_c11_value_txn_op *ops;
+  char *op_keys, *op_values;
+} praktor_c11_value_txn_impl;
+static praktor_c11_value_entry *find_entry_const(const praktor_c11_value_store_impl *p,const char*k,size_t n){size_t i;for(i=0;i<p->capacity;++i){praktor_c11_value_entry*e=(praktor_c11_value_entry*)&p->entries[i];if(e->occupied&&strlen(e->key)==n&&!memcmp(e->key,k,n))return e;}return NULL;}
+static int same_key(const praktor_c11_value_store*a,const praktor_c11_value_store*b,const char*k,size_t n){const praktor_c11_value_store_impl*ai=store_impl(a),*bi=store_impl(b);praktor_c11_value_entry*ae=find_entry_const(ai,k,n),*be=find_entry_const(bi,k,n);if(!ae||!be)return ae==be;return ae->value_size==be->value_size&&!memcmp(ae->value,be->value,ae->value_size);}
+static praktor_c11_value_txn_impl *get_txn(praktor_c11_value_txn*t){return t?(praktor_c11_value_txn_impl*)t->impl:NULL;}
+static praktor_c11_value_txn_op *txn_find_op(praktor_c11_value_txn_impl*t,const char*k,size_t n){size_t i;for(i=0;i<t->op_count;++i)if(t->ops[i].key_size==n&&!memcmp(t->ops[i].key,k,n))return &t->ops[i];return NULL;}
+static int txn_record(praktor_c11_value_txn_impl*t,const char*k,size_t n){praktor_c11_value_txn_op*o=txn_find_op(t,k,n);praktor_c11_value_store_impl*b;praktor_c11_value_entry*e;size_t slot;if(o)return PRAKTOR_C11_VALUE_OK;if(t->op_count>=t->op_capacity)return PRAKTOR_C11_VALUE_ENOSPC;slot=t->op_count++;o=&t->ops[slot];b=store_impl(&t->baseline);o->key=t->op_keys+slot*(b->max_key_bytes+1u);o->baseline_value=t->op_values+slot*(b->max_value_bytes+1u);memcpy(o->key,k,n);o->key[n]=0;o->key_size=n;e=find_entry(b,k,n);o->baseline_exists=e!=NULL;if(e){o->baseline_value_size=e->value_size;memcpy(o->baseline_value,e->value,e->value_size+1u);}return PRAKTOR_C11_VALUE_OK;}
+int praktor_c11_value_txn_begin(praktor_c11_value_txn*t,praktor_c11_value_store*target){praktor_c11_value_txn_impl*p;praktor_c11_value_store_impl*base=store_impl(target);int r;if(!t||t->impl||!base)return PRAKTOR_C11_VALUE_EINVAL;p=(praktor_c11_value_txn_impl*)calloc(1,sizeof(*p));if(!p)return PRAKTOR_C11_VALUE_ENOMEM;p->target=target;p->op_capacity=base->capacity;p->ops=(praktor_c11_value_txn_op*)calloc(p->op_capacity,sizeof(*p->ops));p->op_keys=(char*)calloc(p->op_capacity,base->max_key_bytes+1u);p->op_values=(char*)calloc(p->op_capacity,base->max_value_bytes+1u);if(!p->ops||!p->op_keys||!p->op_values){free(p->ops);free(p->op_keys);free(p->op_values);free(p);return PRAKTOR_C11_VALUE_ENOMEM;}r=praktor_c11_value_store_clone(&p->baseline,target);if(r==0)r=praktor_c11_value_store_clone(&p->working,target);if(r!=0){praktor_c11_value_store_destroy(&p->baseline);praktor_c11_value_store_destroy(&p->working);free(p->ops);free(p->op_keys);free(p->op_values);free(p);return r;}t->impl=p;return 0;}
+int praktor_c11_value_txn_set(praktor_c11_value_txn*t,const char*k,const char*v){praktor_c11_value_txn_impl*p=get_txn(t);praktor_c11_value_store_impl*w;size_t kn,vn;int r;if(!p||!k||!v)return PRAKTOR_C11_VALUE_EINVAL;w=store_impl(&p->working);kn=bounded_length(k,w->max_key_bytes);vn=bounded_length(v,w->max_value_bytes);if(!kn||kn==SIZE_MAX)return PRAKTOR_C11_VALUE_EINVAL;if(kn>w->max_key_bytes||vn>w->max_value_bytes)return PRAKTOR_C11_VALUE_ENOBUFS;r=txn_record(p,k,kn);if(r)return r;return praktor_c11_value_store_set(&p->working,k,v);}
+int praktor_c11_value_txn_erase(praktor_c11_value_txn*t,const char*k){praktor_c11_value_txn_impl*p=get_txn(t);praktor_c11_value_store_impl*w;size_t kn;int r;if(!p||!k)return PRAKTOR_C11_VALUE_EINVAL;w=store_impl(&p->working);kn=bounded_length(k,w->max_key_bytes);if(!kn||kn==SIZE_MAX||kn>w->max_key_bytes)return PRAKTOR_C11_VALUE_EINVAL;if(!find_entry(w,k,kn))return PRAKTOR_C11_VALUE_ENOTFOUND;r=txn_record(p,k,kn);if(r)return r;return praktor_c11_value_store_erase(&p->working,k);}
+int praktor_c11_value_txn_commit(praktor_c11_value_txn*t){praktor_c11_value_txn_impl*p=get_txn(t);praktor_c11_value_store staged={0};praktor_c11_value_store_impl*w;size_t i;int r;if(!p||!store_impl(p->target))return PRAKTOR_C11_VALUE_EINVAL;for(i=0;i<p->op_count;++i)if(!same_key(p->target,&p->baseline,p->ops[i].key,p->ops[i].key_size))return PRAKTOR_C11_VALUE_ECONFLICT;r=praktor_c11_value_store_clone(&staged,p->target);if(r)return r;w=store_impl(&p->working);for(i=0;i<p->op_count;++i){praktor_c11_value_txn_op*o=&p->ops[i];praktor_c11_value_entry*e=find_entry(w,o->key,o->key_size);if(e)r=praktor_c11_value_store_set(&staged,o->key,e->value);else{int yes=0;r=praktor_c11_value_store_contains(&staged,o->key,&yes);if(!r&&yes)r=praktor_c11_value_store_erase(&staged,o->key);}if(r)break;}if(r){praktor_c11_value_store_destroy(&staged);return r;}{void*old=p->target->impl;p->target->impl=staged.impl;staged.impl=old;}praktor_c11_value_store_destroy(&staged);praktor_c11_value_txn_abort(t);return 0;}
+void praktor_c11_value_txn_abort(praktor_c11_value_txn*t){praktor_c11_value_txn_impl*p=get_txn(t);if(!p)return;praktor_c11_value_store_destroy(&p->baseline);praktor_c11_value_store_destroy(&p->working);free(p->ops);free(p->op_keys);free(p->op_values);free(p);t->impl=NULL;}
 size_t praktor_c11_value_store_size(const praktor_c11_value_store *store) {
   const praktor_c11_value_store_impl *impl =
       store == NULL ? NULL : (const praktor_c11_value_store_impl *)store->impl;

@@ -11,13 +11,18 @@ typedef struct praktor_c11_value_store {
   void *impl;
 } praktor_c11_value_store;
 
+typedef struct praktor_c11_value_txn {
+  void *impl;
+} praktor_c11_value_txn;
+
 typedef enum praktor_c11_value_status {
   PRAKTOR_C11_VALUE_OK = 0,
   PRAKTOR_C11_VALUE_EINVAL = 1,
   PRAKTOR_C11_VALUE_ENOMEM = 2,
   PRAKTOR_C11_VALUE_ENOSPC = 3,
   PRAKTOR_C11_VALUE_ENOBUFS = 4,
-  PRAKTOR_C11_VALUE_ENOTFOUND = 5
+  PRAKTOR_C11_VALUE_ENOTFOUND = 5,
+  PRAKTOR_C11_VALUE_ECONFLICT = 6
 } praktor_c11_value_status;
 
 /*
@@ -44,6 +49,19 @@ int praktor_c11_value_store_contains(const praktor_c11_value_store *store,
 int praktor_c11_value_store_erase(praktor_c11_value_store *store,
                                   const char *key);
 size_t praktor_c11_value_store_size(const praktor_c11_value_store *store);
+
+/*
+ * Single-driver optimistic transaction. begin captures a bounded baseline;
+ * writes are isolated in a private snapshot. commit detects per-key write/write
+ * conflicts, preflights capacity on a staged copy, then publishes atomically.
+ * A failed commit leaves the target unchanged and the transaction active so
+ * the caller can abort or retry. Unrelated key updates do not conflict.
+ */
+int praktor_c11_value_txn_begin(praktor_c11_value_txn *txn, praktor_c11_value_store *target);
+int praktor_c11_value_txn_set(praktor_c11_value_txn *txn, const char *key, const char *value);
+int praktor_c11_value_txn_erase(praktor_c11_value_txn *txn, const char *key);
+int praktor_c11_value_txn_commit(praktor_c11_value_txn *txn);
+void praktor_c11_value_txn_abort(praktor_c11_value_txn *txn);
 
 #ifdef __cplusplus
 }

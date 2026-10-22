@@ -94,3 +94,7 @@ Added a constructor which accepts only an action-tree AST, bounded SubTree resol
 ## Independent C11 value-store snapshots
 
 Added a deep-clone operation that preserves the source store's fixed capacity and key/value limits while allocating independent backing storage. A cloned branch can update, insert, or erase values without mutating its baseline snapshot. The test covers changed values, branch-only keys, branch deletion, duplicate clone rejection, and baseline immutability. This supplies an isolation primitive for Parallel branch transactions; conflict detection, deterministic commit, and rollback remain separate requirements and are not claimed by cloning alone.
+
+## Optimistic branch transaction primitive
+
+Added bounded transactions over the C11 value store. Each transaction snapshots a baseline and private working copy, tracks a bounded set of touched keys, detects write/write conflicts per key, stages the merged result in a separate fixed-capacity store, and swaps the target only after all writes fit. Disjoint transactions can commit in sequence; conflicting writes fail with ECONFLICT and leave the target unchanged; abort discards the working copy. This primitive is not yet wired to Parallel hooks; branch ordering, whole-Parallel commit policy, and cancel/abort integration remain to be implemented and tested at the tree level.
