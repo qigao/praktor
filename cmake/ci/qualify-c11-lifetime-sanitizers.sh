@@ -35,6 +35,22 @@ cmake --preset "$CMAKE_PRESET" -B "$build_dir" \
 cmake --build "$build_dir" \
   --target actions_c11_tree_executor_session_test core_only_workflow_test.praktor_lib \
   --parallel 2
+# Released Salts.Native is not TSan-instrumented. Consumer-only TSan
+# cannot see its async logger's release/acquire edges and reports an invalid
+# mixed-instrumentation race in the full WorkflowRunner test. That exact
+# test is instead REQUIRED in .github/workflows/c11-source-tsan.yml with
+# fully instrumented Salts + SaltsUtils and attested actual DSO linkage.
+# The separately instrumented C11 Session smoke test remains useful here.
+case "$mode" in
+  address)
+    test_regex='^(actions_c11_tree_executor_session_test|core_only_workflow_test\.praktor_lib)
+
+    ;;
+  thread)
+    test_regex='^actions_c11_tree_executor_session_test
+
+    ;;
+esac
 ctest --test-dir "$build_dir" \
   --no-tests=error --output-on-failure --parallel 1 --timeout 75 \
-  -R '^(actions_c11_tree_executor_session_test|core_only_workflow_test\.praktor_lib)$'
+  -R "$test_regex"
