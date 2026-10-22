@@ -88,8 +88,8 @@ struct ManagedProcess::Impl {
     return self.cancel_requested ? 1 : 0;
   }
   static int emit(void* user, const char* line, size_t size) noexcept {
-    auto& self = *static_cast<Impl*>(user);
-    try { if (self.callback && size != 0u) self.callback(std::string(line, size)); }
+    (void)user;
+    try { ShellExecutor::emitStreamLine(std::string(line, size)); }
     catch (...) { return SALTS_EIO; }
     return SALTS_OK;
   }
@@ -99,6 +99,7 @@ struct ManagedProcess::Impl {
     praktor_process_driver process{};
     bool spawned = false;
     try {
+      ShellExecutor::setStreamCallback(std::move(callback));
       std::vector<const char*> args;
       for (const auto& arg : spec.args) args.push_back(arg.c_str());
       args.push_back(nullptr);

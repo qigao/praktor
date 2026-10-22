@@ -851,6 +851,17 @@ spec("managed process enforces captured output limits") {
 }
 
 spec("Salts Process facade failure and ownership boundaries") {
+    it("inherits the stream callback and observes updates on the driver thread") {
+        StreamCallbackGuard guard;
+        int first = 0, second = 0;
+        Praktor::Shell::ShellExecutor::setStreamCallback([&](const std::string&) {
+            ++first;
+            Praktor::Shell::ShellExecutor::setStreamCallback([&](const std::string&) { ++second; });
+        });
+        const auto result = Praktor::Shell::ShellExecutor::execute("echo first && echo second");
+        check(result.success());
+        check(first == 1 && second == 1);
+    }
 #ifndef _WIN32
     it("SIGPIPE protection changes neither the caller nor the child policy") {
         sigset_t before_mask;
