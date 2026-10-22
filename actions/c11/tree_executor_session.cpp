@@ -3,11 +3,9 @@
 #include "plan_value_reader.hpp"
 
 #include <json_parser.h>
-#include <salts/process.h>
+#include "praktor/process_driver.h"
 
 #include <algorithm>
-#include <array>
-#include <chrono>
 #include <cctype>
 #include <cmath>
 #include <cstdint>
@@ -18,7 +16,6 @@
 #include <new>
 #include <stdexcept>
 #include <string_view>
-#include <thread>
 #include <utility>
 #include <vector>
 
@@ -278,7 +275,7 @@ actions::Tree expandSubTrees(const actions::Tree& source,
 
 } // namespace
 
-struct TreeExecutorSession::Impl : std::enable_shared_from_this<Impl> {
+struct TreeExecutorSession::Impl {
   actions::Tree tree;
   TreePlan compiled_plan;
   std::shared_ptr<detail::SessionCompatibility> compatibility;
@@ -310,42 +307,12 @@ struct TreeExecutorSession::Impl : std::enable_shared_from_this<Impl> {
     SaltsProcess
   };
   struct ShellState {
-    Impl* owner = nullptr;
     size_t node_index = 0u;
-    cflow_process process{};
-    cflow_process_retainer_token reservation{};
-    bool has_reservation = false;
-    std::shared_ptr<Impl>* retained_owner = nullptr;
-    bool started = false;
-    bool close_requested = false;
-    bool stdin_write_pending = false;
-    bool stdout_read_pending = false;
-    bool stderr_read_pending = false;
-    bool stdin_closed = false;
-    bool stdout_eof = false;
-    bool stderr_eof = false;
-    bool process_terminal = false;
-    bool io_failed = false;
-    bool stream_output = true;
-    uint64_t stdin_lease = 1u;
-    uint64_t stdout_lease = 2u;
-    uint64_t stderr_lease = 3u;
-    size_t input_offset = 0u;
-    std::array<char, 4096> stdin_buffer{};
-    std::array<char, 4096> stdout_buffer{};
-    std::array<char, 4096> stderr_buffer{};
-    std::string command;
-    std::string input;
-    std::string working_dir;
+    praktor_process_driver driver{};
     std::string output_key = "shell_output";
     std::string stderr_key = "shell_stderr";
     std::string exit_code_key = "shell_exit_code";
-    std::string stdout_data;
-    std::string stderr_data;
-    std::string stdout_pending_line;
-    std::string stderr_pending_line;
     std::string failure_reason;
-    cmeta_process_result_t result{};
   };
 
   std::vector<std::vector<praktor_c11_leaf_parameter>> leaf_parameters;
@@ -402,7 +369,6 @@ struct TreeExecutorSession::Impl : std::enable_shared_from_this<Impl> {
     entry_updated_states.resize(compiled_plan.nodes.size());
     queue_states.resize(compiled_plan.nodes.size());
     for (size_t index = 0u; index < shell_states.size(); ++index) {
-      shell_states[index].owner = this;
       shell_states[index].node_index = index;
     }
 
@@ -434,20 +400,10 @@ struct TreeExecutorSession::Impl : std::enable_shared_from_this<Impl> {
     }
   }
 
-  static void releaseRetainedOwner(void* payload) noexcept {
-    delete static_cast<std::shared_ptr<Impl>*>(payload);
-  }
-
   ~Impl() {
-    // No borrowed Process may outlive Impl. TreeExecutorSession's destructor
-    // either quiesces the Process or transfers it and the retained Impl
-    // reference to the explicit recovery owner before this point.
     if (runtime.impl != nullptr) std::terminate();
-    for (auto& shell : shell_states) {
-      if (shell.process.impl != nullptr || shell.retained_owner != nullptr ||
-          shell.has_reservation)
-        std::terminate();
-    }
+    for (const auto& shell : shell_states)
+      if (shell.driver.impl != nullptr) std::terminate();
   }
 
   const actions::Node* nodeAt(size_t index) const noexcept {
@@ -651,273 +607,51 @@ struct TreeExecutorSession::Impl : std::enable_shared_from_this<Impl> {
     }
   }
 
-  void emitStreamBytes(std::string& pending_line,
-                              const char* bytes, size_t length,
-                              bool enabled) {
-    if (!enabled) return;
-    for (size_t offset = 0u; offset < length; ++offset) {
-      const char ch = bytes[offset];
-      if (ch == '\r') continue;
-      if (ch == '\n') {
-        if (compatibility) compatibility->emit(pending_line);
-        pending_line.clear();
-      } else {
-        pending_line.push_back(ch);
-      }
-    }
-  }
-
-  void flushStreamLine(std::string& pending_line, bool enabled) {
-    if (!enabled || pending_line.empty()) return;
-    if (compatibility) compatibility->emit(pending_line);
-    pending_line.clear();
-  }
-
-  static void onProcessCompletion(void* user, cflow_io_request_id,
-                                  cflow_io_lease_id, cflow_process_stream stream,
-                                  const cflow_io_completion* completion) noexcept {
-    auto* state = static_cast<ShellState*>(user);
-    if (state == nullptr || completion == nullptr) return;
+  static int emitProcessLine(void* user, const char* line, size_t size) noexcept {
+    auto* self = static_cast<Impl*>(user);
     try {
-      if (state->close_requested) {
-        if (stream == CFLOW_PROCESS_STDOUT) {
-          state->stdout_read_pending = false;
-          if (completion->kind == CFLOW_IO_COMPLETION_EOF ||
-              completion->kind == CFLOW_IO_COMPLETION_CANCELLED ||
-              completion->kind == CFLOW_IO_COMPLETION_FAILED)
-            state->stdout_eof = true;
-        } else if (stream == CFLOW_PROCESS_STDERR) {
-          state->stderr_read_pending = false;
-          if (completion->kind == CFLOW_IO_COMPLETION_EOF ||
-              completion->kind == CFLOW_IO_COMPLETION_CANCELLED ||
-              completion->kind == CFLOW_IO_COMPLETION_FAILED)
-            state->stderr_eof = true;
-        } else {
-          state->stdin_write_pending = false;
-        }
-        return;
-      }
-
-      if (stream == CFLOW_PROCESS_STDOUT || stream == CFLOW_PROCESS_STDERR) {
-        const bool is_stdout = stream == CFLOW_PROCESS_STDOUT;
-        auto& pending = is_stdout ? state->stdout_read_pending
-                                  : state->stderr_read_pending;
-        auto& eof = is_stdout ? state->stdout_eof : state->stderr_eof;
-        auto& buffer = is_stdout ? state->stdout_buffer : state->stderr_buffer;
-        auto& output = is_stdout ? state->stdout_data : state->stderr_data;
-        auto& pending_line = is_stdout ? state->stdout_pending_line
-                                       : state->stderr_pending_line;
-        pending = false;
-        if (completion->kind == CFLOW_IO_COMPLETION_OK) {
-          if (completion->bytes > buffer.size() ||
-              state->stdout_data.size() + state->stderr_data.size() >
-                  SALTS_PROCESS_DEFAULT_MAX_OUTPUT_BYTES ||
-              completion->bytes > SALTS_PROCESS_DEFAULT_MAX_OUTPUT_BYTES -
-                  (state->stdout_data.size() + state->stderr_data.size())) {
-            state->io_failed = true;
-            state->failure_reason = "Shell output exceeded the bounded capture limit";
-            return;
-          }
-          output.append(buffer.data(), completion->bytes);
-          state->owner->emitStreamBytes(pending_line, buffer.data(), completion->bytes,
-                          state->stream_output);
-        } else if (completion->kind == CFLOW_IO_COMPLETION_EOF) {
-          eof = true;
-        } else {
-          eof = true;
-          state->io_failed = true;
-          state->failure_reason = "Shell stream I/O failed (error " +
-                                  std::to_string(completion->error) + ")";
-        }
-        return;
-      }
-
-      state->stdin_write_pending = false;
-      if (completion->kind == CFLOW_IO_COMPLETION_OK) {
-        if (completion->bytes == 0u ||
-            completion->bytes > state->input.size() - state->input_offset) {
-          state->io_failed = true;
-          state->failure_reason = "Shell stdin write made invalid progress";
-          return;
-        }
-        state->input_offset += completion->bytes;
-      } else {
-        state->io_failed = true;
-        state->failure_reason = "Shell stdin I/O failed (error " +
-                                std::to_string(completion->error) + ")";
-      }
-    } catch (...) {
-      state->io_failed = true;
-      state->failure_reason = "Exception while processing a Salts::Process completion";
-    }
+      if (self->compatibility) self->compatibility->emit(std::string(line, size));
+      return SALTS_OK;
+    } catch (...) { return SALTS_EIO; }
   }
 
-  void clearShellState(ShellState& state) noexcept {
-    // Never erase the callback owner while the C process still owns leases or
-    // teardown has failed. The shell session remains reachable for retry.
-    if (state.process.impl != nullptr) return;
-    if (state.has_reservation && recovery_owner != nullptr) {
-      (void)cflow_process_retainer_release(recovery_owner, state.reservation);
-      state.has_reservation = false;
-    }
-    delete state.retained_owner;
-    state.retained_owner = nullptr;
-    Impl* owner = state.owner;
-    const size_t node_index = state.node_index;
-    state = ShellState{};
-    state.owner = owner;
-    state.node_index = node_index;
+  static praktor_process_view shellView(const ShellState& state) noexcept {
+    praktor_process_view view{};
+    if (state.driver.impl != nullptr)
+      (void)praktor_process_driver_view(&state.driver, &view);
+    return view;
   }
 
   void finalizeShellState(ShellState& state) noexcept {
-    const size_t index = state.node_index;
-    if (state.process.impl == nullptr) {
-      clearShellState(state);
-      if (index < leaf_owners.size()) leaf_owners[index] = LeafOwner::None;
-    } else if (index < leaf_owners.size()) {
-      leaf_owners[index] = LeafOwner::SaltsProcess;
-    }
+    if (!shellView(state).active) {
+      if (state.driver.impl != nullptr &&
+          praktor_process_driver_release(&state.driver) != SALTS_OK)
+        std::terminate();
+      const size_t index = state.node_index;
+      state = ShellState{};
+      state.node_index = index;
+      leaf_owners[index] = LeafOwner::None;
+    } else leaf_owners[state.node_index] = LeafOwner::SaltsProcess;
   }
 
   int closeShellProcess(ShellState& state, bool clear_state) noexcept {
-    int result = SALTS_OK;
-    if (state.process.impl != nullptr) {
-      state.close_requested = true;
-      // Close first, even when the host chooses zero synchronous drain steps:
-      // the explicit retainer must only receive a closed-admission Process.
-      const int close_status = cflow_process_close(&state.process);
-      if (close_status != SALTS_OK && close_status != SALTS_EBUSY) {
-        state.io_failed = true;
-        if (state.failure_reason.empty())
-          state.failure_reason = "Salts::Process close failed with status " +
-                                 std::to_string(close_status);
-      }
-      // Each shutdown_step is non-destructive and drives at most 64 actor
-      // transitions. A persistent native/ack error cannot strand cancel()
-      // or the Session destructor in an unbounded synchronous loop.
-      const auto deadline = std::chrono::steady_clock::now() +
-                            std::chrono::milliseconds(shell_close_budget_ms);
-      bool quiescent = false;
-      for (size_t attempt = 0u; attempt < 4096u &&
-           std::chrono::steady_clock::now() < deadline; ++attempt) {
-        size_t progressed = 0u;
-        const int status = cflow_process_shutdown_step(
-            &state.process, 64u, &progressed, &quiescent);
-        if (status != SALTS_OK && status != SALTS_EBUSY) {
-          state.io_failed = true;
-          if (state.failure_reason.empty())
-            state.failure_reason = "Salts::Process shutdown step failed with status " +
-                                   std::to_string(status);
-          break;
-        }
-        if (quiescent) break;
-        if (progressed == 0u)
-          std::this_thread::sleep_for(std::chrono::milliseconds(1));
-      }
-
-      if (quiescent) {
-        const int status = cflow_process_destroy(&state.process);
-        if (status != SALTS_OK) {
-          state.io_failed = true;
-          if (state.failure_reason.empty())
-            state.failure_reason = "Salts::Process destroy failed with status " +
-                                   std::to_string(status);
-        }
-      }
-      if (state.process.impl != nullptr) {
-        // The retention token and all borrowed buffers remain in ShellState.
-        // The Session destructor hands them to the explicit recovery owner.
-        state.io_failed = true;
-        result = SALTS_EBUSY;
-        if (state.failure_reason.empty())
-          state.failure_reason = "Salts::Process still owns active I/O leases";
-      }
-    }
-
-    if (state.io_failed && result == SALTS_OK) result = SALTS_EIO;
-    const std::string failure = state.failure_reason;
+    if (state.driver.impl == nullptr) return SALTS_OK;
+    const int status = praktor_process_driver_close(&state.driver, shell_close_budget_ms);
+    const auto view = shellView(state);
+    if (status != SALTS_OK && last_error.empty())
+      last_error = view.error == nullptr ? "Salts::Process cleanup failed" : view.error;
     if (clear_state) finalizeShellState(state);
-    else if (state.process.impl != nullptr &&
-             state.node_index < leaf_owners.size())
-      leaf_owners[state.node_index] = LeafOwner::SaltsProcess;
-    if (result != SALTS_OK && last_error.empty())
-      last_error = failure.empty() ? "Salts::Process cleanup failed" : failure;
-    return result;
+    return status;
   }
 
   void publishShellResult(ShellState& state, int exit_code, bool success) {
-    setValue(state.output_key, state.stdout_data);
-    setValue(state.stderr_key, state.stderr_data);
+    const auto view = shellView(state);
+    const std::string output = view.stdout_data == nullptr ? "" : std::string(view.stdout_data, view.stdout_size);
+    const std::string error = view.stderr_data == nullptr ? "" : std::string(view.stderr_data, view.stderr_size);
+    setValue(state.output_key, output);
+    setValue(state.stderr_key, error);
     setValue(state.exit_code_key, std::to_string(exit_code));
-    if (!success) {
-      // Legacy Executor always publishes captured stderr here, even when the
-      // process fails with no stderr output. Keep diagnostics in lastError().
-      setValue("shell_error", state.stderr_data);
-    }
-  }
-
-  int shellSubmitRead(ShellState& state, bool is_stdout) noexcept {
-    if (state.close_requested ||
-        (is_stdout ? state.stdout_eof : state.stderr_eof) ||
-        (is_stdout ? state.stdout_read_pending : state.stderr_read_pending))
-      return SALTS_OK;
-
-    auto result = is_stdout
-        ? cflow_process_try_read_stdout(&state.process, state.stdout_lease,
-                                        state.stdout_buffer.data(), state.stdout_buffer.size())
-        : cflow_process_try_read_stderr(&state.process, state.stderr_lease,
-                                        state.stderr_buffer.data(), state.stderr_buffer.size());
-    if (result.status == CFLOW_PROCESS_SUBMIT_ACCEPTED) {
-      if (is_stdout) state.stdout_read_pending = true;
-      else state.stderr_read_pending = true;
-      return SALTS_OK;
-    }
-    if (result.status == CFLOW_PROCESS_SUBMIT_FULL ||
-        result.status == CFLOW_PROCESS_SUBMIT_LEASE_IN_USE)
-      return SALTS_OK;
-    if (result.status == CFLOW_PROCESS_SUBMIT_CLOSED && state.close_requested) {
-      if (is_stdout) state.stdout_eof = true;
-      else state.stderr_eof = true;
-      return SALTS_OK;
-    }
-    state.io_failed = true;
-    state.failure_reason = "Salts::Process read submission failed with status " +
-                           std::to_string(static_cast<int>(result.status));
-    return SALTS_EIO;
-  }
-
-  int shellSubmitInput(ShellState& state) noexcept {
-    if (state.close_requested || state.stdin_closed || state.stdin_write_pending)
-      return SALTS_OK;
-    if (state.input_offset < state.input.size()) {
-      size_t remaining = state.input.size() - state.input_offset;
-      size_t chunk = remaining < state.stdin_buffer.size()
-                         ? remaining : state.stdin_buffer.size();
-      std::copy_n(state.input.data() + state.input_offset, chunk,
-                  state.stdin_buffer.data());
-      auto result = cflow_process_try_write_stdin(
-          &state.process, state.stdin_lease, state.stdin_buffer.data(), chunk);
-      if (result.status == CFLOW_PROCESS_SUBMIT_ACCEPTED) {
-        state.stdin_write_pending = true;
-        return SALTS_OK;
-      }
-      if (result.status == CFLOW_PROCESS_SUBMIT_FULL) return SALTS_OK;
-      state.io_failed = true;
-      state.failure_reason = "Salts::Process stdin submission failed with status " +
-                             std::to_string(static_cast<int>(result.status));
-      return SALTS_EIO;
-    }
-
-    const int status = cflow_process_close_stdin(&state.process);
-    if (status == SALTS_OK) {
-      state.stdin_closed = true;
-      return SALTS_OK;
-    }
-    if (status == SALTS_EBUSY) return SALTS_OK;
-    state.io_failed = true;
-    state.failure_reason = "Salts::Process stdin close failed with status " +
-                           std::to_string(status);
-    return SALTS_EIO;
+    if (!success) setValue("shell_error", error);
   }
 
   int startShellProcess(size_t index, const actions::Node& source,
@@ -928,20 +662,20 @@ struct TreeExecutorSession::Impl : std::enable_shared_from_this<Impl> {
       return SALTS_EINVAL;
     }
 
-    state.command = resolveValue(command_it->second);
-    if (state.command.empty()) {
+    const std::string command = resolveValue(command_it->second);
+    if (command.empty() || command.find('\0') != std::string::npos) {
       state.failure_reason = "Shell command must not be empty";
       return SALTS_EINVAL;
     }
-    state.input.clear();
+    std::string input;
     const auto input_it = source.params.find("input");
     if (input_it != source.params.end()) {
-      state.input = resolveValue(input_it->second);
+      input = resolveValue(input_it->second);
     }
-    state.working_dir.clear();
+    std::string working_dir;
     const auto cwd_it = source.params.find("working_dir");
     if (cwd_it != source.params.end()) {
-      state.working_dir = resolveValue(cwd_it->second);
+      working_dir = resolveValue(cwd_it->second);
     }
     state.output_key = "shell_output";
     state.stderr_key = "shell_stderr";
@@ -952,9 +686,9 @@ struct TreeExecutorSession::Impl : std::enable_shared_from_this<Impl> {
     if (stderr_it != source.params.end()) state.stderr_key = resolveValue(stderr_it->second);
     const auto exit_it = source.params.find("exit_code_key");
     if (exit_it != source.params.end()) state.exit_code_key = resolveValue(exit_it->second);
-    state.stream_output = true;
+    bool stream_output = true;
     const auto stream_it = source.params.find("stream_output");
-    if (stream_it != source.params.end()) state.stream_output = shellBooleanValue(stream_it->second, valueGetter());
+    if (stream_it != source.params.end()) stream_output = shellBooleanValue(stream_it->second, valueGetter());
 
     uint64_t timeout_ms = UINT64_C(30000);
     const auto timeout_it = source.params.find("timeout");
@@ -986,58 +720,32 @@ struct TreeExecutorSession::Impl : std::enable_shared_from_this<Impl> {
 
     cmeta_process_options_t options{};
     cmeta_process_options_init(&options);
-    options.program = state.command.c_str();
+    options.program = command.c_str();
     options.args = nullptr;
     options.env = env_entries.empty() ? nullptr : env.data();
-    options.cwd = state.working_dir.empty() ? nullptr : state.working_dir.c_str();
+    options.cwd = working_dir.empty() ? nullptr : working_dir.c_str();
     options.flags = SALTS_PROCESS_SHELL_COMMAND;
     options.timeout_ms = timeout_ms;
-
-    cflow_process_config config{};
-#if defined(_WIN32)
-    config.backend_kind = CFLOW_IO_NATIVE_IOCP;
-#elif defined(__linux__)
-    config.backend_kind = CFLOW_IO_NATIVE_EPOLL;
-#elif defined(__APPLE__) || defined(__FreeBSD__) || defined(__NetBSD__) || \
-      defined(__OpenBSD__) || defined(__DragonFly__)
-    config.backend_kind = CFLOW_IO_NATIVE_KQUEUE;
-#else
-    state.failure_reason = "Salts::Process has no native pipe backend for this platform";
-    return SALTS_ENOTSUP;
-#endif
-    config.request_capacity = 8u;
-    config.command_capacity = 8u;
-    config.completion_batch_capacity = 8u;
-    config.completion = &onProcessCompletion;
-    config.completion_user = &state;
 
     if (recovery_owner == nullptr) {
       state.failure_reason = "C11 Shell requires an explicit Process recovery owner";
       return SALTS_ENOTSUP;
     }
-    const int reserve_status = cflow_process_retainer_reserve(
-        recovery_owner, &state.reservation);
-    if (reserve_status != SALTS_OK) {
-      state.failure_reason = "C11 Shell recovery capacity unavailable (status " +
-                             std::to_string(reserve_status) + ")";
-      return reserve_status;
+    if (working_dir.find('\0') != std::string::npos) {
+      state.failure_reason = "Shell working directory contains NUL";
+      return SALTS_EINVAL;
     }
-    state.has_reservation = true;
-    // Reserve both the future retention slot and the shared callback owner
-    // before native I/O is admitted. No allocation is required on the fatal
-    // Session-destruction path.
-    state.retained_owner = new std::shared_ptr<Impl>(shared_from_this());
-
-    const int status = cflow_process_start(&state.process, &options, &config);
+    const int status = praktor_process_driver_start(
+        &state.driver, &options, input.data(), input.size(),
+        SALTS_PROCESS_DEFAULT_MAX_OUTPUT_BYTES, recovery_owner,
+        stream_output && compatibility ? &emitProcessLine : nullptr, this);
     if (status != SALTS_OK) {
-      state.failure_reason = "Salts::Process start failed with status " +
-                             std::to_string(status);
+      const auto view = shellView(state);
+      state.failure_reason = view.error != nullptr ? view.error
+          : "C11 Shell recovery capacity unavailable (status " + std::to_string(status) + ")";
       return status;
     }
-    state.started = true;
-    if (state.stream_output) {
-      if (compatibility) compatibility->emit("$ " + state.command);
-    }
+    if (stream_output && compatibility) compatibility->emit("$ " + command);
     (void)index;
     return SALTS_OK;
   }
@@ -1047,112 +755,40 @@ struct TreeExecutorSession::Impl : std::enable_shared_from_this<Impl> {
     if (out_status == nullptr || index >= shell_states.size()) return SALTS_EINVAL;
     auto& state = shell_states[index];
     try {
-      if (!state.started && state.process.impl == nullptr) {
-        const int start_status = startShellProcess(index, source, state);
-        if (start_status != SALTS_OK) {
+      if (state.driver.impl == nullptr) {
+        const int status = startShellProcess(index, source, state);
+        if (status != SALTS_OK) {
           last_error = state.failure_reason;
+          if (state.driver.impl != nullptr) (void)closeShellProcess(state, false);
           publishShellResult(state, -1, false);
-          *out_status = SALTS_BT_FAILURE;
           finalizeShellState(state);
+          *out_status = SALTS_BT_FAILURE;
           return SALTS_OK;
         }
       }
       leaf_owners[index] = LeafOwner::SaltsProcess;
-
-      if (state.io_failed) {
-        const std::string reason = state.failure_reason;
-        (void)closeShellProcess(state, false);
-        if (!reason.empty()) state.failure_reason = reason;
-        publishShellResult(state, -1, false);
-        last_error = state.failure_reason;
-        finalizeShellState(state);
-        *out_status = SALTS_BT_FAILURE;
-        return SALTS_OK;
+      bool done = false;
+      const int status = praktor_process_driver_tick(&state.driver, &done);
+      if (status != SALTS_OK) throw std::runtime_error("C11 Process driver tick failed");
+      if (!done) { *out_status = SALTS_BT_RUNNING; return SALTS_OK; }
+      auto view = shellView(state);
+      const bool success = !view.failed && !view.output_limited &&
+          view.result.state == SALTS_PROCESS_EXITED && view.result.exit_code == 0;
+      const int exit_code = view.failed || view.output_limited ? -1 : view.result.exit_code;
+      const int cleanup = closeShellProcess(state, false);
+      view = shellView(state);
+      if (!success || cleanup != SALTS_OK) {
+        last_error = view.error != nullptr && *view.error != '\0' ? view.error
+            : view.result.state == SALTS_PROCESS_TIMED_OUT ? "Shell command timed out"
+            : "Shell command exited unsuccessfully";
       }
-
-      (void)shellSubmitRead(state, true);
-      (void)shellSubmitRead(state, false);
-      (void)shellSubmitInput(state);
-      size_t progressed = 0u;
-      const int run_status = cflow_process_run_ready(&state.process, 64u, &progressed);
-      if (run_status != SALTS_OK) {
-        state.io_failed = true;
-        state.failure_reason = "Salts::Process driver failed with status " +
-                               std::to_string(run_status);
-      }
-      if (!state.io_failed) {
-        (void)shellSubmitRead(state, true);
-        (void)shellSubmitRead(state, false);
-        (void)shellSubmitInput(state);
-        progressed = 0u;
-        const int second_run_status =
-            cflow_process_run_ready(&state.process, 64u, &progressed);
-        if (second_run_status != SALTS_OK) {
-          state.io_failed = true;
-          state.failure_reason = "Salts::Process driver failed with status " +
-                                 std::to_string(second_run_status);
-        }
-      }
-
-      if (state.io_failed) {
-        const std::string reason = state.failure_reason;
-        (void)closeShellProcess(state, false);
-        if (!reason.empty()) state.failure_reason = reason;
-        publishShellResult(state, -1, false);
-        last_error = state.failure_reason;
-        finalizeShellState(state);
-        *out_status = SALTS_BT_FAILURE;
-        return SALTS_OK;
-      }
-
-      const int poll_status = cflow_process_poll(&state.process, &state.result);
-      if (poll_status == SALTS_OK) {
-        state.process_terminal = true;
-      } else if (poll_status != SALTS_EBUSY) {
-        state.io_failed = true;
-        state.failure_reason = "Salts::Process poll failed with status " +
-                               std::to_string(poll_status);
-        last_error = state.failure_reason;
-        (void)closeShellProcess(state, true);
-        *out_status = SALTS_BT_FAILURE;
-        return SALTS_OK;
-      }
-
-      if (!state.process_terminal || !state.stdout_eof || !state.stderr_eof ||
-          state.stdin_write_pending || !state.stdin_closed ||
-          state.stdout_read_pending || state.stderr_read_pending) {
-        *out_status = SALTS_BT_RUNNING;
-        return SALTS_OK;
-      }
-
-      flushStreamLine(state.stdout_pending_line, state.stream_output);
-      flushStreamLine(state.stderr_pending_line, state.stream_output);
-      const bool success = state.result.state == SALTS_PROCESS_EXITED &&
-                           state.result.exit_code == 0;
-      const int exit_code = state.result.exit_code;
-      if (!success && state.failure_reason.empty()) {
-        state.failure_reason =
-            state.result.state == SALTS_PROCESS_TIMED_OUT
-                ? "Shell command timed out"
-                : "Shell command exited unsuccessfully";
-      }
-      const int cleanup_status = closeShellProcess(state, false);
-      if (cleanup_status != SALTS_OK) {
-        last_error = state.failure_reason.empty()
-                         ? "Salts::Process cleanup failed"
-                         : state.failure_reason;
-      }
-      publishShellResult(state, exit_code, success && cleanup_status == SALTS_OK);
-      if (!success || cleanup_status != SALTS_OK) {
-        if (!state.failure_reason.empty()) last_error = state.failure_reason;
-      }
+      publishShellResult(state, exit_code, success && cleanup == SALTS_OK);
       finalizeShellState(state);
-      *out_status = (success && cleanup_status == SALTS_OK)
-                        ? SALTS_BT_SUCCESS : SALTS_BT_FAILURE;
+      *out_status = success && cleanup == SALTS_OK ? SALTS_BT_SUCCESS : SALTS_BT_FAILURE;
       return SALTS_OK;
     } catch (...) {
       rememberCurrentException("Salts::Process Shell tick failed");
-      if (state.process.impl != nullptr) (void)closeShellProcess(state, true);
+      if (state.driver.impl != nullptr) (void)closeShellProcess(state, true);
       finalizeShellState(state);
       *out_status = SALTS_BT_FAILURE;
       return SALTS_OK;
@@ -1365,7 +1001,7 @@ struct TreeExecutorSession::Impl : std::enable_shared_from_this<Impl> {
     if (index >= leaf_owners.size()) return;
     const LeafOwner owner = leaf_owners[index];
     if (owner == LeafOwner::SaltsProcess ||
-        (index < shell_states.size() && shell_states[index].process.impl != nullptr)) {
+        (index < shell_states.size() && shellView(shell_states[index]).active)) {
       (void)closeShellProcess(shell_states[index], true);
       return;
     }
@@ -1899,7 +1535,7 @@ TreeExecutorSession::TreeExecutorSession(
     cflow_process_retainer* recovery_owner,
     uint32_t shell_close_budget_ms,
     std::shared_ptr<detail::SessionCompatibility> compatibility)
-    : impl_(std::make_shared<Impl>(tree, std::move(compatibility), limits,
+    : impl_(std::make_unique<Impl>(tree, std::move(compatibility), limits,
                                   subtree_resolver, host_hooks, recovery_owner,
                                   shell_close_budget_ms)) {}
 
@@ -1913,32 +1549,10 @@ TreeExecutorSession::~TreeExecutorSession() {
     std::terminate();
 
   for (auto& state : impl_->shell_states) {
-    if (state.process.impl == nullptr) {
-      impl_->finalizeShellState(state);
-      continue;
-    }
-    if (!state.close_requested)
-      (void)impl_->closeShellProcess(state, false);
-    if (state.process.impl == nullptr) {
-      impl_->finalizeShellState(state);
-      continue;
-    }
-    // Reservation and shared callback reference were acquired BEFORE
-    // process start. This transfer never allocates during teardown.
-    if (impl_->recovery_owner == nullptr ||
-        !state.has_reservation || state.retained_owner == nullptr)
-      std::terminate();
-    const int adopted = cflow_process_retainer_adopt(
-        impl_->recovery_owner, state.reservation, &state.process,
-        state.retained_owner, &Impl::releaseRetainedOwner);
-    if (adopted != SALTS_OK) {
-      // An invalid/expired external recovery owner is an explicit fatal
-      // contract violation; dropping the still-borrowed buffers is forbidden.
-      std::terminate();
-    }
-    state.retained_owner = nullptr;
-    state.has_reservation = false;
-    state.owner = nullptr;
+    if (state.driver.impl == nullptr) continue;
+    if (!Impl::shellView(state).closing) (void)impl_->closeShellProcess(state, false);
+    // The retainer now owns only C storage, never Impl or its AST/host callbacks.
+    if (praktor_process_driver_release(&state.driver) != SALTS_OK) std::terminate();
   }
 }
 
@@ -1948,7 +1562,7 @@ int TreeExecutorSession::tick(salts_bt_node_status* out_status) {
   if (impl_->tick_generation == 0u) ++impl_->tick_generation;
   impl_->last_error.clear();
   for (const auto& shell : impl_->shell_states) {
-    if (shell.close_requested && shell.process.impl != nullptr) {
+    if (Impl::shellView(shell).closing && Impl::shellView(shell).active) {
       impl_->last_error = "C11 Shell shutdown is still pending recovery ownership";
       return SALTS_EBUSY;
     }
@@ -1969,7 +1583,7 @@ int TreeExecutorSession::reset() {
     for (size_t i = 0u; i < impl_->leaf_owners.size(); ++i) {
       impl_->leaf_owners[i] =
           i < impl_->shell_states.size() &&
-                  impl_->shell_states[i].process.impl != nullptr
+                  Impl::shellView(impl_->shell_states[i]).active
               ? Impl::LeafOwner::SaltsProcess
               : Impl::LeafOwner::None;
     }
@@ -1977,7 +1591,7 @@ int TreeExecutorSession::reset() {
     std::fill(impl_->entry_updated_states.begin(), impl_->entry_updated_states.end(), Impl::EntryUpdatedState{});
     std::fill(impl_->queue_states.begin(), impl_->queue_states.end(), Impl::QueueState{});
     for (const auto& shell : impl_->shell_states) {
-      if (shell.process.impl != nullptr && shell.close_requested) {
+      if (Impl::shellView(shell).active && Impl::shellView(shell).closing) {
         if (impl_->last_error.empty())
           impl_->last_error = "C11 Shell has outstanding leases for recovery owner";
         return SALTS_EBUSY;
@@ -1999,7 +1613,7 @@ int TreeExecutorSession::cancel() {
     for (size_t i = 0u; i < impl_->leaf_owners.size(); ++i) {
       impl_->leaf_owners[i] =
           i < impl_->shell_states.size() &&
-                  impl_->shell_states[i].process.impl != nullptr
+                  Impl::shellView(impl_->shell_states[i]).active
               ? Impl::LeafOwner::SaltsProcess
               : Impl::LeafOwner::None;
     }
@@ -2007,7 +1621,7 @@ int TreeExecutorSession::cancel() {
     std::fill(impl_->entry_updated_states.begin(), impl_->entry_updated_states.end(), Impl::EntryUpdatedState{});
     std::fill(impl_->queue_states.begin(), impl_->queue_states.end(), Impl::QueueState{});
     for (const auto& shell : impl_->shell_states) {
-      if (shell.process.impl != nullptr && shell.close_requested) {
+      if (Impl::shellView(shell).active && Impl::shellView(shell).closing) {
         if (impl_->last_error.empty())
           impl_->last_error = "C11 Shell has outstanding leases for recovery owner";
         return SALTS_EBUSY;

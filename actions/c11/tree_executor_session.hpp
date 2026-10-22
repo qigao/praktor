@@ -183,7 +183,7 @@ private:
                       uint32_t shell_close_budget_ms,
                       std::shared_ptr<detail::SessionCompatibility> compatibility);
   struct Impl;
-  std::shared_ptr<Impl> impl_;
+  std::unique_ptr<Impl> impl_;
 };
 
 } // namespace actions::c11

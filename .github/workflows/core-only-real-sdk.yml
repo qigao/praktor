@@ -207,7 +207,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 cmake/ci/audit-process-adapter.py build/ci-sdk/shared/shell/libpraktor_shell.a
+          python3 cmake/ci/audit-process-adapter.py build/ci-sdk/shared/shell/libpraktor_shell.a \
+            build/ci-sdk/shared/process/libpraktor_process_driver.a
 
       # Independent C-only project, with no C++ compiler or actions library.
       - name: C11 BehaviorTree adapter standalone C-only link
@@ -221,6 +222,16 @@ jobs:
           ctest --test-dir build/ci-c11-standalone \
             --no-tests=error --output-on-failure \
             -R '^actions_c11_(tree_adapter|value_store|native_host)_standalone_test$'
+
+      - name: C11 Process standalone without a C++ runtime
+        if: matrix.platform == 'linux' && matrix.sdk == 'behavior-tree'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S shared/process/standalone -B build/ci-process-c -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/ci-process-c --parallel 2
+          python3 cmake/ci/audit-c11-process-link.py build/ci-process-c/praktor_process_driver_test
+          ctest --test-dir build/ci-process-c --no-tests=error --output-on-failure
 
       - name: Independent Session link and run without legacy targets
         if: matrix.platform == 'linux' && matrix.sdk == 'behavior-tree'

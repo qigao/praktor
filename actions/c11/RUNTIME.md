@@ -8,6 +8,7 @@ production switch is implied by these independent execution targets.
 | `praktor_c11_bt_core` | C11 topology/state and Salts::BehaviorTree; no C++ compiler required |
 | `praktor_c11_value_store` | Fixed-capacity C11 values and optimistic transactions |
 | `praktor_c11_native_host` | C11 value-store owner and preallocated parameter scratch; typed `SetVariable`, `CheckExitCode`, cooperative `Sleep` and unfiltered `ParseLines` leaves |
+| `praktor_process_driver` | C11 Process I/O, bounded capture, close and explicit retainer handoff; no C++ state, thread or runtime dependency |
 | `praktor_c11_session` | C++ AST compiler/session over C11 state, JSON queue hooks and Salts::Process; no legacy execution symbols |
 | `praktor_actions_c11` | Explicit compatibility constructors, legacy Blackboard access, Executor dispatch, environment and Shell log adaptation |
 
@@ -66,14 +67,19 @@ write. Regex support remains open; the independent Session cannot fall back to
 Executor. Parallel branch requests remain explicitly unsupported by this Host.
 
 The legacy adapter borrows Executor, Blackboard and ExecutionContext until
-session destruction. Retained Process callbacks touch only stable ShellState;
-they never call the adapter or host value hooks after the session is destroyed.
+session destruction. Process callbacks now touch only a stable C driver payload.
+The driver detaches its borrowed stream callback/user before closing admission;
+retained callbacks never reference the Session, AST, adapter or host value hooks.
+The Session owns Impl uniquely; Process no longer retains a shared C++ Impl.
 The retainer owner must keep driving until native leases settle. No forced
 release is introduced.
 
 Validation projects:
 
 - `actions/c11/standalone`: pure C adapter, store and Native Host tests.
+- `shared/process/standalone`: C compiler/linker only, real duplex child I/O,
+  capture limits, callback failure, saturation and zero-budget handoff after
+  callback-user destruction. A link audit rejects C++ ABI/runtime dependencies.
 - `actions/c11/session-standalone`: independent Session link/run, including typed
   dispatch, values/capacity, cancellation/dynamic Timeout and real Process
   handoff after host destruction. Legacy targets do not exist in this project.
@@ -91,5 +97,8 @@ Validation projects:
   The value-store, Native Host, independent Session and YAML differential runners
   use Salts::TinyTest, including native C tests in the C-only build.
 
+The C++ AST compiler/Session bridge and explicit Legacy facade (including its
+observer synchronization and scheduling thread) remain. This removes Process
+execution state from C++, not all C++ files or the default Legacy backend.
 Full WorkflowContext migration, all built-in leaves, native event queues,
 branch-transaction integration and complete YAML/node parity remain open.

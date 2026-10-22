@@ -10,8 +10,11 @@ call-site adapters for existing workflow, script, service and actions callers.
 They translate configuration and terminal results; they own no OS handles.
 Shell command parsing and process-tree termination belong to Salts.
 
-The synchronous facade has one joined driver thread per invocation. Only this
-thread calls Process start/submit/run/close/destroy. Cancellation and observers
+`shared/process/src/process_driver.c` is the one Praktor Process driver used by
+both this facade and the C11 Session. The old `process_adapter.cpp` and duplicated
+C++ stream-buffer helpers have been deleted. The C++ facade only converts ports,
+maps results, synchronizes observers and schedules one joined thread. Only this
+thread calls the C driver. Cancellation and observers
 access synchronized adapter metadata, never a native Process handle. There are
 three fixed 4096-byte I/O buffers and eight bounded request slots. Input and both
 output streams progress concurrently through Process callbacks. Darwin stdin
@@ -37,9 +40,18 @@ The P1 candidate is `qigao/salts-utils@779705d76ae173d1b5d18ad1de10ee88c086452c`
 (Draft PR #689), retaining the hardened close/acknowledgement, stats and retainer
 paths while adding the Darwin endpoint fix.
 
-The cooperative C11 Session continues to use its separate explicit fixed-capacity
+The cooperative C11 Session uses the same C driver with its explicit fixed-capacity
 Process retainer for bounded synchronous teardown and later owner-driven drain.
-This change does not replace or bypass that retainer contract.
+The driver reserves before native admission and detaches callback/user storage
+before close. Late completions retain only C buffers, never a shared C++ Session
+or AST. P1 retainer/shutdown APIs are an explicit build capability enabled by the
+experimental Session; the released SDK baseline uses the same Process owner with
+synchronous teardown and does not require unpublished P1 headers or symbols.
+
+Capture and input snapshots are allocated before Process start; subsequent
+drive/close/handoff operations allocate no driver storage. The capture bound
+applies across both streams. Each stream's capture and optional line scratch
+has that fixed bound; three 4096-byte I/O buffers remain live until native destroy.
 
 Tests use `Salts::TinyTest` and cover argv, inherited environment and overrides,
 working directories, duplex 256 KiB input/output, capture limits, stream callbacks,

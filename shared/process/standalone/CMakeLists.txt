@@ -1,0 +1,16 @@
+cmake_minimum_required(VERSION 3.27)
+project(PraktorC11ProcessStandalone LANGUAGES C)
+include(CTest)
+find_package(SaltsUtils CONFIG REQUIRED
+    PATHS "$ENV{SALTS_UTILS_ROOT}/lib/cmake/SaltsUtils" NO_DEFAULT_PATH)
+option(PRAKTOR_PROCESS_RETAINER "Test explicit P1 retainer ownership" ON)
+include(../process_target.cmake)
+if(CMAKE_CXX_COMPILER_LOADED OR TARGET actions OR TARGET praktor_shell)
+    message(FATAL_ERROR "C11 Process test must not load a C++ execution target")
+endif()
+add_executable(praktor_process_driver_test ../test/process_driver_test.c)
+target_link_libraries(praktor_process_driver_test PRIVATE praktor_process_driver Salts::TinyTest Salts::Platform)
+set_target_properties(praktor_process_driver_test PROPERTIES
+    C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF LINKER_LANGUAGE C)
+add_test(NAME praktor_process_driver_test COMMAND praktor_process_driver_test)
+set_tests_properties(praktor_process_driver_test PROPERTIES TIMEOUT 30)

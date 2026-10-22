@@ -1,1 +1,2 @@
-add_subdirectory(shell) 
+add_subdirectory(process)
+add_subdirectory(shell)

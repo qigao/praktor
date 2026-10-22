@@ -10,12 +10,14 @@ endif()
 set_target_properties(praktor_c11_native_host PROPERTIES
     C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF POSITION_INDEPENDENT_CODE ON)
 
+set(PRAKTOR_PROCESS_RETAINER ON)
+include(${CMAKE_CURRENT_LIST_DIR}/../../shared/process/process_target.cmake)
 add_library(praktor_c11_session STATIC
     ${CMAKE_CURRENT_LIST_DIR}/tree_plan.cpp
     ${CMAKE_CURRENT_LIST_DIR}/tree_executor_session.cpp)
 target_include_directories(praktor_c11_session PUBLIC
     ${CMAKE_CURRENT_LIST_DIR} ${CMAKE_CURRENT_LIST_DIR}/..)
-target_link_libraries(praktor_c11_session PUBLIC praktor_c11_bt_core Salts::Process
+target_link_libraries(praktor_c11_session PUBLIC praktor_c11_bt_core praktor_process_driver
     PRIVATE Salts::JsonParser)
 target_compile_features(praktor_c11_session PUBLIC cxx_std_17)
 set_target_properties(praktor_c11_session PROPERTIES
