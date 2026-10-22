@@ -68,9 +68,10 @@ before its own storage is released.
 - [SaltsUtils Process PR #674](https://github.com/qigao/salts-utils/pull/674):
   bounded non-destructive `shutdown_step`, typed recovery owner, injected
   NativeIO/Actor close/ack faults.
-- [SaltsUtils Process PR #674 exact source](https://github.com/qigao/salts-utils/commit/53fcfdf8a0fe89ea7ade008675ec94c20241b83c):
-  merged BehaviorTree from master plus candidate lease-safe Process/retainer;
-  this replaces the older #675 qualification pin but is not a release.
+- [SaltsUtils Process PR #674 exact source](https://github.com/qigao/salts-utils/commit/bd60887ef45c5acbf93d3550f75bfcde4d77004f):
+  merged BehaviorTree from master plus validated Process/retainer;
+  source tree matches qualified PR #674 HEAD byte-for-byte, and is now
+  merged on master (no package release or production-default switch).
 - [Praktor PR #78](https://github.com/qigao/praktor/pull/78):
   real YAML WorkflowRunner positive/negative tests, cancel-after-child-start,
   Process-owner capacity and concurrent-turn rejection, delayed callbacks.

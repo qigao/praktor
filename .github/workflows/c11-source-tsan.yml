@@ -29,7 +29,7 @@ jobs:
     timeout-minutes: 120
     env:
       SALTS_RC17_SHA: 6d6fd387cb245be8d7b0d866f9babad026a26832
-      SALTS_UTILS_SHA: 53fcfdf8a0fe89ea7ade008675ec94c20241b83c
+      SALTS_UTILS_SHA: bd60887ef45c5acbf93d3550f75bfcde4d77004f
       QIGAO_SDK_RID: linux-x64
       QIGAO_TARGET_TRIPLET: x64-linux
       RID: linux-x64
@@ -57,7 +57,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: qigao/salts-utils
-          ref: 53fcfdf8a0fe89ea7ade008675ec94c20241b83c
+          ref: bd60887ef45c5acbf93d3550f75bfcde4d77004f
           path: build/p1-salts-utils-source
           persist-credentials: false
 
