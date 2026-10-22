@@ -140,6 +140,32 @@ static int test_transaction_group_conflict_publishes_nothing(void) {
   praktor_c11_value_store_destroy(&target);
   return 0;
 }
+static int test_transaction_group_capacity_failure_is_atomic(void) {
+  praktor_c11_value_store target = {0};
+  praktor_c11_value_txn branches[2] = {{0}, {0}};
+  CHECK(praktor_c11_value_store_init(&target, 3u, 16u, 32u) == PRAKTOR_C11_VALUE_OK);
+  CHECK(praktor_c11_value_store_set(&target, "seed", "base") == PRAKTOR_C11_VALUE_OK);
+  CHECK(praktor_c11_value_txn_begin(&branches[0], &target) == PRAKTOR_C11_VALUE_OK);
+  CHECK(praktor_c11_value_txn_begin(&branches[1], &target) == PRAKTOR_C11_VALUE_OK);
+  CHECK(praktor_c11_value_txn_set(&branches[0], "left", "L") == PRAKTOR_C11_VALUE_OK);
+  CHECK(praktor_c11_value_txn_set(&branches[1], "right", "R") == PRAKTOR_C11_VALUE_OK);
+  CHECK(praktor_c11_value_store_set(&target, "external", "E") == PRAKTOR_C11_VALUE_OK);
+  CHECK(praktor_c11_value_txn_commit_group(branches, 2u) == PRAKTOR_C11_VALUE_ENOSPC);
+  CHECK(praktor_c11_value_store_size(&target) == 2u);
+  CHECK(expect_value(&target, "seed", "base"));
+  CHECK(expect_value(&target, "external", "E"));
+  { int present = 1;
+    CHECK(praktor_c11_value_store_contains(&target, "left", &present) == PRAKTOR_C11_VALUE_OK);
+    CHECK(present == 0);
+    CHECK(praktor_c11_value_store_contains(&target, "right", &present) == PRAKTOR_C11_VALUE_OK);
+    CHECK(present == 0);
+  }
+  praktor_c11_value_txn_abort(&branches[0]);
+  praktor_c11_value_txn_abort(&branches[1]);
+  praktor_c11_value_store_destroy(&target);
+  return 0;
+}
+
 int main(void) {
   praktor_c11_value_store store = {0};
   char output[9];
@@ -199,6 +225,7 @@ int main(void) {
   CHECK(test_transaction_capacity_failure_is_atomic() == 0);
   CHECK(test_transaction_group_commit_is_atomic() == 0);
   CHECK(test_transaction_group_conflict_publishes_nothing() == 0);
+  CHECK(test_transaction_group_capacity_failure_is_atomic() == 0);
   praktor_c11_value_store_destroy(&store);
   CHECK(store.impl == NULL && praktor_c11_value_store_size(&store) == 0u);
   praktor_c11_value_store_destroy(&store);
