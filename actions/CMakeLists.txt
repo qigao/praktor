@@ -61,9 +61,27 @@ if(PRAKTOR_ENABLE_C11_ACTIONS)
             "PRAKTOR_ENABLE_C11_ACTIONS requires Salts::Process; Shell execution never falls back to the legacy ShellExecutor")
     endif()
 
-    add_library(praktor_actions_c11 STATIC
+    # Native C11 adapter: no C++ actions::Executor or Shell dependency.
+    add_library(praktor_c11_bt_core STATIC
         c11/tree_adapter.c
         c11/tree_adapter.h
+    )
+    target_include_directories(praktor_c11_bt_core
+        PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/c11>
+    )
+    target_link_libraries(praktor_c11_bt_core PUBLIC Salts::BehaviorTree)
+    target_compile_features(praktor_c11_bt_core PUBLIC c_std_11)
+    set_target_properties(praktor_c11_bt_core PROPERTIES
+        C_STANDARD 11
+        C_STANDARD_REQUIRED ON
+        C_EXTENSIONS OFF
+        POSITION_INDEPENDENT_CODE ON
+        FOLDER "actions/c11"
+    )
+    cmake_config_target(praktor_c11_bt_core NO_INSTALL NO_VERSION FOLDER "actions/c11")
+
+    # Transitional C++ Workflow/AST bridge; remove after semantic parity.
+    add_library(praktor_actions_c11 STATIC
         c11/tree_plan.cpp
         c11/tree_plan.hpp
         c11/tree_executor_session.cpp
@@ -73,12 +91,10 @@ if(PRAKTOR_ENABLE_C11_ACTIONS)
         PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/c11>
         PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
     )
-    target_link_libraries(praktor_actions_c11 PUBLIC Salts::BehaviorTree Salts::Process actions
+    target_link_libraries(praktor_actions_c11
+        PUBLIC praktor_c11_bt_core Salts::Process actions
         PRIVATE Salts::JsonParser)
-    target_compile_features(praktor_actions_c11
-        PUBLIC c_std_11
-        PRIVATE cxx_std_17
-    )
+    target_compile_features(praktor_actions_c11 PRIVATE cxx_std_17)
     set_target_properties(praktor_actions_c11 PROPERTIES
         C_STANDARD 11
         C_STANDARD_REQUIRED ON
@@ -90,7 +106,7 @@ if(PRAKTOR_ENABLE_C11_ACTIONS)
 
     if(ENABLE_TESTS)
         add_executable(actions_c11_tree_adapter_test c11/tree_adapter_test.c)
-        target_link_libraries(actions_c11_tree_adapter_test PRIVATE praktor_actions_c11)
+        target_link_libraries(actions_c11_tree_adapter_test PRIVATE praktor_c11_bt_core)
         target_compile_features(actions_c11_tree_adapter_test PRIVATE c_std_11)
         set_target_properties(actions_c11_tree_adapter_test PROPERTIES
             C_STANDARD 11

@@ -202,6 +202,63 @@ jobs:
           cmake --build --preset "install-%CMAKE_PRESET%" --parallel 2
           if errorlevel 1 exit /b 1
 
+      # Independent C-only project, with no C++ compiler or actions library.
+      - name: C11 BehaviorTree adapter standalone C-only link
+        if: matrix.platform == 'linux' && matrix.sdk == 'behavior-tree'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S actions/c11/standalone -B build/ci-c11-standalone -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/ci-c11-standalone --parallel 2
+          ctest --test-dir build/ci-c11-standalone \
+            --no-tests=error --output-on-failure \
+            -R '^actions_c11_tree_adapter_standalone_test
+      # nine-platform SDK matrix. The complete real WorkflowRunner TSan gate
+      # is in c11-source-tsan.yml with *fully instrumented* Salts + SaltsUtils.
+      # This job uses released Salts (mixed instrumentation) and cannot
+      # attest its async logger's release/acquire synchronization.
+      - name: C11 Process lifecycle ASan and UBSan
+        if: matrix.platform == 'linux' && matrix.sdk == 'behavior-tree'
+        shell: bash
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1:abort_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: bash cmake/ci/qualify-c11-lifetime-sanitizers.sh address
+
+      - name: C11 Session consumer-only TSan smoke
+        if: matrix.platform == 'linux' && matrix.sdk == 'behavior-tree'
+        shell: bash
+        env:
+          TSAN_OPTIONS: halt_on_error=1:history_size=7
+        run: bash cmake/ci/qualify-c11-lifetime-sanitizers.sh thread
+
+      - name: Report compiler cache statistics
+        if: always()
+        shell: pwsh
+        run: |
+          if (Get-Command ccache -ErrorAction SilentlyContinue) { ccache --show-stats }
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: core-diagnostics-${{ matrix.rid }}-${{ matrix.sdk }}
+          path: |
+            build/ci-sdk/ctest.xml
+            build/ci-sdk/Testing/Temporary/LastTest.log
+            build/ci-c11-address/Testing/Temporary/LastTest.log
+            build/ci-c11-thread/Testing/Temporary/LastTest.log
+            build/ci-sdk/CMakeFiles/CMakeConfigureLog.yaml
+            build/salts-utils-source/build/ci-sdk/**/CMakeFiles/CMakeConfigureLog.yaml
+          if-no-files-found: ignore
+
+      - uses: actions/cache/save@v4
+        if: always() && steps.ccache.outcome == 'success' && steps.ccache.outputs.cache-primary-key != steps.ccache.outputs.cache-matched-key
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ${{ steps.ccache.outputs.cache-primary-key }}
+
+
       # Source-instrument the opt-in C11 consumer without multiplying the
       # nine-platform SDK matrix. The complete real WorkflowRunner TSan gate
       # is in c11-source-tsan.yml with *fully instrumented* Salts + SaltsUtils.

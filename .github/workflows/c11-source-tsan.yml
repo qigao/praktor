@@ -5,6 +5,14 @@ name: C11 Process complete-source TSan qualification
   pull_request:
     paths:
       - '.github/workflows/c11-source-tsan.yml'
+      - 'actions/CMakeLists.txt'
+      - 'actions/c11/**'
+      - 'praktor/src/dag/workflow_executor.cpp'
+      - 'praktor/src/executors/declarative_tree_executor.cpp'
+      - 'praktor/src/workflow_runner.cpp'
+      - 'praktor/include/execution/c11_workflow_process_owner.hpp'
+      - 'praktor/test/core_only_workflow_test.cpp'
+      - 'cmake/ci/qualify-c11-lifetime-sanitizers.sh'
 
 permissions:
   contents: read
@@ -155,6 +163,77 @@ jobs:
                   attestation[suffix] = {"owner": name, "tsan": True}
           print(json.dumps(attestation, indent=2))
           PY
+
+      - name: Prove pure-C11 adapter under full-source TSan
+        shell: bash
+        run: |
+          set -euo pipefail
+          flags="-fsanitize=thread -fno-omit-frame-pointer -O1 -g"
+          cmake -S actions/c11/standalone -B build/p1-c11-standalone-tsan -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug "-DCMAKE_C_FLAGS=$flags" \
+            -DCMAKE_EXE_LINKER_FLAGS=-fsanitize=thread
+          cmake --build build/p1-c11-standalone-tsan --parallel 2
+          export LD_LIBRARY_PATH="$SALTS_SOURCE_TSAN_ROOT/lib:$SALTS_UTILS_SOURCE_TSAN_ROOT/lib:$CHTTP_ROOT/lib:${LD_LIBRARY_PATH:-}"
+          ctest --test-dir build/p1-c11-standalone-tsan \
+            --no-tests=error --output-on-failure --timeout 90 \
+            -R '^actions_c11_tree_adapter_standalone_test
+        shell: bash
+        env:
+          TSAN_OPTIONS: halt_on_error=1:exitcode=66
+        run: |
+          set -euo pipefail
+          flags="-fsanitize=thread -fno-omit-frame-pointer -fno-optimize-sibling-calls -O1 -g"
+          cmake --preset ci-linux-sdk -B build/p1-praktor-tsan \
+            -DCMAKE_BUILD_TYPE=Debug -DENABLE_TESTS=ON \
+            -DENABLE_SCRIPT_ENGINE=OFF -DPRAKTOR_ENABLE_C11_ACTIONS=ON \
+            "-DCMAKE_C_FLAGS=$flags" "-DCMAKE_CXX_FLAGS=$flags" \
+            "-DCMAKE_EXE_LINKER_FLAGS=-fsanitize=thread" \
+            "-DCMAKE_SHARED_LINKER_FLAGS=-fsanitize=thread"
+          cmake --build build/p1-praktor-tsan \
+            --target core_only_workflow_test.praktor_lib actions_c11_tree_executor_session_test \
+            --parallel 2
+
+      - name: Require fully instrumented Salts dynamic linkage
+        shell: bash
+        run: |
+          set -euo pipefail
+          export LD_LIBRARY_PATH="$SALTS_SOURCE_TSAN_ROOT/lib:$SALTS_UTILS_SOURCE_TSAN_ROOT/lib:$CHTTP_ROOT/lib:${LD_LIBRARY_PATH:-}"
+          binary=build/p1-praktor-tsan/bin/core_only_workflow_test.praktor_lib
+          nm -D "$binary" | grep -F ' __tsan_init'
+          ldd "$binary" | tee build/p1-source-tsan-linked-libraries.txt
+          grep -F "$SALTS_SOURCE_TSAN_ROOT/lib/libsalts.so.2.3" \
+            build/p1-source-tsan-linked-libraries.txt
+          if grep -F 'not found' build/p1-source-tsan-linked-libraries.txt; then
+            echo "Missing source-TSan runtime dependency" >&2
+            exit 1
+          fi
+
+      - name: Run real YAML cancellation and C11 lifetime under unsuppressed TSan
+        shell: bash
+        env:
+          TSAN_OPTIONS: halt_on_error=1:exitcode=66
+        run: |
+          set -euo pipefail
+          export LD_LIBRARY_PATH="$SALTS_SOURCE_TSAN_ROOT/lib:$SALTS_UTILS_SOURCE_TSAN_ROOT/lib:$CHTTP_ROOT/lib:${LD_LIBRARY_PATH:-}"
+          ctest --test-dir build/p1-praktor-tsan \
+            --no-tests=error --output-on-failure --parallel 1 --timeout 90 \
+            -R '^(core_only_workflow_test\.praktor_lib|actions_c11_tree_executor_session_test)$'
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: c11-complete-source-tsan-evidence
+          if-no-files-found: ignore
+          retention-days: 14
+          path: |
+            build/p1-source-tsan-audit.json
+            build/p1-source-tsan-linked-libraries.txt
+            build/p1-salts-tsan/compile_commands.json
+            build/p1-salts-utils-tsan/compile_commands.json
+            build/p1-praktor-tsan/Testing/Temporary/LastTest.log
+            build/p1-salts-tsan/CMakeFiles/CMakeConfigureLog.yaml
+            build/p1-salts-utils-tsan/CMakeFiles/CMakeConfigureLog.yaml
+
 
       - name: Compile actual C11 workflow and Process consumer under TSan
         shell: bash

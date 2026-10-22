@@ -1,0 +1,34 @@
+# C11 runtime dependency split (Praktor #78)
+
+This first split isolates a C11-only tree/runtime adapter. It does not
+declare the whole Praktor workflow runtime C-only or authorize a default
+backend switch. PR #78 stays Draft until the remaining gates pass.
+
+| Target | Language | Runtime dependency |
+| --- | --- | --- |
+| `praktor_c11_bt_core` | C11 | installed `Salts::BehaviorTree` |
+| `praktor_actions_c11` | transitional C++17 | C core, `actions`, `Salts::Process` |
+| `praktor_lib` | C++17 | current `actions` default plus opt-in C11 bridge |
+
+`actions/c11/standalone` is independently configured as `LANGUAGES C`.
+It links the real installed BehaviorTree SDK and runs the C adapter
+conformance tests with no C++ compiler or `actions` target, also
+under full-source TSan in dedicated CI.
+
+Remaining cuts before the C++ action runtime can be removed:
+
+1. Compile a typed tree plan from validated `OrchNode` without
+   `actions::Node` / `actions::Value`, retaining deterministic
+   malformed-node and SubTree fail-closed semantics.
+2. Replace `actions::Blackboard` / `ExecutionContext` with bounded
+   host-owned typed values and explicit Parallel branch snapshot, merge,
+   abort and cancellation contracts.
+3. Remove `actions::Executor` dispatch and any legacy Shell fallback.
+   Shell must use the single Salts::Process owner and retainer.
+4. Pass Process destroy-error and permanent-driver fault interleavings,
+   real host-driven recovery and exact-source ASan/UBSan/TSan gates.
+5. Pass full YAML/WorkflowContext/node semantics differential tests,
+   then remove `actions` from the production `praktor_lib` closure
+   and verify the installed public C ABI.
+
+No C++ runtime removal is claimed for the current C++ WorkflowRunner.
