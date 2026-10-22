@@ -213,7 +213,7 @@ jobs:
           cmake --build build/ci-c11-standalone --parallel 2
           ctest --test-dir build/ci-c11-standalone \
             --no-tests=error --output-on-failure \
-            -R '^actions_c11_tree_adapter_standalone_test$'
+            -R '^actions_c11_(tree_adapter|value_store)_standalone_test$'
 
       # Source-instrument the opt-in C11 consumer without multiplying the
       # nine-platform SDK matrix. The complete real WorkflowRunner TSan gate

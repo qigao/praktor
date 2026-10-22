@@ -195,7 +195,7 @@ jobs:
           export LD_LIBRARY_PATH="$SALTS_SOURCE_TSAN_ROOT/lib:$SALTS_UTILS_SOURCE_TSAN_ROOT/lib:$CHTTP_ROOT/lib:${LD_LIBRARY_PATH:-}"
           ctest --test-dir build/p1-c11-standalone-tsan \
             --no-tests=error --output-on-failure --timeout 90 \
-            -R '^actions_c11_tree_adapter_standalone_test$'
+            -R '^actions_c11_(tree_adapter|value_store)_standalone_test$'
 
       - name: Compile actual C11 workflow and Process consumer under TSan
         shell: bash
