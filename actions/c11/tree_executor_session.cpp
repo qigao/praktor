@@ -1,9 +1,9 @@
-#include "core/executor.hpp"
 #include "tree_executor_session.hpp"
+#include "session_compatibility.hpp"
+#include "plan_value_reader.hpp"
 
 #include <json_parser.h>
 #include <salts/process.h>
-#include <praktor/shell/shell_executor.hpp>
 
 #include <algorithm>
 #include <array>
@@ -24,15 +24,6 @@
 
 namespace actions::c11 {
 namespace {
-
-salts_bt_node_status toSaltsStatus(actions::NodeStatus status) {
-  switch (status) {
-  case actions::NodeStatus::SUCCESS: return SALTS_BT_SUCCESS;
-  case actions::NodeStatus::FAILURE: return SALTS_BT_FAILURE;
-  case actions::NodeStatus::RUNNING: return SALTS_BT_RUNNING;
-  }
-  return SALTS_BT_FAILURE;
-}
 
 using ValueGetter = std::function<std::string(const std::string&)>;
 using ValueContains = std::function<bool(const std::string&)>;
@@ -290,9 +281,7 @@ actions::Tree expandSubTrees(const actions::Tree& source,
 struct TreeExecutorSession::Impl : std::enable_shared_from_this<Impl> {
   actions::Tree tree;
   TreePlan compiled_plan;
-  actions::Executor* executor;
-  actions::Blackboard* blackboard;
-  actions::ExecutionContext* execution_context;
+  std::shared_ptr<detail::SessionCompatibility> compatibility;
   salts_bt_tree_config tree_limits{};
   praktor_c11_bt_host hooks{};
   praktor_c11_bt_host runtime_host{};
@@ -359,6 +348,7 @@ struct TreeExecutorSession::Impl : std::enable_shared_from_this<Impl> {
     cmeta_process_result_t result{};
   };
 
+  std::vector<std::vector<praktor_c11_leaf_parameter>> leaf_parameters;
   std::vector<LeafOwner> leaf_owners;
   std::vector<ShellState> shell_states;
   std::vector<PipelineState> pipeline_states;
@@ -368,9 +358,7 @@ struct TreeExecutorSession::Impl : std::enable_shared_from_this<Impl> {
   std::string last_error;
 
   Impl(const actions::Tree& source_tree,
-       actions::Executor* source_executor,
-       actions::Blackboard* source_blackboard,
-       actions::ExecutionContext* source_execution_context,
+       std::shared_ptr<detail::SessionCompatibility> source_compatibility,
        const salts_bt_tree_config& limits,
        const SubTreeResolver& subtree_resolver,
        const praktor_c11_bt_host* supplied_hooks,
@@ -378,9 +366,7 @@ struct TreeExecutorSession::Impl : std::enable_shared_from_this<Impl> {
        uint32_t supplied_shell_close_budget_ms)
       : tree(expandSubTrees(source_tree, subtree_resolver, limits)),
         compiled_plan(compileTreePlan(tree, limits)),
-        executor(source_executor),
-        blackboard(source_blackboard),
-        execution_context(source_execution_context),
+        compatibility(std::move(source_compatibility)),
         tree_limits(limits),
         recovery_owner(supplied_recovery_owner),
         shell_close_budget_ms(supplied_shell_close_budget_ms) {
@@ -389,6 +375,27 @@ struct TreeExecutorSession::Impl : std::enable_shared_from_this<Impl> {
     }
 
     validateHostContracts();
+    leaf_parameters.resize(compiled_plan.nodes.size());
+    for (size_t index = 0u; index < leaf_parameters.size(); ++index) {
+      auto& parameters = leaf_parameters[index];
+      const auto* source = nodeAt(index);
+      parameters.reserve(source->params.size());
+      for (const auto& entry : source->params) {
+        praktor_c11_leaf_parameter parameter{};
+        parameter.name = entry.first.c_str();
+        if (std::holds_alternative<std::string>(entry.second)) {
+          parameter.kind = PRAKTOR_C11_LEAF_STRING;
+          parameter.text = std::get<std::string>(entry.second).c_str();
+        } else if (std::holds_alternative<double>(entry.second)) {
+          parameter.kind = PRAKTOR_C11_LEAF_NUMBER;
+          parameter.number = std::get<double>(entry.second);
+        } else {
+          parameter.kind = PRAKTOR_C11_LEAF_BOOLEAN;
+          parameter.boolean = std::get<bool>(entry.second);
+        }
+        parameters.push_back(parameter);
+      }
+    }
     leaf_owners.assign(compiled_plan.nodes.size(), LeafOwner::None);
     shell_states.resize(compiled_plan.nodes.size());
     pipeline_states.resize(compiled_plan.nodes.size());
@@ -474,9 +481,9 @@ struct TreeExecutorSession::Impl : std::enable_shared_from_this<Impl> {
 
   std::string getValue(const std::string& key) const {
     if (hooks.value_get == nullptr) {
-      if (blackboard == nullptr)
+      if (!compatibility)
         throw std::runtime_error("C11 host value store is required for this session");
-      return blackboard->get(key);
+      return compatibility->get(key);
     }
     constexpr size_t kMaximumHostValueBytes = 16u * 1024u * 1024u;
     size_t required = 0u;
@@ -503,9 +510,9 @@ struct TreeExecutorSession::Impl : std::enable_shared_from_this<Impl> {
 
   bool hasValue(const std::string& key) const {
     if (hooks.value_contains == nullptr) {
-      if (blackboard == nullptr)
+      if (!compatibility)
         throw std::runtime_error("C11 host value store is required for this session");
-      return blackboard->has(key);
+      return compatibility->has(key);
     }
     int contains = 0;
     const int status = hooks.value_contains(hooks.value_user, key.c_str(),
@@ -518,9 +525,9 @@ struct TreeExecutorSession::Impl : std::enable_shared_from_this<Impl> {
 
   void setValue(const std::string& key, const std::string& value) {
     if (hooks.value_set == nullptr) {
-      if (blackboard == nullptr)
+      if (!compatibility)
         throw std::runtime_error("C11 host value store is required for this session");
-      blackboard->set(key, value);
+      compatibility->set(key, value);
       return;
     }
     if (hooks.value_set(hooks.value_user, key.c_str(), value.c_str()) !=
@@ -545,7 +552,24 @@ struct TreeExecutorSession::Impl : std::enable_shared_from_this<Impl> {
     return resolveSwitchValue(source, valueGetter(), valueContains());
   }
 
+  bool hasLeafDispatch() const noexcept {
+    return hooks.tick_leaf != nullptr || hooks.tick_typed_leaf != nullptr;
+  }
+
+  int dispatchLeaf(size_t index, salts_bt_node_status* out_status) {
+    if (hooks.tick_typed_leaf != nullptr) {
+      const auto& parameters = leaf_parameters[index];
+      const praktor_c11_leaf_request request{
+          index, nodeAt(index)->id.c_str(), parameters.data(), parameters.size()};
+      return hooks.tick_typed_leaf(hooks.user, &request, out_status);
+    }
+    return hooks.tick_leaf == nullptr ? SALTS_ENOTSUP
+                                     : hooks.tick_leaf(hooks.user, index, out_status);
+  }
+
   void validateHostContracts() const {
+    if (hooks.tick_leaf != nullptr && hooks.tick_typed_leaf != nullptr)
+      throw std::invalid_argument("Select exactly one C11 leaf dispatcher");
     const bool has_value_get = hooks.value_get != nullptr;
     const bool has_value_set = hooks.value_set != nullptr;
     const bool has_value_contains = hooks.value_contains != nullptr;
@@ -555,13 +579,13 @@ struct TreeExecutorSession::Impl : std::enable_shared_from_this<Impl> {
       throw std::invalid_argument(
           "C11 host value store requires get/set/contains callbacks and value_user");
     }
-    if (executor == nullptr &&
-        (!has_value_get || hooks.tick_leaf == nullptr || hooks.halt_leaf == nullptr)) {
+    if (!compatibility &&
+        (!has_value_get || !hasLeafDispatch() || hooks.halt_leaf == nullptr)) {
       throw std::invalid_argument(
           "Host-only C11 session requires host value get/set/contains and tick/halt hooks");
     }
     if (has_value_get &&
-        (hooks.tick_leaf == nullptr || hooks.halt_leaf == nullptr)) {
+        (!hasLeafDispatch() || hooks.halt_leaf == nullptr)) {
       throw std::invalid_argument(
           "C11 host value store requires explicit host leaf dispatch and halt hooks");
     }
@@ -572,7 +596,7 @@ struct TreeExecutorSession::Impl : std::enable_shared_from_this<Impl> {
         throw std::invalid_argument("TreePlan has no source AST node");
       }
 
-      if (hooks.tick_leaf != nullptr && hooks.halt_leaf == nullptr) {
+      if (hasLeafDispatch() && hooks.halt_leaf == nullptr) {
         throw std::invalid_argument(
             "A custom leaf tick hook requires a halt hook to define cancellation cleanup");
       }
@@ -606,7 +630,7 @@ struct TreeExecutorSession::Impl : std::enable_shared_from_this<Impl> {
     }
   }
 
-  static void emitStreamBytes(std::string& pending_line,
+  void emitStreamBytes(std::string& pending_line,
                               const char* bytes, size_t length,
                               bool enabled) {
     if (!enabled) return;
@@ -614,7 +638,7 @@ struct TreeExecutorSession::Impl : std::enable_shared_from_this<Impl> {
       const char ch = bytes[offset];
       if (ch == '\r') continue;
       if (ch == '\n') {
-        Praktor::Shell::ShellExecutor::emitStreamLine(pending_line);
+        if (compatibility) compatibility->emit(pending_line);
         pending_line.clear();
       } else {
         pending_line.push_back(ch);
@@ -622,9 +646,9 @@ struct TreeExecutorSession::Impl : std::enable_shared_from_this<Impl> {
     }
   }
 
-  static void flushStreamLine(std::string& pending_line, bool enabled) {
+  void flushStreamLine(std::string& pending_line, bool enabled) {
     if (!enabled || pending_line.empty()) return;
-    Praktor::Shell::ShellExecutor::emitStreamLine(pending_line);
+    if (compatibility) compatibility->emit(pending_line);
     pending_line.clear();
   }
 
@@ -674,7 +698,7 @@ struct TreeExecutorSession::Impl : std::enable_shared_from_this<Impl> {
             return;
           }
           output.append(buffer.data(), completion->bytes);
-          emitStreamBytes(pending_line, buffer.data(), completion->bytes,
+          state->owner->emitStreamBytes(pending_line, buffer.data(), completion->bytes,
                           state->stream_output);
         } else if (completion->kind == CFLOW_IO_COMPLETION_EOF) {
           eof = true;
@@ -934,12 +958,7 @@ struct TreeExecutorSession::Impl : std::enable_shared_from_this<Impl> {
 
     std::vector<std::string> env_entries;
     std::vector<const char*> env;
-    if (executor != nullptr) {
-      env_entries.reserve(executor->getEnvironment().size());
-      for (const auto& entry : executor->getEnvironment()) {
-        env_entries.push_back(entry.first + "=" + entry.second);
-      }
-    }
+    if (compatibility) env_entries = compatibility->environment();
     env.reserve(env_entries.size() + 1u);
     for (const auto& entry : env_entries) env.push_back(entry.c_str());
     env.push_back(nullptr);
@@ -996,7 +1015,7 @@ struct TreeExecutorSession::Impl : std::enable_shared_from_this<Impl> {
     }
     state.started = true;
     if (state.stream_output) {
-      Praktor::Shell::ShellExecutor::emitStreamLine("$ " + state.command);
+      if (compatibility) compatibility->emit("$ " + state.command);
     }
     (void)index;
     return SALTS_OK;
@@ -1197,12 +1216,11 @@ struct TreeExecutorSession::Impl : std::enable_shared_from_this<Impl> {
         return tickShell(index, *source, out_status);
       }
       if (owner == LeafOwner::Executor) {
-        if (executor == nullptr || blackboard == nullptr || execution_context == nullptr) {
+        if (!compatibility) {
           last_error = "host-only C11 session cannot dispatch through legacy Executor";
           return SALTS_ENOTSUP;
         }
-        *out_status = toSaltsStatus(executor->execute(*source, *blackboard,
-                                                     *execution_context));
+        *out_status = compatibility->tick(*source);
         if (*out_status == SALTS_BT_RUNNING && hooks.halt_leaf == nullptr) {
           last_error = "registered action leaf '" + source->id +
                        "' returned RUNNING without a halt_leaf hook";
@@ -1214,9 +1232,7 @@ struct TreeExecutorSession::Impl : std::enable_shared_from_this<Impl> {
         return SALTS_OK;
       }
       if (owner == LeafOwner::HostHook) {
-        const int host_status = hooks.tick_leaf == nullptr
-            ? SALTS_ENOTSUP
-            : hooks.tick_leaf(hooks.user, index, out_status);
+        const int host_status = dispatchLeaf(index, out_status);
         if (host_status == SALTS_ENOTSUP) {
           haltLeaf(index);
           last_error = "host leaf hook declined active node '" + source->id +
@@ -1244,9 +1260,9 @@ struct TreeExecutorSession::Impl : std::enable_shared_from_this<Impl> {
 
       // An inactive leaf may be claimed by the optional host hook. ENOTSUP
       // means "not mine"; other errors are authoritative and never fall back.
-      if (hooks.tick_leaf != nullptr) {
+      if (hasLeafDispatch()) {
         const int host_status = safeHostStatus("C11 host leaf tick hook failed", [&] {
-          return hooks.tick_leaf(hooks.user, index, out_status);
+          return dispatchLeaf(index, out_status);
         });
         if (host_status == SALTS_OK) {
           if (*out_status != SALTS_BT_SUCCESS &&
@@ -1305,12 +1321,11 @@ struct TreeExecutorSession::Impl : std::enable_shared_from_this<Impl> {
         return tickShell(index, *source, out_status);
       }
 
-      if (executor == nullptr || blackboard == nullptr || execution_context == nullptr) {
+      if (!compatibility) {
         last_error = "host-only C11 session cannot dispatch through legacy Executor";
         return SALTS_ENOTSUP;
       }
-      *out_status = toSaltsStatus(executor->execute(*source, *blackboard,
-                                                   *execution_context));
+      *out_status = compatibility->tick(*source);
       if (*out_status == SALTS_BT_RUNNING && hooks.halt_leaf == nullptr) {
         last_error = "registered action leaf '" + source->id +
                      "' returned RUNNING without a halt_leaf hook";
@@ -1348,42 +1363,15 @@ struct TreeExecutorSession::Impl : std::enable_shared_from_this<Impl> {
                                       const char* key,
                                       int64_t default_value,
                                       bool required) const {
-    const auto it = source.params.find(key);
-    if (it == source.params.end()) {
-      if (required)
-        throw std::invalid_argument("Node '" + source.id +
-                                    "' requires parameter '" + key + "'");
-      return default_value;
-    }
-    if (std::holds_alternative<double>(it->second)) {
-      const double number = std::get<double>(it->second);
-      if (!std::isfinite(number) || std::abs(number - std::trunc(number)) > 0.0 ||
-          number < static_cast<double>((std::numeric_limits<int>::min)()) ||
-          number > static_cast<double>((std::numeric_limits<int>::max)())) {
-        throw std::invalid_argument("Dynamic parameter '" + std::string(key) +
-                                    "' must be an in-range integer");
-      }
-      return static_cast<int64_t>(number);
-    }
-    if (std::holds_alternative<bool>(it->second)) {
-      throw std::invalid_argument("Dynamic parameter '" + std::string(key) +
-                                  "' must be an integer, not a boolean");
-    }
-    return static_cast<int64_t>(parseInteger(resolveValue(it->second)));
+    return resolveIntegerParameter(source, detail::PlanValueReader{valueGetter(), valueContains()},
+                                    key, default_value, required);
   }
 
   uint64_t resolveHostDurationParameter(const actions::Node& source,
                                         const char* key,
                                         int64_t default_ms) const {
-    const int64_t milliseconds =
-        resolveHostIntegerParameter(source, key, default_ms, false);
-    if (milliseconds < 0 ||
-        static_cast<uint64_t>(milliseconds) >
-            (std::numeric_limits<uint64_t>::max)() / 1000000u) {
-      throw std::invalid_argument("Dynamic duration '" + std::string(key) +
-                                  "' is outside the supported range");
-    }
-    return static_cast<uint64_t>(milliseconds) * 1000000u;
+    return resolveDurationParameter(source, detail::PlanValueReader{valueGetter(), valueContains()},
+                                     key, default_ms);
   }
 
   int resolveDynamicParameters(size_t index,
@@ -1430,10 +1418,8 @@ struct TreeExecutorSession::Impl : std::enable_shared_from_this<Impl> {
           default:
             return SALTS_EINVAL;
         }
-        const int64_t value = hooks.value_get != nullptr
-            ? resolveHostIntegerParameter(*source, key, default_value, required)
-            : resolveIntegerParameter(*source, *blackboard, key, default_value,
-                                      required);
+        const int64_t value =
+            resolveHostIntegerParameter(*source, key, default_value, required);
         if (value < 0 ||
             static_cast<uint64_t>(value) > tree_limits.max_control_iterations) {
           throw std::invalid_argument(std::string("Dynamic parameter '") + key +
@@ -1452,9 +1438,7 @@ struct TreeExecutorSession::Impl : std::enable_shared_from_this<Impl> {
         } else {
           return SALTS_EINVAL;
         }
-        out_params->duration_ns = hooks.value_get != nullptr
-            ? resolveHostDurationParameter(*source, key, default_ms)
-            : resolveDurationParameter(*source, *blackboard, key, default_ms);
+        out_params->duration_ns = resolveHostDurationParameter(*source, key, default_ms);
       } else {
         return SALTS_EINVAL;
       }
@@ -1877,41 +1861,25 @@ struct TreeExecutorSession::Impl : std::enable_shared_from_this<Impl> {
 };
 
 TreeExecutorSession::TreeExecutorSession(
-    const actions::Tree& tree, actions::Executor& executor,
-    actions::Blackboard& blackboard,
-    actions::ExecutionContext& execution_context,
-    const salts_bt_tree_config& limits,
-    const praktor_c11_bt_host* host_hooks,
-    cflow_process_retainer* recovery_owner,
-    uint32_t shell_close_budget_ms)
-    : TreeExecutorSession(
-          tree, executor, blackboard, execution_context, limits,
-          [&executor](const std::string& name) { return executor.getTree(name); },
-          host_hooks, recovery_owner, shell_close_budget_ms) {}
-
-TreeExecutorSession::TreeExecutorSession(
-    const actions::Tree& tree, actions::Executor& executor,
-    actions::Blackboard& blackboard,
-    actions::ExecutionContext& execution_context,
-    const salts_bt_tree_config& limits,
-    const SubTreeResolver& subtree_resolver,
-    const praktor_c11_bt_host* host_hooks,
-    cflow_process_retainer* recovery_owner,
-    uint32_t shell_close_budget_ms)
-    : impl_(std::make_shared<Impl>(tree, &executor, &blackboard,
-                                  &execution_context, limits, subtree_resolver,
-                                  host_hooks, recovery_owner,
-                                  shell_close_budget_ms)) {}
-
-TreeExecutorSession::TreeExecutorSession(
     const actions::Tree& tree,
     const SubTreeResolver& subtree_resolver,
     const salts_bt_tree_config& limits,
     const praktor_c11_bt_host& host_hooks,
     cflow_process_retainer* recovery_owner,
     uint32_t shell_close_budget_ms)
-    : impl_(std::make_shared<Impl>(tree, nullptr, nullptr, nullptr, limits,
-                                  subtree_resolver, &host_hooks, recovery_owner,
+    : TreeExecutorSession(tree, subtree_resolver, limits, &host_hooks,
+                          recovery_owner, shell_close_budget_ms, nullptr) {}
+
+TreeExecutorSession::TreeExecutorSession(
+    const actions::Tree& tree,
+    const SubTreeResolver& subtree_resolver,
+    const salts_bt_tree_config& limits,
+    const praktor_c11_bt_host* host_hooks,
+    cflow_process_retainer* recovery_owner,
+    uint32_t shell_close_budget_ms,
+    std::shared_ptr<detail::SessionCompatibility> compatibility)
+    : impl_(std::make_shared<Impl>(tree, std::move(compatibility), limits,
+                                  subtree_resolver, host_hooks, recovery_owner,
                                   shell_close_budget_ms)) {}
 
 TreeExecutorSession::~TreeExecutorSession() {

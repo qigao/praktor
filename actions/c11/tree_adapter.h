@@ -54,6 +54,27 @@ typedef enum praktor_c11_bt_value_result {
   PRAKTOR_C11_BT_VALUE_ERROR = 3
 } praktor_c11_bt_value_result;
 
+/* Borrowed typed leaf payload. Strings and arrays remain valid for the
+ * callback duration; a host must copy anything retained across ticks. */
+typedef enum praktor_c11_leaf_value_kind {
+  PRAKTOR_C11_LEAF_STRING = 0,
+  PRAKTOR_C11_LEAF_NUMBER = 1,
+  PRAKTOR_C11_LEAF_BOOLEAN = 2
+} praktor_c11_leaf_value_kind;
+typedef struct praktor_c11_leaf_parameter {
+  const char *name;
+  praktor_c11_leaf_value_kind kind;
+  const char *text;
+  double number;
+  bool boolean;
+} praktor_c11_leaf_parameter;
+typedef struct praktor_c11_leaf_request {
+  size_t node_index;
+  const char *action;
+  const praktor_c11_leaf_parameter *parameters;
+  size_t parameter_count;
+} praktor_c11_leaf_request;
+
 typedef struct praktor_c11_bt_host {
   int (*tick_leaf)(void *user, size_t node_index,
                    salts_bt_node_status *out_status);
@@ -107,6 +128,11 @@ typedef struct praktor_c11_bt_host {
   /* Resolve Blackboard-backed decorator values on each node tick. */
   int (*resolve_dynamic_parameters)(void *user, size_t node_index,
                                     salts_bt_node_parameters *out_params);
+  /* Session AST bridge: use either tick_leaf or this typed dispatcher.
+   * RUNNING uses the same dispatcher until halt/terminal completion.
+   * halt_leaf remains mandatory and receives request.node_index. */
+  int (*tick_typed_leaf)(void *user, const praktor_c11_leaf_request *request,
+                         salts_bt_node_status *out_status);
 } praktor_c11_bt_host;
 
 /*

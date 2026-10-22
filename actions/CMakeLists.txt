@@ -87,31 +87,21 @@ if(PRAKTOR_ENABLE_C11_ACTIONS)
     set_target_properties(praktor_c11_value_store PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF POSITION_INDEPENDENT_CODE ON FOLDER "actions/c11")
     cmake_config_target(praktor_c11_value_store NO_INSTALL NO_VERSION FOLDER "actions/c11")
 
-    # Transitional C++ Workflow/AST bridge; remove after semantic parity.
-    add_library(praktor_actions_c11 STATIC
-        c11/tree_plan.cpp
-        c11/tree_plan.hpp
-        c11/tree_executor_session.cpp
-        c11/tree_executor_session.hpp
-    )
-    target_include_directories(praktor_actions_c11
-        PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/c11>
-        PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
-    )
-    target_link_libraries(praktor_actions_c11
-        PUBLIC praktor_c11_bt_core Salts::Process actions
-        PRIVATE Salts::JsonParser)
+    # Independent AST/Process Session; never links actions or praktor_shell.
+    include(${CMAKE_CURRENT_SOURCE_DIR}/c11/session_targets.cmake)
+
+    # Explicit legacy compatibility constructors and Blackboard overloads only.
+    add_library(praktor_actions_c11 STATIC c11/session_legacy_adapter.cpp)
+    target_include_directories(praktor_actions_c11 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_link_libraries(praktor_actions_c11 PUBLIC praktor_c11_session actions)
     target_compile_features(praktor_actions_c11 PRIVATE cxx_std_17)
-    set_target_properties(praktor_actions_c11 PROPERTIES
-        C_STANDARD 11
-        C_STANDARD_REQUIRED ON
-        C_EXTENSIONS OFF
-        POSITION_INDEPENDENT_CODE ON
-        FOLDER "actions/c11"
-    )
+    set_target_properties(praktor_actions_c11 PROPERTIES POSITION_INDEPENDENT_CODE ON)
     cmake_config_target(praktor_actions_c11 NO_INSTALL NO_VERSION FOLDER "actions/c11")
 
     if(ENABLE_TESTS)
+        add_executable(actions_c11_native_host_test c11/native_host_test.c)
+        target_link_libraries(actions_c11_native_host_test PRIVATE praktor_c11_native_host)
+        add_test(NAME actions_c11_native_host_test COMMAND actions_c11_native_host_test)
         add_executable(actions_c11_tree_adapter_test c11/tree_adapter_test.c)
         target_link_libraries(actions_c11_tree_adapter_test PRIVATE praktor_c11_bt_core)
         target_compile_features(actions_c11_tree_adapter_test PRIVATE c_std_11)
@@ -144,6 +134,11 @@ if(PRAKTOR_ENABLE_C11_ACTIONS)
             FOLDER "actions/c11/tests"
         )
 
+        add_executable(actions_c11_session_independent_test c11/session_independent_test.cpp)
+        target_link_libraries(actions_c11_session_independent_test PRIVATE praktor_c11_session praktor_c11_native_host)
+        add_test(NAME actions_c11_session_independent_test COMMAND actions_c11_session_independent_test)
+        set_tests_properties(actions_c11_session_independent_test PROPERTIES TIMEOUT 30)
+
         add_executable(actions_c11_tree_plan_test c11/tree_plan_test.cpp)
         target_link_libraries(actions_c11_tree_plan_test PRIVATE praktor_actions_c11 actions)
         target_compile_features(actions_c11_tree_plan_test PRIVATE cxx_std_17)
@@ -156,7 +151,7 @@ if(PRAKTOR_ENABLE_C11_ACTIONS)
         add_test(NAME actions_c11_tree_plan_test COMMAND actions_c11_tree_plan_test)
 
         add_executable(actions_c11_tree_executor_session_test c11/tree_executor_session_test.cpp)
-        target_link_libraries(actions_c11_tree_executor_session_test PRIVATE praktor_actions_c11 praktor_c11_value_store)
+        target_link_libraries(actions_c11_tree_executor_session_test PRIVATE praktor_actions_c11 praktor_c11_value_store praktor_c11_native_host)
         target_compile_features(actions_c11_tree_executor_session_test PRIVATE cxx_std_17)
         set_target_properties(actions_c11_tree_executor_session_test PROPERTIES
             CXX_STANDARD 17

@@ -1,5 +1,5 @@
-#include "core/executor.hpp"
 #include "tree_plan.hpp"
+#include "plan_value_reader.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -14,7 +14,7 @@ namespace {
 
 using Node = actions::Node;
 using Value = actions::Value;
-using Blackboard = actions::Blackboard;
+using ValueReader = detail::PlanValueReader;
 
 const Value *findParam(const Node &node, const char *key) {
   const auto it = node.params.find(key);
@@ -29,7 +29,7 @@ bool isRuntimeSubstitutedParam(const Node &node, const char *key) {
   return raw.size() >= 2u && raw.front() == '{' && raw.back() == '}';
 }
 
-std::string valueToText(const Value &value, const Blackboard *blackboard,
+std::string valueToText(const Value &value, const ValueReader *blackboard,
                         const std::string &owner, const char *key,
                         bool bare_string_may_name_key = false) {
   if (std::holds_alternative<std::string>(value)) {
@@ -93,7 +93,7 @@ int64_t parseIntegerText(const std::string &raw, const Node &node,
   }
 }
 
-int64_t readIntegerParam(const Node &node, const Blackboard *blackboard,
+int64_t readIntegerParam(const Node &node, const ValueReader *blackboard,
                          const char *key, int64_t default_value,
                          bool required = false,
                          bool bare_string_may_name_key = false) {
@@ -236,7 +236,7 @@ salts_bt_node_kind mapNodeKind(const Node &node) {
 }
 
 void appendNode(TreePlan &plan, const Node &node, size_t parent_index,
-                size_t depth, const Blackboard *blackboard,
+                size_t depth, const ValueReader *blackboard,
                 const salts_bt_tree_config &limits) {
   if (node.id.empty()) {
     throw std::invalid_argument("Action tree contains a node with an empty type");
@@ -464,21 +464,21 @@ void appendNode(TreePlan &plan, const Node &node, size_t parent_index,
 } // namespace
 
 int64_t resolveIntegerParameter(const actions::Node &node,
-                                const actions::Blackboard &blackboard,
+                                const detail::PlanValueReader &blackboard,
                                 const char *key, int64_t default_value,
                                 bool required) {
   return readIntegerParam(node, &blackboard, key, default_value, required);
 }
 
 uint64_t resolveDurationParameter(const actions::Node &node,
-                                  const actions::Blackboard &blackboard,
+                                  const detail::PlanValueReader &blackboard,
                                   const char *key, int64_t default_ms) {
   return millisecondsToNanoseconds(
       readIntegerParam(node, &blackboard, key, default_ms), node, key);
 }
 
 TreePlan compileTreePlan(const actions::Tree &tree,
-                         const actions::Blackboard &blackboard,
+                         const detail::PlanValueReader &blackboard,
                          const salts_bt_tree_config &limits) {
   if (limits.max_nodes == 0u || limits.max_depth == 0u ||
       limits.max_control_iterations == 0u ||

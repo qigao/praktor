@@ -17,6 +17,7 @@ class ExecutionContext;
 #include <vector>
 
 namespace actions::c11 {
+namespace detail { struct SessionCompatibility; }
 
 using SubTreeResolver =
     std::function<const actions::Tree*(const std::string& tree_name)>;
@@ -63,7 +64,13 @@ private:
 /*
  * An opt-in execution bridge for the compiled C11 tree.
  *
- * Ordinary registered action leaves are executed through actions::Executor
+ * Link praktor_c11_session for the host-only constructor. This independent
+ * target owns the AST/Salts state but has no legacy execution link dependency.
+ * The C11 native_host helper supplies bounded values plus typed SetVariable /
+ * CheckExitCode dispatch. Other actions need explicit host dispatch or Shell.
+ * Link praktor_actions_c11 to opt into the legacy compatibility constructors.
+ *
+ * With the compatibility constructors, ordinary action leaves execute through actions::Executor
  * against the caller-owned Blackboard and ExecutionContext. The session owns
  * a stable copy of the AST because TreePlan's source_nodes refer into it.
  *
@@ -141,7 +148,7 @@ public:
    * Host-only constructor: no actions::Executor, Blackboard or ExecutionContext
    * is retained. A complete host value store and tick/halt callbacks are
    * mandatory; declined non-Shell leaves fail closed. Shell uses Salts::Process
-   * with an empty inherited environment (supply explicit command parameters).
+   * with the process environment inherited from the caller.
    */
   TreeExecutorSession(const actions::Tree& tree,
                       const SubTreeResolver& subtree_resolver,
@@ -166,6 +173,13 @@ public:
   const std::string& lastError() const noexcept;
 
 private:
+  TreeExecutorSession(const actions::Tree& tree,
+                      const SubTreeResolver& subtree_resolver,
+                      const salts_bt_tree_config& limits,
+                      const praktor_c11_bt_host* host_hooks,
+                      cflow_process_retainer* recovery_owner,
+                      uint32_t shell_close_budget_ms,
+                      std::shared_ptr<detail::SessionCompatibility> compatibility);
   struct Impl;
   std::shared_ptr<Impl> impl_;
 };

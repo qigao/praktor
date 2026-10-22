@@ -213,7 +213,19 @@ jobs:
           cmake --build build/ci-c11-standalone --parallel 2
           ctest --test-dir build/ci-c11-standalone \
             --no-tests=error --output-on-failure \
-            -R '^actions_c11_(tree_adapter|value_store)_standalone_test$'
+            -R '^actions_c11_(tree_adapter|value_store|native_host)_standalone_test$'
+
+      - name: Independent Session link and run without legacy targets
+        if: matrix.platform == 'linux' && matrix.sdk == 'behavior-tree'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S actions/c11/session-standalone -B build/ci-session-standalone -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/ci-session-standalone --parallel 2
+          python3 cmake/ci/audit-c11-session-link.py \
+            build/ci-session-standalone/actions_c11_session_independent_test
+          ctest --test-dir build/ci-session-standalone --no-tests=error --output-on-failure
 
       # Source-instrument the opt-in C11 consumer without multiplying the
       # nine-platform SDK matrix. The complete real WorkflowRunner TSan gate
@@ -246,6 +258,7 @@ jobs:
         with:
           name: core-diagnostics-${{ matrix.rid }}-${{ matrix.sdk }}
           path: |
+            build/ci-session-standalone/Testing/Temporary/LastTest.log
             build/ci-sdk/ctest.xml
             build/ci-sdk/Testing/Temporary/LastTest.log
             build/ci-c11-address/Testing/Temporary/LastTest.log
