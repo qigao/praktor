@@ -3,6 +3,8 @@
 
 #include <cstdio>
 #include <chrono>
+#include <cstring>
+#include <map>
 #include <stdexcept>
 #include <thread>
 #include <string>
@@ -51,6 +53,37 @@ struct ScopedProcessRetainer {
 };
 
 void noOpHalt(void*, size_t) {}
+
+using HostValueMap = std::map<std::string, std::string>;
+
+int hostValueGet(void* user, const char* key, char* out_value,
+                 size_t out_capacity, size_t* out_size) {
+  if (user == nullptr || key == nullptr || out_size == nullptr)
+    return PRAKTOR_C11_BT_VALUE_ERROR;
+  const auto& values = *static_cast<HostValueMap*>(user);
+  const auto found = values.find(key);
+  if (found == values.end()) return PRAKTOR_C11_BT_VALUE_NOT_FOUND;
+  *out_size = found->second.size();
+  if (out_value == nullptr || out_capacity <= found->second.size())
+    return PRAKTOR_C11_BT_VALUE_BUFFER_TOO_SMALL;
+  std::memcpy(out_value, found->second.c_str(), found->second.size() + 1u);
+  return PRAKTOR_C11_BT_VALUE_OK;
+}
+
+int hostValueSet(void* user, const char* key, const char* value) {
+  if (user == nullptr || key == nullptr || value == nullptr)
+    return PRAKTOR_C11_BT_VALUE_ERROR;
+  (*static_cast<HostValueMap*>(user))[key] = value;
+  return PRAKTOR_C11_BT_VALUE_OK;
+}
+
+int hostValueContains(void* user, const char* key, int* out_contains) {
+  if (user == nullptr || key == nullptr || out_contains == nullptr)
+    return PRAKTOR_C11_BT_VALUE_ERROR;
+  const auto& values = *static_cast<HostValueMap*>(user);
+  *out_contains = values.find(key) != values.end() ? 1 : 0;
+  return PRAKTOR_C11_BT_VALUE_OK;
+}
 
 int testRegisteredLeafResumesRunningState() {
   actions::Tree tree;
@@ -2482,7 +2515,7 @@ int testConsumeQueueRejectsMalformedQueue() {
   return 0;
 }
 
-int testBuiltInEntryUpdatedHook() {
+int testBuiltInEntryUpdatedUsesHostValueStore() {
   actions::Tree tree;
   tree.root.id = "EntryUpdated";
   tree.root.params.emplace("watch_key", actions::Value{std::string("watched")});
@@ -2496,11 +2529,17 @@ int testBuiltInEntryUpdatedHook() {
     ++calls;
     return actions::NodeStatus::SUCCESS;
   });
-  actions::Blackboard blackboard;
-  blackboard.set("watched", "first");
+  actions::Blackboard legacy_blackboard;
+  legacy_blackboard.set("watched", "legacy-value-must-not-win");
   actions::ExecutionContext context;
-  actions::c11::TreeExecutorSession session(tree, executor, blackboard,
-                                            context, limits());
+  HostValueMap values{{"watched", "first"}};
+  praktor_c11_bt_host hooks{};
+  hooks.value_get = &hostValueGet;
+  hooks.value_set = &hostValueSet;
+  hooks.value_contains = &hostValueContains;
+  hooks.value_user = &values;
+  actions::c11::TreeExecutorSession session(tree, executor, legacy_blackboard,
+                                            context, limits(), &hooks);
   salts_bt_node_status status = SALTS_BT_FAILURE;
   CHECK(session.tick(&status) == SALTS_OK);
   CHECK(status == SALTS_BT_SUCCESS);
@@ -2508,7 +2547,7 @@ int testBuiltInEntryUpdatedHook() {
   CHECK(session.tick(&status) == SALTS_OK);
   CHECK(status == SALTS_BT_SUCCESS);
   CHECK(calls == 1);
-  blackboard.set("watched", "second");
+  values["watched"] = "second";
   CHECK(session.tick(&status) == SALTS_OK);
   CHECK(status == SALTS_BT_SUCCESS);
   CHECK(calls == 2);
@@ -3131,7 +3170,7 @@ int main() {
   if (testConsumeQueueResumesCurrentItemAcrossRunning() != 0) return 1;
   if (testBuiltInConsumeQueue() != 0) return 1;
   if (testConsumeQueueRejectsMalformedQueue() != 0) return 1;
-  if (testBuiltInEntryUpdatedHook() != 0) return 1;
+  if (testBuiltInEntryUpdatedUsesHostValueStore() != 0) return 1;
   if (testEntryUpdatedRejectsEmptyWatchKeyBeforeChildEffects() != 0) return 1;
   if (testCancelReportsHostHaltFailure() != 0) return 1;
   if (testFailedInitialHostTickRunsCleanupExactlyOnce() != 0) return 1;
