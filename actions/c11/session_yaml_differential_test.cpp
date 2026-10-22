@@ -6,7 +6,7 @@
 #include <string>
 #define CHECK(e) do { if (!(e)) { std::fprintf(stderr, "%s:%d: %s\n", __FILE__, __LINE__, #e); return 1; } } while (0)
 namespace {
-/* These fixtures deliberately use text ports and default numeric controls;
+/* These fixtures deliberately use text ports, including numeric text;
  * the shared YAML parser supplies the actual canonical node names/topology. */
 actions::Node textNode(const OrchNode& source) {
   actions::Node node; node.id = source.type;
@@ -19,16 +19,14 @@ int differential() {
 tasks:
   - name: native_contract
     sequence:
-      - set_variable:
-          key: copied
-          value: "{source}"
-      - set_variable:
-          key: duplicated
-          from: copied
-      - check_exit_code: {}
-      - set_variable:
-          key: after_check
-          value: admitted
+      - set_variable: copied
+        value: "{source}"
+      - set_variable: duplicated
+        from: copied
+      - check_exit_code:
+          expected: "0"
+      - set_variable: after_check
+        value: admitted
 )", "native-session-differential.yml");
   CHECK(workflow.tasks.size() == 1u);
   actions::Tree tree;
