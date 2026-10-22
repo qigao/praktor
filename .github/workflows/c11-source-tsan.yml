@@ -3,8 +3,23 @@ name: C11 Process complete-source TSan qualification
 'on':
   workflow_dispatch:
   pull_request:
+    # This check must run for EVERY P1 ownership/adapter change, not only
+    # edits to its workflow file. No fallback to the consumer-only TSan job.
     paths:
       - '.github/workflows/c11-source-tsan.yml'
+      - '.github/workflows/core-only-real-sdk.yml'
+      - 'cmake/ci/qualify-c11-lifetime-sanitizers.sh'
+      - 'actions/c11/**'
+      - 'actions/CMakeLists.txt'
+      - 'praktor/include/dag/workflow_executor.hpp'
+      - 'praktor/include/workflow_runner.hpp'
+      - 'praktor/include/executors/declarative_tree_executor.hpp'
+      - 'praktor/include/execution/**'
+      - 'praktor/src/dag/workflow_executor.cpp'
+      - 'praktor/src/workflow_runner.cpp'
+      - 'praktor/src/executors/declarative_tree_executor.cpp'
+      - 'praktor/test/core_only_workflow_test.cpp'
+      - 'praktor/CMakeLists.txt'
 
 permissions:
   contents: read
