@@ -1,5 +1,6 @@
 #include "core/executor.hpp"
 #include "tree_executor_session.hpp"
+#include "value_store.h"
 
 #include <cstdio>
 #include <chrono>
@@ -66,6 +67,62 @@ int hostSuccessLeaf(void* user, size_t, salts_bt_node_status* out_status) {
 }
 
 using HostValueMap = std::map<std::string, std::string>;
+
+struct ScopedC11ValueStore {
+  praktor_c11_value_store store{};
+  ScopedC11ValueStore() {
+    if (praktor_c11_value_store_init(&store, 8u, 64u, 4096u) !=
+        PRAKTOR_C11_VALUE_OK)
+      throw std::runtime_error("cannot initialize C11 value store test");
+  }
+  ~ScopedC11ValueStore() { praktor_c11_value_store_destroy(&store); }
+  void set(const char* key, const char* value) {
+    if (praktor_c11_value_store_set(&store, key, value) !=
+        PRAKTOR_C11_VALUE_OK)
+      throw std::runtime_error("cannot seed C11 value store test");
+  }
+};
+
+int c11ValueStoreGet(void* user, const char* key, char* out_value,
+                     size_t out_capacity, size_t* out_size) {
+  if (user == nullptr || key == nullptr || out_size == nullptr)
+    return PRAKTOR_C11_BT_VALUE_ERROR;
+  auto* store = static_cast<praktor_c11_value_store*>(user);
+  size_t required = 0u;
+  int status = praktor_c11_value_store_get(store, key, nullptr, 0u, &required);
+  if (status == PRAKTOR_C11_VALUE_ENOTFOUND)
+    return PRAKTOR_C11_BT_VALUE_NOT_FOUND;
+  if (status == PRAKTOR_C11_VALUE_ENOBUFS) {
+    *out_size = required;
+    if (out_value == nullptr || out_capacity <= required)
+      return PRAKTOR_C11_BT_VALUE_BUFFER_TOO_SMALL;
+  } else if (status != PRAKTOR_C11_VALUE_OK) {
+    return PRAKTOR_C11_BT_VALUE_ERROR;
+  }
+  status = praktor_c11_value_store_get(store, key, out_value, out_capacity,
+                                       out_size);
+  return status == PRAKTOR_C11_VALUE_OK
+             ? PRAKTOR_C11_BT_VALUE_OK
+             : PRAKTOR_C11_BT_VALUE_ERROR;
+}
+
+int c11ValueStoreSet(void* user, const char* key, const char* value) {
+  if (user == nullptr) return PRAKTOR_C11_BT_VALUE_ERROR;
+  const int status = praktor_c11_value_store_set(
+      static_cast<praktor_c11_value_store*>(user), key, value);
+  return status == PRAKTOR_C11_VALUE_OK
+             ? PRAKTOR_C11_BT_VALUE_OK
+             : PRAKTOR_C11_BT_VALUE_ERROR;
+}
+
+int c11ValueStoreContains(void* user, const char* key, int* out_contains) {
+  if (user == nullptr) return PRAKTOR_C11_BT_VALUE_ERROR;
+  const int status = praktor_c11_value_store_contains(
+      static_cast<praktor_c11_value_store*>(user), key, out_contains);
+  return status == PRAKTOR_C11_VALUE_OK
+             ? PRAKTOR_C11_BT_VALUE_OK
+             : PRAKTOR_C11_BT_VALUE_ERROR;
+}
 
 int hostValueGet(void* user, const char* key, char* out_value,
                  size_t out_capacity, size_t* out_size) {
@@ -2630,15 +2687,16 @@ int testDynamicDelayUsesHostValueStore() {
   actions::Blackboard legacy_blackboard;
   legacy_blackboard.set("delay", "60000");
   actions::ExecutionContext context;
-  HostValueMap values{{"delay", "0"}};
+  ScopedC11ValueStore values;
+  values.set("delay", "0");
   praktor_c11_bt_host hooks{};
   hooks.tick_leaf = &hostSuccessLeaf;
   hooks.halt_leaf = &noOpHalt;
   hooks.user = &host_calls;
-  hooks.value_get = &hostValueGet;
-  hooks.value_set = &hostValueSet;
-  hooks.value_contains = &hostValueContains;
-  hooks.value_user = &values;
+  hooks.value_get = &c11ValueStoreGet;
+  hooks.value_set = &c11ValueStoreSet;
+  hooks.value_contains = &c11ValueStoreContains;
+  hooks.value_user = &values.store;
 
   actions::c11::TreeExecutorSession session(
       tree, executor, legacy_blackboard, context, limits(), &hooks);

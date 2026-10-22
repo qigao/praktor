@@ -156,7 +156,7 @@ if(PRAKTOR_ENABLE_C11_ACTIONS)
         add_test(NAME actions_c11_tree_plan_test COMMAND actions_c11_tree_plan_test)
 
         add_executable(actions_c11_tree_executor_session_test c11/tree_executor_session_test.cpp)
-        target_link_libraries(actions_c11_tree_executor_session_test PRIVATE praktor_actions_c11)
+        target_link_libraries(actions_c11_tree_executor_session_test PRIVATE praktor_actions_c11 praktor_c11_value_store)
         target_compile_features(actions_c11_tree_executor_session_test PRIVATE cxx_std_17)
         set_target_properties(actions_c11_tree_executor_session_test PROPERTIES
             CXX_STANDARD 17
