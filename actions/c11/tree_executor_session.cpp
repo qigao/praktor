@@ -12,6 +12,7 @@
 #include <cmath>
 #include <cstdint>
 #include <exception>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <new>
@@ -33,56 +34,47 @@ salts_bt_node_status toSaltsStatus(actions::NodeStatus status) {
   return SALTS_BT_FAILURE;
 }
 
+using ValueGetter = std::function<std::string(const std::string&)>;
+using ValueContains = std::function<bool(const std::string&)>;
+
 std::string resolveStringValue(const actions::Value& value,
-                               const actions::Blackboard& blackboard) {
+                               const ValueGetter& get_value) {
   if (!std::holds_alternative<std::string>(value)) {
     if (std::holds_alternative<double>(value)) {
       const double number = std::get<double>(value);
-      if (!std::isfinite(number)) {
+      if (!std::isfinite(number))
         throw std::invalid_argument("numeric value is not finite");
-      }
       return std::to_string(number);
     }
     return std::get<bool>(value) ? "true" : "false";
   }
-
   const std::string& raw = std::get<std::string>(value);
-  if (raw.size() >= 3u && raw.front() == '{' && raw.back() == '}') {
-    return blackboard.get(raw.substr(1u, raw.size() - 2u));
-  }
+  if (raw.size() >= 3u && raw.front() == '{' && raw.back() == '}')
+    return get_value(raw.substr(1u, raw.size() - 2u));
   return raw;
 }
 
 bool shellBooleanValue(const actions::Value& value,
-                       const actions::Blackboard& blackboard) {
+                       const ValueGetter& get_value) {
   if (std::holds_alternative<bool>(value)) return std::get<bool>(value);
-  if (std::holds_alternative<double>(value)) {
+  if (std::holds_alternative<double>(value))
     throw std::invalid_argument("Shell stream_output must be a boolean");
-  }
-  std::string raw = resolveStringValue(value, blackboard);
+  std::string raw = resolveStringValue(value, get_value);
   std::transform(raw.begin(), raw.end(), raw.begin(),
-                 [](unsigned char ch) {
-                   return static_cast<char>(std::tolower(ch));
-                 });
+                 [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
   if (raw == "true") return true;
   if (raw == "false") return false;
   throw std::invalid_argument("Shell stream_output must be true or false");
 }
 
 bool conditionValue(const actions::Value& value,
-                    const actions::Blackboard& blackboard) {
-  if (std::holds_alternative<bool>(value)) {
-    return std::get<bool>(value);
-  }
-  if (std::holds_alternative<double>(value)) {
+                    const ValueGetter& get_value) {
+  if (std::holds_alternative<bool>(value)) return std::get<bool>(value);
+  if (std::holds_alternative<double>(value))
     return std::fpclassify(std::get<double>(value)) != FP_ZERO;
-  }
-
-  std::string raw = resolveStringValue(value, blackboard);
+  std::string raw = resolveStringValue(value, get_value);
   std::transform(raw.begin(), raw.end(), raw.begin(),
-                 [](unsigned char ch) {
-                   return static_cast<char>(std::tolower(ch));
-                 });
+                 [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
   return !(raw.empty() || raw == "0" || raw == "false" || raw == "no" ||
            raw == "off" || raw == "null");
 }
@@ -115,33 +107,26 @@ long long parseInteger(const std::string& raw) {
 }
 
 int resolveSwitchValue(const actions::Node& source,
-                       const actions::Blackboard& blackboard) {
+                       const ValueGetter& get_value,
+                       const ValueContains& has_value) {
   const auto it = source.params.find("variable");
-  if (it == source.params.end()) {
+  if (it == source.params.end())
     throw std::invalid_argument("Switch requires parameter 'variable'");
-  }
-
   if (std::holds_alternative<std::string>(it->second)) {
     const std::string& original = std::get<std::string>(it->second);
-    std::string raw = resolveStringValue(it->second, blackboard);
-    // The legacy Executor accepts a bare Blackboard key as well as {key}.
-    if (raw == original && blackboard.has(raw)) {
-      raw = blackboard.get(raw);
-    }
+    std::string raw = resolveStringValue(it->second, get_value);
+    if (raw == original && has_value(raw)) raw = get_value(raw);
     return static_cast<int>(parseInteger(raw));
   }
-
   if (std::holds_alternative<double>(it->second)) {
     const double number = std::get<double>(it->second);
     const double fractional = number - std::trunc(number);
     if (!std::isfinite(number) || std::abs(fractional) > 0.0 ||
         number < static_cast<double>((std::numeric_limits<int>::min)()) ||
-        number > static_cast<double>((std::numeric_limits<int>::max)())) {
+        number > static_cast<double>((std::numeric_limits<int>::max)()))
       throw std::invalid_argument("Switch variable must resolve to a 32-bit integer");
-    }
     return static_cast<int>(number);
   }
-
   throw std::invalid_argument("Switch variable must be an integer, not a boolean");
 }
 
