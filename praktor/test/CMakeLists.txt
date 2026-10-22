@@ -1,3 +1,13 @@
+# Compile this public header without a transitive include of the
+# legacy actions Executor. The main target links actions privately, so this
+# isolated consumer has only Praktor's declared public include interface.
+add_library(praktor_public_header_contract OBJECT
+    c11_public_header_contract.cpp)
+target_link_libraries(praktor_public_header_contract PRIVATE ${TARGET_NAME_LIB})
+target_compile_features(praktor_public_header_contract PRIVATE cxx_std_17)
+set_target_properties(praktor_public_header_contract PROPERTIES
+    FOLDER "praktor/test/contracts")
+
 if(ENABLE_SCRIPT_ENGINE)
     string(REPLACE "\\" "\\\\" PYTHON3_EXECUTABLE_ESCAPED "${Python3_EXECUTABLE}")
     string(REPLACE "\\" "\\\\" FORCE_TERMINATE_CORPUS_ESCAPED

@@ -1,4 +1,5 @@
 #include "executors/declarative_tree_executor.hpp"
+#include "core/executor.hpp"
 #include "actions/shell_executor.hpp"
 #include "util/path_utils.hpp"
 #include "util/logging.hpp"
@@ -355,7 +356,7 @@ std::string DeclarativeTreeExecutor::resolveContextRef(
 }
 
 // Task 3.4: Parse parameter value to appropriate type
-actions::Value DeclarativeTreeExecutor::parseValue(const std::string& str) const
+static actions::Value parseActionValue(const std::string& str)
 {
   // Try to parse as number
   try {
@@ -410,7 +411,7 @@ actions::Node DeclarativeTreeExecutor::convertNode(const OrchNode& praktor_node,
     }
     
     // Step 3: Parse to appropriate type
-    node.params[key] = parseValue(substituted);
+    node.params[key] = parseActionValue(substituted);
   }
   
   // Task 3.4: Recursively convert children

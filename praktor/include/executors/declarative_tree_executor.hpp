@@ -2,10 +2,15 @@
 
 #include "dag/task_executor.hpp"
 #include "yml/task_types.hpp"
-#include "core/executor.hpp"
-
 #include <functional>
 #include <unordered_map>
+
+// Only forward declarations are needed at this public API boundary.
+// The legacy Executor implementation belongs in the .cpp, not consumers.
+namespace actions {
+struct Node;
+class Blackboard;
+}
 
 struct cflow_process_retainer;
 
@@ -51,9 +56,6 @@ private:
 
   // Extract outputs from blackboard to context
   void blackboardToContext(const actions::Blackboard& bb, WorkflowContext& context, const std::string& taskName);
-
-  // Parse string value to appropriate type (string, number, bool)
-  actions::Value parseValue(const std::string& str) const;
 
   std::unordered_map<std::string, std::string> base_environment_;
   ActionTreeBackend backend_ = ActionTreeBackend::Legacy;

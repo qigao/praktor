@@ -73,13 +73,14 @@ target_link_libraries(
            CHttp::Client
            Salts::CNet
            CHttp::S3
-           actions
+    PRIVATE actions
 )
 if(ENABLE_SCRIPT_ENGINE)
     target_link_libraries(${TARGET_NAME_LIB} PUBLIC TurboScript::TurboScript)
 endif()
-# C11 is an explicitly selected runtime path. Keep the default workflow
-# executor linked to legacy actions until parity/ownership gates pass.
+# C11 remains opt-in; the Legacy runtime is a PRIVATE link dependency
+# for the current implementation, not a public header/compile requirement.
+# Do not remove its actual production link until full parity is accepted.
 if(PRAKTOR_ENABLE_C11_ACTIONS)
     target_link_libraries(${TARGET_NAME_LIB} PRIVATE praktor_actions_c11)
 endif()

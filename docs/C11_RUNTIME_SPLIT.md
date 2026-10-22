@@ -10,6 +10,13 @@ backend switch. PR #78 stays Draft until the remaining gates pass.
 | `praktor_actions_c11` | transitional C++17 | C core, `actions`, `Salts::Process` |
 | `praktor_lib` | C++17 | current `actions` default plus opt-in C11 bridge |
 
+The Praktor-facing `DeclarativeTreeExecutor` public header now forward
+declares legacy AST/Blackboard types instead of importing the complete
+`core/executor.hpp`. The latter is implementation-local, and the
+legacy `actions` library is a PRIVATE link (not a public compile
+requirement) for `praktor_lib`. The standalone public-header object
+test compiles this contract in Legacy-default and C11-enabled builds.
+
 `actions/c11/standalone` is independently configured as `LANGUAGES C`.
 It links the real installed BehaviorTree SDK and runs the C adapter
 conformance tests with no C++ compiler or `actions` target, also
