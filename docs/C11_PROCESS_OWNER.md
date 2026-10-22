@@ -68,7 +68,7 @@ before its own storage is released.
 - [SaltsUtils Process PR #674](https://github.com/qigao/salts-utils/pull/674):
   bounded non-destructive `shutdown_step`, typed recovery owner, injected
   NativeIO/Actor close/ack faults.
-- [SaltsUtils Process PR #674 exact source](https://github.com/qigao/salts-utils/commit/cacc97c9568e02aeb1e244ac9a477a77e180ac82):
+- [SaltsUtils Process PR #674 exact source](https://github.com/qigao/salts-utils/commit/53fcfdf8a0fe89ea7ade008675ec94c20241b83c):
   merged BehaviorTree from master plus candidate lease-safe Process/retainer;
   this replaces the older #675 qualification pin but is not a release.
 - [Praktor PR #78](https://github.com/qigao/praktor/pull/78):
