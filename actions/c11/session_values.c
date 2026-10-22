@@ -1,4 +1,5 @@
 #include "session_internal.h"
+#include "plan.h"
 #include <ctype.h>
 #include <errno.h>
 #include <limits.h>
@@ -119,15 +120,6 @@ int session_resolve(session_impl *s, size_t node, const char *name,
   }
   out->data = p->text; out->size = size; return SALTS_OK;
 }
-static int parse_integer(session_text text, int *out) {
-  char *end;
-  double value;
-  errno = 0; value = strtod(text.data, &end);
-  if (end == text.data || (size_t)(end - text.data) != text.size || errno == ERANGE ||
-      !isfinite(value) || value < INT_MIN || value > INT_MAX || fabs(value - trunc(value)) > 0.0)
-    return SALTS_EINVAL;
-  *out = (int)value; return SALTS_OK;
-}
 int session_integer(session_impl *s, size_t node, const char *name, int fallback, int *out) {
   const praktor_c11_leaf_parameter *p = session_parameter(s, node, name);
   session_text value;
@@ -144,7 +136,7 @@ int session_integer(session_impl *s, size_t node, const char *name, int fallback
   if (s->text_sizes[p - s->parameters] == 2u && p->text[0] == '{' && p->text[1] == '}')
     r = session_get(s, "", 0u, &value);
   else r = session_resolve(s, node, name, NULL, 0u, &value);
-  return r == SALTS_OK ? parse_integer(value, out) : r;
+  return r == SALTS_OK ? praktor_c11_parse_integer(value.data, value.size, out) : r;
 }
 int session_switch(session_impl *s, size_t node, size_t *out) {
   const praktor_c11_leaf_parameter *p = session_parameter(s, node, "variable");
@@ -163,7 +155,7 @@ int session_switch(session_impl *s, size_t node, size_t *out) {
       if (result != SALTS_OK) return result;
       if (contains) result = session_get(s, value.data, 1u, &value);
     }
-    if (result == SALTS_OK) result = parse_integer(value, &parsed);
+    if (result == SALTS_OK) result = praktor_c11_parse_integer(value.data, value.size, &parsed);
   }
   if (result != SALTS_OK) return session_error(s, result, "C11 Switch selector failed: variable must resolve to a 32-bit integer");
   *out = parsed < 0 ? s->state[node].child_count : (size_t)parsed; return SALTS_OK;

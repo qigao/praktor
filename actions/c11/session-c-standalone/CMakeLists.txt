@@ -26,3 +26,8 @@ target_link_libraries(actions_c11_session_c_test PRIVATE praktor_c11_session_cor
 set_target_properties(actions_c11_session_c_test PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF LINKER_LANGUAGE C)
 add_test(NAME actions_c11_session_c_test COMMAND actions_c11_session_c_test)
 set_tests_properties(actions_c11_session_c_test PROPERTIES TIMEOUT 30)
+
+add_executable(actions_c11_tree_plan_test ../plan_test.c)
+target_link_libraries(actions_c11_tree_plan_test PRIVATE praktor_c11_session_core Salts::TinyTest)
+set_target_properties(actions_c11_tree_plan_test PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF LINKER_LANGUAGE C)
+add_test(NAME actions_c11_tree_plan_test COMMAND actions_c11_tree_plan_test)

@@ -1,6 +1,5 @@
 include(${CMAKE_CURRENT_LIST_DIR}/session_core_targets.cmake)
 add_library(praktor_c11_session STATIC
-    ${CMAKE_CURRENT_LIST_DIR}/tree_plan.cpp
     ${CMAKE_CURRENT_LIST_DIR}/session_ast_bridge.cpp)
 target_include_directories(praktor_c11_session PUBLIC
     ${CMAKE_CURRENT_LIST_DIR} ${CMAKE_CURRENT_LIST_DIR}/..)

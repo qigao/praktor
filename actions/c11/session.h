@@ -1,7 +1,7 @@
 #ifndef PRAKTOR_C11_SESSION_H
 #define PRAKTOR_C11_SESSION_H
 #include "tree_adapter.h"
-#include <salts/process_retainer.h>
+struct cflow_process_retainer;
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -26,7 +26,7 @@ typedef struct praktor_c11_session_config {
   salts_bt_tree_config tree;
   size_t max_plan_bytes, max_value_bytes, max_state_bytes, max_parameters_per_node;
   uint32_t shell_close_budget_ms;
-  cflow_process_retainer *retainer;
+  struct cflow_process_retainer *retainer;
   praktor_c11_bt_host host;
   /* Explicit compatibility bridge; independent C callers leave these zero.
    * No C++ object or execution implementation is linked by the C core. */

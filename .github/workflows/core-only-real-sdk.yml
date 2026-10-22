@@ -241,6 +241,7 @@ jobs:
           cmake -S actions/c11/session-c-standalone -B build/ci-session-c -G Ninja -DCMAKE_BUILD_TYPE=Release
           cmake --build build/ci-session-c --parallel 2
           python3 cmake/ci/audit-c11-runtime-link.py build/ci-session-c/actions_c11_session_c_test
+          python3 cmake/ci/audit-c11-runtime-link.py build/ci-session-c/actions_c11_tree_plan_test
           ctest --test-dir build/ci-session-c --no-tests=error --output-on-failure
 
       - name: Independent Session link and run without legacy targets

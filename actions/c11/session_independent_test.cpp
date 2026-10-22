@@ -47,6 +47,9 @@ void nativeValuesAndCapacity() {
   tree.root.children.push_back(from);
   actions::Node check; check.id = "CheckExitCode"; check.params["expected"] = 42.0;
   tree.root.children.push_back(check);
+  const auto plan = actions::c11::compileTreePlan(tree, limits());
+  check(plan.source_nodes[0] == &tree.root && plan.source_nodes[1] == &tree.root.children[0]);
+  check(plan.nodes[1].parent_index == 0u && plan.source_nodes.size() == 6u);
   actions::c11::TreeExecutorSession session(tree, {}, limits(), host.hooks);
   salts_bt_node_status status = SALTS_BT_FAILURE;
   check(session.tick(&status) == SALTS_OK && status == SALTS_BT_SUCCESS);

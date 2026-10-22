@@ -220,6 +220,7 @@ jobs:
             -DCMAKE_BUILD_TYPE=Debug "-DCMAKE_C_FLAGS=$flags" -DCMAKE_EXE_LINKER_FLAGS=-fsanitize=thread
           cmake --build build/p1-session-c-tsan --parallel 2
           python3 cmake/ci/audit-c11-runtime-link.py build/p1-session-c-tsan/actions_c11_session_c_test
+          python3 cmake/ci/audit-c11-runtime-link.py build/p1-session-c-tsan/actions_c11_tree_plan_test
           export LD_LIBRARY_PATH="$SALTS_SOURCE_TSAN_ROOT/lib:$SALTS_UTILS_SOURCE_TSAN_ROOT/lib:$CHTTP_ROOT/lib:${LD_LIBRARY_PATH:-}"
           ctest --test-dir build/p1-session-c-tsan --no-tests=error --output-on-failure --timeout 90
 

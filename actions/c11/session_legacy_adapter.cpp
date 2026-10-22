@@ -1,7 +1,8 @@
 #include "core/executor.hpp"
 #include "tree_executor_session.hpp"
 #include "session_compatibility.hpp"
-#include "plan_value_reader.hpp"
+#include "plan.h"
+#include <stdexcept>
 #include <praktor/shell/shell_executor.hpp>
 
 namespace actions::c11 {
@@ -33,10 +34,7 @@ struct LegacyAdapter final : detail::SessionCompatibility {
     Praktor::Shell::ShellExecutor::emitStreamLine(line);
   }
 };
-detail::PlanValueReader reader(const actions::Blackboard& blackboard) {
-  return {[&blackboard](const std::string& key) { return blackboard.get(key); },
-          [&blackboard](const std::string& key) { return blackboard.has(key); }};
-}
+
 }
 TreeExecutorSession::TreeExecutorSession(
     const actions::Tree& tree, actions::Executor& executor,
@@ -69,16 +67,40 @@ TreeExecutorSession::TreeExecutorSession(
 int64_t resolveIntegerParameter(const actions::Node& node,
                                 const actions::Blackboard& blackboard,
                                 const char* key, int64_t default_value, bool required) {
-  return resolveIntegerParameter(node, reader(blackboard), key, default_value, required);
+  const auto it = node.params.find(key);
+  if (it == node.params.end()) {
+    if (required) throw std::invalid_argument(std::string("Missing required integer parameter: ") + key);
+    return default_value;
+  }
+  praktor_c11_leaf_parameter p{}; std::string resolved; size_t size = 0;
+  if (std::holds_alternative<std::string>(it->second)) {
+    resolved = std::get<std::string>(it->second);
+    if (resolved.size() >= 2 && resolved.front() == '{' && resolved.back() == '}') {
+      const auto name = resolved.substr(1,resolved.size()-2);
+      if (!blackboard.has(name)) throw std::invalid_argument("Missing blackboard key: " + name);
+      resolved = blackboard.get(name);
+    }
+    p.kind = PRAKTOR_C11_LEAF_STRING; p.text = resolved.c_str(); size = resolved.size();
+  } else if (std::holds_alternative<double>(it->second)) {
+    p.kind = PRAKTOR_C11_LEAF_NUMBER; p.number = std::get<double>(it->second);
+  } else { p.kind = PRAKTOR_C11_LEAF_BOOLEAN; p.boolean = std::get<bool>(it->second); }
+  int value = 0;
+  if (praktor_c11_parameter_integer(&p,size,&value) != SALTS_OK)
+    throw std::invalid_argument(std::string("Parameter must be a 32-bit integer: ") + key);
+  return value;
 }
 uint64_t resolveDurationParameter(const actions::Node& node,
                                   const actions::Blackboard& blackboard,
                                   const char* key, int64_t default_ms) {
-  return resolveDurationParameter(node, reader(blackboard), key, default_ms);
+  const auto value = resolveIntegerParameter(node,blackboard,key,default_ms);
+  if (value < 0 || static_cast<uint64_t>(value) > UINT64_MAX/UINT64_C(1000000))
+    throw std::invalid_argument("Duration must be non-negative and fit nanoseconds");
+  return static_cast<uint64_t>(value)*UINT64_C(1000000);
 }
 TreePlan compileTreePlan(const actions::Tree& tree,
                          const actions::Blackboard& blackboard,
                          const salts_bt_tree_config& limits) {
-  return compileTreePlan(tree, reader(blackboard), limits);
+  (void)blackboard; // Substituted controls are always resolved on tick.
+  return compileTreePlan(tree, limits);
 }
 } // namespace actions::c11

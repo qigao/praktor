@@ -13,6 +13,7 @@ set_target_properties(praktor_c11_native_host PROPERTIES
 set(PRAKTOR_PROCESS_RETAINER ON)
 include(${CMAKE_CURRENT_LIST_DIR}/../../shared/process/process_target.cmake)
 add_library(praktor_c11_session_core STATIC
+    ${CMAKE_CURRENT_LIST_DIR}/plan.c
     ${CMAKE_CURRENT_LIST_DIR}/session.c
     ${CMAKE_CURRENT_LIST_DIR}/session_values.c
     ${CMAKE_CURRENT_LIST_DIR}/session_controls.c)

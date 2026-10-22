@@ -143,15 +143,10 @@ if(PRAKTOR_ENABLE_C11_ACTIONS)
         add_test(NAME actions_c11_session_independent_test COMMAND actions_c11_session_independent_test)
         set_tests_properties(actions_c11_session_independent_test PROPERTIES TIMEOUT 30)
 
-        add_executable(actions_c11_tree_plan_test c11/tree_plan_test.cpp)
-        target_link_libraries(actions_c11_tree_plan_test PRIVATE praktor_actions_c11 actions)
-        target_compile_features(actions_c11_tree_plan_test PRIVATE cxx_std_17)
-        set_target_properties(actions_c11_tree_plan_test PROPERTIES
-            CXX_STANDARD 17
-            CXX_STANDARD_REQUIRED ON
-            CXX_EXTENSIONS OFF
-            FOLDER "actions/c11/tests"
-        )
+        add_executable(actions_c11_tree_plan_test c11/plan_test.c)
+        target_link_libraries(actions_c11_tree_plan_test PRIVATE praktor_c11_session_core Salts::TinyTest)
+        target_compile_features(actions_c11_tree_plan_test PRIVATE c_std_11)
+        set_target_properties(actions_c11_tree_plan_test PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF FOLDER "actions/c11/tests")
         add_test(NAME actions_c11_tree_plan_test COMMAND actions_c11_tree_plan_test)
 
         add_executable(actions_c11_tree_executor_session_test c11/tree_executor_session_test.cpp)

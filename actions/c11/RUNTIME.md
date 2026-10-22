@@ -9,13 +9,14 @@ production switch is implied by these independent execution targets.
 | `praktor_c11_value_store` | Fixed-capacity C11 values and optimistic transactions |
 | `praktor_c11_native_host` | C11 value-store owner and preallocated parameter scratch; typed `SetVariable`, `CheckExitCode`, cooperative `Sleep` and unfiltered `ParseLines` leaves |
 | `praktor_process_driver` | C11 Process I/O, bounded capture, close and explicit retainer handoff; no C++ state, thread or runtime dependency |
-| `praktor_c11_session_core` | Entire C11 Session runtime: owned bounded typed plan, dispatch/activation ownership, dynamic controls, pipeline/entry/JSON queue state and Salts::Process; no C++ compiler or runtime |
+| `praktor_c11_session_core` | C11 control compiler and entire Session runtime: owned bounded typed plan, dispatch/activation ownership, dynamic controls, pipeline/entry/JSON queue state and Salts::Process; no C++ compiler or runtime |
 | `praktor_c11_session` | Construction-only C++ AST compiler and exception boundary over `praktor_c11_session_core`; no legacy execution symbols |
 | `praktor_actions_c11` | Explicit compatibility constructors, legacy Blackboard access, Executor dispatch, environment and Shell log adaptation |
 
 The independent Session uses the host-only constructor, a construction-only
 SubTree resolver and `praktor_c11_native_host_bind()` (or explicit host hooks).
-C callers instead use `session.h` directly and link `praktor_c11_session_core`.
+C callers use `plan.h` to compile action names, arity and typed control
+parameters, then `session.h` directly and link `praktor_c11_session_core`.
 `praktor_c11_session_init()` deep-copies a validated preorder plan and typed
 parameters. Construction storage can be released immediately after init. The
 configuration bounds plan bytes, parameters per node, each resolved value and
@@ -96,8 +97,11 @@ Validation projects:
   pinned Host owners, first-tick failure cleanup, reentrancy, Sleep cancellation,
   real Shell execution and retainer transfer after Host destruction. The shared
   `audit-c11-runtime-link.py` rejects C++ execution symbols and runtime libraries.
-  Core-only and complete-source TSan run this project; Native SDK and ASan/UBSan
-  run the same C tests through the root build.
+  The former C++ plan test has been migrated to `plan_test.c` / TinyTest, with
+  all 13 scenario groups retained; AST source-pointer checks remain in the
+  independent construction bridge test. Core-only and complete-source TSan run
+  this project, and the C11 ASan/UBSan root slice runs both C executables.
+  Native SDK separately protects released-SDK compatibility.
 - `actions/c11/session-standalone`: independent C++ construction bridge link/run, including typed
   dispatch, values/capacity, cancellation/dynamic Timeout and real Process
   handoff after host destruction. Legacy targets do not exist in this project.
@@ -115,14 +119,16 @@ Validation projects:
   The value-store, Native Host, independent Session and YAML differential runners
   use Salts::TinyTest, including native C tests in the C-only build.
 
-`tree_executor_session.cpp` has been removed. Its runtime no longer exists in
-C++; the construction-only `session_ast_bridge.cpp` delegates every operation to
+`tree_executor_session.cpp`, `tree_plan.cpp` and the private C++
+`plan_value_reader.hpp` have been removed. Its runtime no longer exists in
+C++; the construction-only `session_ast_bridge.cpp` delegates node compilation and
+every execution operation to
 the same C implementation used by direct C callers. C++ exceptions are contained
 in the facade and cannot unwind through the C runtime. Compatibility dispatch is
 an explicit optional callback group; the C archive has no Executor, Blackboard,
 ExecutionContext or C++ ABI dependency.
 
-The C++ AST compiler, YAML/Workflow/SDK/CLI layers and explicit Legacy facade
+The C++ AST traversal/conversion, YAML/Workflow/SDK/CLI layers and explicit Legacy facade
 (including observer synchronization and scheduling) still remain. Removing all
 C++ is the migration goal; this step does not yet replace the default backend.
 Full WorkflowContext migration, all built-in leaves, native event queues,

@@ -74,6 +74,8 @@ static int start_process(session_impl *s, size_t node) {
     {SESSION_SHELL_CWD,"working_dir","",true}, {SESSION_SHELL_OUT,"output_key","shell_output",true},
     {SESSION_SHELL_ERR,"stderr_key","shell_stderr",true}, {SESSION_SHELL_EXIT,"exit_code_key","shell_exit_code",true}
   };
+  if (!session_parameter(s,node,"cmd"))
+    return session_error(s,SALTS_EINVAL,"Shell requires parameter 'cmd'");
   for (i = 0; i < sizeof(ports)/sizeof(ports[0]); ++i) {
     r = cache_parameter(s, node, ports[i].slot, ports[i].name, ports[i].fallback, ports[i].key);
     if (r != SALTS_OK) return r;

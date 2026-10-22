@@ -1,6 +1,7 @@
 #include "tree_executor_session.hpp"
 #include "session_compatibility.hpp"
 #include "session.h"
+#include "plan.h"
 #include <algorithm>
 #include <cstring>
 #include <exception>
@@ -9,6 +10,39 @@
 
 namespace actions::c11 {
 namespace {
+struct AstParameters {
+  std::vector<praktor_c11_leaf_parameter> values;
+  std::vector<size_t> sizes;
+  explicit AstParameters(const actions::Node& source) {
+    if (source.id.find('\0') != std::string::npos) throw std::invalid_argument("Action type contains NUL");
+    for (const auto& entry : source.params) {
+      if (entry.first.find('\0') != std::string::npos) throw std::invalid_argument("Parameter name contains NUL");
+      praktor_c11_leaf_parameter p{}; size_t size = 0;
+      p.name = entry.first.c_str();
+      if (std::holds_alternative<std::string>(entry.second)) {
+        const auto& text = std::get<std::string>(entry.second);
+        p.kind = PRAKTOR_C11_LEAF_STRING; p.text = text.c_str(); size = text.size();
+      } else if (std::holds_alternative<double>(entry.second)) {
+        p.kind = PRAKTOR_C11_LEAF_NUMBER; p.number = std::get<double>(entry.second);
+      } else { p.kind = PRAKTOR_C11_LEAF_BOOLEAN; p.boolean = std::get<bool>(entry.second); }
+      values.push_back(p); sizes.push_back(size);
+    }
+  }
+};
+void appendPlan(TreePlan& plan, const actions::Node& source, size_t parent, size_t depth,
+                const salts_bt_tree_config& limits) {
+  if (depth > limits.max_depth) throw std::length_error("Action tree exceeds configured max_depth");
+  if (plan.nodes.size() >= limits.max_nodes) throw std::length_error("Action tree exceeds configured max_nodes");
+  AstParameters params(source);
+  praktor_c11_session_node node{}; bool prune = false; char error[512];
+  const int status = praktor_c11_compile_node(&limits,source.id.c_str(),params.values.data(),params.values.size(),
+      params.sizes.data(),source.children.size(),parent,&node,&prune,error,sizeof(error));
+  if (status != SALTS_OK) throw std::invalid_argument(error);
+  const size_t index = plan.nodes.size();
+  plan.nodes.push_back(node.tree); plan.source_nodes.push_back(&source);
+  plan.terminal_actions.push_back(static_cast<TreePlanTerminalAction>(node.terminal));
+  if (!prune) for (const auto& child : source.children) appendPlan(plan,child,index,depth+1,limits);
+}
 std::string resolveSubTreeName(const actions::Node& node) {
   const auto it = node.params.find("tree");
   if (it == node.params.end()) {
@@ -105,6 +139,15 @@ actions::Tree expandSubTrees(const actions::Tree& source,
 }
 
 } // namespace
+
+TreePlan compileTreePlan(const actions::Tree& tree, const salts_bt_tree_config& limits) {
+  if (!limits.max_nodes || limits.max_nodes > UINT32_MAX || !limits.max_depth || limits.max_depth > SALTS_BT_MAX_DEPTH ||
+      !limits.max_control_iterations || limits.max_control_iterations > SALTS_BT_MAX_CONTROL_ITERATIONS)
+    throw std::invalid_argument("Invalid Salts BehaviorTree limits");
+  TreePlan plan;
+  plan.nodes.reserve(limits.max_nodes); plan.source_nodes.reserve(limits.max_nodes);
+  appendPlan(plan,tree.root,PRAKTOR_C11_BT_NO_PARENT,1,limits); return plan;
+}
 
 /* Construction metadata and an exception boundary only. All execution state,
  * ownership selection, controls and Process lifetime live in session.c. */
@@ -391,17 +434,8 @@ struct TreeExecutorSession::Impl {
     std::vector<std::vector<size_t>> sizes(nodes.size());
     for (size_t n = 0; n < nodes.size(); ++n) {
       const auto* source_node = nodeAt(n);
-      for (const auto& entry : source_node->params) {
-        praktor_c11_leaf_parameter param{}; size_t size = 0;
-        param.name = entry.first.c_str();
-        if (std::holds_alternative<std::string>(entry.second)) {
-          const auto& text = std::get<std::string>(entry.second);
-          param.kind = PRAKTOR_C11_LEAF_STRING; param.text = text.c_str(); size = text.size();
-        } else if (std::holds_alternative<double>(entry.second)) {
-          param.kind = PRAKTOR_C11_LEAF_NUMBER; param.number = std::get<double>(entry.second);
-        } else { param.kind = PRAKTOR_C11_LEAF_BOOLEAN; param.boolean = std::get<bool>(entry.second); }
-        parameters[n].push_back(param); sizes[n].push_back(size);
-      }
+      AstParameters ports(*source_node);
+      parameters[n] = std::move(ports.values); sizes[n] = std::move(ports.sizes);
       nodes[n] = {compiled_plan.nodes[n],source_node->id.c_str(),parameters[n].data(),parameters[n].size(),sizes[n].data(),
                   static_cast<praktor_c11_terminal_action>(compiled_plan.terminal_actions[n])};
     }

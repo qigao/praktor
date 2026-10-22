@@ -1,4 +1,6 @@
 #include "session.h"
+#include "plan.h"
+#include <salts/process_retainer.h>
 #include "native_host.h"
 #include <salts/clock.h>
 #include <salts/thread.h>
@@ -96,6 +98,42 @@ static void drain(cflow_process_retainer *retainer) {
 }
 
 spec("C11 Session without a C++ compiler or runtime") {
+  it("compiles action names and typed ports into an executable C plan") {
+    fixture f; praktor_c11_session_node ns[3]; bool prune; char error[128];
+    praktor_c11_leaf_parameter set_ports[] = {text("key","answer"),text("value","7")};
+    praktor_c11_leaf_parameter check_ports[] = {text("input_key","answer"),text("expected","7.0")};
+    init(&f);
+    check(praktor_c11_compile_node(&f.config.tree,"Sequence",NULL,0,NULL,2,PRAKTOR_C11_BT_NO_PARENT,&ns[0],&prune,error,sizeof(error)) == SALTS_OK && !prune);
+    check(praktor_c11_compile_node(&f.config.tree,"SetVariable",set_ports,2,NULL,0,0,&ns[1],&prune,error,sizeof(error)) == SALTS_OK && !prune);
+    check(praktor_c11_compile_node(&f.config.tree,"CheckExitCode",check_ports,2,NULL,0,0,&ns[2],&prune,error,sizeof(error)) == SALTS_OK && !prune);
+    check(praktor_c11_session_init(&f.session,&f.config,ns,3) == SALTS_OK);
+    check(drive(&f) == SALTS_BT_SUCCESS); expect(&f,"answer","7"); destroy(&f);
+  }
+  it("checks control arity before zero-budget pruning and leaves failed output untouched") {
+    fixture f; praktor_c11_session_node n = node("sentinel",SALTS_BT_NODE_LEAF,42);
+    praktor_c11_leaf_parameter zero = text("num_attempts","0"); bool prune = false; char error[16];
+    init(&f);
+    check(praktor_c11_compile_node(&f.config.tree,"Retry",&zero,1,NULL,0,PRAKTOR_C11_BT_NO_PARENT,&n,&prune,error,sizeof(error)) == SALTS_EINVAL);
+    check(n.tree.parent_index == 42 && !strcmp(n.action,"sentinel") && !prune && error[sizeof(error)-1] == '\0');
+    check(praktor_c11_compile_node(&f.config.tree,"Retry",&zero,1,NULL,1,PRAKTOR_C11_BT_NO_PARENT,&n,&prune,error,sizeof(error)) == SALTS_OK);
+    check(prune && n.tree.kind == SALTS_BT_NODE_LEAF && n.terminal == PRAKTOR_C11_TERMINAL_FAILURE);
+    check(praktor_c11_session_init(&f.session,&f.config,&n,1) == SALTS_OK);
+    check(drive(&f) == SALTS_BT_FAILURE && !f.calls); destroy(&f);
+  }
+  it("compiles bounded dynamic placeholders and validates empty Switch before lowering") {
+    fixture f; praktor_c11_session_node n; bool prune; char error[128];
+    praktor_c11_leaf_parameter p = text("num_attempts","{later}");
+    init(&f); f.config.tree.max_control_iterations = 1;
+    check(praktor_c11_compile_node(&f.config.tree,"Retry",&p,1,NULL,1,PRAKTOR_C11_BT_NO_PARENT,&n,&prune,error,sizeof(error)) == SALTS_OK);
+    check(!prune && n.tree.limit == 1 && n.tree.dynamic_parameter_mask == SALTS_BT_DYNAMIC_PARAMETER_LIMIT);
+    check(praktor_c11_compile_node(&f.config.tree,"Switch",NULL,0,NULL,0,PRAKTOR_C11_BT_NO_PARENT,&n,&prune,error,sizeof(error)) == SALTS_EINVAL);
+    p = text("variable","0");
+    check(praktor_c11_compile_node(&f.config.tree,"Switch",&p,1,NULL,0,PRAKTOR_C11_BT_NO_PARENT,&n,&prune,error,sizeof(error)) == SALTS_OK);
+    check(prune && n.terminal == PRAKTOR_C11_TERMINAL_SWITCH_FAILURE);
+    check(praktor_c11_compile_node(&f.config.tree,"UnknownControl",NULL,0,NULL,1,PRAKTOR_C11_BT_NO_PARENT,&n,&prune,error,sizeof(error)) == SALTS_EINVAL);
+    check(praktor_c11_compile_node(&f.config.tree,"SubTree",NULL,0,NULL,0,PRAKTOR_C11_BT_NO_PARENT,&n,&prune,error,sizeof(error)) == SALTS_EINVAL);
+    destroy(&f);
+  }
   it("owns a cloned typed plan after the caller changes construction storage") {
     fixture f; char action[] = "SetVariable", value[] = "original";
     praktor_c11_leaf_parameter p[] = {text("key","result"),text("value",value)};
@@ -237,6 +275,14 @@ spec("C11 Session without a C++ compiler or runtime") {
       check(status == SALTS_BT_SUCCESS && f.calls == 3);
     }
     expect(&f,"task_queue","[]"); expect(&f,"current_item","3"); destroy(&f);
+  }
+  it("preserves missing Shell command diagnostics before Process admission") {
+    fixture f; praktor_c11_session_node n = node("Shell",SALTS_BT_NODE_LEAF,PRAKTOR_C11_BT_NO_PARENT);
+    init(&f);
+    check(praktor_c11_session_init(&f.session,&f.config,&n,1) == SALTS_OK);
+    check(drive(&f) == SALTS_BT_FAILURE);
+    check(strstr(praktor_c11_session_error(&f.session),"Shell requires parameter 'cmd'") != NULL);
+    expect(&f,"shell_exit_code","-1"); destroy(&f);
   }
   it("executes Shell using only the C Session, native Host and Salts Process") {
     fixture f; cflow_process_retainer retainer = {0};
