@@ -2082,6 +2082,30 @@ int testRunOnceAndKeepRunningStateMatchExecutor() {
   return 0;
 }
 
+int testHostOnlySessionHasNoLegacyRuntimeObjects() {
+  actions::Tree tree;
+  tree.root.id = "Observe";
+  actions::c11::SubTreeRegistry registry(0u);
+  HostValueMap values{{"seed", "host-owned"}};
+  int host_calls = 0;
+  praktor_c11_bt_host hooks{};
+  hooks.tick_leaf = &hostSuccessLeaf;
+  hooks.halt_leaf = &noOpHalt;
+  hooks.user = &host_calls;
+  hooks.value_get = &hostValueGet;
+  hooks.value_set = &hostValueSet;
+  hooks.value_contains = &hostValueContains;
+  hooks.value_user = &values;
+  actions::c11::TreeExecutorSession session(
+      tree, registry.resolver(), limits(), hooks);
+  CHECK(session.validate() == SALTS_OK);
+  salts_bt_node_status status = SALTS_BT_FAILURE;
+  CHECK(session.tick(&status) == SALTS_OK);
+  CHECK(status == SALTS_BT_SUCCESS);
+  CHECK(host_calls == 1);
+  return 0;
+}
+
 int testSubTreeUsesBoundedRegistry() {
   actions::Tree inner;
   inner.name = "inner";
@@ -3400,6 +3424,7 @@ int main() {
   if (testRunOnceAndKeepRunningStateMatchExecutor() != 0) return 1;
   if (testSubTreeExpansionAndCycleRejection() != 0) return 1;
   if (testSubTreeUsesBoundedRegistry() != 0) return 1;
+  if (testHostOnlySessionHasNoLegacyRuntimeObjects() != 0) return 1;
   if (testPipelineSequencePreservesInputMutationWithinStage() != 0) return 1;
   if (testPipelineSequenceResumesActiveStageAndRestoresInput() != 0) return 1;
   if (testPipelineSequenceRestoresInputBeforeNestedSwitchSelection() != 0) return 1;
