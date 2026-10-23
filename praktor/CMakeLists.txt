@@ -35,7 +35,7 @@ set(SOURCE_FILES
     src/executors/host_tool_executor.cpp
     src/system/service_controller.cpp
     src/system/process_control_legacy_bridge.cpp
-    src/system/managed_process_win.cpp
+    src/system/process_native_legacy_bridge.cpp
     src/expressions/expression_evaluator.cpp
     src/expressions/expression_lexer.cpp
     src/util/system_info.cpp
@@ -74,7 +74,7 @@ target_link_libraries(
            Salts::CNet
            CHttp::S3
            praktor_shell
-    PRIVATE actions praktor_process_driver
+    PRIVATE actions praktor_process_driver praktor_process_native
 )
 if(ENABLE_SCRIPT_ENGINE)
     target_link_libraries(${TARGET_NAME_LIB} PUBLIC TurboScript::TurboScript)

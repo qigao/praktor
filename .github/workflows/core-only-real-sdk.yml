@@ -208,7 +208,8 @@ jobs:
         run: |
           set -euo pipefail
           python3 cmake/ci/audit-process-adapter.py build/ci-sdk/shared/shell/libpraktor_shell.a \
-            build/ci-sdk/shared/process/libpraktor_process_driver.a build/ci-sdk/praktor/libpraktor_lib.a
+            build/ci-sdk/shared/process/libpraktor_process_driver.a build/ci-sdk/praktor/libpraktor_lib.a \
+            build/ci-sdk/shared/process/libpraktor_process_native.a
 
       # Independent C-only project, with no C++ compiler or actions library.
       - name: C11 BehaviorTree adapter standalone C-only link
@@ -233,7 +234,32 @@ jobs:
           python3 cmake/ci/audit-c11-runtime-link.py build/ci-process-c/praktor_process_driver_test
           python3 cmake/ci/audit-c11-runtime-link.py build/ci-process-c/praktor_process_worker_test
           python3 cmake/ci/audit-c11-runtime-link.py build/ci-process-c/praktor_process_control_test
+          python3 cmake/ci/audit-c11-runtime-link.py build/ci-process-c/praktor_process_native_test
           ctest --test-dir build/ci-process-c --no-tests=error --output-on-failure
+
+      - name: Native application host with only the base C SDK
+        if: matrix.platform == 'linux' && matrix.sdk == 'behavior-tree'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S shared/process/native-standalone -B build/ci-native-c -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/ci-native-c --parallel 2
+          python3 cmake/ci/audit-c11-runtime-link.py build/ci-native-c/praktor_process_control_test
+          python3 cmake/ci/audit-c11-runtime-link.py build/ci-native-c/praktor_process_native_test
+          ctest --test-dir build/ci-native-c --no-tests=error --output-on-failure
+
+      - name: Windows native application execution without a C++ compiler
+        if: runner.os == 'Windows' && matrix.sdk == 'behavior-tree'
+        shell: cmd
+        run: |
+          call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64
+          if errorlevel 1 exit /b 1
+          cmake -S shared/process/native-standalone -B build/ci-native-c -G Ninja -DCMAKE_BUILD_TYPE=Release
+          if errorlevel 1 exit /b 1
+          cmake --build build/ci-native-c --parallel 2
+          if errorlevel 1 exit /b 1
+          ctest --test-dir build/ci-native-c --no-tests=error --output-on-failure
+          if errorlevel 1 exit /b 1
 
       - name: C11 Session without a C++ compiler or runtime
         if: matrix.platform == 'linux' && matrix.sdk == 'behavior-tree'
@@ -289,6 +315,7 @@ jobs:
         with:
           name: core-diagnostics-${{ matrix.rid }}-${{ matrix.sdk }}
           path: |
+            build/ci-native-c/Testing/Temporary/LastTest.log
             build/ci-session-standalone/Testing/Temporary/LastTest.log
             build/ci-session-c/Testing/Temporary/LastTest.log
             build/ci-sdk/ctest.xml

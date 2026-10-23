@@ -121,6 +121,13 @@ if(WIN32)
         PRIVATE PRAKTOR_MANAGED_PROCESS_FIXTURE="$<TARGET_FILE:managed_process_fixture>"
                 PRAKTOR_MANAGED_PROCESS_FIXTURE_ALT="$<TARGET_FILE:managed_process_fixture_alt>"
     )
+    if(TARGET praktor_process_native_test)
+        add_dependencies(praktor_process_native_test managed_process_fixture)
+        target_compile_definitions(praktor_process_native_test PRIVATE
+            PRAKTOR_NATIVE_FIXTURE="$<TARGET_FILE:managed_process_fixture>")
+        set_tests_properties(praktor_process_native_test PROPERTIES
+            RESOURCE_LOCK praktor_managed_process_fixture)
+    endif()
     if(TARGET workflow_runner_test.${TARGET_NAME_LIB})
         add_dependencies(workflow_runner_test.${TARGET_NAME_LIB} managed_process_fixture)
         target_compile_definitions(

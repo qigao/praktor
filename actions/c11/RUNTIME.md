@@ -9,6 +9,7 @@ production switch is implied by these independent execution targets.
 | `praktor_c11_value_store` | Fixed-capacity C11 values and optimistic transactions |
 | `praktor_c11_native_host` | C11 value-store owner and preallocated parameter scratch; typed `SetVariable`, `CheckExitCode`, cooperative `Sleep` and unfiltered `ParseLines` leaves |
 | `praktor_process_driver` | C11 Process I/O/retainer driver plus optional C11 joined worker with Salts thread, cancellation, synchronized observers and bounded admission copies; no C++ runtime |
+| `praktor_process_native` | C11 persistent-application controller and bounded Windows host; base Salts::Platform only, no Shell driver or C++ runtime |
 | `praktor_c11_session_core` | C11 control compiler and entire Session runtime: owned bounded typed plan, dispatch/activation ownership, dynamic controls, pipeline/entry/JSON queue state and Salts::Process; no C++ compiler or runtime |
 | `praktor_c11_session` | Construction-only C++ AST compiler and exception boundary over `praktor_c11_session_core`; no legacy execution symbols |
 | `praktor_actions_c11` | Explicit compatibility constructors, legacy Blackboard access, Executor dispatch, environment and Shell log adaptation |
@@ -97,8 +98,14 @@ Validation projects:
   controller suite covers typed arguments, idempotence, restart ordering, startup
   compensation against an exact instance despite replacement queries, late native
   calls, stop escalation, error propagation and counter wrap with a controlled
-  monotonic clock. All three executables
+  monotonic clock. All four executables
   reject C++ ABI/runtime dependencies and run against baseline and P1 profiles.
+- `shared/process/native-standalone`: `LANGUAGES C`, base Salts SDK only; rejects
+  C++ compiler, Legacy and Salts::Process targets. TinyTest directly exercises
+  native ownership, exact Unicode/session/token matching and evidence errors.
+  Windows additionally runs real escaped argv, controller start/stop, stale-token
+  rejection, persistent application survival after host destruction, bounded
+  invalid admission and repeated failed-start recovery without handle growth.
 - `actions/c11/session-c-standalone`: a `LANGUAGES C` project that rejects C++
   compiler/target loading. TinyTest exercises owned plan lifetime, bounded state,
   Switch/conditions/dynamic Retry and Timeout, pipeline/entry/JSON queue semantics,
@@ -163,8 +170,21 @@ boundary. All existing controller/executor tests also run with the script engine
 disabled, including real Windows identity/instance tests. ASan/UBSan and the
 complete-source TSan slice include this bridge suite. The C application-control
 test additionally links and runs without any C++ compiler/runtime in both SDK
-profiles. The Windows identity/native backend in `managed_process_win.cpp`
-still remains C++; migrating that backend is separate unfinished work.
+profiles. `managed_process_win.cpp` is also removed.
+`process_native_legacy_bridge.cpp` performs only legacy value conversion and
+explicit ownership of the C host. Its start result storage is reserved before
+native admission; no C++ allocation is needed to publish successful startup.
+
+The Windows host in `shared/process/src/process_native.c` owns native handles,
+Unicode/path/argv conversion, enumeration and exact instance validation. Its
+fixed buffers are allocated once at init (32768 UTF-16 units per path/command,
+131072 bytes per UTF-8 identity and 1024 bytes of diagnostics). Failed admission
+retains one cleanup handle until actual process exit; later admissions cannot
+bypass it. Bounded close returns EBUSY/EIO without discarding ownership. An
+explicit synchronous compatibility destroy joins cleanup and can block on a
+permanent native fault. Successful persistent applications outlive host close.
+This host is separate from Shell/Program, which continues using Salts::Process.
+Other platforms explicitly report unsupported, preserving existing behavior.
 Windows evidence loss during teardown gets one bounded 25 ms wait on the same
 process handle before classification; only a signaled handle means exited.
 Timeout/wait failure still returns the native error. The controller charges

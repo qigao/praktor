@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Audit Shell/Program ownership and the persistent-application control bridge.
 
-This does not cover the remaining Windows application-identity native backend.
+The native application host is separate from the Shell/Program driver.
 """
 import re
 import subprocess
@@ -44,4 +44,19 @@ if len(sys.argv) > 3:
                  r'_ZNSt6thread|_ZNSt5mutex|_ZNSt18condition_variable', control):
         raise SystemExit('C++ application bridge still owns polling/time/synchronization')
     print('Application control bridge: C owns polling, deadlines and compensation')
+    native_bridge = '\n'.join(line for line in archive.splitlines()
+                              if 'process_native_legacy_bridge' in line)
+    for symbol in ('praktor_process_native_init', 'praktor_process_native_bind',
+                   'praktor_process_native_destroy_join'):
+        if not re.search(r'\b' + symbol + r'\b', native_bridge):
+            raise SystemExit('C++ native facade must delegate to C: ' + symbol)
+    if re.search(r'CreateProcess|OpenProcess|CloseHandle|WaitForSingleObject|'
+                 r'QueryFullProcessImageName|Process32|EnumWindows|TerminateProcess|'
+                 r'steady_clock|this_thread|sleep_for|nanosleep|clock_gettime', native_bridge):
+        raise SystemExit('C++ native facade still owns native application operations')
+if len(sys.argv) > 4:
+    native = subprocess.check_output(['nm', '-u', sys.argv[4]], text=True)
+    if re.search(r'__cxa_|__gxx_|_Z[NST]|\bstd::|\bcflow_process_', native):
+        raise SystemExit('Native application C host requires C++ or the Shell process driver')
+    print('Native application host: separate C archive, no C++/Shell execution dependency')
 print('Shell/Program facade: Salts::Process owns native spawn, I/O and teardown')

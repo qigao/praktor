@@ -1,8 +1,7 @@
 if(NOT TARGET praktor_process_driver)
     add_library(praktor_process_driver STATIC
         ${CMAKE_CURRENT_LIST_DIR}/src/process_driver.c
-        ${CMAKE_CURRENT_LIST_DIR}/src/process_worker.c
-        ${CMAKE_CURRENT_LIST_DIR}/src/process_control.c)
+        ${CMAKE_CURRENT_LIST_DIR}/src/process_worker.c)
     target_include_directories(praktor_process_driver PUBLIC
         ${CMAKE_CURRENT_LIST_DIR}/include)
     target_link_libraries(praktor_process_driver PUBLIC Salts::Process PRIVATE Salts::Platform)
