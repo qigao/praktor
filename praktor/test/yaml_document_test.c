@@ -8,7 +8,8 @@
 static praktor_yaml_document *document(const char *source) {
     praktor_yaml_document *result = NULL;
     char error[256];
-    int status = praktor_yaml_document_create(vstr_from_cstr(source), &result, error, sizeof(error));
+    praktor_yaml_diagnostic diagnostic = {error, sizeof(error), PRAKTOR_YAML_FAILURE_NONE};
+    int status = praktor_yaml_document_create(vstr_from_cstr(source), &result, &diagnostic);
     info("parse status %d: %s", status, error);
     check(status == SALTS_OK && result && !error[0]);
     return result;
@@ -17,7 +18,8 @@ static praktor_yaml_document *document(const char *source) {
 static praktor_yaml_node get(praktor_yaml_node root, const char *key) {
     praktor_yaml_node result = {0};
     char error[256];
-    int status = praktor_yaml_get(root, key, &result, error, sizeof(error));
+    praktor_yaml_diagnostic diagnostic = {error, sizeof(error), PRAKTOR_YAML_FAILURE_NONE};
+    int status = praktor_yaml_get(root, key, &result, &diagnostic);
     info("key %s / status %d: %s", key, status, error);
     check(status == SALTS_OK && !error[0]);
     return result;
@@ -25,7 +27,7 @@ static praktor_yaml_node get(praktor_yaml_node root, const char *key) {
 
 static void text_is(praktor_yaml_node node, const char *expected) {
     tstr text = NULL;
-    check(praktor_yaml_scalar(node, &text, NULL, 0) == SALTS_OK);
+    check(praktor_yaml_scalar(node, &text, NULL) == SALTS_OK);
     check(text && tstr_len(text) == strlen(expected) && strcmp(text, expected) == 0);
     tstr_free(text);
 }
@@ -39,10 +41,10 @@ static void independent_document(void *argument) {
         praktor_yaml_node value = {0};
         int number = 0;
         tstr source = tstr_format("value: {}\n", index);
-        *passed = source && praktor_yaml_document_create(tstr_to_v(source), &owner, NULL, 0) == SALTS_OK;
+        *passed = source && praktor_yaml_document_create(tstr_to_v(source), &owner, NULL) == SALTS_OK;
         tstr_free(source);
-        *passed = *passed && praktor_yaml_get(praktor_yaml_root(owner), "value", &value, NULL, 0) == SALTS_OK &&
-            praktor_yaml_integer(value, &number, NULL, 0) == SALTS_OK && number == (int)index;
+        *passed = *passed && praktor_yaml_get(praktor_yaml_root(owner), "value", &value, NULL) == SALTS_OK &&
+            praktor_yaml_integer(value, &number, NULL) == SALTS_OK && number == (int)index;
         praktor_yaml_document_destroy(owner);
     }
 }
@@ -54,7 +56,8 @@ spec("C-owned YAML document and borrowed nodes") {
         size_t index;
         for (index = 0; index < 2; ++index) {
             char error[256];
-            check(praktor_yaml_document_create(empty[index], &result, error, sizeof(error)) == SALTS_EINVAL);
+            praktor_yaml_diagnostic diagnostic = {error, sizeof(error), PRAKTOR_YAML_FAILURE_NONE};
+            check(praktor_yaml_document_create(empty[index], &result, &diagnostic) == SALTS_EINVAL);
             check(result == owner && strcmp(error, "Invalid YAML input") == 0);
         }
         praktor_yaml_document_destroy(owner);
@@ -64,12 +67,12 @@ spec("C-owned YAML document and borrowed nodes") {
         praktor_yaml_document *owner = NULL, *moved;
         praktor_yaml_node value;
         tstr text = NULL;
-        check(praktor_yaml_document_create(vstr_from_buf(source, 9), &owner, NULL, 0) == SALTS_OK);
+        check(praktor_yaml_document_create(vstr_from_buf(source, 9), &owner, NULL) == SALTS_OK);
         memset(source, 'x', tstr_len(source)); tstr_free(source);
         value = get(praktor_yaml_root(owner), "value");
         moved = owner; owner = NULL;
         text_is(value, "7");
-        check(praktor_yaml_scalar(value, &text, NULL, 0) == SALTS_OK);
+        check(praktor_yaml_scalar(value, &text, NULL) == SALTS_OK);
         praktor_yaml_document_destroy(moved);
         check(strcmp(text, "7") == 0);
         tstr_free(text);
@@ -82,7 +85,7 @@ spec("C-owned YAML document and borrowed nodes") {
         check(praktor_yaml_valid(root) && praktor_yaml_is_map(root) && praktor_yaml_count(root) == 3);
         check(praktor_yaml_is_map(copy) && praktor_yaml_count(copy) == 2);
         text_is(get(copy, "name"), "Ada");
-        check(praktor_yaml_key(praktor_yaml_at(root, 1), &key, NULL, 0) == SALTS_OK);
+        check(praktor_yaml_key(praktor_yaml_at(root, 1), &key, NULL) == SALTS_OK);
         check(strcmp(key, "copy") == 0); tstr_free(key);
         check(praktor_yaml_is_seq(items) && praktor_yaml_count(items) == 2);
         text_is(praktor_yaml_at(items, 1), "b");
@@ -112,7 +115,8 @@ spec("C-owned YAML document and borrowed nodes") {
             praktor_yaml_document *owner = document(source);
             praktor_yaml_node value = get(praktor_yaml_root(owner), "value");
             char error[256];
-            int result = 71, status = praktor_yaml_integer(value, &result, error, sizeof(error));
+            praktor_yaml_diagnostic diagnostic = {error, sizeof(error), PRAKTOR_YAML_FAILURE_NONE};
+            int result = 71, status = praktor_yaml_integer(value, &result, &diagnostic);
             if (index < sizeof(expected) / sizeof(expected[0])) {
                 check(status == SALTS_OK && result == expected[index] && !error[0]);
             } else {
@@ -139,7 +143,7 @@ spec("C-owned YAML document and borrowed nodes") {
         tstr text = NULL;
         check(praktor_yaml_has(root, "a\\nb") && !praktor_yaml_has(root, "a\nb"));
         text_is(escaped, "value");
-        check(praktor_yaml_key(escaped, &text, NULL, 0) == SALTS_EINVAL && !text);
+        check(praktor_yaml_key(escaped, &text, NULL) == SALTS_EINVAL && !text);
         check(praktor_yaml_location(plain, &text) == SALTS_OK);
         check(strcmp(text, " at line 2, column 1") == 0); tstr_free(text);
         praktor_yaml_document_destroy(owner);
@@ -150,18 +154,20 @@ spec("C-owned YAML document and borrowed nodes") {
         size_t index;
         for (index = 0; index < 2; ++index) {
             char error[256];
-            check(praktor_yaml_document_create(vstr_from_cstr(invalid[index]), &result, error, sizeof(error)) == SALTS_EINVAL);
+            praktor_yaml_diagnostic diagnostic = {error, sizeof(error), PRAKTOR_YAML_FAILURE_NONE};
+            check(praktor_yaml_document_create(vstr_from_cstr(invalid[index]), &result, &diagnostic) == SALTS_EINVAL);
             check(result == owner && error[0]);
             if (!index) check(strstr(error, "Duplicate mapping key at line 2, column 1") != NULL);
         }
         {
             char error[8];
+            praktor_yaml_diagnostic diagnostic = {error, sizeof(error), PRAKTOR_YAML_FAILURE_NONE};
             vstr bad = {NULL, 1}, huge = {"x", SIZE_MAX};
             memset(error, 'x', sizeof(error));
-            check(praktor_yaml_document_create(bad, &result, error, sizeof(error)) == SALTS_EINVAL && result == owner);
+            check(praktor_yaml_document_create(bad, &result, &diagnostic) == SALTS_EINVAL && result == owner);
             check(error[7] == '\0');
-            check(praktor_yaml_document_create(huge, &result, NULL, 0) == SALTS_EINVAL && result == owner);
-            check(praktor_yaml_document_create(vstr_from_cstr(""), NULL, NULL, 0) == SALTS_EINVAL);
+            check(praktor_yaml_document_create(huge, &result, NULL) == SALTS_EINVAL && result == owner);
+            check(praktor_yaml_document_create(vstr_from_cstr(""), NULL, NULL) == SALTS_EINVAL);
         }
         text_is(get(praktor_yaml_root(owner), "keep"), "7");
         praktor_yaml_document_destroy(owner);
@@ -171,12 +177,12 @@ spec("C-owned YAML document and borrowed nodes") {
         praktor_yaml_node root = praktor_yaml_root(owner), result = root;
         tstr sentinel = tstr_dup("retained"), text = sentinel;
         int number = 71;
-        check(praktor_yaml_get(root, "absent", &result, NULL, 0) == SALTS_ENOENT && result.node == root.node);
-        check(praktor_yaml_get(root, NULL, &result, NULL, 0) == SALTS_ENOENT);
-        check(praktor_yaml_get(root, "value", NULL, NULL, 0) == SALTS_EINVAL);
-        check(praktor_yaml_scalar(root, &text, NULL, 0) == SALTS_EINVAL && text == sentinel);
-        check(praktor_yaml_key(root, &text, NULL, 0) == SALTS_EINVAL && text == sentinel);
-        check(praktor_yaml_integer(root, &number, NULL, 0) == SALTS_EINVAL && number == 71);
+        check(praktor_yaml_get(root, "absent", &result, NULL) == SALTS_ENOENT && result.node == root.node);
+        check(praktor_yaml_get(root, NULL, &result, NULL) == SALTS_ENOENT);
+        check(praktor_yaml_get(root, "value", NULL, NULL) == SALTS_EINVAL);
+        check(praktor_yaml_scalar(root, &text, NULL) == SALTS_EINVAL && text == sentinel);
+        check(praktor_yaml_key(root, &text, NULL) == SALTS_EINVAL && text == sentinel);
+        check(praktor_yaml_integer(root, &number, NULL) == SALTS_EINVAL && number == 71);
         check(praktor_yaml_location(root, NULL) == SALTS_EINVAL);
         tstr_free(sentinel); praktor_yaml_document_destroy(owner);
     }

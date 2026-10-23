@@ -4,15 +4,16 @@
 #include <fmt.h>
 #include <stdlib.h>
 #include <string.h>
-#include <tinytest.h>
 
 static unsigned failure_point, operation;
 static tstr retained_source;
+static char retained_first;
 static bool parser_alive, wrong_order;
 static bool injected(void) { return failure_point && ++operation == failure_point; }
 static void *fault_alloc(size_t size) { return injected() ? NULL : malloc(size); }
 static tstr fault_source(vstr source) {
     retained_source = injected() ? NULL : tstr_from_v(source);
+    if (retained_source && tstr_len(retained_source)) retained_first = retained_source[0];
     return retained_source;
 }
 static cyaml_doc_t *fault_parse(const char *source, size_t size, const cyaml_opts_t *options, cyaml_error_t *error) {
@@ -26,7 +27,7 @@ static void ordered_parser_free(cyaml_doc_t *document) {
     if (document) {
         /* Source must still be readable while the provider is being destroyed. */
         wrong_order = wrong_order || cyaml_src(document) != retained_source ||
-            memcmp(cyaml_src(document), "first:", 6) != 0;
+            (cyaml_src_len(document) && cyaml_src(document)[0] != retained_first);
         parser_alive = false;
     }
     cyaml_free(document);
@@ -62,10 +63,14 @@ static tstr fault_location(uint32_t line, uint32_t column) {
 #undef tstr_dup
 #undef tstr_format
 
+#ifdef PRAKTOR_YAML_FAULT_PROVIDER
+void praktor_yaml_test_fail(unsigned point) { failure_point = point; operation = 0; }
+#else
+#include <tinytest.h>
 static const char *source = "first: text\nvalue: '7'\n";
 static praktor_yaml_document *owner(void) {
     praktor_yaml_document *result = NULL;
-    check(praktor_yaml_document_create(vstr_from_cstr(source), &result, NULL, 0) == SALTS_OK);
+    check(praktor_yaml_document_create(vstr_from_cstr(source), &result, NULL) == SALTS_OK);
     return result;
 }
 
@@ -75,12 +80,16 @@ spec("C YAML owner and output rollback at every provider boundary") {
         for (point = 1; point < 8; ++point) {
             praktor_yaml_document previous = {0}, *result = &previous;
             char error[256];
+            praktor_yaml_diagnostic diagnostic = {error, sizeof(error), PRAKTOR_YAML_FAILURE_NONE};
             int status;
             operation = 0; failure_point = point; parser_alive = false; wrong_order = false;
-            status = praktor_yaml_document_create(vstr_from_cstr(source), &result, error, sizeof(error));
+            status = praktor_yaml_document_create(vstr_from_cstr(source), &result, &diagnostic);
             failure_point = 0;
             if (status == SALTS_OK) praktor_yaml_document_destroy(result);
-            else check(status == SALTS_ENOMEM && result == &previous && error[0]);
+            else {
+                check(status == SALTS_ENOMEM && result == &previous && error[0]);
+                check(diagnostic.origin == (point == 3 ? PRAKTOR_YAML_FAILURE_PROVIDER : PRAKTOR_YAML_FAILURE_ALLOCATION));
+            }
             check(!parser_alive && !wrong_order);
             if (status == SALTS_OK) break;
         }
@@ -94,11 +103,15 @@ spec("C YAML owner and output rollback at every provider boundary") {
                 praktor_yaml_node value = praktor_yaml_at(praktor_yaml_root(document), 1);
                 tstr previous = tstr_dup("retained"), result = previous;
                 int status;
+                praktor_yaml_diagnostic diagnostic = {NULL, 0, PRAKTOR_YAML_FAILURE_NONE};
                 operation = 0; failure_point = point;
-                status = action ? praktor_yaml_key(value, &result, NULL, 0) : praktor_yaml_scalar(value, &result, NULL, 0);
+                status = action ? praktor_yaml_key(value, &result, &diagnostic) : praktor_yaml_scalar(value, &result, &diagnostic);
                 failure_point = 0;
                 if (status == SALTS_OK) { check(strcmp(result, action ? "value" : "7") == 0); tstr_free(result); }
-                else check(status == SALTS_ENOMEM && result == previous);
+                else {
+                    check(status == SALTS_ENOMEM && result == previous);
+                    check(diagnostic.origin == (point == 1 ? PRAKTOR_YAML_FAILURE_PROVIDER : PRAKTOR_YAML_FAILURE_ALLOCATION));
+                }
                 tstr_free(previous); praktor_yaml_document_destroy(document);
                 check(!parser_alive && !wrong_order);
                 if (status == SALTS_OK) break;
@@ -113,7 +126,7 @@ spec("C YAML owner and output rollback at every provider boundary") {
             praktor_yaml_node root = praktor_yaml_root(document), result = root;
             int status;
             operation = 0; failure_point = point;
-            status = praktor_yaml_get(root, "value", &result, NULL, 0);
+            status = praktor_yaml_get(root, "value", &result, NULL);
             failure_point = 0;
             if (status != SALTS_OK) {
                 check(status == SALTS_ENOMEM && result.document == root.document && result.node == root.node && result.key_node == root.key_node);
@@ -133,7 +146,7 @@ spec("C YAML owner and output rollback at every provider boundary") {
                 tstr previous = tstr_dup("retained"), result = previous;
                 int number = 71, status;
                 operation = 0; failure_point = point;
-                status = !action ? praktor_yaml_integer(node, &number, NULL, 0) :
+                status = !action ? praktor_yaml_integer(node, &number, NULL) :
                     praktor_yaml_location(action == 1 ? node : empty, &result);
                 failure_point = 0;
                 if (status != SALTS_OK) check(status == SALTS_ENOMEM && number == 71 && result == previous);
@@ -147,3 +160,5 @@ spec("C YAML owner and output rollback at every provider boundary") {
         }
     }
 }
+
+#endif

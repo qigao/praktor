@@ -13,9 +13,26 @@ extern "C" {
  * document owner retains a copy of the source borrowed by the real YAML parser.
  * Transfer its pointer rather than copying it; destroy frees nodes before text.
  * Create leaves *out untouched on failure. Input lengths must fit YAML spans. */
+typedef enum praktor_yaml_failure {
+    PRAKTOR_YAML_FAILURE_NONE = 0,
+    PRAKTOR_YAML_FAILURE_INPUT,
+    PRAKTOR_YAML_FAILURE_ALLOCATION,
+    PRAKTOR_YAML_FAILURE_PROVIDER
+} praktor_yaml_failure;
+
+/* Borrowed diagnostic storage. Each operation resets origin/text, then reports
+ * its failure source independently of message wording. This lets the temporary
+ * facade retain std::bad_alloc for owner/text allocations and ordinary exceptions
+ * for provider failures, even when both return SALTS_ENOMEM. NULL suppresses it. */
+typedef struct praktor_yaml_diagnostic {
+    char *text;
+    size_t capacity;
+    praktor_yaml_failure origin;
+} praktor_yaml_diagnostic;
+
 typedef struct praktor_yaml_document praktor_yaml_document;
 int praktor_yaml_document_create(vstr source, praktor_yaml_document **out,
-    char *error, size_t capacity);
+    praktor_yaml_diagnostic *error);
 void praktor_yaml_document_destroy(praktor_yaml_document *document);
 
 /* Immutable borrowed handles, valid only while their document owner lives.
@@ -43,19 +60,19 @@ praktor_yaml_node praktor_yaml_at(praktor_yaml_node node, size_t index);
  * is untouched on failure. has() uses the provider without decoding/allocating. */
 bool praktor_yaml_has(praktor_yaml_node node, const char *key);
 int praktor_yaml_get(praktor_yaml_node node, const char *key,
-    praktor_yaml_node *out, char *error, size_t capacity);
+    praktor_yaml_node *out, praktor_yaml_diagnostic *error);
 
 /* Successful text outputs are unique tstr owners released with tstr_free().
  * Outputs are untouched on failure; previous output owners remain the caller's
  * responsibility. Scalar decoding retains legacy truncation at decoded NUL,
  * because the supported public provider API returns a C string without length.
  * Location text is empty or " at line N, column N", preferring the mapping key. */
-int praktor_yaml_scalar(praktor_yaml_node node, tstr *out, char *error, size_t capacity);
-int praktor_yaml_key(praktor_yaml_node node, tstr *out, char *error, size_t capacity);
+int praktor_yaml_scalar(praktor_yaml_node node, tstr *out, praktor_yaml_diagnostic *error);
+int praktor_yaml_key(praktor_yaml_node node, tstr *out, praktor_yaml_diagnostic *error);
 int praktor_yaml_location(praktor_yaml_node node, tstr *out);
 /* Strict decoded decimal int (no +, spaces, bases, separators or fractions),
  * including quoted integers, matching the prior from_chars<int> contract. */
-int praktor_yaml_integer(praktor_yaml_node node, int *out, char *error, size_t capacity);
+int praktor_yaml_integer(praktor_yaml_node node, int *out, praktor_yaml_diagnostic *error);
 /* Optional semantic integer 0/1 only; ENOENT for other values/types. */
 int praktor_yaml_bool_integer(praktor_yaml_node node, bool *out);
 

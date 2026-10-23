@@ -2,6 +2,7 @@
 
 #include "data/structured_document_query.hpp"
 #include "../src/yml/yaml_document.hpp"
+#include <new>
 
 using Praktor::Data::StructuredDocumentQuery;
 using Praktor::Data::StructuredFormat;
@@ -177,3 +178,53 @@ spec("YAML C ownership through the temporary parser facade") {
         }, {"Duplicate mapping key at line 2, column 1"}));
     }
 }
+
+#ifdef PRAKTOR_YAML_FAULT_TEST
+extern "C" void praktor_yaml_test_fail(unsigned point);
+
+// Restore fault injection even if an assertion unwinds the TinyTest case.
+struct YamlFaultScope {
+    explicit YamlFaultScope(unsigned point) { praktor_yaml_test_fail(point); }
+    ~YamlFaultScope() { praktor_yaml_test_fail(0); }
+};
+
+template<class Operation>
+static void yaml_failure_kind(unsigned point, bool allocation, Operation operation) {
+    bool caught = false;
+    try { YamlFaultScope fault(point); operation(); }
+    catch (const std::bad_alloc&) { caught = allocation; }
+    catch (const std::runtime_error&) { caught = !allocation; }
+    check(caught);
+}
+
+spec("YAML typed failure origin preserves legacy allocation exceptions") {
+    it("distinguishes owner/source allocation from provider parse failure") {
+        for (unsigned point = 1; point <= 3; ++point)
+            yaml_failure_kind(point, point != 3, [] {
+                TaskYamlDetail::YamlDocument document("first: text\nvalue: '7'\n");
+            });
+    }
+    it("distinguishes provider scalar decoding from owned text allocation") {
+        TaskYamlDetail::YamlDocument document("first: text\nvalue: '7'\n");
+        const auto value = *++document.root().begin();
+        yaml_failure_kind(1, false, [&] { (void)value.scalar(); });
+        yaml_failure_kind(2, true, [&] { (void)value.scalar(); });
+        yaml_failure_kind(1, false, [&] { (void)value.key(); });
+        yaml_failure_kind(2, true, [&] { (void)value.key(); });
+        check(value.scalar() == "7");
+    }
+    it("preserves lookup, integer and location allocation categories") {
+        TaskYamlDetail::YamlDocument document("first: text\nvalue: '7'\n");
+        const auto root = document.root(), value = *++root.begin();
+        for (unsigned point = 1; point <= 4; ++point)
+            yaml_failure_kind(point, point % 2 == 0, [&] { (void)root["value"]; });
+        int number = 71;
+        yaml_failure_kind(1, false, [&] { value >> number; });
+        yaml_failure_kind(2, true, [&] { value >> number; });
+        check(number == 71);
+        yaml_failure_kind(1, true, [&] { (void)value.location(); });
+        value >> number;
+        check(number == 7);
+    }
+}
+#endif

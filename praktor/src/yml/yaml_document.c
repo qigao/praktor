@@ -11,42 +11,55 @@ struct praktor_yaml_document {
     cyaml_doc_t *parsed;
 };
 
-static void clear_error(char *error, size_t capacity) {
-    if (error && capacity) error[0] = '\0';
+static void clear_error(praktor_yaml_diagnostic *error) {
+    if (!error) return;
+    error->origin = PRAKTOR_YAML_FAILURE_NONE;
+    if (error->text && error->capacity) error->text[0] = '\0';
 }
 
-static int fail(char *error, size_t capacity, int status, const char *message) {
-    if (error && capacity) (void)fmt(error, capacity, "{}", message);
+static int fail(praktor_yaml_diagnostic *error, int status, const char *message) {
+    if (error) {
+        error->origin = status == SALTS_ENOMEM ? PRAKTOR_YAML_FAILURE_ALLOCATION : PRAKTOR_YAML_FAILURE_INPUT;
+        if (error->text && error->capacity) (void)fmt(error->text, error->capacity, "{}", message);
+    }
     return status;
 }
 
-static int fail_at(char *error, size_t capacity, int status,
+static int fail_at(praktor_yaml_diagnostic *error, int status,
     const char *message, cyaml_span_t location) {
-    if (!location.start_line) return fail(error, capacity, status, message);
-    if (error && capacity) (void)fmt(error, capacity,
-        "{} at line {}, column {}", message, location.start_line, location.start_col);
+    (void)fail(error, status, message);
+    if (location.start_line && error && error->text && error->capacity)
+        (void)fmt(error->text, error->capacity, "{} at line {}, column {}",
+            message, location.start_line, location.start_col);
+    return status;
+}
+
+static int provider_fail(praktor_yaml_diagnostic *error, int status,
+    const char *message, cyaml_span_t location) {
+    (void)fail_at(error, status, message, location);
+    if (error) error->origin = PRAKTOR_YAML_FAILURE_PROVIDER;
     return status;
 }
 
 int praktor_yaml_document_create(vstr source, praktor_yaml_document **out,
-    char *error, size_t capacity) {
+    praktor_yaml_diagnostic *error) {
     praktor_yaml_document *owner;
     cyaml_error_t diagnostic = {0};
-    clear_error(error, capacity);
+    clear_error(error);
     if (!out || !vstr_is_valid(source) || source.len > UINT32_MAX || source.len == SIZE_MAX)
-        return fail(error, capacity, SALTS_EINVAL, "Invalid YAML source or output");
+        return fail(error, SALTS_EINVAL, "Invalid YAML source or output");
     owner = (praktor_yaml_document *)malloc(sizeof(*owner));
-    if (!owner) return fail(error, capacity, SALTS_ENOMEM, "Failed to allocate YAML document");
+    if (!owner) return fail(error, SALTS_ENOMEM, "Failed to allocate YAML document");
     owner->source = tstr_from_v(source);
     if (!owner->source) {
         free(owner);
-        return fail(error, capacity, SALTS_ENOMEM, "Failed to retain YAML source");
+        return fail(error, SALTS_ENOMEM, "Failed to retain YAML source");
     }
     owner->parsed = cyaml_parse(owner->source, tstr_len(owner->source), NULL, &diagnostic);
     if (!owner->parsed) {
         tstr_free(owner->source);
         free(owner);
-        return fail_at(error, capacity, diagnostic.code == CYAML_ERR_NOMEM ? SALTS_ENOMEM : SALTS_EINVAL,
+        return provider_fail(error, diagnostic.code == CYAML_ERR_NOMEM ? SALTS_ENOMEM : SALTS_EINVAL,
             diagnostic.msg[0] ? diagnostic.msg : "Invalid YAML input", diagnostic.span);
     }
     *out = owner;
@@ -109,28 +122,28 @@ bool praktor_yaml_has(praktor_yaml_node node, const char *key) {
 }
 
 static int scalar_text(const cyaml_doc_t *document, cyaml_node_t *node,
-    tstr *out, char *error, size_t capacity) {
+    tstr *out, praktor_yaml_diagnostic *error) {
     char *decoded;
     tstr result;
     node = resolve_alias(node);
     if (!out || !document || !cyaml_is_scalar(node))
-        return fail(error, capacity, SALTS_EINVAL, "Expected YAML scalar");
+        return fail(error, SALTS_EINVAL, "Expected YAML scalar");
     decoded = cyaml_scalar_str(document, node);
-    if (!decoded) return fail(error, capacity, SALTS_ENOMEM, "Failed to decode YAML scalar");
+    if (!decoded) return provider_fail(error, SALTS_ENOMEM, "Failed to decode YAML scalar", (cyaml_span_t){0});
     result = tstr_dup(decoded);
     free(decoded);
-    if (!result) return fail(error, capacity, SALTS_ENOMEM, "Failed to decode YAML scalar");
+    if (!result) return fail(error, SALTS_ENOMEM, "Failed to decode YAML scalar");
     *out = result;
     return SALTS_OK;
 }
 
 int praktor_yaml_get(praktor_yaml_node node, const char *key,
-    praktor_yaml_node *out, char *error, size_t capacity) {
+    praktor_yaml_node *out, praktor_yaml_diagnostic *error) {
     praktor_yaml_node result = {node.document, NULL, NULL};
     cyaml_node_t *mapping = resolve_alias(node.node);
     uint32_t index;
-    clear_error(error, capacity);
-    if (!out) return fail(error, capacity, SALTS_EINVAL, "Missing YAML node output");
+    clear_error(error);
+    if (!out) return fail(error, SALTS_EINVAL, "Missing YAML node output");
     if (!key || !cyaml_is_map(mapping)) return SALTS_ENOENT;
     result.node = cyaml_get(node.document, mapping, key);
     if (!result.node) return SALTS_ENOENT;
@@ -138,7 +151,7 @@ int praktor_yaml_get(praktor_yaml_node node, const char *key,
         cyaml_pair_t *pair = cyaml_map_at(mapping, index);
         if (pair && cyaml_is_scalar(resolve_alias(pair->key))) {
             tstr text = NULL;
-            int status = scalar_text(node.document, pair->key, &text, error, capacity);
+            int status = scalar_text(node.document, pair->key, &text, error);
             bool matched;
             if (status != SALTS_OK) return status;
             matched = strcmp(text, key) == 0;
@@ -150,14 +163,14 @@ int praktor_yaml_get(praktor_yaml_node node, const char *key,
     return SALTS_OK;
 }
 
-int praktor_yaml_scalar(praktor_yaml_node node, tstr *out, char *error, size_t capacity) {
-    clear_error(error, capacity);
-    return scalar_text(node.document, node.node, out, error, capacity);
+int praktor_yaml_scalar(praktor_yaml_node node, tstr *out, praktor_yaml_diagnostic *error) {
+    clear_error(error);
+    return scalar_text(node.document, node.node, out, error);
 }
 
-int praktor_yaml_key(praktor_yaml_node node, tstr *out, char *error, size_t capacity) {
-    clear_error(error, capacity);
-    return scalar_text(node.document, node.key_node, out, error, capacity);
+int praktor_yaml_key(praktor_yaml_node node, tstr *out, praktor_yaml_diagnostic *error) {
+    clear_error(error);
+    return scalar_text(node.document, node.key_node, out, error);
 }
 
 static bool find_location(cyaml_node_t *node, cyaml_span_t *out) {
@@ -191,16 +204,16 @@ int praktor_yaml_location(praktor_yaml_node node, tstr *out) {
     return SALTS_OK;
 }
 
-int praktor_yaml_integer(praktor_yaml_node node, int *out, char *error, size_t capacity) {
+int praktor_yaml_integer(praktor_yaml_node node, int *out, praktor_yaml_diagnostic *error) {
     tstr text = NULL;
     char *end;
     intmax_t parsed;
     size_t index;
     bool decimal;
     int status, saved_errno = errno, conversion_errno;
-    clear_error(error, capacity);
-    if (!out) return fail(error, capacity, SALTS_EINVAL, "Missing YAML integer output");
-    status = scalar_text(node.document, node.node, &text, error, capacity);
+    clear_error(error);
+    if (!out) return fail(error, SALTS_EINVAL, "Missing YAML integer output");
+    status = scalar_text(node.document, node.node, &text, error);
     if (status != SALTS_OK) return status;
     index = text[0] == '-' ? 1u : 0u;
     decimal = index < tstr_len(text);
@@ -213,7 +226,7 @@ int praktor_yaml_integer(praktor_yaml_node node, int *out, char *error, size_t c
     if (!decimal || end == text ||
         end != text + tstr_len(text) || conversion_errno == ERANGE || parsed < INT_MIN || parsed > INT_MAX) {
         tstr_free(text);
-        return fail_at(error, capacity, SALTS_ERANGE, "Expected YAML integer", node_location(node));
+        return fail_at(error, SALTS_ERANGE, "Expected YAML integer", node_location(node));
     }
     tstr_free(text);
     *out = (int)parsed;

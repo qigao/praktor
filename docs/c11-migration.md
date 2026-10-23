@@ -174,7 +174,13 @@ YAML documents now have a separate C target linking only Salts Core and the
 existing YAML provider. Its opaque owner copies source into `tstr`, retains that
 buffer for the provider's borrowed spans, and frees parser nodes before source.
 Moving the owner pointer preserves borrowed node handles; destroying it invalidates
-them. Returned scalar/key/location text has independent `tstr` ownership. Failed
+them. Returned scalar/key/location text has independent `tstr` ownership. Bounded
+borrowed diagnostic buffers also report a typed failure origin. The temporary
+facade retains `bad_alloc` for owner/text allocation and the original ordinary
+exception for a provider failure, including provider-reported memory exhaustion;
+this preserves SDK out-of-memory classification without inspecting message text.
+Cross-language fault tests exercise both error categories in the actual bridge.
+Failed
 construction or decoding publishes no partial owner, node or text output.
 
 The provider keeps its default parsing policy and duplicate-key refusal. Sources
