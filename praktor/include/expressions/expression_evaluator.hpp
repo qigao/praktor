@@ -9,7 +9,7 @@
 
 class WorkflowContext;
 
-// Temporary C++ facade over expression_evaluator.h and an explicit regex Host.
+// Temporary C++ facade over the C evaluator/Salts regex provider and WorkflowContext.
 
 namespace Praktor::Expressions {
 

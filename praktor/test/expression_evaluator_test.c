@@ -1,4 +1,5 @@
 #include "expressions/expression_evaluator.h"
+#include "expressions/expression_regex_salts.h"
 #include <fmt.h>
 #include <math.h>
 #include <salts/thread.h>
@@ -37,8 +38,7 @@ static int resolve(void *user, vstr path, size_t max_bytes, praktor_expression_v
     }
     return praktor_expression_value_copy_string(text, max_bytes, out);
 }
-/* Protocol mock only: this is not a regex implementation or matching test.
- * Real std::regex behavior remains covered by the C++ integration suite. */
+/* Protocol mock only: provider behavior is covered independently below. */
 static int compile(void *user, vstr pattern, void **out, char *error, size_t capacity) {
     fixture *state = user;
     ++state->compiles;
@@ -232,5 +232,27 @@ spec("C expression evaluator") {
         check(created == 4 && joined);
         for (index = 0; index < created; ++index)
             check(!states[index].failed && states[index].state.resolves == 750);
+    }
+}
+
+spec("Salts expression regex provider") {
+    it("supports bounded byte matching and lookahead without C++") {
+        praktor_expression_host hooks = {0};
+        praktor_expression_value value = {0};
+        int truthy = 0;
+        char error[256];
+        check(praktor_expression_regex_salts_bind(&hooks) == SALTS_OK);
+        check(praktor_expression_evaluate(vstr_from_cstr("/^(ab)+$/.test('abab')"),
+            &hooks, NULL, &value, &truthy, error, sizeof(error)) == SALTS_OK && truthy);
+        praktor_expression_value_destroy(&value);
+        check(praktor_expression_evaluate(vstr_from_cstr("/a(?=b)/.test('ab')"),
+            &hooks, NULL, &value, &truthy, error, sizeof(error)) == SALTS_OK && truthy);
+        praktor_expression_value_destroy(&value);
+        check(praktor_expression_evaluate(vstr_from_cstr("/a(?!b)/.test('ac')"),
+            &hooks, NULL, &value, &truthy, error, sizeof(error)) == SALTS_OK && truthy);
+        praktor_expression_value_destroy(&value);
+        check(praktor_expression_evaluate(vstr_from_cstr("/[/"), &hooks, NULL,
+            &value, &truthy, error, sizeof(error)) == SALTS_EINVAL);
+        check(strstr(error, "invalid pattern") != NULL);
     }
 }

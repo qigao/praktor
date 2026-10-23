@@ -54,7 +54,7 @@ the rollback point; partial migration is not released as the completed product.
 | Area | Current migration state | Required next state |
 | --- | --- | --- |
 | Schema maintenance tool | C projection, CLI and TinyTest tests; no `WorkflowValue`, `praktor_lib` or C++ link | Preserve generated grammar and all existing refusal rules |
-| Expressions | C lexer, bounded parser/coercion/comparison/string methods, typed variable/regex Host; old evaluator implementation removed | C context and compatible C regex provider replace the explicit temporary C++ adapter |
+| Expressions | C lexer/evaluator plus bounded Salts/Core regex provider; only `WorkflowContext` and public variant conversion remain in the temporary C++ facade | C context/callers replace the remaining facade |
 | Structured document queries | C JSONPath/YPATH/XPath/CSVPath dispatch and owned results; explicit temporary C++ value/exception bridge | Migrate remaining `WorkflowValue` callers, then delete the bridge |
 | Workflow values | C exact numeric conversion, borrowed path reads, transactional mutations over the existing Salts JSON owner; temporary C++ container/exception facade | Migrate callers and remove the facade |
 | YAML documents, fields, structured values and system parameters | C source/document owner, node access, scalar/int conversion, bounded field readers, key whitelist validation and owned contract/HostTool value conversion, Download/Service/ManagedProcess/Command/Program parameter construction, shared string containers and Each/Triggers/DynamicTasks/Uses construction; explicit temporary C++ iterator/exception facade | Port remaining YAML task/workflow field construction, then delete the facade |
@@ -106,21 +106,23 @@ or dispatch through a hidden legacy path. Internal C callers may supply explicit
 input/token/string limits and a depth up to 128. This intentionally bounds
 previously unbounded C++ parsing; unusually large/deep expressions are rejected
 with a diagnostic. The installed SDK ABI and ordinary expression syntax remain
-unchanged. Scratch/value memory limits do not bound execution inside a Host
-regex provider; that provider still owns its execution/resource policy.
+unchanged. The Salts provider separately bounds pattern/text bytes, depth, steps
+and workspace with `re_limits_default`; it preserves byte lengths and supports
+the lookahead/escape syntax exercised by the compatibility suite.
 
 Variable reads and regex compile/search/destroy are explicit synchronous typed
 Host operations. The callback tuple must be complete. Every returned regex
 handle, including a partial handle on failure, has one destruction owner.
 The C core never contains or discovers a C++ context/regex implementation.
-`expression_evaluator_legacy_bridge.cpp` temporarily supplies `WorkflowContext`
-conversion, the original `std::regex` provider, public variant conversion and
-the existing warning/failure boundary. It is not a native C regex implementation
-and must be removed when its providers/callers migrate. The alternative of
-substituting a smaller incompatible regex engine was rejected. Stateless
-concurrent callers and reentrant evaluation from a Host callback have executable
-C tests; the regex protocol mock tests ownership only, while real matching is
-covered by the application suite. Original C++ evaluator algorithms are deleted.
+`praktor_expression_regex_salts_bind()` installs the C compile/search/destroy
+tuple without changing the caller's resolver or user pointer. The C-only suite
+now exercises real anchored repetition, positive/negative lookahead and invalid
+patterns in addition to the ownership protocol mock. The application bridge
+uses this provider and no longer contains or links `std::regex`; it temporarily
+supplies only `WorkflowContext` conversion, public variant conversion and the
+existing warning/failure boundary. Stateless concurrent callers and reentrant
+evaluation from a Host callback remain covered. Original C++ evaluator
+algorithms are deleted.
 
 `praktor/src/data/standalone` links the real Salts JSON/YAML/XML/CSV query
 providers with a C compiler only. Query results own independent JSON trees;

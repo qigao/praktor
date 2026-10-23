@@ -1,14 +1,13 @@
 #include "expressions/expression_evaluator.hpp"
 #include "expressions/expression_evaluator.h"
+#include "expressions/expression_regex_salts.h"
 #include "dag/workflow_context.hpp"
 #include "util/logging.hpp"
 #include <fmt.h>
 #include <new>
-#include <regex>
 
-// Temporary Host/value adapter. Parsing, coercion, truthiness, comparison and
-// string methods belong to C. std::regex remains an explicit provider until
-// an independent C provider proves compatibility with its matching language.
+// Temporary value adapter. Parsing, regex, coercion, truthiness, comparison and
+// string methods belong to C; only WorkflowContext resolution remains here.
 namespace Praktor::Expressions {
 namespace {
 int host_error(char *error, size_t capacity, const char *message, int status = SALTS_EIO) {
@@ -33,31 +32,15 @@ int resolve(void *user, vstr path, size_t max_bytes, praktor_expression_value *o
     catch (const std::exception& e) { return host_error(error, capacity, e.what()); }
     catch (...) { return host_error(error, capacity, "Unknown expression variable Host error"); }
 }
-int compile(void *, vstr pattern, void **out, char *error, size_t capacity) {
-    try {
-        *out = new std::regex(std::string(pattern.data, pattern.len));
-        return SALTS_OK;
-    } catch (const std::bad_alloc& e) { return host_error(error, capacity, e.what(), SALTS_ENOMEM); }
-    catch (const std::exception& e) { return host_error(error, capacity, e.what()); }
-    catch (...) { return host_error(error, capacity, "Unknown expression regex compile error"); }
-}
-int search(void *, void *regex, vstr text, int *matches, char *error, size_t capacity) {
-    try {
-        const std::string input(text.data, text.len);
-        *matches = std::regex_search(input, *static_cast<std::regex *>(regex));
-        return SALTS_OK;
-    } catch (const std::bad_alloc& e) { return host_error(error, capacity, e.what(), SALTS_ENOMEM); }
-    catch (const std::exception& e) { return host_error(error, capacity, e.what()); }
-    catch (...) { return host_error(error, capacity, "Unknown expression regex search error"); }
-}
-void destroy(void *, void *regex) { delete static_cast<std::regex *>(regex); }
 struct ValueOwner {
     praktor_expression_value value{};
     ~ValueOwner() { praktor_expression_value_destroy(&value); }
 };
 int evaluate(const std::string& expression, const WorkflowContext& context,
     praktor_expression_value *out, int *truthy, char *error, size_t capacity) {
-    const praktor_expression_host host{const_cast<WorkflowContext *>(&context), resolve, compile, search, destroy};
+    praktor_expression_host host{const_cast<WorkflowContext *>(&context), resolve, nullptr, nullptr, nullptr};
+    if (praktor_expression_regex_salts_bind(&host) != SALTS_OK)
+        return host_error(error, capacity, "Cannot bind expression regex provider");
     return praktor_expression_evaluate(vstr_from_buf(expression.data(), expression.size()), &host,
         nullptr, out, truthy, error, capacity);
 }
