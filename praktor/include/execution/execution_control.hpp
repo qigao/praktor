@@ -92,7 +92,7 @@ public:
 
 private:
     static constexpr std::int64_t kNotRequested =
-        std::numeric_limits<std::int64_t>::max();
+        (std::numeric_limits<std::int64_t>::max)();
 
     static std::int64_t toNanoseconds(Clock::time_point value) noexcept
     {
