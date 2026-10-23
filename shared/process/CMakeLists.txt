@@ -6,6 +6,11 @@ if(ENABLE_TESTS)
     set_target_properties(praktor_process_native_test PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF LINKER_LANGUAGE C)
     add_test(NAME praktor_process_native_test COMMAND praktor_process_native_test)
     set_tests_properties(praktor_process_native_test PROPERTIES TIMEOUT 30)
+    if(WIN32)
+        # Test properties are scoped to the directory that declares the test.
+        set_tests_properties(praktor_process_native_test PROPERTIES
+            RESOURCE_LOCK praktor_managed_process_fixture)
+    endif()
     add_executable(praktor_process_control_test test/process_control_test.c)
     target_link_libraries(praktor_process_control_test PRIVATE praktor_process_native Salts::TinyTest Salts::Platform)
     set_target_properties(praktor_process_control_test PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF LINKER_LANGUAGE C)
