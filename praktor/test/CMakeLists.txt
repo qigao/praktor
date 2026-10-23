@@ -30,7 +30,6 @@ if(ENABLE_SCRIPT_ENGINE)
         matrix_test.cpp
         script_engine_test.cpp
         declarative_tree_executor_test.cpp
-        service_executor_test.cpp
         structured_document_query_test.cpp
     )
 else()
@@ -38,6 +37,7 @@ else()
 endif()
 
 list(APPEND TEST_SOURCES
+    service_executor_test.cpp
     managed_process_executor_test.cpp
     download_executor_test.cpp
     workflow_execution_regression_test.cpp
