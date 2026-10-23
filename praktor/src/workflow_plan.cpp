@@ -1,7 +1,7 @@
 #include "workflow_plan.hpp"
 #include "workflow_contract.hpp"
 #include "workflow_effects.hpp"
-#include "workflow_profile.hpp"
+#include "profile/workflow_profile.h"
 
 #include "util/path_utils.hpp"
 #include "yml/task_parser.hpp"
@@ -64,6 +64,33 @@ std::string joinRoles(const std::vector<std::string>& roles) {
         result += roles[index];
     }
     return result;
+}
+
+WorkflowValue harnessSafeProfile(
+    const Workflow& workflow,
+    const Praktor::Effects::EffectManifest& effects) {
+    praktor_profile_input input = {};
+    input.strict_inputs = workflow.strict_inputs ? 1 : 0;
+    input.output_count = workflow.outputs.size();
+    input.unknown_effects = effects.unknown_effects ? 1 : 0;
+    if (effects.effects.count("outside_workspace") != 0)
+        input.effects |= PRAKTOR_PROFILE_EFFECT_OUTSIDE_WORKSPACE;
+    if (effects.effects.count("native_extension") != 0)
+        input.effects |= PRAKTOR_PROFILE_EFFECT_NATIVE_EXTENSION;
+    if (effects.effects.count("model_api") != 0)
+        input.effects |= PRAKTOR_PROFILE_EFFECT_MODEL_API;
+    const uint32_t reasons = praktor_profile_evaluate_harness_safe(&input);
+    WorkflowValue report = WorkflowValue::object();
+    report["qualified"] = reasons == 0u;
+    WorkflowValue reason_values = WorkflowValue::array();
+    const size_t count = praktor_profile_reason_count(reasons);
+    for (size_t index = 0; index < count; ++index) {
+        const char* reason = praktor_profile_reason_at(reasons, index);
+        if (reason == nullptr) throw std::logic_error("Invalid C workflow profile reason mask");
+        reason_values.push_back(reason);
+    }
+    report["reasons"] = std::move(reason_values);
+    return report;
 }
 
 bool identifierChar(char ch) {
@@ -158,7 +185,7 @@ public:
         const auto effects = Praktor::Effects::analyzeWorkflow(root_path_);
         WorkflowValue profiles = WorkflowValue::object();
         profiles["harness_safe"] =
-            Praktor::Profile::evaluateHarnessSafe(root_workflow, effects).toValue();
+            harnessSafeProfile(root_workflow, effects);
 
         std::sort(host_tools_.begin(), host_tools_.end(),
                   [](const WorkflowHostTool& lhs, const WorkflowHostTool& rhs) {
@@ -542,7 +569,7 @@ WorkflowPlan WorkflowPlan::compileInline(
     const auto effects = inlineEffects(workflow);
     WorkflowValue profiles = WorkflowValue::object();
     profiles["harness_safe"] =
-        Praktor::Profile::evaluateHarnessSafe(workflow, effects).toValue();
+        harnessSafeProfile(workflow, effects);
 
     const std::string digest = inlineDigest(source_id, workflow_source);
     auto host_tools = inlineHostTools(workflow, source_id);
