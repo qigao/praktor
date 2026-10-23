@@ -4,6 +4,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/../src/data/query_tests.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/../src/data/value_tests.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/../src/yml/yaml_tests.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/../src/yml/yaml_value_tests.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/../src/yml/yaml_action_tests.cmake)
 
 # Compile this public header without a transitive include of the
 # legacy actions Executor. The main target links actions privately, so this
@@ -60,6 +61,10 @@ cmake_add_test(
     FOLDER "${folder_name}/test"
     OUT_TARGETS PRAKTOR_TEST_TARGETS
 )
+
+# This test includes the internal native YAML action projection contract.
+target_link_libraries(structured_document_query_test.${TARGET_NAME_LIB}
+    PRIVATE praktor_yaml_action_params)
 
 target_include_directories(download_executor_test.${TARGET_NAME_LIB}
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../src)

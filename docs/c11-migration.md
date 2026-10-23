@@ -57,7 +57,7 @@ the rollback point; partial migration is not released as the completed product.
 | Expressions | C lexer, bounded parser/coercion/comparison/string methods, typed variable/regex Host; old evaluator implementation removed | C context and compatible C regex provider replace the explicit temporary C++ adapter |
 | Structured document queries | C JSONPath/YPATH/XPath/CSVPath dispatch and owned results; explicit temporary C++ value/exception bridge | Migrate remaining `WorkflowValue` callers, then delete the bridge |
 | Workflow values | C exact numeric conversion, borrowed path reads, transactional mutations over the existing Salts JSON owner; temporary C++ container/exception facade | Migrate callers and remove the facade |
-| YAML documents, fields and structured values | C source/document owner, node access, scalar/int conversion, bounded field readers, key whitelist validation and owned contract/HostTool value conversion; explicit temporary C++ iterator/exception facade | Port remaining YAML task/workflow field construction, then delete the facade |
+| YAML documents, fields, structured values and system parameters | C source/document owner, node access, scalar/int conversion, bounded field readers, key whitelist validation and owned contract/HostTool value conversion, Download/Service/ManagedProcess parameter construction; explicit temporary C++ iterator/exception facade | Port remaining YAML task/workflow field construction, then delete the facade |
 | Contracts, effects, profiles, reviewed plans | C++ remains | One C-owned representation and unchanged SDK/YAML contracts |
 | DAG, contexts, triggers, scheduler, actions | C++ application layer and explicit compatibility dispatch remain | Native C execution and atomic Parallel branch state |
 | Shell/application/service adapters | C implementations exist, C++ conversions remain | C callers only; remove adapter headers/translation units |
@@ -281,6 +281,50 @@ decode order. SDK contract and HostTool API tests join lifecycle ASan and comple
 source TSan filters to qualify these actual consumers, alongside platform suites.
 Remaining YAML task/workflow construction and application execution still require
 migration; these cuts do not remove that C++ layer.
+
+Download, Service and ManagedProcess now construct parameters in a separate C11
+`praktor_yaml_action_params` target. It links the existing C document/field target
+and Salts CSTL; the shared Process header supplies the existing operation enum,
+without linking a Process backend or Legacy Executor. An opaque unique owner
+copies each retained `tstr` and owns a raw CSTL vector of argument pointers. It
+explicitly frees each string before destroying vector storage. No YAML document,
+C++ runtime, or execution context is retained. Typed views and indexed argument
+views borrow this owner, remain valid across pointer transfer, and expire on
+owner destruction. Independent owners can be read concurrently; destruction may
+not race a read of the same owner.
+
+Creation builds provisional state, validates each field in the original order,
+and publishes the owner only on success. Failures destroy all provisional state
+and leave the caller's output untouched. Existing scalar/string distinctions,
+case-sensitive operations, defaults, strict decimal `int` timeouts, decoded-NUL
+truncation, force-terminate compatibility grammar, and full location diagnostics
+are preserved. Owned allocations retain their allocation failure category;
+provider decode failures retain the provider category at the temporary exception
+boundary. The application wrappers now only copy typed views into existing
+C++ structures; the three original validation/construction algorithms are removed.
+
+This branch adds admission limits of 4096 arguments and 1 MiB of retained decoded
+text including NUL terminators, in addition to the existing 10 KiB per-field
+limit. Defaults borrowed from static literals consume no owned text budget.
+Excess input fails closed with a location diagnostic. These limits cover retained
+parameter state, not the provider DOM, temporary decoding, or allocator overhead.
+An unbounded vector port, parallel C++ parameter owner, and hidden Legacy retry
+were rejected: each would undermine bounded ownership or maintain two sources of
+truth. The temporary C++ copy remains an explicit migration cost until task nodes
+and their callers are migrated; rolling back this cut must restore constructors
+and their wiring together, without a runtime fallback.
+
+Native TinyTest cases cover all 25 system-string and 34 force-terminate corpus
+rows, defaults, validation precedence, aliases, source/owner lifetimes, concurrent
+owners, exact argument/retained-byte boundaries and unchanged outputs. Allocation
+fault cases walk owner allocation, real YAML decode/copy, CSTL append and error
+construction boundaries. A native integration test passes the typed result into
+the actual C Process controller with an explicit test Host; this proves the call
+boundary, not OS-process backend parity. The independent executable links no C++
+implementation. Application projection and typed-exception tests exercise the
+actual temporary wrappers, and both new C tests join lifecycle ASan and complete-
+source TSan qualification. Other YAML task/workflow construction and application
+execution still require migration.
 
 All three projects provide release/ASan presets. On Linux,
 `bash cmake/ci/qualify-c-only-tools.sh release` configures/builds/tests all three

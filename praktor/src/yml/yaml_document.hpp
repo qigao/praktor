@@ -1,6 +1,7 @@
 #pragma once
 
 #include "yml/yaml_document.h"
+#include "yml/yaml_action_params.h"
 
 #include <cstddef>
 #include <iterator>
@@ -96,5 +97,7 @@ bool read_force_terminate_or_throw(const YamlNodeRef& node);
 void check_unknown_keys(const YamlNodeRef& node, const std::unordered_set<std::string>& allowed_keys);
 // Transfers one unique JSON owner to the value facade after successful conversion.
 json_value_s* read_contract_json_or_throw(const YamlNodeRef& node);
+
+praktor_yaml_action_params* read_action_params_or_throw(const YamlNodeRef& node, praktor_yaml_action_kind kind);
 
 } // namespace TaskYamlDetail

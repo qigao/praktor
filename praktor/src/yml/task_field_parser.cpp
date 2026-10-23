@@ -1,5 +1,6 @@
 #include "task_yaml_internal.hpp"
 
+#include <memory>
 #include <string>
 #include <unordered_set>
 #include <variant>
@@ -23,44 +24,28 @@ CommandOutputFormat parse_output_format(const TaskYamlDetail::YamlNodeRef& node,
     throw_parse_error(node, "Unsupported output_format value: '" + value + "'");
 }
 
-SystemOperation parse_system_operation(const TaskYamlDetail::YamlNodeRef& node,
-                                       const std::string& value,
-                                       const char* field_name) {
-    if (value == "status") {
-        return SystemOperation::Status;
-    }
-    if (value == "start") {
-        return SystemOperation::Start;
-    }
-    if (value == "stop") {
-        return SystemOperation::Stop;
-    }
-    if (value == "restart") {
-        return SystemOperation::Restart;
-    }
-    throw_parse_error(node, "Unsupported " + std::string(field_name) + " value: '" + value + "'");
+struct ActionParamsDeleter {
+    void operator()(praktor_yaml_action_params* owner) const noexcept { praktor_yaml_action_params_destroy(owner); }
+};
+using ActionParamsOwner = std::unique_ptr<praktor_yaml_action_params, ActionParamsDeleter>;
+void require_native_params(int status) {
+    if (status != SALTS_OK) throw std::logic_error("Invalid native YAML action parameter projection");
 }
-
-void require_positive_timeout(const TaskYamlDetail::YamlNodeRef& node,
-                              int value,
-                              const char* field_name) {
-    if (value <= 0) {
-        throw_parse_error(node, std::string(field_name) + " must be positive");
+std::string owned_text(vstr text) { return std::string(text.data, text.len); }
+StrList owned_arguments(const praktor_yaml_action_params* owner, std::size_t count) {
+    StrList result;
+    result.reserve(count);
+    for (std::size_t index = 0; index < count; ++index) {
+        vstr text{};
+        require_native_params(praktor_yaml_action_argument(owner, index, &text));
+        result.push_back(owned_text(text));
     }
+    return result;
 }
-
-StrList parse_argument_list(const TaskYamlDetail::YamlNodeRef& node, const char* field_name) {
-    if (!node.is_seq()) {
-        throw_parse_error(node, std::string(field_name) + " must be a sequence");
-    }
-
-    StrList arguments;
-    for (const auto& argument : node) {
-        arguments.push_back(read_system_action_string_or_throw(
-            argument, std::string(field_name) + " entries must be strings"));
-    }
-    return arguments;
-}
+static_assert(static_cast<int>(SystemOperation::Status) == PRAKTOR_PROCESS_STATUS);
+static_assert(static_cast<int>(SystemOperation::Start) == PRAKTOR_PROCESS_START);
+static_assert(static_cast<int>(SystemOperation::Stop) == PRAKTOR_PROCESS_STOP);
+static_assert(static_cast<int>(SystemOperation::Restart) == PRAKTOR_PROCESS_RESTART);
 
 TriggerAction parse_trigger_action_node(const TaskYamlDetail::YamlNodeRef& node) {
     if (!node.has_val()) {
@@ -382,174 +367,39 @@ ProgramParams parse_program_params(const TaskYamlDetail::YamlNodeRef& node) {
     return params;
 }
 
+// Temporary STL conversion only. Validation/defaults/owned strings live in C.
 DownloadParams parse_download_params(const TaskYamlDetail::YamlNodeRef& node) {
-    const auto& download = node["download"];
-    if (!download.is_map()) {
-        TaskYamlDetail::throw_parse_error(download, "download must be a map");
-    }
-
-    static const std::unordered_set<std::string> allowed_keys = {
-        "url", "path", "sha256", "overwrite", "timeout_ms"
-    };
-    TaskYamlDetail::check_unknown_keys(download, allowed_keys);
-    if (!download.has_child("url")) {
-        TaskYamlDetail::throw_parse_error(download, "download requires 'url'");
-    }
-    if (!download.has_child("path")) {
-        TaskYamlDetail::throw_parse_error(download, "download requires 'path'");
-    }
-
-    DownloadParams params;
-    params.url = TaskYamlDetail::read_scalar_or_throw(
-        download["url"], "download.url must be a scalar");
-    params.path = TaskYamlDetail::read_scalar_or_throw(
-        download["path"], "download.path must be a scalar");
-    if (params.url.empty()) {
-        TaskYamlDetail::throw_parse_error(download["url"], "download.url cannot be empty");
-    }
-    if (params.path.empty()) {
-        TaskYamlDetail::throw_parse_error(download["path"], "download.path cannot be empty");
-    }
-    if (download.has_child("sha256")) {
-        params.sha256 = TaskYamlDetail::read_scalar_or_throw(
-            download["sha256"], "download.sha256 must be a scalar");
-    }
-    if (download.has_child("overwrite")) {
-        params.overwrite =
-            TaskYamlDetail::read_bool_or_throw(download["overwrite"], "download.overwrite");
-    }
-    if (download.has_child("timeout_ms")) {
-        download["timeout_ms"] >> params.timeout_ms;
-        if (params.timeout_ms <= 0) {
-            TaskYamlDetail::throw_parse_error(download["timeout_ms"],
-                                               "download.timeout_ms must be positive");
-        }
-    }
-    return params;
+    ActionParamsOwner owner(TaskYamlDetail::read_action_params_or_throw(node, PRAKTOR_YAML_ACTION_DOWNLOAD));
+    praktor_yaml_download_view view{};
+    require_native_params(praktor_yaml_action_download(owner.get(), &view));
+    DownloadParams result;
+    result.url = owned_text(view.url); result.path = owned_text(view.path); result.sha256 = owned_text(view.sha256);
+    result.overwrite = view.overwrite; result.timeout_ms = view.timeout_ms;
+    return result;
 }
-
 ServiceParams parse_service_params(const TaskYamlDetail::YamlNodeRef& node) {
-    const auto& service = node["service"];
-    if (!service.is_map()) {
-        TaskYamlDetail::throw_parse_error(service, "service must be a map");
-    }
-
-    static const std::unordered_set<std::string> allowed_keys = {
-        "operation", "name", "profile", "arguments", "timeout_ms", "poll_interval_ms"
-    };
-    TaskYamlDetail::check_unknown_keys(service, allowed_keys);
-    if (!service.has_child("name")) {
-        TaskYamlDetail::throw_parse_error(service, "service requires 'name'");
-    }
-
-    ServiceParams params;
-    params.name = TaskYamlDetail::read_system_action_string_or_throw(
-        service["name"], "service.name must be a string");
-    if (params.name.empty()) {
-        TaskYamlDetail::throw_parse_error(service["name"], "service.name cannot be empty");
-    }
-    if (service.has_child("operation")) {
-        const std::string operation = TaskYamlDetail::read_system_action_string_or_throw(
-            service["operation"], "service.operation must be a string");
-        params.operation = parse_system_operation(service["operation"], operation, "service.operation");
-    }
-    if (service.has_child("profile")) {
-        params.profile = TaskYamlDetail::read_system_action_string_or_throw(
-            service["profile"], "service.profile must be a string");
-        if (params.profile.empty()) {
-            TaskYamlDetail::throw_parse_error(service["profile"], "service.profile cannot be empty");
-        }
-    }
-    if (service.has_child("arguments")) {
-        params.arguments = parse_argument_list(service["arguments"], "service.arguments");
-    }
-    if (service.has_child("timeout_ms")) {
-        service["timeout_ms"] >> params.timeout_ms;
-        require_positive_timeout(service["timeout_ms"], params.timeout_ms, "service.timeout_ms");
-    }
-    if (service.has_child("poll_interval_ms")) {
-        service["poll_interval_ms"] >> params.poll_interval_ms;
-        require_positive_timeout(service["poll_interval_ms"], params.poll_interval_ms,
-                                 "service.poll_interval_ms");
-    }
-    return params;
+    ActionParamsOwner owner(TaskYamlDetail::read_action_params_or_throw(node, PRAKTOR_YAML_ACTION_SERVICE));
+    praktor_yaml_service_view view{};
+    require_native_params(praktor_yaml_action_service(owner.get(), &view));
+    ServiceParams result;
+    result.operation = static_cast<SystemOperation>(view.operation);
+    result.name = owned_text(view.name); result.profile = owned_text(view.profile);
+    result.arguments = owned_arguments(owner.get(), view.argument_count);
+    result.timeout_ms = view.timeout_ms; result.poll_interval_ms = view.poll_interval_ms;
+    return result;
 }
-
 ManagedProcessParams parse_managed_process_params(const TaskYamlDetail::YamlNodeRef& node) {
-    const auto& process = node["managed_process"];
-    if (!process.is_map()) {
-        TaskYamlDetail::throw_parse_error(process, "managed_process must be a map");
-    }
-
-    static const std::unordered_set<std::string> allowed_keys = {
-        "operation", "executable", "arguments", "working_directory", "identity",
-        "startup_timeout_ms", "stop_timeout_ms", "force_terminate"
-    };
-    static const std::unordered_set<std::string> allowed_identity_keys = {"image_name"};
-    TaskYamlDetail::check_unknown_keys(process, allowed_keys);
-    if (!process.has_child("identity")) {
-        TaskYamlDetail::throw_parse_error(process, "managed_process requires 'identity'");
-    }
-
-    const auto& identity = process["identity"];
-    if (!identity.is_map()) {
-        TaskYamlDetail::throw_parse_error(identity, "managed_process.identity must be a map");
-    }
-    TaskYamlDetail::check_unknown_keys(identity, allowed_identity_keys);
-    if (!identity.has_child("image_name")) {
-        TaskYamlDetail::throw_parse_error(identity, "managed_process.identity requires 'image_name'");
-    }
-
-    ManagedProcessParams params;
-    params.identity.image_name = TaskYamlDetail::read_system_action_string_or_throw(
-        identity["image_name"], "managed_process.identity.image_name must be a string");
-    if (params.identity.image_name.empty()) {
-        TaskYamlDetail::throw_parse_error(identity["image_name"],
-                                           "managed_process.identity.image_name cannot be empty");
-    }
-    if (process.has_child("operation")) {
-        const std::string operation = TaskYamlDetail::read_system_action_string_or_throw(
-            process["operation"], "managed_process.operation must be a string");
-        params.operation = parse_system_operation(process["operation"], operation,
-                                                  "managed_process.operation");
-    }
-    if (process.has_child("executable")) {
-        params.executable = TaskYamlDetail::read_system_action_string_or_throw(
-            process["executable"], "managed_process.executable must be a string");
-    }
-    if (params.operation == SystemOperation::Start && params.executable.empty()) {
-        TaskYamlDetail::throw_parse_error(process, "managed_process.start requires 'executable'");
-    }
-    if (params.operation == SystemOperation::Restart && params.executable.empty()) {
-        TaskYamlDetail::throw_parse_error(process,
-                                          "managed_process.restart requires 'executable'");
-    }
-    if (process.has_child("arguments")) {
-        params.arguments = parse_argument_list(process["arguments"], "managed_process.arguments");
-    }
-    if (process.has_child("working_directory")) {
-        params.working_directory = TaskYamlDetail::read_system_action_string_or_throw(
-            process["working_directory"], "managed_process.working_directory must be a string");
-        if (params.working_directory.empty()) {
-            TaskYamlDetail::throw_parse_error(process["working_directory"],
-                                               "managed_process.working_directory cannot be empty");
-        }
-    }
-    if (process.has_child("startup_timeout_ms")) {
-        process["startup_timeout_ms"] >> params.startup_timeout_ms;
-        require_positive_timeout(process["startup_timeout_ms"], params.startup_timeout_ms,
-                                 "managed_process.startup_timeout_ms");
-    }
-    if (process.has_child("stop_timeout_ms")) {
-        process["stop_timeout_ms"] >> params.stop_timeout_ms;
-        require_positive_timeout(process["stop_timeout_ms"], params.stop_timeout_ms,
-                                 "managed_process.stop_timeout_ms");
-    }
-    if (process.has_child("force_terminate")) {
-        params.force_terminate = TaskYamlDetail::read_force_terminate_or_throw(
-            process["force_terminate"]);
-    }
-    return params;
+    ActionParamsOwner owner(TaskYamlDetail::read_action_params_or_throw(node, PRAKTOR_YAML_ACTION_MANAGED_PROCESS));
+    praktor_yaml_managed_process_view view{};
+    require_native_params(praktor_yaml_action_managed_process(owner.get(), &view));
+    ManagedProcessParams result;
+    result.operation = static_cast<SystemOperation>(view.operation);
+    result.identity.image_name = owned_text(view.image_name); result.executable = owned_text(view.executable);
+    result.working_directory = owned_text(view.working_directory);
+    result.arguments = owned_arguments(owner.get(), view.argument_count);
+    result.startup_timeout_ms = view.startup_timeout_ms; result.stop_timeout_ms = view.stop_timeout_ms;
+    result.force_terminate = view.force_terminate;
+    return result;
 }
 
 UsesParams parse_uses_params(const TaskYamlDetail::YamlNodeRef& node) {

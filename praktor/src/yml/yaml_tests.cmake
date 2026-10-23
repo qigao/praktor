@@ -36,13 +36,16 @@ if(CMAKE_CXX_COMPILER_LOADED)
         ${CMAKE_CURRENT_LIST_DIR}/../../test/structured_document_query_test.cpp
         ${CMAKE_CURRENT_LIST_DIR}/yaml_fields.c
         ${CMAKE_CURRENT_LIST_DIR}/yaml_value.c
+        ${CMAKE_CURRENT_LIST_DIR}/yaml_action_params.c
+        ${CMAKE_CURRENT_LIST_DIR}/task_field_parser.cpp
         ${CMAKE_CURRENT_LIST_DIR}/yaml_document_legacy_bridge.cpp
         ${CMAKE_CURRENT_LIST_DIR}/../data/workflow_value_legacy_bridge.cpp
         ${CMAKE_CURRENT_LIST_DIR}/../data/structured_document_query_legacy_bridge.cpp
         $<TARGET_OBJECTS:yaml_document_fault_provider>)
     target_compile_definitions(yaml_document_legacy_fault_test PRIVATE PRAKTOR_YAML_FAULT_TEST)
     target_link_libraries(yaml_document_legacy_fault_test PRIVATE praktor_test_support
-        praktor_document_query praktor_workflow_value Salts::YamlParser Salts::Core)
+        praktor_document_query praktor_workflow_value Salts::YamlParser Salts::Core Salts::CSTL)
+    target_include_directories(yaml_document_legacy_fault_test PRIVATE ${CMAKE_CURRENT_LIST_DIR}/../../../shared/process/include)
     target_compile_features(yaml_document_legacy_fault_test PRIVATE cxx_std_17)
     set_target_properties(yaml_document_legacy_fault_test PROPERTIES C_STANDARD 11
         C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)

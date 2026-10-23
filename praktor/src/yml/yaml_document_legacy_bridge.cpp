@@ -169,4 +169,12 @@ json_value_t* read_contract_json_or_throw(const YamlNodeRef& node) {
     return result;
 }
 
+praktor_yaml_action_params* read_action_params_or_throw(const YamlNodeRef& node, praktor_yaml_action_kind kind) {
+    FieldError error;
+    praktor_yaml_action_params* result = nullptr;
+    const int status = praktor_yaml_action_params_create(node.native(), kind, &result, &error.value);
+    error.check(status);
+    return result;
+}
+
 } // namespace TaskYamlDetail

@@ -49,6 +49,25 @@ int praktor_yaml_field_decode(praktor_yaml_node node, bool key, tstr *out,
     return praktor_yaml_field_fail(error, status, diagnostic.origin, tstr_dup(buffer));
 }
 
+int praktor_yaml_field_get(praktor_yaml_node node, const char *key,
+    praktor_yaml_node *out, praktor_yaml_field_error *error) {
+    char buffer[256];
+    praktor_yaml_diagnostic diagnostic = {buffer, sizeof(buffer), PRAKTOR_YAML_FAILURE_NONE};
+    int status = praktor_yaml_get(node, key, out, &diagnostic);
+    if (status == SALTS_ENOENT) { *out = (praktor_yaml_node){0}; return SALTS_OK; }
+    if (status == SALTS_OK || !error) return status;
+    return praktor_yaml_field_fail(error, status, diagnostic.origin, tstr_dup(buffer));
+}
+
+int praktor_yaml_field_integer(praktor_yaml_node node, int *out,
+    praktor_yaml_field_error *error) {
+    char buffer[256];
+    praktor_yaml_diagnostic diagnostic = {buffer, sizeof(buffer), PRAKTOR_YAML_FAILURE_NONE};
+    int status = praktor_yaml_integer(node, out, &diagnostic);
+    if (status == SALTS_OK || !error) return status;
+    return praktor_yaml_field_fail(error, status, diagnostic.origin, tstr_dup(buffer));
+}
+
 static int read_scalar(praktor_yaml_node node, vstr message, bool string_only,
     tstr *out, praktor_yaml_field_error *error) {
     tstr text = NULL;

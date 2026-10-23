@@ -226,6 +226,37 @@ spec("YAML structured values through the temporary exception boundary") {
     }
 }
 
+spec("Native YAML action parameter projection through the temporary facade") {
+    it("copies typed fields and defaults into current callers") {
+        TaskYamlDetail::YamlDocument document(
+            "download: {url: true, path: file, overwrite: yes, timeout_ms: 7}\n"
+            "service: {name: worker, operation: restart, arguments: ['a', '']}\n"
+            "managed_process: {identity: {image_name: worker}, operation: start, executable: exe, "
+            "arguments: [one, two], working_directory: work, force_terminate: '0X__1_'}\n");
+        const auto download = parse_download_params(document.root());
+        check(download.url == "true" && download.path == "file" && download.overwrite && download.timeout_ms == 7);
+        check(download.sha256.empty());
+        const auto service = parse_service_params(document.root());
+        check(service.operation == SystemOperation::Restart && service.profile == "windows_scm");
+        check(service.name == "worker" && service.arguments == StrList({"a", ""}));
+        check(service.timeout_ms == 30000 && service.poll_interval_ms == 200);
+        const auto process = parse_managed_process_params(document.root());
+        check(process.operation == SystemOperation::Start && process.identity.image_name == "worker");
+        check(process.executable == "exe" && process.arguments == StrList({"one", "two"}));
+        check(process.working_directory == "work" && process.force_terminate);
+        check(process.startup_timeout_ms == 5000 && process.stop_timeout_ms == 5000);
+    }
+    it("preserves the first failure when later fields are also invalid") {
+        TaskYamlDetail::YamlDocument document(
+            "download: {url: '', path: [], overwrite: maybe}\n"
+            "managed_process: {identity: {image_name: worker}, operation: restart, arguments: 1}\n");
+        check(praktor_test::throws_containing([&] { (void)parse_download_params(document.root()); },
+            {"download.path must be a scalar"}));
+        check(praktor_test::throws_containing([&] { (void)parse_managed_process_params(document.root()); },
+            {"managed_process.restart requires 'executable'"}));
+    }
+}
+
 #ifdef PRAKTOR_YAML_FAULT_TEST
 extern "C" void praktor_yaml_test_fail(unsigned point);
 
@@ -293,6 +324,14 @@ spec("YAML typed failure origin preserves legacy allocation exceptions") {
         yaml_failure_kind(2, true, [&] { TaskYamlDetail::check_unknown_keys(root, {"value"}); });
         auto result = WorkflowValue::adoptJson(TaskYamlDetail::read_contract_json_or_throw(value));
         check(result.as<int>() == 7);
+    }
+    it("preserves provider versus owned-text failures through action constructors") {
+        TaskYamlDetail::YamlDocument document("service: {name: worker}\n");
+        const auto root = document.root();
+        yaml_failure_kind(1, false, [&] { (void)parse_service_params(root); });
+        yaml_failure_kind(2, true, [&] { (void)parse_service_params(root); });
+        const auto result = parse_service_params(root);
+        check(result.name == "worker" && result.timeout_ms == 30000);
     }
 }
 #endif
