@@ -964,7 +964,7 @@ void WorkflowExecutor::updateTaskCache(const Task &task, WorkflowContext &contex
   state.action_hash = Praktor::Execution::Internal::computeTaskActionHash(task);
   for (const auto &src : task.sources) {
     auto path = Praktor::util::resolveRelativePath(task.source_path, src);
-    state.source_hashes[path.string()] = Praktor::Util::computeFileHash(path);
+    state.source_hashes[path.string()] = computeFileHashC(path);
   }
 
   std::lock_guard<std::mutex> lock(execution_mutex_);
