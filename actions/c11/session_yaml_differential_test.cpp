@@ -194,8 +194,63 @@ tasks:
   praktor_c11_native_host_destroy(&host);
 }
 
+void parseKeyValueDifferential() {
+  const auto workflow = TaskParser::parseText(R"(
+tasks:
+  - name: native_pairs_contract
+    sequence:
+      - parse_keyvalue:
+          input_key: "{input_port}"
+          delimiter: "{delimiter_port}"
+          line_separator: "{separator_port}"
+          output_key: "{output_port}"
+      - set_variable: after_pairs
+        value: completed
+)", "native-pairs-differential.yml");
+  check(workflow.tasks.size() == 1u);
+  actions::Tree tree;
+  tree.root = textNode(std::get<OrchParams>(workflow.tasks.front().specifics).root);
+  actions::Executor legacy;
+  // Exhaust short data/delimiter/LF/space combinations against Legacy's map
+  // and the SDK JSON serializer. Include multi-byte separators and aliases.
+  for (const char* delimiter : {"=", "aa", ""}) {
+    for (const char* separator : {"\n", "aa"}) {
+      for (size_t length = 0u, combinations = 1u; length <= 5u; ++length, combinations *= 4u) {
+        for (size_t row = 0u; row < combinations; ++row) {
+          std::string input(length, 'a'); size_t digits = row;
+          for (char& ch : input) { ch = "a=\n "[digits % 4u]; digits /= 4u; }
+          actions::Blackboard blackboard; actions::ExecutionContext context;
+          blackboard.set("input_port", "source"); blackboard.set("output_port", "source");
+          blackboard.set("delimiter_port", delimiter); blackboard.set("separator_port", separator);
+          blackboard.set("source", input);
+          praktor_c11_native_host host{}; praktor_c11_bt_host hooks{};
+          check(praktor_c11_native_host_init(&host, 8u, 64u, 256u) == SALTS_OK);
+          check(praktor_c11_native_host_bind(&host, &hooks) == SALTS_OK);
+          auto* values = praktor_c11_native_host_values(&host);
+          for (const char* key : {"input_port", "output_port", "delimiter_port", "separator_port", "source"})
+            check(praktor_c11_value_store_set(values, key, blackboard.get(key).c_str()) == PRAKTOR_C11_VALUE_OK);
+          check(legacy.execute(tree, blackboard, context) == actions::NodeStatus::SUCCESS);
+          {
+            salts_bt_tree_config config{}; salts_bt_tree_config_init(&config);
+            actions::c11::TreeExecutorSession session(tree, {}, config, hooks);
+            salts_bt_node_status status = SALTS_BT_FAILURE;
+            check(session.tick(&status) == SALTS_OK && status == SALTS_BT_SUCCESS);
+            for (const char* key : {"source", "after_pairs"}) {
+              char text[257]; size_t size = 0u;
+              check(praktor_c11_value_store_get(values, key, text, sizeof(text), &size) == PRAKTOR_C11_VALUE_OK);
+              check(blackboard.get(key) == text);
+            }
+          }
+          praktor_c11_native_host_destroy(&host);
+        }
+      }
+    }
+  }
+}
+
 }
 spec("C11 and Legacy YAML differential") {
+  it("preserves ParseKeyValue YAML ports, sorted JSON and duplicate semantics") { parseKeyValueDifferential(); }
   it("preserves ParseLines YAML ports and every short newline combination") { parseLinesDifferential(); }
   it("preserves YAML value, copy and exit-code behavior") { differential(); }
   it("preserves terminal Sleep effects and cooperatively cancels") { sleepDifferential(); }

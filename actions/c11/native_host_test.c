@@ -208,9 +208,65 @@ static void parse_lines_atomic_failure(void) {
   praktor_c11_native_host_destroy(&host);
 }
 
+static void parse_key_value(void) {
+  praktor_c11_native_host host = {0};
+  praktor_c11_bt_host hooks = {0};
+  praktor_c11_value_store *values;
+  praktor_c11_leaf_parameter params[] = {
+      {"input_key", PRAKTOR_C11_LEAF_STRING, "{port}", 0.0, false},
+      {"delimiter", PRAKTOR_C11_LEAF_STRING, "{delim}", 0.0, false},
+      {"line_separator", PRAKTOR_C11_LEAF_STRING, "{sep}", 0.0, false},
+      {"output_key", PRAKTOR_C11_LEAF_STRING, "source", 0.0, false}};
+  praktor_c11_leaf_request request = {0u, "ParseKeyValue", params, 4u, false, NULL};
+  salts_bt_node_status status = SALTS_BT_FAILURE;
+  char text[257]; size_t size = 0u, i;
+  const struct { const char *input, *delimiter, *separator, *expected; } cases[] = {
+      {"z=first\na=  one \nz=last\nignored\n= empty \na=two=three\n", "=", "\n", "{\"\":\"empty\",\"a\":\"two=three\",\"z\":\"last\"}"},
+      {"\t k \r:: v \t||z:: \r||k::last||", "::", "||", "{\"k\":\"last\",\"z\":\"\"}"},
+      {"foo\nbar\n", "", "\n", "{\"\":\"bar\"}"},
+      {"", "=", "\n", "{}"}, {"ignored\nno delimiter", "=", "\n", "{}"},
+      {"\xc3\xa9=\\\"\b\f\t\x01/x\nA=first", "=", "\n", "{\"A\":\"first\",\"\xc3\xa9\":\"\\\\\\\"\\b\\f\\t\\u0001/x\"}"}};
+  check(praktor_c11_native_host_init(&host, 5u, 32u, 256u) == SALTS_OK);
+  check(praktor_c11_native_host_bind(&host, &hooks) == SALTS_OK);
+  values = praktor_c11_native_host_values(&host);
+  check(praktor_c11_value_store_set(values, "port", "source") == PRAKTOR_C11_VALUE_OK);
+  for (i = 0u; i < sizeof(cases) / sizeof(cases[0]); ++i) {
+    check(praktor_c11_value_store_set(values, "source", cases[i].input) == PRAKTOR_C11_VALUE_OK);
+    check(praktor_c11_value_store_set(values, "delim", cases[i].delimiter) == PRAKTOR_C11_VALUE_OK);
+    check(praktor_c11_value_store_set(values, "sep", cases[i].separator) == PRAKTOR_C11_VALUE_OK);
+    check(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_OK && status == SALTS_BT_SUCCESS);
+    check(praktor_c11_value_store_get(values, "source", text, sizeof(text), &size) == PRAKTOR_C11_VALUE_OK);
+    check(strcmp(text, cases[i].expected) == 0);
+  }
+  /* Empty separator used to hang Legacy. Both dispatches now reject it. */
+  check(praktor_c11_value_store_set(values, "sep", "") == PRAKTOR_C11_VALUE_OK);
+  check(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_EINVAL);
+  check(praktor_c11_value_store_get(values, "source", text, sizeof(text), &size) == PRAKTOR_C11_VALUE_OK && strcmp(text, cases[5].expected) == 0);
+  params[0].text = "missing";
+  check(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_OK && status == SALTS_BT_FAILURE);
+  praktor_c11_native_host_destroy(&host);
+  check(praktor_c11_native_host_init(&host, 2u, 32u, 16u) == SALTS_OK);
+  check(praktor_c11_native_host_bind(&host, &hooks) == SALTS_OK);
+  values = praktor_c11_native_host_values(&host);
+  request.parameter_count = 0u;
+  check(praktor_c11_value_store_set(values, "parsed_output", "old") == PRAKTOR_C11_VALUE_OK);
+  check(praktor_c11_value_store_set(values, "shell_output", "a=\x01\x01\x01") == PRAKTOR_C11_VALUE_OK);
+  check(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_ENOBUFS);
+  check(praktor_c11_value_store_get(values, "parsed_output", text, sizeof(text), &size) == PRAKTOR_C11_VALUE_OK && strcmp(text, "old") == 0);
+  check(praktor_c11_value_store_set(values, "shell_output", "a=b") == PRAKTOR_C11_VALUE_OK);
+  check(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_OK && status == SALTS_BT_SUCCESS);
+  check(praktor_c11_value_store_get(values, "parsed_output", text, sizeof(text), &size) == PRAKTOR_C11_VALUE_OK && strcmp(text, "{\"a\":\"b\"}") == 0);
+  check(praktor_c11_value_store_erase(values, "parsed_output") == PRAKTOR_C11_VALUE_OK);
+  check(praktor_c11_value_store_set(values, "full", "occupied") == PRAKTOR_C11_VALUE_OK);
+  check(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_ENOBUFS);
+  check(praktor_c11_value_store_size(values) == 2u);
+  praktor_c11_native_host_destroy(&host);
+}
+
 spec("C11 Native Host") {
   it("dispatches bounded typed values and fails closed") { stateless_leaves(); }
   it("owns cooperative Sleep activations per Session") { sleep_leaves(); }
   it("parses lines with Legacy newline and parameter semantics") { parse_lines(); }
   it("publishes line content and count atomically within bounds") { parse_lines_atomic_failure(); }
+  it("encodes sorted key/value JSON without allocating or partial publication") { parse_key_value(); }
 }

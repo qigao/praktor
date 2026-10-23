@@ -98,6 +98,26 @@ static void drain(cflow_process_retainer *retainer) {
 }
 
 spec("C11 Session without a C++ compiler or runtime") {
+  it("dispatches ParseKeyValue natively and cancels before any publication") {
+    fixture f;
+    praktor_c11_leaf_parameter wait = text("duration","1s");
+    praktor_c11_leaf_parameter parse = text("output_key","parsed");
+    praktor_c11_session_node ns[] = {
+      node("Sequence",SALTS_BT_NODE_SEQUENCE,PRAKTOR_C11_BT_NO_PARENT),
+      node("Sleep",SALTS_BT_NODE_LEAF,0), node("ParseKeyValue",SALTS_BT_NODE_LEAF,0)};
+    init(&f); set(&f,"shell_output","z=first\na=two\nz=last"); set(&f,"parsed","old");
+    ns[1].parameters = &wait; ns[1].parameter_count = 1;
+    ns[2].parameters = &parse; ns[2].parameter_count = 1;
+    check(praktor_c11_session_init(&f.session,&f.config,ns,3) == SALTS_OK);
+    check(drive(&f) == SALTS_BT_RUNNING);
+    check(praktor_c11_session_cancel(&f.session) == SALTS_OK);
+    expect(&f,"parsed","old");
+    check(praktor_c11_session_reset(&f.session) == SALTS_OK);
+    check(drive(&f) == SALTS_BT_RUNNING);
+    f.now = UINT64_C(1000000000);
+    check(drive(&f) == SALTS_BT_SUCCESS);
+    expect(&f,"parsed","{\"a\":\"two\",\"z\":\"last\"}"); destroy(&f);
+  }
   it("compiles action names and typed ports into an executable C plan") {
     fixture f; praktor_c11_session_node ns[3]; bool prune; char error[128];
     praktor_c11_leaf_parameter set_ports[] = {text("key","answer"),text("value","7")};

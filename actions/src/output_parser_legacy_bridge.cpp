@@ -3,7 +3,9 @@
 #include <algorithm>
 #include <cctype>
 #include <memory>
-#include <sstream>
+#include <stdexcept>
+#include <regex>
+#include "core/output_scan.h"
 
 #include <json_parser.h>
 
@@ -108,8 +110,9 @@ std::vector<std::string> OutputParser::parseLines(
     const std::string& filter_pattern
 ) {
     std::vector<std::string> lines;
-    std::istringstream stream(input);
-    std::string line;
+    size_t offset = 0;
+    praktor_output_span line;
+    const praktor_output_span source{input.data(), input.size()};
 
     std::regex filter_re;
     bool use_filter = !filter_pattern.empty();
@@ -122,13 +125,10 @@ std::vector<std::string> OutputParser::parseLines(
         }
     }
 
-    while (std::getline(stream, line)) {
-        if (use_filter) {
-            if (std::regex_search(line, filter_re)) {
-                lines.push_back(line);
-            }
-        } else {
-            lines.push_back(line);
+    while (praktor_output_next_line(source, &offset, &line) > 0) {
+        std::string text(line.data, line.size);
+        if (!use_filter || std::regex_search(text, filter_re)) {
+            lines.push_back(std::move(text));
         }
     }
 
@@ -142,33 +142,16 @@ std::map<std::string, std::string> OutputParser::parseKeyValue(
 ) {
     std::map<std::string, std::string> result;
 
-    size_t pos = 0;
-    while (pos < input.size()) {
-        // Find next line separator
-        size_t line_end = input.find(line_separator, pos);
-        if (line_end == std::string::npos) {
-            line_end = input.size();
-        }
-
-        std::string line = input.substr(pos, line_end - pos);
-
-        // Find delimiter
-        size_t delim_pos = line.find(delimiter);
-        if (delim_pos != std::string::npos) {
-            std::string key = line.substr(0, delim_pos);
-            std::string value = line.substr(delim_pos + delimiter.size());
-
-            // Trim whitespace
-            key.erase(0, key.find_first_not_of(" \t\r\n"));
-            key.erase(key.find_last_not_of(" \t\r\n") + 1);
-            value.erase(0, value.find_first_not_of(" \t\r\n"));
-            value.erase(value.find_last_not_of(" \t\r\n") + 1);
-
-            result[key] = value;
-        }
-
-        pos = line_end + line_separator.size();
+    size_t offset = 0;
+    praktor_output_pair pair;
+    int status;
+    while ((status = praktor_output_next_pair(
+        {input.data(), input.size()}, {delimiter.data(), delimiter.size()},
+        {line_separator.data(), line_separator.size()}, &offset, &pair)) > 0) {
+        result[std::string(pair.key.data, pair.key.size)] =
+            std::string(pair.value.data, pair.value.size);
     }
+    if (status < 0) throw std::invalid_argument("ParseKeyValue requires a nonempty line separator");
 
     return result;
 }
@@ -177,7 +160,8 @@ bool OutputParser::contains(
     const std::string& input,
     const std::string& search
 ) {
-    return input.find(search) != std::string::npos;
+    return praktor_output_contains({input.data(), input.size()},
+                                  {search.data(), search.size()}) != 0;
 }
 
 int OutputParser::countMatches(

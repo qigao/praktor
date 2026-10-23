@@ -264,7 +264,7 @@ jobs:
             "-DCMAKE_EXE_LINKER_FLAGS=-fsanitize=thread" \
             "-DCMAKE_SHARED_LINKER_FLAGS=-fsanitize=thread"
           cmake --build build/p1-praktor-tsan \
-            --target shell_executor_test praktor_process_driver_test praktor_process_worker_test praktor_process_control_test praktor_process_native_test praktor_service_control_test praktor_service_process_test service_executor_test.praktor_lib managed_process_executor_test.praktor_lib core_only_workflow_test.praktor_lib actions_c11_tree_executor_session_test actions_c11_session_yaml_differential_test \
+            --target actions_output_core_test test_output_parser shell_executor_test praktor_process_driver_test praktor_process_worker_test praktor_process_control_test praktor_process_native_test praktor_service_control_test praktor_service_process_test service_executor_test.praktor_lib managed_process_executor_test.praktor_lib core_only_workflow_test.praktor_lib actions_c11_tree_executor_session_test actions_c11_session_yaml_differential_test \
             --parallel 2
 
       - name: Audit Shell ownership and application control bridge
@@ -300,7 +300,7 @@ jobs:
           export LD_LIBRARY_PATH="$SALTS_SOURCE_TSAN_ROOT/lib:$SALTS_UTILS_SOURCE_TSAN_ROOT/lib:$CHTTP_ROOT/lib:${LD_LIBRARY_PATH:-}"
           ctest --test-dir build/p1-praktor-tsan \
             --no-tests=error --output-on-failure --parallel 1 --timeout 90 \
-            -R '^(shell_executor_test|praktor_process_driver_test|praktor_process_worker_test|praktor_process_control_test|praktor_process_native_test|praktor_service_control_test|praktor_service_process_test|service_executor_test\.praktor_lib|managed_process_executor_test\.praktor_lib|core_only_workflow_test\.praktor_lib|actions_c11_tree_executor_session_test|actions_c11_session_yaml_differential_test)$'
+            -R '^(actions_output_core_test|test_output_parser|shell_executor_test|praktor_process_driver_test|praktor_process_worker_test|praktor_process_control_test|praktor_process_native_test|praktor_service_control_test|praktor_service_process_test|service_executor_test\.praktor_lib|managed_process_executor_test\.praktor_lib|core_only_workflow_test\.praktor_lib|actions_c11_tree_executor_session_test|actions_c11_session_yaml_differential_test)$'
 
       - uses: actions/upload-artifact@v4
         if: always()

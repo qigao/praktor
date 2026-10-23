@@ -1,4 +1,5 @@
 #include "native_host.h"
+#include "core/output_scan.h"
 #include <salts/clock.h>
 #include <errno.h>
 #include <limits.h>
@@ -20,6 +21,8 @@ typedef struct native_host_impl {
   praktor_c11_value_store values;
   size_t scratch_capacity;
   char *scratch;
+  praktor_output_pair *pairs;
+  size_t pair_capacity;
   native_sleep_state *sleep_states;
   size_t max_running_leaves;
   uint64_t (*now_ns)(void *user);
@@ -245,6 +248,45 @@ static int tick_parse_lines(native_host_impl *impl,
   return SALTS_OK;
 }
 
+static int tick_parse_key_value(native_host_impl *impl,
+    const praktor_c11_leaf_request *request, salts_bt_node_status *status) {
+  const char *names[] = {"input_key", "delimiter", "line_separator", "output_key"};
+  const char *defaults[] = {"shell_output", "=", "\n", "parsed_output"};
+  char *input = impl->scratch;
+  char *delimiter = input + impl->scratch_capacity;
+  char *separator = delimiter + impl->scratch_capacity;
+  char *key = separator + impl->scratch_capacity;
+  char *output = key + impl->scratch_capacity;
+  char *ports[] = {key, delimiter, separator, key};
+  size_t i, required = 0u;
+  int result;
+  /* Resolve input key, snapshot input, then resolve the remaining ports. All
+   * aliases are safe: no value store publication happens until encoding ends. */
+  for (i = 0u; i < 4u; ++i) {
+    const praktor_c11_leaf_parameter *param = parameter(request, names[i]);
+    result = param == NULL ? copy_text(ports[i], impl->scratch_capacity, defaults[i])
+        : resolve(impl, param, ports[i], output);
+    if (result != SALTS_OK) return result;
+    if (i == 0u) {
+      result = praktor_c11_value_store_get(&impl->values, key, input,
+          impl->scratch_capacity, &required);
+      if (result == PRAKTOR_C11_VALUE_ENOTFOUND) { *status = SALTS_BT_FAILURE; return SALTS_OK; }
+      if (result != PRAKTOR_C11_VALUE_OK) return SALTS_EINVAL;
+    }
+  }
+  result = praktor_output_key_value_json(
+      (praktor_output_span){input, strlen(input)},
+      (praktor_output_span){delimiter, strlen(delimiter)},
+      (praktor_output_span){separator, strlen(separator)},
+      impl->pairs, impl->pair_capacity, output, impl->scratch_capacity);
+  if (result != 0) return result == -2 ? SALTS_ENOBUFS : SALTS_EINVAL;
+  result = praktor_c11_value_store_set(&impl->values, key, output);
+  if (result != PRAKTOR_C11_VALUE_OK)
+    return result == PRAKTOR_C11_VALUE_EINVAL ? SALTS_EINVAL : SALTS_ENOBUFS;
+  *status = SALTS_BT_SUCCESS;
+  return SALTS_OK;
+}
+
 static int tick_leaf(void *user, const praktor_c11_leaf_request *request,
                       salts_bt_node_status *status) {
   native_host_impl *impl = (native_host_impl *)user;
@@ -264,6 +306,7 @@ static int tick_leaf(void *user, const praktor_c11_leaf_request *request,
   if (strcmp(request->action, "Sleep") == 0) return tick_sleep(impl, request, status);
   if (find_sleep(impl, request) != NULL) return SALTS_EINVAL;
   if (strcmp(request->action, "ParseLines") == 0) return tick_parse_lines(impl, request, status);
+  if (strcmp(request->action, "ParseKeyValue") == 0) return tick_parse_key_value(impl, request, status);
   key = impl->scratch;
   value = key + impl->scratch_capacity;
   temporary = value + impl->scratch_capacity;
@@ -333,7 +376,8 @@ int praktor_c11_native_host_init_with_config(
   if (host == NULL || host->impl != NULL || config == NULL) return SALTS_EINVAL;
   scratch_bytes = config->max_key_bytes > config->max_value_bytes
       ? config->max_key_bytes : config->max_value_bytes;
-  if (scratch_bytes == SIZE_MAX || scratch_bytes + 1u > SIZE_MAX / 3u ||
+  if (scratch_bytes == SIZE_MAX || scratch_bytes + 1u > SIZE_MAX / 5u ||
+      config->max_value_bytes / 2u + 1u > SIZE_MAX / sizeof(praktor_output_pair) ||
       config->max_running_leaves > SIZE_MAX / sizeof(native_sleep_state)) return SALTS_EINVAL;
   impl = (native_host_impl *)calloc(1u, sizeof(*impl));
   if (impl == NULL) return SALTS_ENOMEM;
@@ -344,13 +388,15 @@ int praktor_c11_native_host_init_with_config(
     return result == PRAKTOR_C11_VALUE_ENOMEM ? SALTS_ENOMEM : SALTS_EINVAL;
   }
   impl->scratch_capacity = scratch_bytes + 1u;
-  impl->scratch = (char *)calloc(3u, impl->scratch_capacity);
+  impl->scratch = (char *)calloc(5u, impl->scratch_capacity);
+  impl->pair_capacity = config->max_value_bytes / 2u + 1u;
+  impl->pairs = (praktor_output_pair *)calloc(impl->pair_capacity, sizeof(praktor_output_pair));
   if (config->max_running_leaves != 0u)
     impl->sleep_states = (native_sleep_state *)calloc(config->max_running_leaves, sizeof(native_sleep_state));
-  if (impl->scratch == NULL ||
+  if (impl->scratch == NULL || impl->pairs == NULL ||
       (config->max_running_leaves != 0u && impl->sleep_states == NULL)) {
     praktor_c11_value_store_destroy(&impl->values);
-    free(impl->scratch); free(impl->sleep_states); free(impl);
+    free(impl->scratch); free(impl->pairs); free(impl->sleep_states); free(impl);
     return SALTS_ENOMEM;
   }
   impl->max_running_leaves = config->max_running_leaves;
@@ -371,6 +417,7 @@ void praktor_c11_native_host_destroy(praktor_c11_native_host *host) {
   if (impl == NULL) return;
   praktor_c11_value_store_destroy(&impl->values);
   free(impl->scratch);
+  free(impl->pairs);
   free(impl->sleep_states);
   free(impl);
   host->impl = NULL;

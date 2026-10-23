@@ -1,8 +1,9 @@
+include(${CMAKE_CURRENT_LIST_DIR}/../output_targets.cmake)
 # C-only Session and host targets; usable from a project with LANGUAGES C.
 add_library(praktor_c11_native_host STATIC
     ${CMAKE_CURRENT_LIST_DIR}/native_host.c)
 target_include_directories(praktor_c11_native_host PUBLIC ${CMAKE_CURRENT_LIST_DIR})
-target_link_libraries(praktor_c11_native_host PUBLIC praktor_c11_value_store praktor_c11_bt_core PRIVATE Salts::Platform)
+target_link_libraries(praktor_c11_native_host PUBLIC praktor_c11_value_store praktor_c11_bt_core PRIVATE Salts::Platform praktor_output_core)
 target_compile_features(praktor_c11_native_host PUBLIC c_std_11)
 if(UNIX)
     target_link_libraries(praktor_c11_native_host PRIVATE m)

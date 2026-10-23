@@ -7,7 +7,8 @@ production switch is implied by these independent execution targets.
 | --- | --- |
 | `praktor_c11_bt_core` | C11 topology/state and Salts::BehaviorTree; no C++ compiler required |
 | `praktor_c11_value_store` | Fixed-capacity C11 values and optimistic transactions |
-| `praktor_c11_native_host` | C11 value-store owner and preallocated parameter scratch; typed `SetVariable`, `CheckExitCode`, cooperative `Sleep` and unfiltered `ParseLines` leaves |
+| `praktor_output_core` | Allocation-free C text scanner and bounded key/value JSON encoder; no SDK dependency |
+| `praktor_c11_native_host` | C11 value-store owner and preallocated parameter scratch; typed `SetVariable`, `CheckExitCode`, cooperative `Sleep`, unfiltered `ParseLines` and `ParseKeyValue` leaves |
 | `praktor_process_driver` | C11 Process I/O/retainer driver plus optional C11 joined worker with Salts thread, cancellation, synchronized observers and bounded admission copies; no C++ runtime |
 | `praktor_service_control` | Bounded C service state machine and numeric STATE parser; base Salts::Platform only |
 | `praktor_service_process_host` | Explicit service command binding to the joined C Process worker; no shell parser or C++ runtime |
@@ -80,6 +81,26 @@ substring matching. Native nonempty filters return `SALTS_ENOTSUP` before any
 write. Regex support remains open; the independent Session cannot fall back to
 Executor. Parallel branch requests remain explicitly unsupported by this Host.
 
+Native `ParseKeyValue` resolves typed/dynamic input, delimiter, separator and
+output ports. Defaults remain `shell_output`, `=`, LF and `parsed_output`.
+It emits the same sorted, string-valued JSON object as Legacy's map and SDK
+serializer: first delimiter per line, space/tab/CR/LF trim, last duplicate wins,
+empty keys/values and empty delimiters preserved. Missing input is FAILURE.
+All pair workspace (`max_value_bytes / 2 + 1` entries) and five parameter/input/
+output scratch buffers are allocated at Host init. Scanning, sorted insertion
+and JSON escaping allocate nothing; insertion is quadratic in the bounded pair
+count. Overflow or invalid arguments leave the existing output untouched, even
+when output aliases input. Empty line separators now fail explicitly in both
+paths; Legacy previously could loop forever. The length-aware shared scanners
+preserve binary input for legacy containers, while the JSON encoder rejects
+embedded NUL; Native Host's value API already uses NUL-terminated strings.
+
+`actions/src/output_parser.cpp` has been replaced by the explicit
+`output_parser_legacy_bridge.cpp`: C++ regex and JSON DOM compatibility remain
+there, but line scanning, pair splitting/trimming and substring search delegate
+to `actions/core/output_scan.c`. The independent `praktor_output_core` archive
+has no SDK, DOM, allocator, Executor or C++ runtime dependency.
+
 The legacy adapter borrows Executor, Blackboard and ExecutionContext until
 session destruction. Process callbacks now touch only a stable C driver payload.
 The driver detaches its borrowed stream callback/user before closing admission;
@@ -90,6 +111,8 @@ release is introduced.
 
 Validation projects:
 
+- `actions/output-standalone`: pure C scanner/encoder with base SDK TinyTest only;
+  link and archive audits reject C++/DOM and allocation dependencies.
 - `actions/c11/standalone`: pure C adapter, store and Native Host tests.
 - `shared/process/standalone`: C compiler/linker only, real duplex child I/O,
   capture limits, callback failure, saturation and zero-budget handoff after
@@ -135,6 +158,10 @@ Validation projects:
   ParseLines additionally compares 1,093 exhaustive short data/LF/CR strings
   through actual YAML, dynamic ports, empty filters and unchanged source values;
   native tests cover capacity/key-bound atomicity and cancellation before parse.
+  ParseKeyValue compares 8,190 short data/delimiter/LF/space combinations with
+  Legacy's SDK JSON serializer through YAML, including dynamic multi-byte ports,
+  duplicate keys and input/output aliasing. C tests cover JSON escaping, exact
+  bounds, failed publication and cancellation before parse.
   The value-store, Native Host, independent Session and YAML differential runners
   use Salts::TinyTest, including native C tests in the C-only build.
 

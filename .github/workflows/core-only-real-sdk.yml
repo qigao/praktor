@@ -205,6 +205,17 @@ jobs:
             build/ci-sdk/shared/process/libpraktor_process_native.a \
             build/ci-sdk/shared/process/libpraktor_service_control.a build/ci-sdk/shared/process/libpraktor_service_process_host.a
 
+      - name: Independent C output parser with only the base SDK
+        if: matrix.platform == 'linux' && matrix.sdk == 'behavior-tree'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S actions/output-standalone -B build/ci-output-c -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/ci-output-c --parallel 2
+          python3 cmake/ci/audit-c11-runtime-link.py build/ci-output-c/actions_output_core_test
+          python3 cmake/ci/audit-output-core.py build/ci-output-c/libpraktor_output_core.a
+          ctest --test-dir build/ci-output-c --no-tests=error --output-on-failure
+
       # Independent C-only project, with no C++ compiler or actions library.
       - name: C11 BehaviorTree adapter standalone C-only link
         if: matrix.platform == 'linux' && matrix.sdk == 'behavior-tree'
