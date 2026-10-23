@@ -185,9 +185,7 @@ praktor_yaml_action_params* read_action_params_or_throw(const YamlNodeRef& node,
     return result;
 }
 
-} // namespace TaskYamlDetail
-
-json_value_t* TaskYamlDetail::read_workflow_contract_fields_or_throw(
+json_value_t* read_workflow_contract_fields_or_throw(
     const YamlNodeRef& node, bool output) {
     FieldError error;
     json_value_t* result = nullptr;
@@ -196,3 +194,5 @@ json_value_t* TaskYamlDetail::read_workflow_contract_fields_or_throw(
     error.check(status);
     return result;
 }
+
+} // namespace TaskYamlDetail

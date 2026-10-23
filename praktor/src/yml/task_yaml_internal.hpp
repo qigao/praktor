@@ -85,5 +85,7 @@ OrchNode parseOrchNode(const TaskYamlDetail::YamlNodeRef& yaml, int depth = 0);
 Task parse_task(const TaskYamlDetail::YamlNodeRef& node, const std::string& source_path);
 Workflow parse_workflow(const TaskYamlDetail::YamlNodeRef& node,
                         const std::string& source_path);
+namespace TaskYamlDetail {
 json_value_t* read_workflow_contract_fields_or_throw(
-    const TaskYamlDetail::YamlNodeRef& node, bool output);
+    const YamlNodeRef& node, bool output);
+}
