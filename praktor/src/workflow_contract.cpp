@@ -1,4 +1,5 @@
 #include "workflow_contract.hpp"
+#include "data/workflow_contract_value.h"
 
 #include "dag/workflow_context.hpp"
 #include "util/variable_substitution.hpp"
@@ -35,7 +36,7 @@ void validateFieldValue(const std::string& name,
                         const WorkflowContractField& field,
                         const WorkflowValue& value,
                         const char* surface) {
-    if (!valueMatchesType(value, field.type)) {
+    if (!praktor_contract_value_matches_type(value.raw(), field.type.c_str())) {
         throw WorkflowContractError(
             std::string(surface) + " '" + name + "' must be " + field.type);
     }
@@ -86,16 +87,6 @@ WorkflowValue resolveOutputValue(const std::string& name,
 }
 
 } // namespace
-
-bool valueMatchesType(const WorkflowValue& value, const std::string& type) {
-    if (type == "string") return value.is_string();
-    if (type == "boolean") return value.is_bool();
-    if (type == "integer") return value.is_int64() || value.is_uint64();
-    if (type == "number") return value.is_number();
-    if (type == "array") return value.is_array();
-    if (type == "object") return value.is_object();
-    return false;
-}
 
 InputValues validateAndApplyInputs(const Workflow& workflow,
                                    const InputValues& inputs) {

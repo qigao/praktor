@@ -1,5 +1,6 @@
 #include "task_yaml_internal.hpp"
 #include "workflow_contract.hpp"
+#include "data/workflow_contract_value.h"
 
 #include <algorithm>
 #include <charconv>
@@ -63,7 +64,7 @@ WorkflowContractField parse_contract_field(
     }
     if (node.has_child("default")) {
         field.default_value = parse_contract_value(node["default"]);
-        if (!Praktor::Contract::valueMatchesType(*field.default_value, field.type)) {
+        if (!praktor_contract_value_matches_type(field.default_value->raw(), field.type.c_str())) {
             TaskYamlDetail::throw_parse_error(
                 node["default"], "default does not match declared type '" + field.type + "'");
         }
@@ -76,7 +77,7 @@ WorkflowContractField parse_contract_field(
         }
         for (const auto& enum_node : values) {
             WorkflowValue value = parse_contract_value(enum_node);
-            if (!Praktor::Contract::valueMatchesType(value, field.type)) {
+            if (!praktor_contract_value_matches_type(value.raw(), field.type.c_str())) {
                 TaskYamlDetail::throw_parse_error(
                     enum_node, "enum value does not match declared type '" + field.type + "'");
             }
