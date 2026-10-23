@@ -221,7 +221,7 @@ spec("C-owned typed YAML Action parameters") {
     it("feeds the real C controller with typed parameters through an explicit test Host") {
         praktor_yaml_action_params *owner = params("managed_process: {identity: {image_name: worker.exe}, operation: start, executable: worker.exe, arguments: [first, second]}\n", PRAKTOR_YAML_ACTION_MANAGED_PROCESS);
         praktor_yaml_managed_process_view view;
-        vstr first, second;
+        vstr first = {0}, second = {0};
         const char *args[2];
         start_probe probe = {0};
         praktor_process_control_host host = {&probe, query, start, command, command, NULL, NULL, 1};
