@@ -35,6 +35,7 @@ if(CMAKE_CXX_COMPILER_LOADED)
     add_executable(yaml_document_legacy_fault_test
         ${CMAKE_CURRENT_LIST_DIR}/../../test/structured_document_query_test.cpp
         ${CMAKE_CURRENT_LIST_DIR}/yaml_fields.c
+        ${CMAKE_CURRENT_LIST_DIR}/yaml_value.c
         ${CMAKE_CURRENT_LIST_DIR}/yaml_document_legacy_bridge.cpp
         ${CMAKE_CURRENT_LIST_DIR}/../data/workflow_value_legacy_bridge.cpp
         ${CMAKE_CURRENT_LIST_DIR}/../data/structured_document_query_legacy_bridge.cpp

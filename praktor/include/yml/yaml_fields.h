@@ -48,6 +48,13 @@ int praktor_yaml_field_boolean(praktor_yaml_node node, vstr field_name,
  * ENOENT means unsupported syntax/value; EINVAL means invalid view/output. */
 int praktor_yaml_force_terminate_integer(vstr value, bool *out);
 
+/* Case-sensitive whitelist of decoded mapping keys, in document order.
+ * Non-mappings succeed; the first unknown key fails at its mapping-key location.
+ * Views are borrowed only for this call. Decoded-NUL truncation remains the
+ * document provider's compatibility rule; whitelist views themselves are exact. */
+int praktor_yaml_check_keys(praktor_yaml_node node, const vstr *allowed,
+    size_t count, praktor_yaml_field_error *error);
+
 #ifdef __cplusplus
 }
 #endif

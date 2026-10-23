@@ -1,8 +1,9 @@
 #include "yaml_document.hpp"
-#include "yml/yaml_fields.h"
+#include "yml/yaml_value.h"
 #include <memory>
 #include <stdexcept>
 #include <utility>
+#include <vector>
 
 namespace TaskYamlDetail {
 namespace {
@@ -152,4 +153,20 @@ bool read_bool_or_throw(const YamlNodeRef& node, const char* field_name) {
 bool read_force_terminate_or_throw(const YamlNodeRef& node) {
     return field_boolean(node, "force_terminate", PRAKTOR_YAML_BOOLEAN_FORCE_TERMINATE);
 }
+void check_unknown_keys(const YamlNodeRef& node, const std::unordered_set<std::string>& allowed_keys) {
+    std::vector<vstr> views;
+    views.reserve(allowed_keys.size());
+    for (const auto& key : allowed_keys) views.push_back(vstr_from_buf(key.data(), key.size()));
+    FieldError error;
+    const int status = praktor_yaml_check_keys(node.native(), views.data(), views.size(), &error.value);
+    error.check(status);
+}
+json_value_t* read_contract_json_or_throw(const YamlNodeRef& node) {
+    FieldError error;
+    json_value_t* result = nullptr;
+    const int status = praktor_yaml_value(node.native(), &result, &error.value);
+    error.check(status);
+    return result;
+}
+
 } // namespace TaskYamlDetail

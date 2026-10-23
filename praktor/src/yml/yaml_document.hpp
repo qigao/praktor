@@ -7,6 +7,9 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_set>
+
+struct json_value_s;
 
 namespace TaskYamlDetail {
 
@@ -89,5 +92,9 @@ std::string read_scalar_or_throw(const YamlNodeRef& node, const std::string& mes
 std::string read_system_action_string_or_throw(const YamlNodeRef& node, const std::string& message);
 bool read_bool_or_throw(const YamlNodeRef& node, const char* field_name);
 bool read_force_terminate_or_throw(const YamlNodeRef& node);
+
+void check_unknown_keys(const YamlNodeRef& node, const std::unordered_set<std::string>& allowed_keys);
+// Transfers one unique JSON owner to the value facade after successful conversion.
+json_value_s* read_contract_json_or_throw(const YamlNodeRef& node);
 
 } // namespace TaskYamlDetail

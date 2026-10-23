@@ -206,6 +206,26 @@ spec("YAML field grammar through the temporary exception boundary") {
     }
 }
 
+spec("YAML structured values through the temporary exception boundary") {
+    it("transfers the native JSON owner and validates decoded mapping keys") {
+        TaskYamlDetail::YamlDocument document("value: {count: 9223372036854775807, flags: [true, 'false']}\n");
+        auto result = WorkflowValue::adoptJson(TaskYamlDetail::read_contract_json_or_throw(document.root()["value"]));
+        check(result["count"].as<std::int64_t>() == INT64_MAX);
+        check(result["flags"][0].as<bool>());
+        check(result["flags"][1].as<std::string>() == "false");
+        TaskYamlDetail::check_unknown_keys(document.root()["value"], {"count", "flags"});
+        check(praktor_test::throws_containing([&] {
+            TaskYamlDetail::check_unknown_keys(document.root()["value"], {"count"});
+        }, {"Unknown key: 'flags'", "line 1"}));
+    }
+    it("preserves contract null refusal through the C conversion") {
+        TaskYamlDetail::YamlDocument document("value: {good: 1, bad: null}\n");
+        check(praktor_test::throws_containing([&] {
+            (void)TaskYamlDetail::read_contract_json_or_throw(document.root()["value"]);
+        }, {"contract value must be a scalar, sequence, or map"}));
+    }
+}
+
 #ifdef PRAKTOR_YAML_FAULT_TEST
 extern "C" void praktor_yaml_test_fail(unsigned point);
 
@@ -263,6 +283,16 @@ spec("YAML typed failure origin preserves legacy allocation exceptions") {
         yaml_failure_kind(3, true, [&] { (void)TaskYamlDetail::read_bool_or_throw(value, "silent"); });
         yaml_failure_kind(1, true, [&] { (void)TaskYamlDetail::read_scalar_or_throw(shape, "scalar"); });
         check(TaskYamlDetail::read_scalar_or_throw(value, "scalar") == "maybe");
+    }
+    it("preserves value and whitelist provider-vs-owned decoding failures") {
+        TaskYamlDetail::YamlDocument document("value: 7\n");
+        const auto root = document.root(), value = *root.begin();
+        yaml_failure_kind(1, false, [&] { (void)TaskYamlDetail::read_contract_json_or_throw(value); });
+        yaml_failure_kind(2, true, [&] { (void)TaskYamlDetail::read_contract_json_or_throw(value); });
+        yaml_failure_kind(1, false, [&] { TaskYamlDetail::check_unknown_keys(root, {"value"}); });
+        yaml_failure_kind(2, true, [&] { TaskYamlDetail::check_unknown_keys(root, {"value"}); });
+        auto result = WorkflowValue::adoptJson(TaskYamlDetail::read_contract_json_or_throw(value));
+        check(result.as<int>() == 7);
     }
 }
 #endif

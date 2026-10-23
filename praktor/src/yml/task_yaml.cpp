@@ -13,53 +13,7 @@
 namespace {
 
 WorkflowValue parse_contract_value(const TaskYamlDetail::YamlNodeRef& node) {
-    if (node.is_map()) {
-        WorkflowValue object = WorkflowValue::object();
-        for (const auto& child : node) {
-            object[child.key()] = parse_contract_value(child);
-        }
-        return object;
-    }
-    if (node.is_seq()) {
-        WorkflowValue array = WorkflowValue::array();
-        for (const auto& child : node) {
-            array.push_back(parse_contract_value(child));
-        }
-        return array;
-    }
-    if (!node.has_val()) {
-        TaskYamlDetail::throw_parse_error(node, "contract value must be a scalar, sequence, or map");
-    }
-    if (node.is_string_scalar()) {
-        return WorkflowValue(node.scalar());
-    }
-
-    const std::string text = node.scalar();
-    const std::string lower = TaskYamlDetail::to_lower_copy(text);
-    if (lower == "null" || lower == "~") {
-        return WorkflowValue::null();
-    }
-    if (lower == "true" || lower == "yes" || lower == "on") {
-        return WorkflowValue(true);
-    }
-    if (lower == "false" || lower == "no" || lower == "off") {
-        return WorkflowValue(false);
-    }
-
-    std::int64_t integer = 0;
-    const auto parsed_integer =
-        std::from_chars(text.data(), text.data() + text.size(), integer);
-    if (parsed_integer.ec == std::errc{} &&
-        parsed_integer.ptr == text.data() + text.size()) {
-        return WorkflowValue(integer);
-    }
-
-    char* end = nullptr;
-    const double number = std::strtod(text.c_str(), &end);
-    if (end && end == text.c_str() + text.size()) {
-        return WorkflowValue(number);
-    }
-    return WorkflowValue(text);
+    return WorkflowValue::adoptJson(TaskYamlDetail::read_contract_json_or_throw(node));
 }
 
 WorkflowContractField parse_contract_field(

@@ -57,7 +57,7 @@ the rollback point; partial migration is not released as the completed product.
 | Expressions | C lexer, bounded parser/coercion/comparison/string methods, typed variable/regex Host; old evaluator implementation removed | C context and compatible C regex provider replace the explicit temporary C++ adapter |
 | Structured document queries | C JSONPath/YPATH/XPath/CSVPath dispatch and owned results; explicit temporary C++ value/exception bridge | Migrate remaining `WorkflowValue` callers, then delete the bridge |
 | Workflow values | C exact numeric conversion, borrowed path reads, transactional mutations over the existing Salts JSON owner; temporary C++ container/exception facade | Migrate callers and remove the facade |
-| YAML documents and field readers | C source/document owner, node access, scalar/int conversion, bounded scalar/string validation and separate boolean policies; explicit temporary C++ iterator/exception facade | Port remaining YAML task/workflow field construction, then delete the facade |
+| YAML documents, fields and structured values | C source/document owner, node access, scalar/int conversion, bounded field readers, key whitelist validation and owned contract/HostTool value conversion; explicit temporary C++ iterator/exception facade | Port remaining YAML task/workflow field construction, then delete the facade |
 | Contracts, effects, profiles, reviewed plans | C++ remains | One C-owned representation and unchanged SDK/YAML contracts |
 | DAG, contexts, triggers, scheduler, actions | C++ application layer and explicit compatibility dispatch remain | Native C execution and atomic Parallel branch state |
 | Shell/application/service adapters | C implementations exist, C++ conversions remain | C callers only; remove adapter headers/translation units |
@@ -238,8 +238,49 @@ aliases, long/binary errors, unchanged failed outputs and concurrent owners.
 Provider-boundary injection covers decoding, text/message/location allocation
 and rejected-value cleanup in the actual C implementation. Application bridge
 tests also retain provider-vs-owned exception mapping and complete diagnostics.
-Remaining YAML task/workflow construction, key validation and application
-execution still require migration; these cuts do not remove that C++ layer.
+A separate C YAML-value target now converts contract defaults/enums and typed
+HostTool arguments directly into the existing Salts JSON owner. The document and
+scalar-field target retains its original Core/YAML-only dependency; only value
+conversion adds the JSON provider. Mapping values are converted before decoding
+keys, preserving C++17 right-hand-side error precedence. Checked provider adoption
+transfers each independent child once; failure frees child/provisional roots and
+leaves caller output unchanged. Repeated aliases produce independent JSON trees.
+
+Scalar conversion preserves provider string classification, exact signed decimal
+`int64_t` before the original full-consumption `strtod` rule, case folding, decoded
+NUL truncation and last decoded duplicate key wins. Provider null-node refusal is
+retained. Structured contract strings keep their previous length policy rather
+than acquiring the ordinary 10 KiB field limit. JSON factories and checked
+adoption failures retain ordinary provider exceptions and existing diagnostics;
+owned diagnostic/text allocation still maps to `bad_alloc` in the temporary bridge.
+
+Conversion is limited to depth 128 (root depth 1) and 16384 expanded values,
+including alias copies. Keys do not count as values. This intentionally bounds
+previously unbounded recursion/alias expansion: excess fails closed with a source
+location and no partial output. Traversal limits do not bound provider DOM/string
+allocation bytes. An unbounded recursive port or a hidden C++ retry was rejected;
+recursive and exponentially expanded aliases now have executable refusal tests.
+The public installed SDK ABI remains unchanged; unusually deep/expanded contract
+inputs are an explicit admission change on this migration branch.
+
+The C key whitelist compares borrowed exact views against decoded keys in source
+order and reports the first unknown key with its key location. It preserves
+case sensitivity, decoded-NUL truncation, long error text and non-map no-op behavior.
+Small immutable task-schema lists use a linear scan (keys times allowed keys),
+avoiding a new hash/container dependency. The temporary C++ bridge marshals the
+existing sets to borrowed views; no performance improvement is claimed. Both
+original C++ conversion/validation algorithms have been deleted. Their wrappers
+only transfer JSON ownership, marshal views and map exceptions.
+
+Native tests cover nested values, independent source/alias/result lifetimes,
+exact numeric tokens, duplicate decoded keys, large strings, admission edges,
+concurrent conversions, key order and full diagnostics. Fault injection walks
+real decode/copy/factory/adoption/message/location boundaries and checks unchanged
+outputs and failure categories; an observation test verifies value-before-key
+decode order. SDK contract and HostTool API tests join lifecycle ASan and complete-
+source TSan filters to qualify these actual consumers, alongside platform suites.
+Remaining YAML task/workflow construction and application execution still require
+migration; these cuts do not remove that C++ layer.
 
 All three projects provide release/ASan presets. On Linux,
 `bash cmake/ci/qualify-c-only-tools.sh release` configures/builds/tests all three

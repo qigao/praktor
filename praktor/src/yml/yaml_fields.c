@@ -1,4 +1,4 @@
-#include "yml/yaml_fields.h"
+#include "yaml_diagnostic_internal.h"
 #include <ctype.h>
 #include <fmt.h>
 #include <stdint.h>
@@ -11,7 +11,7 @@ void praktor_yaml_field_error_dispose(praktor_yaml_field_error *error) {
     error->origin = PRAKTOR_YAML_FAILURE_NONE;
 }
 
-static int field_failure(praktor_yaml_field_error *error, int status,
+int praktor_yaml_field_fail(praktor_yaml_field_error *error, int status,
     praktor_yaml_failure origin, tstr message) {
     bool allocated = message != NULL;
     if (error) {
@@ -23,40 +23,44 @@ static int field_failure(praktor_yaml_field_error *error, int status,
 
 static int invalid_argument(praktor_yaml_field_error *error) {
     if (!error) return SALTS_EINVAL;
-    return field_failure(error, SALTS_EINVAL, PRAKTOR_YAML_FAILURE_INPUT,
+    return praktor_yaml_field_fail(error, SALTS_EINVAL, PRAKTOR_YAML_FAILURE_INPUT,
         tstr_dup("Invalid YAML field argument"));
 }
 
-static int parse_error(praktor_yaml_node node, vstr message,
+int praktor_yaml_field_fail_at(praktor_yaml_node node, vstr message,
     praktor_yaml_field_error *error) {
     tstr location = NULL, text;
     int status;
     if (!error) return SALTS_EINVAL;
     status = praktor_yaml_location(node, &location);
     if (status != SALTS_OK)
-        return field_failure(error, status, PRAKTOR_YAML_FAILURE_ALLOCATION, NULL);
+        return praktor_yaml_field_fail(error, status, PRAKTOR_YAML_FAILURE_ALLOCATION, NULL);
     text = tstr_format("Parse error{}: {}", location, message);
     tstr_free(location);
-    return field_failure(error, SALTS_EINVAL, PRAKTOR_YAML_FAILURE_INPUT, text);
+    return praktor_yaml_field_fail(error, SALTS_EINVAL, PRAKTOR_YAML_FAILURE_INPUT, text);
+}
+
+int praktor_yaml_field_decode(praktor_yaml_node node, bool key, tstr *out,
+    praktor_yaml_field_error *error) {
+    char buffer[256];
+    praktor_yaml_diagnostic diagnostic = {buffer, sizeof(buffer), PRAKTOR_YAML_FAILURE_NONE};
+    int status = key ? praktor_yaml_key(node, out, &diagnostic) : praktor_yaml_scalar(node, out, &diagnostic);
+    if (status == SALTS_OK || !error) return status;
+    return praktor_yaml_field_fail(error, status, diagnostic.origin, tstr_dup(buffer));
 }
 
 static int read_scalar(praktor_yaml_node node, vstr message, bool string_only,
     tstr *out, praktor_yaml_field_error *error) {
     tstr text = NULL;
-    char buffer[256];
-    praktor_yaml_diagnostic diagnostic = {buffer, sizeof(buffer), PRAKTOR_YAML_FAILURE_NONE};
     int status;
     if (!out || !vstr_is_valid(message)) return invalid_argument(error);
     if (!praktor_yaml_has_val(node) || (string_only && !praktor_yaml_is_string_scalar(node)))
-        return parse_error(node, message, error);
-    status = praktor_yaml_scalar(node, &text, &diagnostic);
-    if (status != SALTS_OK) {
-        if (!error) return status;
-        return field_failure(error, status, diagnostic.origin, tstr_dup(buffer));
-    }
+        return praktor_yaml_field_fail_at(node, message, error);
+    status = praktor_yaml_field_decode(node, false, &text, error);
+    if (status != SALTS_OK) return status;
     if (tstr_len(text) > PRAKTOR_YAML_MAX_PARAMETER_LENGTH) {
         tstr_free(text);
-        return parse_error(node,
+        return praktor_yaml_field_fail_at(node,
             vstr_from_cstr("Parameter value exceeds maximum length of 10240 bytes"), error);
     }
     *out = text;
@@ -125,7 +129,7 @@ int praktor_yaml_field_boolean(praktor_yaml_node node, vstr field_name,
         (policy != PRAKTOR_YAML_BOOLEAN_STRICT && policy != PRAKTOR_YAML_BOOLEAN_FORCE_TERMINATE))
         return invalid_argument(error);
     message = tstr_format("'{}' must be a boolean", field_name);
-    if (!message) return field_failure(error, SALTS_ENOMEM, PRAKTOR_YAML_FAILURE_ALLOCATION, NULL);
+    if (!message) return praktor_yaml_field_fail(error, SALTS_ENOMEM, PRAKTOR_YAML_FAILURE_ALLOCATION, NULL);
     status = read_scalar(node, tstr_to_v(message), false, &text, error);
     if (status != SALTS_OK) { tstr_free(message); return status; }
     for (index = 0; index < tstr_len(text); ++index) text[index] = (char)tolower((unsigned char)text[index]);
@@ -137,12 +141,41 @@ int praktor_yaml_field_boolean(praktor_yaml_node node, vstr field_name,
         (praktor_yaml_bool_integer(node, &value) != SALTS_OK &&
          praktor_yaml_force_terminate_integer(tstr_to_v(text), &value) != SALTS_OK)) {
         tstr_free(text);
-        status = parse_error(node, tstr_to_v(message), error);
+        status = praktor_yaml_field_fail_at(node, tstr_to_v(message), error);
         tstr_free(message);
         return status;
     }
     tstr_free(text);
     tstr_free(message);
     *out = value;
+    return SALTS_OK;
+}
+
+int praktor_yaml_check_keys(praktor_yaml_node node, const vstr *allowed,
+    size_t count, praktor_yaml_field_error *error) {
+    size_t index, candidate;
+    praktor_yaml_field_error_dispose(error);
+    if (count && !allowed) return invalid_argument(error);
+    for (candidate = 0; candidate < count; ++candidate)
+        if (!vstr_is_valid(allowed[candidate])) return invalid_argument(error);
+    if (!praktor_yaml_is_map(node)) return SALTS_OK;
+    for (index = 0; index < praktor_yaml_count(node); ++index) {
+        praktor_yaml_node child = praktor_yaml_at(node, index);
+        tstr key = NULL, message;
+        int status = praktor_yaml_field_decode(child, true, &key, error);
+        if (status != SALTS_OK) return status;
+        for (candidate = 0; candidate < count; ++candidate)
+            if (vstr_eq(tstr_to_v(key), allowed[candidate])) break;
+        if (candidate == count) {
+            if (!error) { tstr_free(key); return SALTS_EINVAL; }
+            message = tstr_format("Unknown key: '{}'", key);
+            tstr_free(key);
+            if (!message) return praktor_yaml_field_fail(error, SALTS_ENOMEM, PRAKTOR_YAML_FAILURE_ALLOCATION, NULL);
+            status = praktor_yaml_field_fail_at(child, tstr_to_v(message), error);
+            tstr_free(message);
+            return status;
+        }
+        tstr_free(key);
+    }
     return SALTS_OK;
 }

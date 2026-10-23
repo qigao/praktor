@@ -51,20 +51,6 @@ inline std::string normalize_lookup_key(std::string value) {
 
 constexpr int MAX_BTDSL_NESTING_DEPTH = 100;
 
-inline void check_unknown_keys(const YamlNodeRef& node,
-                               const std::unordered_set<std::string>& allowed_keys) {
-    if (!node.is_map()) {
-        return;
-    }
-
-    for (const auto& child : node) {
-        std::string key = child.key();
-        if (allowed_keys.find(key) == allowed_keys.end()) {
-            throw_parse_error(child, "Unknown key: '" + key + "'");
-        }
-    }
-}
-
 template <typename T>
 T get_optional(const YamlNodeRef& node, const char* key, T default_value) {
     if (!node.has_child(key)) {
