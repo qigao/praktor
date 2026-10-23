@@ -23,7 +23,7 @@
 #include <unordered_map>
 #include <vector>
 
-#include "util/praktor_init.hpp"
+#include "util/praktor_init.h"
 
 #ifdef _WIN32
 #include <Windows.h>
@@ -335,7 +335,21 @@ int main(int argc, char* argv[]) {
 
         // Subcommand dispatch
         if (config.command == "init") {
-            return Praktor::Utils::PraktorInit::initialize(config.templateName) ? 0 : 1;
+            praktor_init_options init_options;
+            praktor_init_result init_result{};
+            praktor_init_options_init(&init_options);
+            init_options.template_name = config.templateName.c_str();
+            const auto init_status = praktor_init_project(&init_options, &init_result);
+            if (init_result.message != nullptr) {
+                if (init_status == PRAKTOR_INIT_OK) logi(init_result.message);
+                else loge(init_result.message);
+            }
+            if (init_result.detail != nullptr) {
+                if (init_status == PRAKTOR_INIT_OK) logi(init_result.detail);
+                else loge(init_result.detail);
+            }
+            praktor_init_result_destroy(&init_result);
+            return init_status == PRAKTOR_INIT_OK ? 0 : 1;
         }
 
         // All other operations require a YAML file

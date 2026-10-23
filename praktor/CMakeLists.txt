@@ -37,7 +37,6 @@ set(SOURCE_FILES
     src/system/process_native_legacy_bridge.cpp
     src/expressions/expression_evaluator_legacy_bridge.cpp
     src/util/system_info.cpp
-    src/util/praktor_init.cpp
     src/util/mustache_substitutor.cpp
 )
 
@@ -58,6 +57,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/src/yml/yaml_task_targets.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/src/yml/orch_targets.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/src/profile/profile_targets.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/src/util/file_hash_targets.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/src/util/praktor_init_targets.cmake)
 add_library(${TARGET_NAME_LIB} ${SOURCE_FILES})
 target_include_directories(
     ${TARGET_NAME_LIB}
@@ -82,7 +82,7 @@ target_link_libraries(
            Salts::CNet
            CHttp::S3
            praktor_shell
-    PRIVATE praktor_file_hash praktor_orch_tree praktor_workflow_profile praktor_yaml_task_fields praktor_yaml_action_params praktor_yaml_value praktor_yaml_document praktor_workflow_value praktor_document_query praktor_expression_evaluator actions praktor_process_driver praktor_process_native praktor_service_control
+    PRIVATE praktor_init praktor_file_hash praktor_orch_tree praktor_workflow_profile praktor_yaml_task_fields praktor_yaml_action_params praktor_yaml_value praktor_yaml_document praktor_workflow_value praktor_document_query praktor_expression_evaluator actions praktor_process_driver praktor_process_native praktor_service_control
 )
 if(ENABLE_SCRIPT_ENGINE)
     target_link_libraries(${TARGET_NAME_LIB} PUBLIC TurboScript::TurboScript)

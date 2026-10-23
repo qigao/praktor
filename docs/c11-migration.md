@@ -59,16 +59,16 @@ the rollback point; partial migration is not released as the completed product.
 | Workflow values | C exact numeric conversion, borrowed path reads, transactional mutations over the existing Salts JSON owner; temporary C++ container/exception facade | Migrate callers and remove the facade |
 | YAML documents, fields, structured values and system parameters | C source/document owner, node access, scalar/int conversion, bounded field readers, key whitelist validation and owned contract/HostTool value conversion, Download/Service/ManagedProcess/Command/Program parameter construction, shared string containers and Each/Triggers/DynamicTasks/Uses construction; explicit temporary C++ iterator/exception facade | Port remaining YAML task/workflow field construction, then delete the facade |
 | Harness profile | Pure C reason-mask policy; temporary input/result conversion in the reviewed-plan caller | Preserve reason order and remove remaining caller conversion with the plan migration |
+| File hashing and project initialization | Pure C hashing and bounded template discovery/copy; CLI performs only result logging | Preserve native paths, template search order and exclusive `praktor.yml` creation |
 | Contracts, effects, reviewed plans | C++ remains | One C-owned representation and unchanged SDK/YAML contracts |
 | DAG, contexts, triggers, scheduler, actions | C++ application layer and explicit compatibility dispatch remain | Native C execution and atomic Parallel branch state |
 | Shell/application/service adapters | C implementations exist, C++ conversions remain | C callers only; remove adapter headers/translation units |
 | SDK, CLI, script wrapper, remaining tools/examples/tests | C++ remains | Preserve the C ABI and CLI behavior, port all consumers/tests |
 | Root CMake/presets/install | Still loads C++ during migration | C-only compiler graph and installed C consumer link audit |
 
-The first cut deletes six C++ source/header/test files. It does **not** meet the
-whole-program completion gate yet. The baseline contained 186 tracked C++ files
-(excluding `.hpp.in` templates); 179 remain, including a temporary facade regression
-test added during the value port. This count is
+The branch does **not** meet the whole-program completion gate yet. The baseline
+contained 186 tracked C++ files (excluding `.hpp.in` templates); 175 remain,
+including a temporary facade regression test added during the value port. This count is
 inventory, not a measure of runtime parity or a substitute for the final audit.
 
 Native regex support must preserve the established matching language or gain
@@ -481,8 +481,25 @@ lifecycle ASan and complete-source TSan filters. The policy remains the sole
 reason-mask/ordering authority; no parallel C++ policy is reintroduced. The
 reviewed-plan caller's explicit value projection still needs migration.
 
-All five independent projects provide release/ASan presets. On Linux,
-`bash cmake/ci/qualify-c-only-tools.sh release` configures/builds/tests all five
+File hashing now has a standalone C owner and the workflow cache calls that API
+without the deleted C++ hash implementation/header. The same C-only utility
+graph now owns `praktor init`: it preserves executable, adjacent source-tree and
+working-directory template search order, sorted unique missing-template output
+and the two existing success messages. Search paths and result text use unique
+`tstr` owners. Discovery admits at most 4096 template names and 1 MiB of retained
+name text; excess fails closed without creating a project file.
+
+The working directory is admitted as a Salts filesystem root. `praktor.yml` is
+created with the root-relative exclusive flag, so a concurrent creator is never
+overwritten. Template bytes stream in bounded 64 KiB chunks; read, write or close
+failure closes every handle and removes the partial destination. The CLI only
+maps the owned C result into the existing info/error logger. The old
+`PraktorInit` class and its C++ translation unit are deleted. Native TinyTest
+cases cover search precedence, result ownership, sorted deduplication, invalid
+input and no-replace behavior without changing process cwd.
+
+All six independent projects provide release/ASan presets. On Linux,
+`bash cmake/ci/qualify-c-only-tools.sh release` configures/builds/tests all six
 complete graphs and rejects C++ symbols/libraries in their executable links.
 The complete-source TSan workflow invokes the same qualification with `thread`
 against instrumented Salts and SaltsUtils. Ordinary platform CI continues

@@ -9,6 +9,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/../src/yml/yaml_task_tests.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/../src/yml/orch_tests.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/../src/profile/profile_tests.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/../src/util/file_hash_tests.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/../src/util/praktor_init_tests.cmake)
 
 # Compile this public header without a transitive include of the
 # legacy actions Executor. The main target links actions privately, so this
