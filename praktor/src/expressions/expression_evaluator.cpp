@@ -1,9 +1,11 @@
 #include "expressions/expression_evaluator.hpp"
 
-#include "expressions/expression_lexer.hpp"
+#include "expressions/expression_lexer.h"
+#include <salts/error_codes.h>
 #include "util/logging.hpp"
 
 #include <cmath>
+#include <limits>
 #include <cstdlib>
 #include <regex>
 #include <stdexcept>
@@ -13,6 +15,11 @@
 namespace Praktor::Expressions {
 
 namespace {
+
+// Temporary container conversion until the evaluator itself has a C value
+// provider. All token recognition, decoding and lexical state are owned by C.
+using TokenType = praktor_expression_token_kind;
+struct Token { TokenType type; std::string value; size_t position; };
 
 using EvalValue = std::variant<std::monostate, bool, double, std::string, std::regex>;
 
@@ -133,7 +140,7 @@ public:
 
   EvalValue parse() {
     EvalValue value = parseOr();
-    require(TokenType::END, "unexpected trailing tokens");
+    require(PRAKTOR_EXPR_END, "unexpected trailing tokens");
     return value;
   }
 
@@ -146,12 +153,12 @@ private:
 
   const Token& previous() const { return tokens_.at(pos_ - 1); }
 
-  bool isAtEnd() const { return peek().type == TokenType::END; }
+  bool isAtEnd() const { return peek().type == PRAKTOR_EXPR_END; }
 
   bool check(TokenType type) const { return peek().type == type; }
 
   bool checkOperator(std::string_view op) const {
-    return peek().type == TokenType::OPERATOR && peek().value == op;
+    return peek().type == PRAKTOR_EXPR_OPERATOR && peek().value == op;
   }
 
   const Token& advance() {
@@ -203,7 +210,7 @@ private:
 
   EvalValue parseEquality() {
     EvalValue value = parseComparison();
-    while (check(TokenType::OPERATOR)) {
+    while (check(PRAKTOR_EXPR_OPERATOR)) {
       const std::string op = peek().value;
       if (op != "==" && op != "!=") {
         if (op == "===" || op == "!==") {
@@ -222,7 +229,7 @@ private:
 
   EvalValue parseComparison() {
     EvalValue value = parseUnary();
-    while (check(TokenType::OPERATOR)) {
+    while (check(PRAKTOR_EXPR_OPERATOR)) {
       const std::string op = peek().value;
       if (op != "<" && op != ">" && op != "<=" && op != ">=") {
         break;
@@ -258,49 +265,49 @@ private:
 
   EvalValue parsePostfix() {
     EvalValue value = parsePrimary();
-    while (match(TokenType::DOT)) {
-      if (!match(TokenType::IDENTIFIER)) {
+    while (match(PRAKTOR_EXPR_DOT)) {
+      if (!match(PRAKTOR_EXPR_IDENTIFIER)) {
         throw std::runtime_error("expected method name after '.'");
       }
 
       const std::string method = previous().value;
-      require(TokenType::LPAREN, "expected '(' after method name");
+      require(PRAKTOR_EXPR_LPAREN, "expected '(' after method name");
 
       std::vector<EvalValue> args;
-      if (!check(TokenType::RPAREN)) {
+      if (!check(PRAKTOR_EXPR_RPAREN)) {
         args.push_back(parseOr());
       }
 
-      require(TokenType::RPAREN, "expected ')' after arguments");
+      require(PRAKTOR_EXPR_RPAREN, "expected ')' after arguments");
       value = applyMethod(value, method, args);
     }
     return value;
   }
 
   EvalValue parsePrimary() {
-    if (match(TokenType::LPAREN)) {
+    if (match(PRAKTOR_EXPR_LPAREN)) {
       EvalValue value = parseOr();
-      require(TokenType::RPAREN, "expected ')' after expression");
+      require(PRAKTOR_EXPR_RPAREN, "expected ')' after expression");
       return value;
     }
 
-    if (match(TokenType::VARIABLE)) {
+    if (match(PRAKTOR_EXPR_VARIABLE)) {
       return resolveVariable(previous().value);
     }
 
-    if (match(TokenType::STRING)) {
+    if (match(PRAKTOR_EXPR_STRING)) {
       return EvalValue(previous().value);
     }
 
-    if (match(TokenType::NUMBER)) {
+    if (match(PRAKTOR_EXPR_NUMBER)) {
       return EvalValue(std::stod(previous().value));
     }
 
-    if (match(TokenType::REGEX)) {
+    if (match(PRAKTOR_EXPR_REGEX)) {
       return EvalValue(std::regex(previous().value));
     }
 
-    if (match(TokenType::IDENTIFIER)) {
+    if (match(PRAKTOR_EXPR_IDENTIFIER)) {
       const std::string& value = previous().value;
       if (value == "true") {
         return EvalValue(true);
@@ -376,8 +383,22 @@ private:
 };
 
 EvalValue evaluateInternal(const std::string& expression, const WorkflowContext& context) {
-  ExpressionLexer lexer(expression);
-  const std::vector<Token> tokens = lexer.tokenize();
+  praktor_expression_lexer lexer{};
+  if (praktor_expression_lexer_init(&lexer, expression.data(), expression.size()) != SALTS_OK)
+    throw std::runtime_error("invalid expression input");
+  if (expression.size() == std::numeric_limits<size_t>::max())
+    throw std::length_error("expression is too large");
+  std::vector<char> scratch(expression.size() + 1);
+  std::vector<Token> tokens;
+  for (;;) {
+    praktor_expression_token token{}; size_t size = 0;
+    const int result = praktor_expression_lexer_next(&lexer, &token, scratch.data(), scratch.size(), &size);
+    if (result != SALTS_OK)
+      throw std::runtime_error("unexpected character in expression: " +
+          std::string(1, expression.at(lexer.error_position)));
+    tokens.push_back({token.kind, std::string(scratch.data(), size), token.position});
+    if (token.kind == PRAKTOR_EXPR_END) break;
+  }
   Parser parser(tokens, context);
   return parser.parse();
 }

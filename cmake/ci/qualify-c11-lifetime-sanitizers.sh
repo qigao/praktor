@@ -33,7 +33,6 @@ cmake --preset "$CMAKE_PRESET" -B "$build_dir" \
   "-DCMAKE_SHARED_LINKER_FLAGS=$sanitizer_flags"
 
 cmake --build "$build_dir" \
-  --target actions_output_core_test test_output_parser shell_executor_test praktor_process_driver_test praktor_process_worker_test praktor_process_control_test praktor_process_native_test praktor_service_control_test praktor_service_process_test service_executor_test.praktor_lib managed_process_executor_test.praktor_lib actions_c11_tree_executor_session_test actions_c11_session_c_test actions_c11_tree_plan_test actions_c11_session_independent_test actions_c11_native_host_test actions_c11_session_yaml_differential_test core_only_workflow_test.praktor_lib \
   --parallel 2
 # Released Salts.Native is not TSan-instrumented. Consumer-only TSan
 # cannot see its async logger's release/acquire edges and reports an invalid
@@ -44,7 +43,7 @@ cmake --build "$build_dir" \
 # The separately instrumented C11 Session smoke test remains useful here.
 case "$mode" in
   address)
-    test_regex='^(actions_output_core_test|test_output_parser|service_executor_test\.praktor_lib|managed_process_executor_test\.praktor_lib|shell_executor_test|praktor_process_driver_test|praktor_process_worker_test|praktor_process_control_test|praktor_process_native_test|praktor_service_control_test|praktor_service_process_test|actions_c11_tree_executor_session_test|actions_c11_session_c_test|actions_c11_tree_plan_test|actions_c11_session_independent_test|actions_c11_native_host_test|actions_c11_session_yaml_differential_test|core_only_workflow_test\.praktor_lib)$'
+    test_regex='^(schema_projection_cli|schema_projection_test|schema_projection_cli_usage|expression_lexer_test|expression_evaluator_test\.praktor_lib|actions_output_core_test|test_output_parser|service_executor_test\.praktor_lib|managed_process_executor_test\.praktor_lib|shell_executor_test|praktor_process_driver_test|praktor_process_worker_test|praktor_process_control_test|praktor_process_native_test|praktor_service_control_test|praktor_service_process_test|actions_c11_tree_executor_session_test|actions_c11_session_c_test|actions_c11_tree_plan_test|actions_c11_session_independent_test|actions_c11_native_host_test|actions_c11_session_yaml_differential_test|core_only_workflow_test\.praktor_lib)$'
     ;;
   thread)
     test_regex='^(shell_executor_test|praktor_process_driver_test|praktor_process_worker_test|praktor_process_control_test|praktor_process_native_test|praktor_service_control_test|praktor_service_process_test|actions_c11_tree_executor_session_test|actions_c11_session_c_test|actions_c11_tree_plan_test|actions_c11_session_independent_test|actions_c11_native_host_test)$'

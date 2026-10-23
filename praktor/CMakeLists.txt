@@ -37,7 +37,6 @@ set(SOURCE_FILES
     src/system/process_control_legacy_bridge.cpp
     src/system/process_native_legacy_bridge.cpp
     src/expressions/expression_evaluator.cpp
-    src/expressions/expression_lexer.cpp
     src/util/system_info.cpp
     src/util/praktor_init.cpp
     src/util/file_hash.cpp
@@ -50,6 +49,7 @@ else()
     list(APPEND SOURCE_FILES src/script/script_engine_disabled.cpp)
 endif()
 
+include(${CMAKE_CURRENT_SOURCE_DIR}/src/expressions/lexer_targets.cmake)
 add_library(${TARGET_NAME_LIB} ${SOURCE_FILES})
 target_include_directories(
     ${TARGET_NAME_LIB}
@@ -74,7 +74,7 @@ target_link_libraries(
            Salts::CNet
            CHttp::S3
            praktor_shell
-    PRIVATE actions praktor_process_driver praktor_process_native praktor_service_control
+    PRIVATE praktor_expression_lexer actions praktor_process_driver praktor_process_native praktor_service_control
 )
 if(ENABLE_SCRIPT_ENGINE)
     target_link_libraries(${TARGET_NAME_LIB} PUBLIC TurboScript::TurboScript)

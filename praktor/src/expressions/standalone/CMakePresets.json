@@ -1,0 +1,15 @@
+{
+  "version": 6,
+  "configurePresets": [
+    {"name": "lexer-c-release", "generator": "Ninja", "binaryDir": "${sourceDir}/../../../../build/lexer-c-release", "cacheVariables": {"CMAKE_BUILD_TYPE": "Release", "CMAKE_EXPORT_COMPILE_COMMANDS": true}},
+    {"name": "lexer-c-asan", "inherits": "lexer-c-release", "binaryDir": "${sourceDir}/../../../../build/lexer-c-asan", "condition": {"type": "equals", "lhs": "${hostSystemName}", "rhs": "Linux"}, "cacheVariables": {"CMAKE_BUILD_TYPE": "Debug", "CMAKE_C_FLAGS": "-fsanitize=address,undefined -fno-omit-frame-pointer -g", "CMAKE_EXE_LINKER_FLAGS": "-fsanitize=address,undefined"}}
+  ],
+  "buildPresets": [
+    {"name": "lexer-c-release", "configurePreset": "lexer-c-release", "jobs": 2},
+    {"name": "lexer-c-asan", "configurePreset": "lexer-c-asan", "jobs": 2}
+  ],
+  "testPresets": [
+    {"name": "lexer-c-release", "configurePreset": "lexer-c-release", "output": {"outputOnFailure": true}, "execution": {"noTestsAction": "error"}},
+    {"name": "lexer-c-asan", "configurePreset": "lexer-c-asan", "output": {"outputOnFailure": true}, "execution": {"noTestsAction": "error"}}
+  ]
+}

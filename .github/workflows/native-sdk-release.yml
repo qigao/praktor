@@ -83,9 +83,9 @@ jobs:
       HOST_TRIPLET: ${{ matrix.host }}
       CMAKE_PRESET: ${{ matrix.preset }}
       SDK_VERSION: ${{ needs.metadata.outputs.version }}
-      # The adapter draft must validate against the exact 3.0.11 producer artifact.
+      # C11 migration PRs must validate against the exact 3.0.11 producer artifact.
       # Keep the override branch-scoped; unrelated PRs continue using released packages.
-      TURBOSCRIPT_CI_RUN: ${{ inputs.turboscript_ci_run || (github.event_name == 'pull_request' && github.head_ref == 'feat/praktor-c11-behavior-tree-adapter' && '38529473245') || '' }}
+      TURBOSCRIPT_CI_RUN: ${{ inputs.turboscript_ci_run || (github.event_name == 'pull_request' && (github.head_ref == 'feat/praktor-c11-behavior-tree-adapter' || github.head_ref == 'refactor/praktor-c-only') && '38529473245') || '' }}
       CCACHE_DIR: ${{ github.workspace }}/.cache/ccache
       CCACHE_BASEDIR: ${{ github.workspace }}
       CCACHE_COMPILERCHECK: content

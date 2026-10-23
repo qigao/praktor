@@ -1,3 +1,5 @@
+include(${CMAKE_CURRENT_SOURCE_DIR}/../src/expressions/lexer_tests.cmake)
+
 # Compile this public header without a transitive include of the
 # legacy actions Executor. The main target links actions privately, so this
 # isolated consumer has only Praktor's declared public include interface.
@@ -17,7 +19,6 @@ if(ENABLE_SCRIPT_ENGINE)
 
     set(TEST_SOURCES
         dynamic_tasks_executor_test.cpp
-        expression_evaluator_test.cpp
         graph_test.cpp
         task_parser_test.cpp
         task_registry_test.cpp
@@ -37,6 +38,7 @@ else()
 endif()
 
 list(APPEND TEST_SOURCES
+    expression_evaluator_test.cpp
     service_executor_test.cpp
     managed_process_executor_test.cpp
     download_executor_test.cpp

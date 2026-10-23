@@ -1,7 +1,8 @@
 # Experimental C11 execution boundaries
 
-PR #78 remains Draft. `Legacy` is still the workflow default. No release or
-production switch is implied by these independent execution targets.
+PR #78 is merged. `Legacy` remains the accepted workflow default while the
+[complete C11 migration](../../docs/c11-migration.md) is in progress. Independent
+C execution targets alone do not establish whole-workflow parity.
 
 | Target | Owner and dependencies |
 | --- | --- |
