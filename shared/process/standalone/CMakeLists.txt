@@ -6,6 +6,8 @@ find_package(SaltsUtils CONFIG REQUIRED
 option(PRAKTOR_PROCESS_RETAINER "Test explicit P1 retainer ownership" ON)
 include(../process_target.cmake)
 include(../native_target.cmake)
+include(../service_targets.cmake)
+include(../service_tests.cmake)
 if(CMAKE_CXX_COMPILER_LOADED OR TARGET actions OR TARGET praktor_shell)
     message(FATAL_ERROR "C11 Process test must not load a C++ execution target")
 endif()

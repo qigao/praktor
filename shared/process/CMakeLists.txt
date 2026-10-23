@@ -1,6 +1,8 @@
 include(process_target.cmake)
 include(native_target.cmake)
+include(service_targets.cmake)
 if(ENABLE_TESTS)
+    include(service_tests.cmake)
     add_executable(praktor_process_native_test test/process_native_test.c)
     target_link_libraries(praktor_process_native_test PRIVATE praktor_process_native Salts::TinyTest Salts::Platform)
     set_target_properties(praktor_process_native_test PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF LINKER_LANGUAGE C)

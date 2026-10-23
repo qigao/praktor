@@ -9,6 +9,8 @@ production switch is implied by these independent execution targets.
 | `praktor_c11_value_store` | Fixed-capacity C11 values and optimistic transactions |
 | `praktor_c11_native_host` | C11 value-store owner and preallocated parameter scratch; typed `SetVariable`, `CheckExitCode`, cooperative `Sleep` and unfiltered `ParseLines` leaves |
 | `praktor_process_driver` | C11 Process I/O/retainer driver plus optional C11 joined worker with Salts thread, cancellation, synchronized observers and bounded admission copies; no C++ runtime |
+| `praktor_service_control` | Bounded C service state machine and numeric STATE parser; base Salts::Platform only |
+| `praktor_service_process_host` | Explicit service command binding to the joined C Process worker; no shell parser or C++ runtime |
 | `praktor_process_native` | C11 persistent-application controller and bounded Windows host; base Salts::Platform only, no Shell driver or C++ runtime |
 | `praktor_c11_session_core` | C11 control compiler and entire Session runtime: owned bounded typed plan, dispatch/activation ownership, dynamic controls, pipeline/entry/JSON queue state and Salts::Process; no C++ compiler or runtime |
 | `praktor_c11_session` | Construction-only C++ AST compiler and exception boundary over `praktor_c11_session_core`; no legacy execution symbols |
@@ -98,7 +100,9 @@ Validation projects:
   controller suite covers typed arguments, idempotence, restart ordering, startup
   compensation against an exact instance despite replacement queries, late native
   calls, stop escalation, error propagation and counter wrap with a controlled
-  monotonic clock. All four executables
+  monotonic clock. Service suites additionally exercise restart order, all terminal
+  command outcomes, bounded template expansion, deadline charging, reentrancy,
+  and actual C fixture commands through the C Process host. All six executables
   reject C++ ABI/runtime dependencies and run against baseline and P1 profiles.
 - `shared/process/native-standalone`: `LANGUAGES C`, base Salts SDK only; rejects
   C++ compiler, Legacy and Salts::Process targets. TinyTest directly exercises
@@ -191,3 +195,32 @@ Timeout/wait failure still returns the native error. The controller charges
 the wait against its deadline. Windows tests cover pending/signaled/invalid
 kernel objects and the real graceful-stop path. Their fixture is now compiled
 and linked as C (`managed_process_fixture.c`), without a C++ entry point.
+
+
+`praktor/src/system/service_controller.cpp` has been removed. Its replacement,
+`service_control_legacy_bridge.cpp`, owns only the immutable Legacy profile map,
+value conversion, C owner scope and exception containment. The C state machine
+in `shared/process/src/service_control.c` pre-renders all three command templates
+before dispatch and rejects configured argument/metadata bounds without partial
+render admission. Callback time consumes one operation deadline; late successful
+mutations retain `changed=true` but cannot authorize later commands. This also
+closes the old late-status-query success hole. Polling and parsing allocate no
+memory. C state, diagnostics and argv scratch are owned from init until destroy.
+Default compatibility bounds are 4096 arguments per command, 1 MiB aggregate
+render metadata (including argv pointers) and 16 MiB captured command output.
+Embedded NUL in Legacy metadata is rejected before command dispatch.
+
+The separate `service_process_host.c` binds that typed command interface to the
+existing Salts::Process C worker. It retains the completed worker while output
+is borrowed, joins/reclaims it before the next command, and joins again at host
+close. There is no shell expansion or Legacy fallback. Native commands can fail
+after external service effects; this synchronous controller does not promise
+rollback or preemption of host callbacks. Cancellation remains an explicit
+terminal command result. It does not introduce a default-backend switch.
+
+Base-SDK-only `native-standalone` also links/runs the service controller test
+without loading Salts::Process or a C++ compiler. `shared/process/standalone`
+runs the real service fixture through the explicit C Process binding on Linux
+and Windows; root builds run it across SDK platforms. Existing Service YAML and
+compatibility tests remain in the SDK gate, and ASan/UBSan/full-source TSan now
+include both service C suites plus the compatibility executor suite.

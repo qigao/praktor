@@ -434,3 +434,30 @@ spec("service controller owns a frozen profile registry snapshot") {
 spec("service controller safely owns a temporary profile registry") {
     it("complete case") { test_service_controller_safely_owns_a_temporary_profile_registry_11(); }
 }
+
+
+spec("C service compatibility metadata and exception boundary") {
+  it("rejects embedded NUL before dispatch") {
+    ScriptedProcessRunner runner({serviceState(4)});
+    ServiceController controller(runner, profiles());
+    auto request = params(SystemOperation::Start);
+    request.arguments.push_back(std::string("safe\0unsafe",11));
+    const auto result = controller.execute(request);
+    check(!result.task_result.success && result.task_result.error_code == "schema_invalid");
+    check(runner.calls.empty() && !result.changed);
+  }
+  it("contains standard and nonstandard runner exceptions at the C boundary") {
+    ScriptedProcessRunner exhausted({});
+    ServiceController controller(exhausted, profiles());
+    const auto result = controller.execute(params(SystemOperation::Status));
+    check(!result.task_result.success && result.task_result.error_code == "process_spawn_failed");
+    check(result.task_result.error_message == "failed to run service command: fake runner script exhausted");
+    class ThrowingRunner final : public IProcessRunner {
+      ShellResult run(const ProcessSpec&) override { throw 7; }
+    } runner;
+    ServiceController other(runner, profiles());
+    const auto unknown = other.execute(params(SystemOperation::Status));
+    check(!unknown.task_result.success && unknown.task_result.error_code == "process_spawn_failed");
+    check(unknown.task_result.error_message == "failed to run service command");
+  }
+}

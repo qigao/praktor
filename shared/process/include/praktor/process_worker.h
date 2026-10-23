@@ -1,17 +1,12 @@
 #ifndef PRAKTOR_PROCESS_WORKER_H
 #define PRAKTOR_PROCESS_WORKER_H
 #include "process_driver.h"
+#include "process_state.h"
 #include <salts/error_codes.h>
 #ifdef __cplusplus
 extern "C" {
 #endif
 typedef struct praktor_process_worker { void *impl; } praktor_process_worker;
-typedef enum praktor_process_state {
-  PRAKTOR_PROCESS_STARTING, PRAKTOR_PROCESS_RUNNING, PRAKTOR_PROCESS_CANCELLING,
-  PRAKTOR_PROCESS_EXITED, PRAKTOR_PROCESS_SIGNALED, PRAKTOR_PROCESS_TIMED_OUT,
-  PRAKTOR_PROCESS_CANCELLED, PRAKTOR_PROCESS_SPAWN_FAILED, PRAKTOR_PROCESS_WAIT_FAILED,
-  PRAKTOR_PROCESS_OUTPUT_LIMIT_EXCEEDED
-} praktor_process_state;
 typedef struct praktor_process_worker_config {
   cmeta_process_options_t options;
   const void *input;

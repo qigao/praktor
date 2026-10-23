@@ -44,6 +44,16 @@ if len(sys.argv) > 3:
                  r'_ZNSt6thread|_ZNSt5mutex|_ZNSt18condition_variable', control):
         raise SystemExit('C++ application bridge still owns polling/time/synchronization')
     print('Application control bridge: C owns polling, deadlines and compensation')
+    service = '\n'.join(line for line in archive.splitlines()
+                         if 'service_control_legacy_bridge' in line)
+    for symbol in ('praktor_service_control_init', 'praktor_service_control_execute',
+                   'praktor_service_control_destroy'):
+        if not re.search(r'\b' + symbol + r'\b', service):
+            raise SystemExit('Service compatibility bridge must delegate to C: ' + symbol)
+    if re.search(r'steady_clock|sleep_for|cmeta_(?:sleep|hrtime|monotonic)|'
+                 r'from_chars|_ZNSt6thread|_ZNSt5mutex|_ZNSt18condition_variable', service):
+        raise SystemExit('C++ service bridge still owns parsing/polling/time')
+    print('Service compatibility bridge: C owns rendering, state parsing and deadlines')
     native_bridge = '\n'.join(line for line in archive.splitlines()
                               if 'process_native_legacy_bridge' in line)
     for symbol in ('praktor_process_native_init', 'praktor_process_native_bind',
@@ -60,3 +70,17 @@ if len(sys.argv) > 4:
         raise SystemExit('Native application C host requires C++ or the Shell process driver')
     print('Native application host: separate C archive, no C++/Shell execution dependency')
 print('Shell/Program facade: Salts::Process owns native spawn, I/O and teardown')
+
+for index in range(5, len(sys.argv)):
+    service_symbols = subprocess.check_output(['nm', '-u', sys.argv[index]], text=True)
+    if re.search(r'__cxa_|__gxx_|_Z[NST]|\bstd::', service_symbols):
+        raise SystemExit('Service C archive requires a C++ runtime')
+    if index == 5 and re.search(r'\b(?:cflow_process_|praktor_process_worker_)', service_symbols):
+        raise SystemExit('Service state machine requires a process implementation')
+    if index == 6:
+        for operation in ('start', 'wait', 'result', 'destroy'):
+            if not re.search(r'\bpraktor_process_worker_' + operation + r'\b', service_symbols):
+                raise SystemExit('Service process binding must use the joined C worker: ' + operation)
+        if re.search(r'\b(?:fork|posix_spawn|execve|CreateProcessW|CreateProcessA|system|popen)\b', service_symbols):
+            raise SystemExit('Service process binding bypasses Salts::Process')
+print('Service execution: bounded C state machine and explicit joined C Process binding')
