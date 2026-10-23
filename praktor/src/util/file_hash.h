@@ -13,7 +13,6 @@ enum { PRAKTOR_FILE_HASH_OK = 0, PRAKTOR_FILE_HASH_ERROR = -1 };
  * The file API streams input and does not retain the file contents. */
 int praktor_file_hash_bytes(const void *data, size_t size,
                             char *out, size_t capacity);
-int praktor_file_hash_file(const char *path, char *out, size_t capacity);
 
 #ifdef __cplusplus
 }

@@ -31,6 +31,7 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <optional>
 #include <queue>
 #include <sstream>
@@ -38,6 +39,7 @@
 #include <thread>
 #include <unordered_map>
 #include <unordered_set>
+#include <vector>
 #include <variant>
 
 namespace {
@@ -49,10 +51,16 @@ std::string computeFileHashC(const std::filesystem::path& path) {
   if (!std::filesystem::exists(path)) {
     throw std::runtime_error("Cannot hash missing file: " + path.string());
   }
-  char hash[PRAKTOR_FILE_HASH_HEX_SIZE] = {};
-  if (praktor_file_hash_file(path.string().c_str(), hash, sizeof(hash)) !=
-      PRAKTOR_FILE_HASH_OK) {
+  std::ifstream file(path, std::ios::binary);
+  if (!file.is_open()) {
     throw std::runtime_error("Failed to open file for hashing: " + path.string());
+  }
+  const std::vector<char> bytes((std::istreambuf_iterator<char>(file)),
+                                std::istreambuf_iterator<char>());
+  char hash[PRAKTOR_FILE_HASH_HEX_SIZE] = {};
+  if (praktor_file_hash_bytes(bytes.data(), bytes.size(), hash, sizeof(hash)) !=
+      PRAKTOR_FILE_HASH_OK) {
+    throw std::runtime_error("Failed to hash file: " + path.string());
   }
   return std::string(hash);
 }
