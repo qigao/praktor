@@ -21,8 +21,8 @@ static int optional_node(praktor_yaml_node node, const char *key,
                          praktor_yaml_node *out, praktor_yaml_field_error *error) {
     return praktor_yaml_field_get(node, key, out, error);
 }
-static int parse_field(praktor_yaml_node node, bool output, json_value_t **out,
-                       praktor_yaml_field_error *error) {
+static int parse_field(praktor_yaml_node node, bool output, const char *field_name,
+                       json_value_t **out, praktor_yaml_field_error *error) {
     static const vstr in_keys[]={{"type",4},{"required",8},{"default",7},{"enum",4},{"description",11}};
     static const vstr out_keys[]={{"type",4},{"required",8},{"default",7},{"enum",4},{"description",11},{"value",5}};
     praktor_yaml_node type_node={0}, required_node={0}, description_node={0};
@@ -32,7 +32,12 @@ static int parse_field(praktor_yaml_node node, bool output, json_value_t **out,
     bool required=false;
     size_t i;
     int status;
-    if(!praktor_yaml_is_map(node))return at_error(node,"workflow contract field must be a map",error);
+    if(!praktor_yaml_is_map(node)) {
+        tstr message=tstr_format("workflow contract field '{}' must be a map",field_name);
+        if(!message)return praktor_yaml_field_fail(error,SALTS_ENOMEM,PRAKTOR_YAML_FAILURE_ALLOCATION,NULL);
+        status=praktor_yaml_field_fail_at(node,tstr_to_v(message),error);
+        tstr_free(message);return status;
+    }
     status=praktor_yaml_check_keys(node,output?out_keys:in_keys,
         output?sizeof(out_keys)/sizeof(out_keys[0]):sizeof(in_keys)/sizeof(in_keys[0]),error);
     if(status!=SALTS_OK)return status;
@@ -143,7 +148,7 @@ int praktor_yaml_contract_fields_create(praktor_yaml_node node, bool output,
         if(tstr_len(key)==0u) {
             tstr_free(key);status=at_error(child,"workflow contract field name cannot be empty",error);goto fail;
         }
-        status=parse_field(child,output,&field,error);
+        status=parse_field(child,output,key,&field,error);
         if(status!=SALTS_OK){tstr_free(key);goto fail;}
         /* Existing std::map::emplace semantics: first duplicate field wins. */
         if(json_object_get(result,key)==NULL) {

@@ -12,6 +12,10 @@
 
 namespace {
 
+WorkflowValue parse_contract_value(const TaskYamlDetail::YamlNodeRef& node) {
+    return WorkflowValue::adoptJson(TaskYamlDetail::read_contract_json_or_throw(node));
+}
+
 WorkflowContractFields parse_contract_fields(
     const TaskYamlDetail::YamlNodeRef& node,
     bool output) {
@@ -62,25 +66,6 @@ std::uint32_t parse_retry_count(
                 std::to_string(kPraktorHostToolMaxRetries));
     }
     return static_cast<std::uint32_t>(value);
-}
-
-WorkflowContractFields parse_contract_fields(
-    const TaskYamlDetail::YamlNodeRef& node,
-    bool output) {
-    if (!node.is_map()) {
-        TaskYamlDetail::throw_parse_error(
-            node, output ? "'outputs' must be a map" : "'inputs' must be a map");
-    }
-
-    WorkflowContractFields fields;
-    for (const auto& child : node) {
-        const std::string name = child.key();
-        if (name.empty()) {
-            TaskYamlDetail::throw_parse_error(child, "workflow contract field name cannot be empty");
-        }
-        fields.emplace(name, parse_contract_field(child, name, output));
-    }
-    return fields;
 }
 
 } // namespace
