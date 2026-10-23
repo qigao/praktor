@@ -78,7 +78,6 @@ UsesParams parse_uses_params(const TaskYamlDetail::YamlNodeRef& node);
 DynamicTasksParams parse_dynamic_tasks_params(const TaskYamlDetail::YamlNodeRef& node);
 OrchParams parse_orch_params(const TaskYamlDetail::YamlNodeRef& task_node,
                              const std::string& node_type);
-TaskDefaults parse_defaults(const TaskYamlDetail::YamlNodeRef& node);
 bool isBtdslControlNode(const TaskYamlDetail::YamlNodeRef& node);
 bool isBtdslLeafNode(const TaskYamlDetail::YamlNodeRef& node);
 OrchNode parseOrchNode(const TaskYamlDetail::YamlNodeRef& yaml, int depth = 0);
@@ -88,4 +87,5 @@ Workflow parse_workflow(const TaskYamlDetail::YamlNodeRef& node,
 namespace TaskYamlDetail {
 json_value_t* read_workflow_contract_fields_or_throw(
     const YamlNodeRef& node, bool output);
+json_value_t* read_workflow_metadata_or_throw(const YamlNodeRef& node);
 }

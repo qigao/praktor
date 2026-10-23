@@ -70,23 +70,6 @@ std::uint32_t parse_retry_count(
 
 } // namespace
 
-TaskDefaults parse_defaults(const TaskYamlDetail::YamlNodeRef& node) {
-    if (!node.is_map()) {
-        TaskYamlDetail::throw_parse_error(node, "defaults must be a map");
-    }
-
-    static const std::unordered_set<std::string> allowed_default_keys = {"timeout"};
-    TaskYamlDetail::check_unknown_keys(node, allowed_default_keys);
-
-    TaskDefaults defaults;
-    if (node.has_child("timeout")) {
-        std::string timeout;
-        node["timeout"] >> timeout;
-        defaults.timeout = timeout;
-    }
-    return defaults;
-}
-
 Task parse_task(const TaskYamlDetail::YamlNodeRef& node, const std::string& source_path) {
     if (!node.is_map()) {
         TaskYamlDetail::throw_parse_error(node, "task must be a map");
@@ -386,38 +369,19 @@ Workflow parse_workflow(const TaskYamlDetail::YamlNodeRef& node, const std::stri
         TaskYamlDetail::throw_parse_error(node, "workflow must be a map");
     }
 
-    static const std::unordered_set<std::string> allowed_workflow_keys = {
-        "name", "description", "inputs", "outputs", "input_policy",
-        "variables", "env", "dotEnv", "defaults", "includes", "tasks"
-    };
-    TaskYamlDetail::check_unknown_keys(node, allowed_workflow_keys);
-
+    WorkflowValue metadata = WorkflowValue::adoptJson(
+        TaskYamlDetail::read_workflow_metadata_or_throw(node));
     Workflow workflow;
-
-    if (node.has_child("name")) {
-        node["name"] >> workflow.name;
-    }
-    if (node.has_child("description")) {
-        node["description"] >> workflow.description;
-    }
+    if (metadata.contains("name")) workflow.name = metadata.at("name").as<std::string>();
+    if (metadata.contains("description")) workflow.description = metadata.at("description").as<std::string>();
+    if (metadata.contains("strict_inputs")) workflow.strict_inputs = metadata.at("strict_inputs").as<bool>();
+    if (metadata.contains("defaults") && metadata.at("defaults").contains("timeout"))
+        workflow.defaults.timeout = metadata.at("defaults").at("timeout").as<std::string>();
     if (node.has_child("inputs")) {
         workflow.inputs = parse_contract_fields(node["inputs"], false);
     }
     if (node.has_child("outputs")) {
         workflow.outputs = parse_contract_fields(node["outputs"], true);
-    }
-    if (node.has_child("input_policy")) {
-        const std::string policy = TaskYamlDetail::read_scalar_or_throw(
-            node["input_policy"], "input_policy must be a scalar");
-        if (policy == "strict") {
-            workflow.strict_inputs = true;
-        } else if (policy == "allow_extra") {
-            workflow.strict_inputs = false;
-        } else {
-            TaskYamlDetail::throw_parse_error(
-                node["input_policy"],
-                "input_policy must be 'strict' or 'allow_extra'");
-        }
     }
     if (node.has_child("variables")) {
         workflow.variables = node_to_string_map(node["variables"]);
@@ -427,10 +391,6 @@ Workflow parse_workflow(const TaskYamlDetail::YamlNodeRef& node, const std::stri
     }
     if (node.has_child("dotEnv")) {
         workflow.dot_env = node_to_string_vector(node["dotEnv"]);
-    }
-
-    if (node.has_child("defaults")) {
-        workflow.defaults = parse_defaults(node["defaults"]);
     }
 
     if (!node.has_child("tasks")) {
