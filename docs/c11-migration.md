@@ -56,7 +56,8 @@ the rollback point; partial migration is not released as the completed product.
 | Schema maintenance tool | C projection, CLI and TinyTest tests; no `WorkflowValue`, `praktor_lib` or C++ link | Preserve generated grammar and all existing refusal rules |
 | Expressions | C lexer, bounded parser/coercion/comparison/string methods, typed variable/regex Host; old evaluator implementation removed | C context and compatible C regex provider replace the explicit temporary C++ adapter |
 | Structured document queries | C JSONPath/YPATH/XPath/CSVPath dispatch and owned results; explicit temporary C++ value/exception bridge | Migrate remaining `WorkflowValue` callers, then delete the bridge |
-| Values, YAML, contracts, effects, profiles, reviewed plans | C++ remains | One C-owned representation and unchanged SDK/YAML contracts |
+| Workflow values | C exact numeric conversion, borrowed path reads, transactional mutations over the existing Salts JSON owner; temporary C++ container/exception facade | Migrate callers and remove the facade |
+| YAML, contracts, effects, profiles, reviewed plans | C++ remains | One C-owned representation and unchanged SDK/YAML contracts |
 | DAG, contexts, triggers, scheduler, actions | C++ application layer and explicit compatibility dispatch remain | Native C execution and atomic Parallel branch state |
 | Shell/application/service adapters | C implementations exist, C++ conversions remain | C callers only; remove adapter headers/translation units |
 | SDK, CLI, script wrapper, remaining tools/examples/tests | C++ remains | Preserve the C ABI and CLI behavior, port all consumers/tests |
@@ -64,7 +65,8 @@ the rollback point; partial migration is not released as the completed product.
 
 The first cut deletes six C++ source/header/test files. It does **not** meet the
 whole-program completion gate yet. The baseline contained 186 tracked C++ files
-(excluding `.hpp.in` templates); 180 remain after this cut. This count is
+(excluding `.hpp.in` templates); 181 remain, including a temporary facade regression
+test added during the value port. This count is
 inventory, not a measure of runtime parity or a substitute for the final audit.
 
 Native regex support must preserve the established matching language or gain
@@ -128,6 +130,44 @@ no allocation-free or fixed-capacity claim. The old C++ query implementation
 has been removed; `structured_document_query_legacy_bridge.cpp` only converts
 values and statuses for callers that have not migrated yet. Its existing
 regressions now run with the script engine both enabled and disabled.
+
+The same data project now builds the native workflow value library and two
+additional C-only executables. The single state owner remains a Salts JSON root:
+the C API operates on that owner, reuses its factories/cloning/serialization,
+and returns borrowed path reads. No second JSON tree implementation or hidden
+C++ environment is introduced. Exact signed/unsigned integer tokens retain all
+64 bits; floating conversion checks finite integral values against exact,
+exclusive power-of-two upper bounds. This corrects the old undefined conversion
+at rounded `INT64_MAX`/`UINT64_MAX` boundaries: `9223372036854775808.0` and
+`18446744073709551616.0` now fail with the existing range exception category.
+
+Mutation paths accept at most 128 object keys and reject excess without changing
+owners. This explicitly bounds previously unbounded Proxy paths. C keys preserve
+embedded NULs; the temporary C++ facade deliberately retains its existing C-string
+key semantics and length-aware string values. Existing null/scalar children
+remain errors; only a null root is promoted. Self insertion retains the original
+snapshot shape after creating parent objects, using a provisional root.
+
+Ordinary writes prepare only the missing suffix and source, then perform one
+checked adoption or root replacement. Cloning the whole root on every write was
+rejected because of its cost for accumulating workflow state. A direct take
+adopts the source owner. A take into a missing suffix first clones the source,
+then releases its original owner only after commit: Salts JSON has no detach API
+that could undo an adopted source after a failed suffix commit. Self writes that
+need new parents use a provisional root clone to preserve legacy snapshot shape.
+Failure discards provisional state and leaves root/source owners unchanged.
+Erase builds its replacement before publishing it. Provider-boundary fault tests
+fail each creation, clone and checked adoption in the actual C algorithm while
+using the real JSON provider; they verify unchanged owners and serialized trees.
+They do not claim to inject failures inside the provider's own allocator.
+Four concurrent C callers also exercise independent owners with the real provider;
+sharing a root across mutation/read calls still requires external synchronization.
+
+`workflow_value_legacy_bridge.cpp` retains class/Proxy lifetimes, STL container
+conversion, exception mapping and public string conversion for current callers;
+its old numeric/path/mutation algorithms are deleted. It remains a temporary
+C++ dependency of the application, not of the native C value target. Whole-program
+C++ removal still requires migrating those callers and deleting this facade.
 
 All three projects provide release/ASan presets. On Linux,
 `bash cmake/ci/qualify-c-only-tools.sh release` configures/builds/tests all three

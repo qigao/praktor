@@ -6,7 +6,7 @@ flags=
 link_flags=
 case "$mode" in
   release) ;;
-  address) flags='-fsanitize=address,undefined -fno-omit-frame-pointer -g'; link_flags=-fsanitize=address,undefined ;;
+  address) flags='-fsanitize=address,undefined,float-cast-overflow -fno-omit-frame-pointer -g'; link_flags=-fsanitize=address,undefined,float-cast-overflow ;;
   thread) flags='-fsanitize=thread -fno-omit-frame-pointer -O1 -g'; link_flags=-fsanitize=thread ;;
   *) echo 'Expected release, address or thread' >&2; exit 2 ;;
 esac
@@ -24,6 +24,6 @@ for unit in schema lexer query; do
     ctest --preset "$unit-c-release" --timeout 90
   )
 done
-for binary in build/schema-c-release/praktor-schema build/schema-c-release/schema_projection_test build/lexer-c-release/expression_lexer_test build/lexer-c-release/expression_evaluator_c_test build/query-c-release/structured_document_query_c_test; do
+for binary in build/schema-c-release/praktor-schema build/schema-c-release/schema_projection_test build/lexer-c-release/expression_lexer_test build/lexer-c-release/expression_evaluator_c_test build/query-c-release/structured_document_query_c_test build/query-c-release/workflow_value_c_test build/query-c-release/workflow_value_fault_test; do
   python3 cmake/ci/audit-c11-runtime-link.py "$binary"
 done

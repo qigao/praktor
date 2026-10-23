@@ -1,9 +1,8 @@
 #pragma once
 
-#include <json_parser.h>
+#include "data/workflow_value.h"
 
-#include <charconv>
-#include <cmath>
+#include <climits>
 #include <cstdint>
 #include <initializer_list>
 #include <limits>
@@ -191,38 +190,26 @@ private:
 
     template <typename Integer>
     Integer parseInteger() const {
-        if (!is_number()) {
-            throw std::runtime_error("WorkflowValue is not a number");
+        char error[128];
+        int status;
+        if constexpr (std::is_signed_v<Integer>) {
+            int64_t result;
+            status = praktor_value_as_signed(value_, sizeof(Integer) * CHAR_BIT,
+                &result, error, sizeof(error));
+            checkInteger(status, error);
+            return static_cast<Integer>(result);
+        } else {
+            uint64_t result;
+            status = praktor_value_as_unsigned(value_, sizeof(Integer) * CHAR_BIT,
+                &result, error, sizeof(error));
+            checkInteger(status, error);
+            return static_cast<Integer>(result);
         }
-
-        size_t length = 0;
-        const char* token = json_number_text(value_, &length);
-        if (token && length > 0 &&
-            std::string_view(token, length).find_first_of(".eE") == std::string_view::npos) {
-            Integer result{};
-            const auto parsed = std::from_chars(token, token + length, result);
-            if (parsed.ec == std::errc{} && parsed.ptr == token + length) {
-                return result;
-            }
-            throw std::out_of_range("WorkflowValue integer is out of range");
-        }
-
-        const double number = json_number(value_);
-        if (!std::isfinite(number)) {
-            throw std::out_of_range("WorkflowValue number cannot be represented as an integer");
-        }
-        double integral_part = 0.0;
-        const double fractional_part = std::modf(number, &integral_part);
-        if (std::fpclassify(fractional_part) != FP_ZERO ||
-            integral_part < static_cast<double>(std::numeric_limits<Integer>::lowest()) ||
-            integral_part > static_cast<double>(std::numeric_limits<Integer>::max())) {
-            throw std::out_of_range("WorkflowValue number cannot be represented as an integer");
-        }
-        return static_cast<Integer>(integral_part);
     }
 
-    json_value_t* findPath(const std::vector<std::string>& keys) const;
-    json_value_t* ensureObjectPath(const std::vector<std::string>& keys, size_t count);
+    static void checkInteger(int status, const char* error);
+
+    const json_value_t* findPath(const std::vector<std::string>& keys) const;
     void setPath(const std::vector<std::string>& keys, const WorkflowValue& value);
     void setPath(const std::vector<std::string>& keys, WorkflowValue&& value);
     void appendPath(const std::vector<std::string>& keys, const WorkflowValue& value);

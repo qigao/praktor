@@ -1,6 +1,6 @@
 #include "data/workflow_value.hpp"
 
-#include <algorithm>
+#include <array>
 #include <cstring>
 #include <memory>
 
@@ -22,6 +22,23 @@ void freeJson(json_value_t*& value) noexcept {
 struct SerializedJsonDeleter {
     void operator()(char* text) const noexcept { json_serialize_free(text); }
 };
+
+void checkValue(int status, const char* error, const char* legacy_error = nullptr) {
+    if (status == SALTS_OK) return;
+    if (status == SALTS_ENOMEM && std::strcmp(error, "Failed to clone WorkflowValue") == 0)
+        throw std::bad_alloc();
+    if (status == SALTS_ENOENT) throw std::out_of_range(error);
+    throw std::runtime_error(legacy_error ? legacy_error : error);
+}
+
+std::array<vstr, PRAKTOR_VALUE_MAX_PATH> pathViews(const std::vector<std::string>& keys) {
+    if (keys.size() > PRAKTOR_VALUE_MAX_PATH)
+        throw std::runtime_error("Invalid WorkflowValue path or source");
+    std::array<vstr, PRAKTOR_VALUE_MAX_PATH> views{};
+    for (size_t index = 0; index < keys.size(); ++index)
+        views[index] = vstr_from_cstr(keys[index].c_str());
+    return views;
+}
 
 } // namespace
 
@@ -150,33 +167,16 @@ bool WorkflowValue::is_number() const noexcept {
 }
 
 bool WorkflowValue::is_int64() const noexcept {
-    if (!is_number()) {
-        return false;
-    }
-    size_t length = 0;
-    const char* token = json_number_text(value_, &length);
-    if (!token || length == 0 || std::string_view(token, length).find_first_of(".eE") !=
-                                    std::string_view::npos) {
-        return false;
-    }
-    int64_t parsed{};
-    const auto result = std::from_chars(token, token + length, parsed);
-    return result.ec == std::errc{} && result.ptr == token + length;
+    return praktor_value_is_int64(value_);
 }
 
 bool WorkflowValue::is_uint64() const noexcept {
-    if (!is_number()) {
-        return false;
-    }
-    size_t length = 0;
-    const char* token = json_number_text(value_, &length);
-    if (!token || length == 0 || token[0] == '-' ||
-        std::string_view(token, length).find_first_of(".eE") != std::string_view::npos) {
-        return false;
-    }
-    uint64_t parsed{};
-    const auto result = std::from_chars(token, token + length, parsed);
-    return result.ec == std::errc{} && result.ptr == token + length;
+    return praktor_value_is_uint64(value_);
+}
+
+void WorkflowValue::checkInteger(int status, const char* error) {
+    if (status == SALTS_ERANGE) throw std::out_of_range(error);
+    if (status != SALTS_OK) throw std::runtime_error(error);
 }
 
 bool WorkflowValue::is_double() const noexcept {
@@ -200,16 +200,7 @@ json_type_t WorkflowValue::type() const noexcept {
 }
 
 size_t WorkflowValue::size() const noexcept {
-    if (is_object()) {
-        return json_object_size(value_);
-    }
-    if (is_array()) {
-        return json_array_size(value_);
-    }
-    if (is_string()) {
-        return json_string_len(value_);
-    }
-    return 0;
+    return praktor_value_size(value_);
 }
 
 bool WorkflowValue::contains(std::string_view key) const {
@@ -248,68 +239,43 @@ WorkflowValue::Proxy WorkflowValue::operator[](std::string_view key) {
 }
 
 void WorkflowValue::set(std::string_view key, const WorkflowValue& value) {
-    if (!is_object()) {
-        throw std::runtime_error("WorkflowValue is not an object");
-    }
-    json_value_t* clone = cloneOrThrow(value.value_);
+    if (!is_object()) throw std::runtime_error("WorkflowValue is not an object");
     const std::string owned_key(key);
-    if (!json_object_add_checked(value_, owned_key.c_str(), clone)) {
-        freeJson(clone);
-        throw std::runtime_error("Failed to set WorkflowValue object member");
-    }
+    const vstr view = vstr_from_cstr(owned_key.c_str());
+    if (!value.value_) throw std::bad_alloc();
+    char error[128];
+    const int status = praktor_value_set_copy(&value_, &view, 1, value.value_, error, sizeof(error));
+    checkValue(status, error, "Failed to set WorkflowValue object member");
 }
 
 void WorkflowValue::set(std::string_view key, WorkflowValue&& value) {
-    if (this == &value) {
-        set(key, static_cast<const WorkflowValue&>(value));
-        return;
-    }
-    if (!is_object()) {
-        throw std::runtime_error("WorkflowValue is not an object");
-    }
+    if (!is_object()) throw std::runtime_error("WorkflowValue is not an object");
     const std::string owned_key(key);
-    if (!json_object_add_checked(value_, owned_key.c_str(), value.value_)) {
-        throw std::runtime_error("Failed to set WorkflowValue object member");
-    }
-    value.value_ = nullptr;
+    const vstr view = vstr_from_cstr(owned_key.c_str());
+    char error[128];
+    const int status = praktor_value_set_take(&value_, &view, 1, &value.value_, error, sizeof(error));
+    checkValue(status, error, "Failed to set WorkflowValue object member");
 }
 
 void WorkflowValue::push_back(const WorkflowValue& value) {
-    if (!is_array()) {
-        throw std::runtime_error("WorkflowValue is not an array");
-    }
-    json_value_t* clone = cloneOrThrow(value.value_);
-    if (!json_array_add_checked(value_, clone)) {
-        freeJson(clone);
-        throw std::runtime_error("Failed to append WorkflowValue array member");
-    }
+    if (!is_array()) throw std::runtime_error("WorkflowValue is not an array");
+    if (!value.value_) throw std::bad_alloc();
+    char error[128];
+    const int status = praktor_value_append_copy(&value_, nullptr, 0, value.value_, error, sizeof(error));
+    checkValue(status, error, "Failed to append WorkflowValue array member");
 }
 
 void WorkflowValue::push_back(WorkflowValue&& value) {
-    if (this == &value) {
-        push_back(static_cast<const WorkflowValue&>(value));
-        return;
-    }
-    if (!is_array()) {
-        throw std::runtime_error("WorkflowValue is not an array");
-    }
-    if (!json_array_add_checked(value_, value.value_)) {
-        throw std::runtime_error("Failed to append WorkflowValue array member");
-    }
-    value.value_ = nullptr;
+    if (!is_array()) throw std::runtime_error("WorkflowValue is not an array");
+    char error[128];
+    const int status = praktor_value_append_take(&value_, nullptr, 0, &value.value_, error, sizeof(error));
+    checkValue(status, error, "Failed to append WorkflowValue array member");
 }
 
 void WorkflowValue::erase_at(size_t index) {
-    if (!is_array() || index >= size()) {
-        throw std::out_of_range("WorkflowValue array index out of range");
-    }
-    WorkflowValue replacement = array();
-    for (size_t current = 0; current < size(); ++current) {
-        if (current != index) {
-            replacement.push_back(at(current));
-        }
-    }
-    *this = std::move(replacement);
+    char error[128];
+    const int status = praktor_value_erase(&value_, index, error, sizeof(error));
+    checkValue(status, error);
 }
 
 std::vector<WorkflowValueMember> WorkflowValue::object_range() const {
@@ -366,99 +332,43 @@ void WorkflowValue::requireValue(const json_value_t* value, std::string_view ope
     }
 }
 
-json_value_t* WorkflowValue::findPath(const std::vector<std::string>& keys) const {
-    json_value_t* current = value_;
-    for (const auto& key : keys) {
-        if (!current || json_type(current) != JSON_OBJECT) {
-            return nullptr;
-        }
-        current = json_object_get(current, key.c_str());
-    }
-    return current;
-}
-
-json_value_t* WorkflowValue::ensureObjectPath(const std::vector<std::string>& keys, size_t count) {
-    if (is_null()) {
-        json_value_t* object = json_create_object();
-        requireValue(object, "create root object");
-        reset(object);
-    }
-    json_value_t* current = value_;
-    for (size_t index = 0; index < count; ++index) {
-        const std::string& key = keys[index];
-        if (!current || json_type(current) != JSON_OBJECT) {
-            throw std::runtime_error("WorkflowValue path traverses a non-object value");
-        }
-        json_value_t* child = json_object_get(current, key.c_str());
-        if (!child) {
-            json_value_t* created = json_create_object();
-            requireValue(created, "create nested object");
-            if (!json_object_add_checked(current, key.c_str(), created)) {
-                freeJson(created);
-                throw std::runtime_error("Failed to create nested WorkflowValue object");
-            }
-            child = json_object_get(current, key.c_str());
-        }
-        current = child;
-    }
-    return current;
+const json_value_t* WorkflowValue::findPath(const std::vector<std::string>& keys) const {
+    const auto views = pathViews(keys);
+    const json_value_t* found = nullptr;
+    const int status = praktor_value_find(value_, views.data(), keys.size(), &found);
+    return status == SALTS_OK ? found : nullptr;
 }
 
 void WorkflowValue::setPath(const std::vector<std::string>& keys, const WorkflowValue& value) {
-    if (keys.empty()) {
-        *this = value;
-        return;
-    }
-    json_value_t* parent = ensureObjectPath(keys, keys.size() - 1);
-    const std::string& key = keys.back();
-    json_value_t* clone = cloneOrThrow(value.value_);
-    if (!json_object_add_checked(parent, key.c_str(), clone)) {
-        freeJson(clone);
-        throw std::runtime_error("Failed to assign WorkflowValue path");
-    }
+    if (keys.empty()) { *this = value; return; }
+    const auto views = pathViews(keys);
+    if (!value.value_) throw std::bad_alloc();
+    char error[128];
+    const int status = praktor_value_set_copy(&value_, views.data(), keys.size(), value.value_, error, sizeof(error));
+    checkValue(status, error);
 }
 
 void WorkflowValue::setPath(const std::vector<std::string>& keys, WorkflowValue&& value) {
-    if (this == &value) {
-        setPath(keys, static_cast<const WorkflowValue&>(value));
-        return;
-    }
-    if (keys.empty()) {
-        *this = std::move(value);
-        return;
-    }
-    json_value_t* parent = ensureObjectPath(keys, keys.size() - 1);
-    if (!json_object_add_checked(parent, keys.back().c_str(), value.value_)) {
-        throw std::runtime_error("Failed to assign WorkflowValue path");
-    }
-    value.value_ = nullptr;
+    if (keys.empty()) { *this = std::move(value); return; }
+    const auto views = pathViews(keys);
+    char error[128];
+    const int status = praktor_value_set_take(&value_, views.data(), keys.size(), &value.value_, error, sizeof(error));
+    checkValue(status, error);
 }
 
 void WorkflowValue::appendPath(const std::vector<std::string>& keys, const WorkflowValue& value) {
-    json_value_t* array = findPath(keys);
-    if (!array || json_type(array) != JSON_ARRAY) {
-        throw std::runtime_error("WorkflowValue path is not an array");
-    }
-    json_value_t* clone = cloneOrThrow(value.value_);
-    if (!json_array_add_checked(array, clone)) {
-        freeJson(clone);
-        throw std::runtime_error("Failed to append WorkflowValue path");
-    }
+    const auto views = pathViews(keys);
+    if (!value.value_) throw std::bad_alloc();
+    char error[128];
+    const int status = praktor_value_append_copy(&value_, views.data(), keys.size(), value.value_, error, sizeof(error));
+    checkValue(status, error);
 }
 
 void WorkflowValue::appendPath(const std::vector<std::string>& keys, WorkflowValue&& value) {
-    if (this == &value) {
-        appendPath(keys, static_cast<const WorkflowValue&>(value));
-        return;
-    }
-    json_value_t* array = findPath(keys);
-    if (!array || json_type(array) != JSON_ARRAY) {
-        throw std::runtime_error("WorkflowValue path is not an array");
-    }
-    if (!json_array_add_checked(array, value.value_)) {
-        throw std::runtime_error("Failed to append WorkflowValue path");
-    }
-    value.value_ = nullptr;
+    const auto views = pathViews(keys);
+    char error[128];
+    const int status = praktor_value_append_take(&value_, views.data(), keys.size(), &value.value_, error, sizeof(error));
+    checkValue(status, error);
 }
 
 void WorkflowValue::reset(json_value_t* value) noexcept {

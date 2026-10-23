@@ -14,7 +14,7 @@ set(SOURCE_FILES
     src/workflow_contract.cpp
     src/workflow_effects.cpp
     src/workflow_profile.cpp
-    src/data/workflow_value.cpp
+    src/data/workflow_value_legacy_bridge.cpp
     src/data/structured_document_query_legacy_bridge.cpp
     src/yml/yaml_document.cpp
     src/yml/task_parser.cpp
@@ -52,6 +52,7 @@ endif()
 include(${CMAKE_CURRENT_SOURCE_DIR}/src/expressions/lexer_targets.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/src/expressions/evaluator_targets.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/src/data/query_targets.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/src/data/value_targets.cmake)
 add_library(${TARGET_NAME_LIB} ${SOURCE_FILES})
 target_include_directories(
     ${TARGET_NAME_LIB}
@@ -76,7 +77,7 @@ target_link_libraries(
            Salts::CNet
            CHttp::S3
            praktor_shell
-    PRIVATE praktor_document_query praktor_expression_evaluator actions praktor_process_driver praktor_process_native praktor_service_control
+    PRIVATE praktor_workflow_value praktor_document_query praktor_expression_evaluator actions praktor_process_driver praktor_process_native praktor_service_control
 )
 if(ENABLE_SCRIPT_ENGINE)
     target_link_libraries(${TARGET_NAME_LIB} PUBLIC TurboScript::TurboScript)
