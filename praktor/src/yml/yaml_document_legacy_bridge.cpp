@@ -1,5 +1,6 @@
 #include "yaml_document.hpp"
 #include "yml/yaml_value.h"
+#include "yml/yaml_contract.h"
 #include <memory>
 #include <stdexcept>
 #include <utility>
@@ -185,3 +186,13 @@ praktor_yaml_action_params* read_action_params_or_throw(const YamlNodeRef& node,
 }
 
 } // namespace TaskYamlDetail
+
+json_value_t* TaskYamlDetail::read_workflow_contract_fields_or_throw(
+    const YamlNodeRef& node, bool output) {
+    FieldError error;
+    json_value_t* result = nullptr;
+    const int status = praktor_yaml_contract_fields_create(
+        node.native(), output, &result, &error.value);
+    error.check(status);
+    return result;
+}

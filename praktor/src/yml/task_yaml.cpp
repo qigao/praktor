@@ -1,6 +1,5 @@
 #include "task_yaml_internal.hpp"
 #include "workflow_contract.hpp"
-#include "data/workflow_contract_value.h"
 
 #include <algorithm>
 #include <charconv>
@@ -13,78 +12,27 @@
 
 namespace {
 
-WorkflowValue parse_contract_value(const TaskYamlDetail::YamlNodeRef& node) {
-    return WorkflowValue::adoptJson(TaskYamlDetail::read_contract_json_or_throw(node));
-}
-
-WorkflowContractField parse_contract_field(
+WorkflowContractFields parse_contract_fields(
     const TaskYamlDetail::YamlNodeRef& node,
-    const std::string& name,
     bool output) {
-    if (!node.is_map()) {
-        TaskYamlDetail::throw_parse_error(
-            node, "workflow contract field '" + name + "' must be a map");
-    }
-
-    std::unordered_set<std::string> allowed = {
-        "type", "required", "default", "enum", "description"
-    };
-    if (output) {
-        allowed.insert("value");
-    }
-    TaskYamlDetail::check_unknown_keys(node, allowed);
-
-    if (!node.has_child("type")) {
-        TaskYamlDetail::throw_parse_error(
-            node, "workflow contract field '" + name + "' requires 'type'");
-    }
-
-    WorkflowContractField field;
-    field.type = TaskYamlDetail::read_scalar_or_throw(
-        node["type"], "workflow contract type must be a scalar");
-    static const std::unordered_set<std::string> valid_types = {
-        "string", "boolean", "integer", "number", "array", "object"
-    };
-    if (valid_types.find(field.type) == valid_types.end()) {
-        TaskYamlDetail::throw_parse_error(
-            node["type"], "unsupported workflow contract type '" + field.type + "'");
-    }
-
-    if (node.has_child("required")) {
-        field.required =
-            TaskYamlDetail::read_bool_or_throw(node["required"], "required");
-    }
-    if (node.has_child("description")) {
-        field.description = TaskYamlDetail::read_scalar_or_throw(
-            node["description"], "description must be a scalar");
-    }
-    if (node.has_child("value")) {
-        field.value = TaskYamlDetail::read_scalar_or_throw(
-            node["value"], "output value must be a scalar");
-    }
-    if (node.has_child("default")) {
-        field.default_value = parse_contract_value(node["default"]);
-        if (!praktor_contract_value_matches_type(field.default_value->raw(), field.type.c_str())) {
-            TaskYamlDetail::throw_parse_error(
-                node["default"], "default does not match declared type '" + field.type + "'");
+    WorkflowValue model = WorkflowValue::adoptJson(
+        TaskYamlDetail::read_workflow_contract_fields_or_throw(node, output));
+    WorkflowContractFields fields;
+    for (const auto& item : model.object_range()) {
+        const WorkflowValue& encoded = item.value();
+        WorkflowContractField field;
+        field.type = encoded.at("type").as<std::string>();
+        if (encoded.contains("required")) field.required = encoded.at("required").as<bool>();
+        if (encoded.contains("description")) field.description = encoded.at("description").as<std::string>();
+        if (encoded.contains("value")) field.value = encoded.at("value").as<std::string>();
+        if (encoded.contains("default")) field.default_value = encoded.at("default");
+        if (encoded.contains("enum")) {
+            for (const auto& value : encoded.at("enum").array_range())
+                field.enum_values.push_back(value);
         }
+        fields.emplace(item.key(), std::move(field));
     }
-    if (node.has_child("enum")) {
-        const auto& values = node["enum"];
-        if (!values.is_seq() || values.num_children() == 0) {
-            TaskYamlDetail::throw_parse_error(
-                values, "enum must be a non-empty sequence");
-        }
-        for (const auto& enum_node : values) {
-            WorkflowValue value = parse_contract_value(enum_node);
-            if (!praktor_contract_value_matches_type(value.raw(), field.type.c_str())) {
-                TaskYamlDetail::throw_parse_error(
-                    enum_node, "enum value does not match declared type '" + field.type + "'");
-            }
-            field.enum_values.push_back(std::move(value));
-        }
-    }
-    return field;
+    return fields;
 }
 
 std::uint32_t parse_retry_count(
