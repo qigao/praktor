@@ -5,6 +5,8 @@ name: C11 Process complete-source TSan qualification
   pull_request:
     paths:
       - '.github/workflows/c11-source-tsan.yml'
+      - '.github/actions/setup-native-ci/**'
+      - 'cmake/ci/**'
       - 'actions/CMakeLists.txt'
       - 'actions/c11/**'
       - 'shared/**'
@@ -14,7 +16,6 @@ name: C11 Process complete-source TSan qualification
       - 'praktor/src/workflow_runner.cpp'
       - 'praktor/include/execution/c11_workflow_process_owner.hpp'
       - 'praktor/test/core_only_workflow_test.cpp'
-      - 'cmake/ci/qualify-c11-lifetime-sanitizers.sh'
 
 permissions:
   contents: read
@@ -63,21 +64,13 @@ jobs:
           path: build/p1-salts-utils-source
           persist-credentials: false
 
-      - uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-cache@0dc254695917bc180504d916240292e9096e9da5
-        with:
-          mode: read
-
-      - uses: qigao/vcpkg-cache/.github/actions/setup-re2c-tools@0dc254695917bc180504d916240292e9096e9da5
-
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '8.0.x'
+      - uses: ./.github/actions/setup-native-ci
 
       - name: Restore unrelated official CHttp native SDK
-        shell: pwsh
+        shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: ./cmake/RestoreNativeSdks.ps1 -Rid linux-x64 -CoreOnly -SaltsUtilsVersion 4.3.0-rc.11
+        run: python cmake/ci/github_packages.py sdks --rid linux-x64 --only-chttp --packages build/native-sdk/packages
 
       - name: Attest source inputs and compiler prerequisites
         shell: bash
@@ -312,6 +305,7 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
           path: |
+            ${{ runner.temp }}/praktor-curl-cache.log
             build/p1-native-c-tsan/Testing/Temporary/LastTest.log
             build/p1-session-standalone-tsan/Testing/Temporary/LastTest.log
             build/p1-session-c-tsan/Testing/Temporary/LastTest.log

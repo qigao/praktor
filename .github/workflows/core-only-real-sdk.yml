@@ -24,6 +24,7 @@ on:
       - "grammar.schema.json"
       - "tools/**"
       - "vcpkg.json"
+      - ".github/actions/setup-native-ci/**"
       - ".github/workflows/core-only-real-sdk.yml"
       - ".github/workflows/c11-source-tsan.yml"
 
@@ -66,15 +67,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-cache@master
-        with:
-          mode: read
-
-      - uses: qigao/vcpkg-cache/.github/actions/setup-re2c-tools@master
-
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: "8.0.x"
+      - uses: ./.github/actions/setup-native-ci
 
       - uses: actions/cache/restore@v4
         id: ccache
@@ -315,6 +308,7 @@ jobs:
         with:
           name: core-diagnostics-${{ matrix.rid }}-${{ matrix.sdk }}
           path: |
+            ${{ runner.temp }}/praktor-curl-cache.log
             build/ci-native-c/Testing/Temporary/LastTest.log
             build/ci-session-standalone/Testing/Temporary/LastTest.log
             build/ci-session-c/Testing/Temporary/LastTest.log

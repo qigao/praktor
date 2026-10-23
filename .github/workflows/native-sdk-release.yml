@@ -23,6 +23,7 @@ on:
       - "grammar.schema.json"
       - "vcpkg.json"
       - "packaging/nuget/**"
+      - ".github/actions/setup-native-ci/**"
       - ".github/workflows/native-sdk-release.yml"
   push:
     tags:
@@ -94,20 +95,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-cache@master
-        with:
-          mode: read
-
-      - uses: qigao/vcpkg-cache/.github/actions/setup-re2c-tools@master
-
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: "8.0.x"
-
-      - uses: actions/setup-python@v5
-        if: matrix.rid != 'android-arm64-v8a'
-        with:
-          python-version: "3.12"
+      - uses: ./.github/actions/setup-native-ci
 
       - name: Prepare tools
         shell: bash
@@ -132,47 +120,11 @@ jobs:
       - name: Reset compiler cache statistics
         run: ccache --zero-stats
 
-      - name: Restore released native SDK dependencies
+      - name: Download released native SDK dependencies with curl
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
-        run: |
-          set -euo pipefail
-          config="$RUNNER_TEMP/praktor-sdk-nuget.config"
-          printf '<configuration><packageSources><clear /></packageSources></configuration>\n' > "$config"
-          dotnet nuget add source https://nuget.pkg.github.com/qigao/index.json --name github \
-            --username qigao --password "$GITHUB_TOKEN" --store-password-in-clear-text --configfile "$config"
-          packages="$RUNNER_TEMP/native-dependencies"
-          dotnet restore packaging/nuget/Praktor.Native.csproj \
-            --configfile "$config" --packages "$packages" --no-cache --force-evaluate
-
-          resolve_sdk_root() {
-            local package_id="$1"
-            local package_dir="$packages/$package_id"
-            local count
-            local version_dir
-            count="$(find "$package_dir" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')"
-            test "$count" -eq 1
-            version_dir="$(find "$package_dir" -mindepth 1 -maxdepth 1 -type d -print -quit)"
-            test -d "$version_dir/sdk/$RID"
-            printf '%s\n' "$version_dir/sdk/$RID"
-          }
-
-          salts_root="$(resolve_sdk_root salts.native)"
-          salts_utils_root="$(resolve_sdk_root saltsutils.native)"
-          chttp_root="$(resolve_sdk_root chttp.native)"
-          turboscript_root="$(resolve_sdk_root turboscript.native)"
-
-          {
-            echo "SALTS_ROOT=$salts_root"
-            echo "SALTS_UTILS_ROOT=$salts_utils_root"
-            echo "CHTTP_ROOT=$chttp_root"
-            echo "TURBOSCRIPT_ROOT=$turboscript_root"
-            echo "SALTS_NATIVE_VERSION=$(basename "$(dirname "$(dirname "$salts_root")")")"
-            echo "SALTS_UTILS_NATIVE_VERSION=$(basename "$(dirname "$(dirname "$salts_utils_root")")")"
-            echo "CHTTP_NATIVE_VERSION=$(basename "$(dirname "$(dirname "$chttp_root")")")"
-            echo "TURBOSCRIPT_NATIVE_VERSION=$(basename "$(dirname "$(dirname "$turboscript_root")")")"
-          } >> "$GITHUB_ENV"
+        run: python cmake/ci/github_packages.py sdks --rid "$RID" --packages build/native-sdk/packages
 
       - name: Report resolved native SDK baseline
         shell: bash
@@ -261,6 +213,14 @@ jobs:
         run: |
           if command -v ccache >/dev/null; then ccache --show-stats; fi
 
+      - name: Upload curl cache diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-curl-cache-${{ matrix.rid }}
+          path: ${{ runner.temp }}/praktor-curl-cache.log
+          if-no-files-found: ignore
+
       - uses: actions/cache/save@v4
         if: always() && steps.ccache.outcome == 'success' && steps.ccache.outputs.cache-primary-key != steps.ccache.outputs.cache-matched-key
         with:
@@ -287,13 +247,8 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "8.0.x"
-      - uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-cache@master
-        with:
-          mode: read
-
       - name: Pack tested SDK artifacts
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SDK_VERSION: ${{ needs.metadata.outputs.version }}
         shell: bash
         run: |
@@ -305,14 +260,13 @@ jobs:
           done
           test "$(sed -n 's/^commit=//p' package/sdk/*/praktor-sdk-manifest.txt | sort -u | wc -l)" -eq 1
 
-          config="$RUNNER_TEMP/praktor-pack.config"
-          printf '<configuration><packageSources><clear /></packageSources></configuration>\n' > "$config"
-          dotnet nuget add source https://nuget.pkg.github.com/qigao/index.json --name github \
-            --username qigao --password "$GITHUB_TOKEN" --store-password-in-clear-text --configfile "$config"
-          dotnet restore packaging/nuget/Praktor.Native.csproj --configfile "$config" --packages "$RUNNER_TEMP/pack-deps" --no-cache --force-evaluate
+          # Packing consumes only the tested SDK artifacts. No native packages
+          # or cache toolchain are restored in this job.
+          dotnet restore packaging/nuget/Praktor.Native.csproj \
+            --configfile cmake/ci/empty-nuget.config -p:RestoreNativeDependencies=False
           dotnet pack packaging/nuget/Praktor.Native.csproj --no-restore --configuration Release --output dist \
             "-p:PackageVersion=$SDK_VERSION" "-p:PackageRoot=$GITHUB_WORKSPACE/package" \
-            "-p:RestorePackagesPath=$RUNNER_TEMP/pack-deps"
+            -p:RestoreNativeDependencies=False
 
           package="dist/Praktor.Native.$SDK_VERSION.nupkg"
           nuspec="$RUNNER_TEMP/Praktor.Native.nuspec"

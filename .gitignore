@@ -72,3 +72,6 @@ compile_commands.json
 .env
 .env.config.cmake
 external/*
+
+# Python CI helpers
+__pycache__/
