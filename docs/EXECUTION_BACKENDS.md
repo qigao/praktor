@@ -4,7 +4,7 @@ Issue: [#74 — first-class Shell, Wasm, and TurboScript execution backends](htt
 
 ## Decision
 
-Praktor exposes three explicit execution modes while keeping one workflow model, one DAG scheduler, and one task result contract:
+Target contract: Praktor will support three explicit execution modes while keeping one workflow model, one DAG scheduler, and one task result contract:
 
 1. **Shell/process** — existing `command:` and `program:` tasks. Their established parsing, process semantics, output capture, timeout, and exit-status behavior remain unchanged.
 2. **Wasm** — execute a host-approved Wasm module/export through a TurboWasm adapter.
