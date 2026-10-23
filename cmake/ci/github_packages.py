@@ -13,6 +13,7 @@ from pathlib import Path, PurePosixPath
 import re
 import shutil
 import subprocess
+import socketserver
 import tempfile
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -252,8 +253,16 @@ class BinaryCache:
             return destination
 
 
-def serve(args, packages):
-    cache = BinaryCache(packages, args.packages)
+class LoopbackServer(ThreadingHTTPServer):
+    def server_bind(self):
+        # HTTPServer's getfqdn() can block on reverse DNS on macOS runners.
+        # This adapter binds only a numeric loopback address and needs no DNS.
+        socketserver.TCPServer.server_bind(self)
+        self.server_name = '127.0.0.1'
+        self.server_port = self.server_address[1]
+
+
+def cache_server(cache):
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
             self.respond(True)
@@ -279,8 +288,14 @@ def serve(args, packages):
                 self.send_error(502, 'Binary cache download failed')
         def log_message(self, *_):
             pass
-    server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
-    args.ready.write_text(json.dumps({'port': server.server_port, 'pid': os.getpid()}))
+    return LoopbackServer(('127.0.0.1', 0), Handler)
+
+
+def serve(args, packages):
+    server = cache_server(BinaryCache(packages, args.packages))
+    ready = args.ready.with_suffix('.tmp')
+    ready.write_text(json.dumps({'port': server.server_port, 'pid': os.getpid()}))
+    ready.replace(args.ready)
     server.serve_forever()
 
 

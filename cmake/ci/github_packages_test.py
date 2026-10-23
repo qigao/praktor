@@ -8,13 +8,14 @@ import json
 import os
 from pathlib import Path
 import tempfile
+import subprocess
 import threading
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 import unittest
 from unittest.mock import patch
 import zipfile
 
-from github_packages import BinaryCache, PackageMissing, Packages, restore_sdks, version_key
+from github_packages import BinaryCache, LoopbackServer, PackageMissing, Packages, cache_server, restore_sdks, version_key
 
 
 class Feed:
@@ -41,7 +42,7 @@ class Feed:
                 self.wfile.write(data)
             def log_message(self, *_):
                 pass
-        self.server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+        self.server = LoopbackServer(('127.0.0.1', 0), Handler)
         self.base = f'http://127.0.0.1:{self.server.server_port}'
         self.thread = threading.Thread(target=self.server.serve_forever)
         self.thread.start()
@@ -143,6 +144,29 @@ class PackageTests(unittest.TestCase):
         self.assertEqual(len(self.feed.requests), requests)
         with self.assertRaises(PackageMissing):
             cache.get('test', 'x64-linux', '0' * 64)
+
+    def test_http_adapter_binds_without_dns_and_serves_native_vcpkg_zip(self):
+        evidence = b'exact ABI evidence'
+        abi = hashlib.sha256(evidence).hexdigest()
+        self.feed.add('test_x64-linux', '1.0.0-vcpkg' + abi,
+                      {'share/test/vcpkg_abi_info.txt': evidence, 'lib/test.a': b'archive'})
+        with patch('socket.getfqdn', side_effect=AssertionError('loopback must not query DNS')):
+            server = cache_server(BinaryCache(self.packages, self.root / 'cache'))
+        thread = threading.Thread(target=server.serve_forever)
+        thread.start()
+        try:
+            url = f'http://127.0.0.1:{server.server_port}/test/x64-linux/1.0.0/{abi}'
+            subprocess.run(['curl', '--fail', '--silent', '--head', url], check=True, capture_output=True)
+            destination = self.root / 'restored.zip'
+            subprocess.run(['curl', '--fail', '--silent', '--output', str(destination), url], check=True)
+            with zipfile.ZipFile(destination) as archive:
+                self.assertEqual(archive.read('lib/test.a'), b'archive')
+            miss = subprocess.run(['curl', '--fail', '--silent', url[:-64] + '0' * 64], capture_output=True)
+            self.assertEqual(miss.returncode, 22)
+        finally:
+            server.shutdown()
+            thread.join()
+            server.server_close()
 
     def test_cache_rejects_abi_evidence_mismatch(self):
         abi = 'a' * 64
