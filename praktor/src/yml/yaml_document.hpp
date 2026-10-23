@@ -2,6 +2,7 @@
 
 #include "yml/yaml_document.h"
 #include "yml/yaml_action_params.h"
+#include "yml/yaml_task_fields.h"
 
 #include <cstddef>
 #include <iterator>
@@ -98,6 +99,7 @@ void check_unknown_keys(const YamlNodeRef& node, const std::unordered_set<std::s
 // Transfers one unique JSON owner to the value facade after successful conversion.
 json_value_s* read_contract_json_or_throw(const YamlNodeRef& node);
 
+praktor_yaml_task_fields* read_task_fields_or_throw(const YamlNodeRef& node, praktor_yaml_task_field_kind kind);
 praktor_yaml_action_params* read_action_params_or_throw(const YamlNodeRef& node, praktor_yaml_action_kind kind);
 
 } // namespace TaskYamlDetail

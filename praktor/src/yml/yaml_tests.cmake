@@ -37,6 +37,7 @@ if(CMAKE_CXX_COMPILER_LOADED)
         ${CMAKE_CURRENT_LIST_DIR}/yaml_fields.c
         ${CMAKE_CURRENT_LIST_DIR}/yaml_value.c
         ${CMAKE_CURRENT_LIST_DIR}/yaml_action_params.c
+        ${CMAKE_CURRENT_LIST_DIR}/yaml_task_fields.c
         ${CMAKE_CURRENT_LIST_DIR}/task_field_parser.cpp
         ${CMAKE_CURRENT_LIST_DIR}/yaml_document_legacy_bridge.cpp
         ${CMAKE_CURRENT_LIST_DIR}/../data/workflow_value_legacy_bridge.cpp

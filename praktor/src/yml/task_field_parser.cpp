@@ -2,7 +2,6 @@
 
 #include <memory>
 #include <string>
-#include <unordered_set>
 #include <variant>
 
 namespace {
@@ -34,151 +33,67 @@ static_assert(static_cast<int>(SystemOperation::Start) == PRAKTOR_PROCESS_START)
 static_assert(static_cast<int>(SystemOperation::Stop) == PRAKTOR_PROCESS_STOP);
 static_assert(static_cast<int>(SystemOperation::Restart) == PRAKTOR_PROCESS_RESTART);
 
-TriggerAction parse_trigger_action_node(const TaskYamlDetail::YamlNodeRef& node) {
-    if (!node.has_val()) {
-        throw_parse_error(node, "Trigger action must be a task name (string)");
+struct TaskFieldsDeleter {
+    void operator()(praktor_yaml_task_fields* owner) const noexcept { praktor_yaml_task_fields_destroy(owner); }
+};
+using TaskFieldsOwner = std::unique_ptr<praktor_yaml_task_fields, TaskFieldsDeleter>;
+StrList owned_list(const praktor_yaml_string_list* list) {
+    StrList result;
+    result.reserve(praktor_yaml_string_list_size(list));
+    for (std::size_t index = 0; index < praktor_yaml_string_list_size(list); ++index) {
+        vstr text{};
+        require_native_params(praktor_yaml_string_list_at(list, index, &text));
+        result.push_back(owned_text(text));
     }
-
-    std::string task_name;
-    node >> task_name;
-
-    if (task_name.empty()) {
-        throw_parse_error(node, "Trigger action task name cannot be empty");
-    }
-
-    return task_name;
+    return result;
 }
-
-std::vector<TriggerAction> parse_trigger_action_list(const TaskYamlDetail::YamlNodeRef& node) {
-    if (!node.is_seq()) {
-        throw_parse_error(node, "Trigger action list must be a sequence");
+Vars owned_map(const praktor_yaml_string_map* map) {
+    Vars result;
+    for (std::size_t index = 0; index < praktor_yaml_string_map_size(map); ++index) {
+        praktor_yaml_string_entry entry{};
+        require_native_params(praktor_yaml_string_map_at(map, index, &entry));
+        result[owned_text(entry.key)] = owned_text(entry.value);
     }
-
-    std::vector<TriggerAction> actions;
-    for (const auto& item : node) {
-        actions.emplace_back(parse_trigger_action_node(item));
-    }
-    if (actions.empty()) {
-        throw_parse_error(node, "Trigger action list must contain at least one task name");
-    }
-    return actions;
+    return result;
 }
-
 } // namespace
 
+// Temporary STL projections. Construction and validation have a C-only owner.
 StrList node_to_string_vector(const TaskYamlDetail::YamlNodeRef& node) {
-    StrList result;
-    if (node.is_seq()) {
-        for (const auto& child : node) {
-            std::string value;
-            child >> value;
-            result.push_back(value);
-        }
-    } else if (node.has_val()) {
-        std::string value;
-        node >> value;
-        if (!value.empty()) {
-            result.push_back(value);
-        }
-    } else {
-        TaskYamlDetail::throw_parse_error(node, "Expected sequence or scalar when converting to string list");
-    }
-    return result;
+    TaskFieldsOwner owner(TaskYamlDetail::read_task_fields_or_throw(node, PRAKTOR_YAML_STRING_LIST));
+    const praktor_yaml_string_list* list = nullptr;
+    require_native_params(praktor_yaml_task_list(owner.get(), &list));
+    return owned_list(list);
 }
-
 Vars node_to_string_map(const TaskYamlDetail::YamlNodeRef& node) {
-    if (!node.is_map()) {
-        TaskYamlDetail::throw_parse_error(node, "Expected mapping when converting to string map");
+    TaskFieldsOwner owner(TaskYamlDetail::read_task_fields_or_throw(node, PRAKTOR_YAML_STRING_MAP));
+    const praktor_yaml_string_map* map = nullptr;
+    require_native_params(praktor_yaml_task_map(owner.get(), &map));
+    return owned_map(map);
+}
+Each parse_each(const TaskYamlDetail::YamlNodeRef& node) {
+    TaskFieldsOwner owner(TaskYamlDetail::read_task_fields_or_throw(node, PRAKTOR_YAML_EACH));
+    praktor_yaml_each_view view{};
+    require_native_params(praktor_yaml_task_each(owner.get(), &view));
+    Each result;
+    result.items = owned_list(view.items);
+    for (std::size_t index = 0; index < praktor_yaml_list_map_size(view.matrix); ++index) {
+        praktor_yaml_list_entry entry{};
+        require_native_params(praktor_yaml_list_map_at(view.matrix, index, &entry));
+        result.matrix[owned_text(entry.key)] = owned_list(entry.values);
     }
-
-    Vars result;
-    for (const auto& child : node) {
-        std::string key = child.key();
-        std::string value;
-        child >> value;
-        result[key] = value;
-    }
+    result.as = owned_text(view.as); result.index_variable = owned_text(view.index_variable);
     return result;
 }
-
-Each parse_each(const TaskYamlDetail::YamlNodeRef& node) {
-    if (!node.is_map()) {
-        TaskYamlDetail::throw_parse_error(node, "each must be a map");
-    }
-
-    static const std::unordered_set<std::string> allowed_keys = {
-        "items", "matrix", "as", "index_variable"
-    };
-    TaskYamlDetail::check_unknown_keys(node, allowed_keys);
-
-    Each each;
-    if (node.has_child("items")) {
-        each.items = node_to_string_vector(node["items"]);
-    }
-
-    if (node.has_child("matrix")) {
-        const auto& matrix_node = node["matrix"];
-        if (!matrix_node.is_map()) {
-            TaskYamlDetail::throw_parse_error(matrix_node, "each.matrix must be a map");
-        }
-        for (const auto& child : matrix_node) {
-            std::string key = child.key();
-            each.matrix[key] = node_to_string_vector(child);
-            if (each.matrix[key].empty()) {
-                TaskYamlDetail::throw_parse_error(
-                    child, "each.matrix dimension '" + key + "' must not be empty");
-            }
-        }
-    }
-
-    if (each.hasItems() && each.hasMatrix()) {
-        TaskYamlDetail::throw_parse_error(node, "each cannot define both 'items' and 'matrix'");
-    }
-    if (!each.hasItems() && !each.hasMatrix()) {
-        TaskYamlDetail::throw_parse_error(node, "each requires either 'items' or 'matrix'");
-    }
-
-    if (node.has_child("as")) {
-        node["as"] >> each.as;
-        if (each.as.empty()) {
-            each.as = "item";
-        }
-    }
-
-    if (node.has_child("index_variable")) {
-        node["index_variable"] >> each.index_variable;
-    }
-
-    return each;
-}
-
 Triggers parse_triggers(const TaskYamlDetail::YamlNodeRef& node) {
-    if (!node.is_map()) {
-        TaskYamlDetail::throw_parse_error(node, "triggers must be a map");
-    }
-
-    static const std::unordered_set<std::string> allowed_keys = {
-        "on_success", "on_failure", "on_complete"
-    };
-    TaskYamlDetail::check_unknown_keys(node, allowed_keys);
-
-    Triggers triggers;
-
-    if (node.has_child("on_success")) {
-        triggers.on_success = parse_trigger_action_list(node["on_success"]);
-    }
-    if (node.has_child("on_failure")) {
-        triggers.on_failure = parse_trigger_action_list(node["on_failure"]);
-    }
-    if (node.has_child("on_complete")) {
-        triggers.on_complete = parse_trigger_action_list(node["on_complete"]);
-    }
-
-    if (triggers.empty()) {
-        TaskYamlDetail::throw_parse_error(node, "triggers block must contain at least one action list");
-    }
-
-    return triggers;
+    TaskFieldsOwner owner(TaskYamlDetail::read_task_fields_or_throw(node, PRAKTOR_YAML_TRIGGERS));
+    praktor_yaml_triggers_view view{};
+    require_native_params(praktor_yaml_task_triggers(owner.get(), &view));
+    Triggers result;
+    result.on_success = owned_list(view.on_success);
+    result.on_failure = owned_list(view.on_failure);
+    result.on_complete = owned_list(view.on_complete);
+    return result;
 }
 
 RunCommandParams parse_run_command_params(const TaskYamlDetail::YamlNodeRef& node) {
@@ -249,106 +164,27 @@ ManagedProcessParams parse_managed_process_params(const TaskYamlDetail::YamlNode
 }
 
 UsesParams parse_uses_params(const TaskYamlDetail::YamlNodeRef& node) {
-    UsesParams params;
-    if (node.has_val()) {
-        params.path = node.scalar();
-    } else {
-        node >> params.path;
-    }
-    if (params.path.empty()) {
-        TaskYamlDetail::throw_parse_error(node, "uses value cannot be empty");
-    }
-    return params;
+    TaskFieldsOwner owner(TaskYamlDetail::read_task_fields_or_throw(node, PRAKTOR_YAML_USES));
+    vstr path{};
+    require_native_params(praktor_yaml_task_uses(owner.get(), &path));
+    UsesParams result;
+    result.path = owned_text(path);
+    return result;
 }
-
 DynamicTasksParams parse_dynamic_tasks_params(const TaskYamlDetail::YamlNodeRef& node) {
-    if (!node.is_map()) {
-        TaskYamlDetail::throw_parse_error(node, "dynamic_tasks must be a map");
-    }
-
-    static const std::unordered_set<std::string> allowed_keys = {"items_variable", "template"};
-    TaskYamlDetail::check_unknown_keys(node, allowed_keys);
-
-    DynamicTasksParams params;
-
-    if (!node.has_child("items_variable")) {
-        TaskYamlDetail::throw_parse_error(node, "dynamic_tasks requires 'items_variable'");
-    }
-    node["items_variable"] >> params.items_variable;
-    if (params.items_variable.empty()) {
-        TaskYamlDetail::throw_parse_error(node["items_variable"],
-                                          "dynamic_tasks 'items_variable' cannot be empty");
-    }
-
-    if (!node.has_child("template")) {
-        TaskYamlDetail::throw_parse_error(node, "dynamic_tasks requires 'template'");
-    }
-    const auto& tmpl_node = node["template"];
-    if (!tmpl_node.is_map()) {
-        TaskYamlDetail::throw_parse_error(tmpl_node, "dynamic_tasks 'template' must be a map");
-    }
-    static const std::unordered_set<std::string> allowed_template_keys = {
-        "name", "command", "timeout", "when", "depends_on", "env"
-    };
-    TaskYamlDetail::check_unknown_keys(tmpl_node, allowed_template_keys);
-
-    if (!tmpl_node.has_child("name")) {
-        TaskYamlDetail::throw_parse_error(tmpl_node, "dynamic_tasks template requires 'name'");
-    }
-    tmpl_node["name"] >> params.task_template.name;
-    if (params.task_template.name.empty()) {
-        TaskYamlDetail::throw_parse_error(tmpl_node["name"],
-                                          "dynamic_tasks template 'name' cannot be empty");
-    }
-
-    if (!tmpl_node.has_child("command")) {
-        TaskYamlDetail::throw_parse_error(tmpl_node, "dynamic_tasks template requires 'command'");
-    }
-    const auto& cmd_node = tmpl_node["command"];
-    if (cmd_node.is_seq()) {
-        params.task_template.command = node_to_string_vector(cmd_node);
-        const auto& command_list = std::get<StrList>(params.task_template.command);
-        if (command_list.empty()) {
-            TaskYamlDetail::throw_parse_error(cmd_node,
-                                              "dynamic_tasks template 'command' cannot be empty");
-        }
-        for (const auto& command : command_list) {
-            if (command.empty()) {
-                TaskYamlDetail::throw_parse_error(
-                    cmd_node, "dynamic_tasks template command entries cannot be empty");
-            }
-        }
-    } else {
-        std::string cmd;
-        cmd_node >> cmd;
-        if (cmd.empty()) {
-            TaskYamlDetail::throw_parse_error(cmd_node,
-                                              "dynamic_tasks template 'command' cannot be empty");
-        }
-        params.task_template.command = cmd;
-    }
-
-    if (tmpl_node.has_child("timeout")) {
-        std::string timeout;
-        tmpl_node["timeout"] >> timeout;
-        params.task_template.timeout = timeout;
-    }
-
-    if (tmpl_node.has_child("when")) {
-        std::string when;
-        tmpl_node["when"] >> when;
-        params.task_template.when = when;
-    }
-
-    if (tmpl_node.has_child("depends_on")) {
-        params.task_template.depends_on = node_to_string_vector(tmpl_node["depends_on"]);
-    }
-
-    if (tmpl_node.has_child("env")) {
-        params.task_template.env = node_to_string_map(tmpl_node["env"]);
-    }
-
-    return params;
+    TaskFieldsOwner owner(TaskYamlDetail::read_task_fields_or_throw(node, PRAKTOR_YAML_DYNAMIC_TASKS));
+    praktor_yaml_dynamic_view view{};
+    require_native_params(praktor_yaml_task_dynamic(owner.get(), &view));
+    DynamicTasksParams result;
+    result.items_variable = owned_text(view.items_variable);
+    result.task_template.name = owned_text(view.name);
+    if (view.sequence) result.task_template.command = owned_list(view.commands);
+    else result.task_template.command = owned_text(view.command);
+    if (view.has_timeout) result.task_template.timeout = owned_text(view.timeout);
+    if (view.has_when) result.task_template.when = owned_text(view.when);
+    result.task_template.depends_on = owned_list(view.depends_on);
+    result.task_template.env = owned_map(view.env);
+    return result;
 }
 
 OrchParams desugarCommandToorch(const RunCommandParams& params) {

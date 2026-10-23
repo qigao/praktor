@@ -57,7 +57,7 @@ the rollback point; partial migration is not released as the completed product.
 | Expressions | C lexer, bounded parser/coercion/comparison/string methods, typed variable/regex Host; old evaluator implementation removed | C context and compatible C regex provider replace the explicit temporary C++ adapter |
 | Structured document queries | C JSONPath/YPATH/XPath/CSVPath dispatch and owned results; explicit temporary C++ value/exception bridge | Migrate remaining `WorkflowValue` callers, then delete the bridge |
 | Workflow values | C exact numeric conversion, borrowed path reads, transactional mutations over the existing Salts JSON owner; temporary C++ container/exception facade | Migrate callers and remove the facade |
-| YAML documents, fields, structured values and system parameters | C source/document owner, node access, scalar/int conversion, bounded field readers, key whitelist validation and owned contract/HostTool value conversion, Download/Service/ManagedProcess/Command/Program parameter construction; explicit temporary C++ iterator/exception facade | Port remaining YAML task/workflow field construction, then delete the facade |
+| YAML documents, fields, structured values and system parameters | C source/document owner, node access, scalar/int conversion, bounded field readers, key whitelist validation and owned contract/HostTool value conversion, Download/Service/ManagedProcess/Command/Program parameter construction, shared string containers and Each/Triggers/DynamicTasks/Uses construction; explicit temporary C++ iterator/exception facade | Port remaining YAML task/workflow field construction, then delete the facade |
 | Contracts, effects, profiles, reviewed plans | C++ remains | One C-owned representation and unchanged SDK/YAML contracts |
 | DAG, contexts, triggers, scheduler, actions | C++ application layer and explicit compatibility dispatch remain | Native C execution and atomic Parallel branch state |
 | Shell/application/service adapters | C implementations exist, C++ conversions remain | C callers only; remove adapter headers/translation units |
@@ -360,6 +360,61 @@ scanner, alongside the existing real C Process-controller boundary test. Both
 native tests and the temporary-wrapper/exception tests remain in the current
 platform, lifecycle sanitizer and complete-source TSan qualification; no test
 selection or configured build graph is narrowed.
+
+Shared scalar/sequence string lists, string maps, Each, Triggers, DynamicTasks
+and Uses now construct in the separate C-only `praktor_yaml_task_fields` target.
+The separate boundary owns task metadata and nested dimension lists without
+pulling in Process or JSON providers; reusing the action owner would couple
+these unrelated dependencies and field lifetimes. It uses existing diagnostic,
+lookup and scalar helpers. C++ callers for task/workflow dependencies, variables,
+environment, dotEnv, sources/generates and these four task blocks now copy typed
+borrowed views only. The old constructors/validation algorithms are deleted.
+Orchestration construction and task/workflow representation remain C++.
+
+A unique opaque owner retains copied `tstr` data and raw CSTL vectors. Maps use
+a CSTL tree index borrowing immutable owned keys plus an insertion-ordered entry
+vector. Tree values are entry indexes, so vector relocation cannot invalidate
+them. The index is destroyed before entry keys; matrix entries uniquely own
+separately allocated lists, never byte-copied container ownership. Replacing a
+decoded key frees superseded values/lists and keeps its first insertion position.
+This preserves the existing unordered-map projection's iteration and Each
+expansion order. No document, context or Executor survives construction; views
+remain valid across owner pointer transfer and expire on owner destruction.
+Failure destroys provisional state and leaves outputs unchanged, including index
+insertion failure after entry ownership has transferred to the vector.
+
+The branch-local admission policy is 4096 entries per list or distinct-key map,
+16384 expanded data strings across a construction (including overwritten keys/values
+and repeated aliases), and 1 MiB retained plus provisional decoded text including
+terminators. Superseded strings release the byte budget; the expanded-string
+count remains monotonic. Static defaults consume no owned text. These constructors
+keep the legacy individual string-length policy rather than adding the ordinary
+10 KiB field guard. Excess fails closed with a location diagnostic; validation/lookup decoding, parser DOM,
+temporary provider decoding and allocator/container overhead are outside these
+bounds. No unbounded legacy retry is used.
+
+Each retains content-based items/matrix selection, including empty items with a
+nonempty matrix, and rejects an empty dimension before later duplicates. Triggers
+validate success/failure/complete in that fixed order, accept existing scalar task
+names and refuse present empty groups. DynamicTasks retains all required fields,
+plain scalar command errors, full-list decode before empty-entry checks and the
+presence of explicitly empty timeout/when values. Uses retains plain scalar
+conversion. Raw-key lookup, decoded-NUL truncation and provider/owned allocation
+failure origins remain unchanged. Rollback requires restoring constructors and
+wiring together; no parallel C++ algorithm remains as a fallback.
+
+Twelve native TinyTest cases cover these lifetimes, typed views, decoded duplicate
+keys/order, coercion, validation precedence, concurrent independent owners, exact
+admission boundaries, and byte-budget release on replacement. Six boundary-fault
+cases walk owner/list allocation, actual YAML decode/copy, CSTL vector/tree
+creation/insertion and early/late diagnostic failures. Formal application tests
+cover the real typed-to-STL projection and exception categories. Both new C-only
+executables join runtime link audits, lifecycle ASan and complete-source TSan;
+existing application YAML/cancellation/timeout regressions remain in the complete
+graph. Frozen old constructors and their pre-migration YAML facade additionally
+matched 45,102 complete local payload/exception/diagnostic outcomes, including
+unordered-map iteration, long scalars and competing invalid fields. This is
+construction parity evidence, not a claim of native DAG/trigger execution.
 
 All three projects provide release/ASan presets. On Linux,
 `bash cmake/ci/qualify-c-only-tools.sh release` configures/builds/tests all three

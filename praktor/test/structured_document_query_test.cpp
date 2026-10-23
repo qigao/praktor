@@ -283,6 +283,34 @@ spec("Native Command and Program YAML projection through existing callers") {
     }
 }
 
+spec("Native C task fields project into legacy task types") {
+    it("preserves Each selection and duplicate dimension expansion order") {
+        TaskYamlDetail::YamlDocument doc("items: []\nmatrix: {z: [one], x: [two], \"z\\0last\": [last]}\nas: ''\nindex_variable: n\n");
+        const auto each = parse_each(doc.root());
+        check(each.items.empty() && each.matrix.size() == 2 && each.as == "item" && each.index_variable == "n");
+        check(each.matrix.at("z") == StrList({"last"}) && each.matrix.at("x") == StrList({"two"}));
+        TaskYamlDetail::YamlDocument bad("matrix: {z: [], \"z\\0last\": [a]}\n");
+        check(praktor_test::throws_containing([&] { (void)parse_each(bad.root()); }, {"dimension 'z' must not be empty"}));
+    }
+    it("projects shared containers triggers Uses and dynamic option presence") {
+        TaskYamlDetail::YamlDocument list("['', true, 7]"), map("{z: old, x: a, \"z\\0last\": new}"), uses("true");
+        check(node_to_string_vector(list.root()) == StrList({"", "true", "7"}));
+        const auto vars = node_to_string_map(map.root());
+        check(vars.size() == 2 && vars.at("z") == "new" && vars.at("x") == "a");
+        check(parse_uses_params(uses.root()).path == "true");
+        TaskYamlDetail::YamlDocument triggers("on_success: [a, true]\non_complete: [end]\n");
+        const auto actions = parse_triggers(triggers.root());
+        check(actions.on_success == StrList({"a", "true"}) && actions.on_failure.empty() && actions.on_complete == StrList({"end"}));
+        TaskYamlDetail::YamlDocument dynamic("items_variable: jobs\ntemplate: {name: task, command: [echo, 7], timeout: '', when: '', depends_on: ready, env: {x: true}}\n");
+        const auto params = parse_dynamic_tasks_params(dynamic.root());
+        check(params.items_variable == "jobs" && params.task_template.name == "task");
+        check(std::get<StrList>(params.task_template.command) == StrList({"echo", "7"}));
+        check(params.task_template.timeout.has_value() && params.task_template.timeout->empty());
+        check(params.task_template.when.has_value() && params.task_template.when->empty());
+        check(params.task_template.depends_on == StrList({"ready"}) && params.task_template.env.at("x") == "true");
+    }
+}
+
 #ifdef PRAKTOR_YAML_FAULT_TEST
 extern "C" void praktor_yaml_test_fail(unsigned point);
 
@@ -368,6 +396,16 @@ spec("YAML typed failure origin preserves legacy allocation exceptions") {
         yaml_failure_kind(2, true, [&] { (void)parse_program_params(program.root()); });
         check(parse_run_command_params(command.root()).parse_regex->output_key == "match");
         check(parse_program_params(program.root()).args.size() == 2);
+    }
+    it("retains provider and owned text exception categories through task fields") {
+        TaskYamlDetail::YamlDocument each("items: [a]"), dynamic("items_variable: jobs\ntemplate: {name: task, command: echo}"), uses("path");
+        yaml_failure_kind(1, false, [&] { (void)parse_each(each.root()); });
+        yaml_failure_kind(2, true, [&] { (void)parse_each(each.root()); });
+        yaml_failure_kind(1, false, [&] { (void)parse_dynamic_tasks_params(dynamic.root()); });
+        yaml_failure_kind(2, true, [&] { (void)parse_dynamic_tasks_params(dynamic.root()); });
+        yaml_failure_kind(1, false, [&] { (void)parse_uses_params(uses.root()); });
+        yaml_failure_kind(2, true, [&] { (void)parse_uses_params(uses.root()); });
+        check(parse_each(each.root()).items == StrList({"a"}));
     }
 
 }

@@ -5,6 +5,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/../src/data/value_tests.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/../src/yml/yaml_tests.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/../src/yml/yaml_value_tests.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/../src/yml/yaml_action_tests.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/../src/yml/yaml_task_tests.cmake)
 
 # Compile this public header without a transitive include of the
 # legacy actions Executor. The main target links actions privately, so this

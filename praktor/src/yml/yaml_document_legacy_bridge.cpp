@@ -169,6 +169,13 @@ json_value_t* read_contract_json_or_throw(const YamlNodeRef& node) {
     return result;
 }
 
+praktor_yaml_task_fields* read_task_fields_or_throw(const YamlNodeRef& node, praktor_yaml_task_field_kind kind) {
+    FieldError error;
+    praktor_yaml_task_fields* result = nullptr;
+    const int status = praktor_yaml_task_fields_create(node.native(), kind, &result, &error.value);
+    error.check(status);
+    return result;
+}
 praktor_yaml_action_params* read_action_params_or_throw(const YamlNodeRef& node, praktor_yaml_action_kind kind) {
     FieldError error;
     praktor_yaml_action_params* result = nullptr;
