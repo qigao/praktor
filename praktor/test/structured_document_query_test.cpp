@@ -257,6 +257,32 @@ spec("Native YAML action parameter projection through the temporary facade") {
     }
 }
 
+spec("Native Command and Program YAML projection through existing callers") {
+    it("projects sequence commands and all postprocessor variants") {
+        TaskYamlDetail::YamlDocument regex("command: [echo, 7]\noutput_format: JsOn\nparse_regex: {pattern: x, capture_group: -1, output_key: match}\n");
+        const auto result = parse_run_command_params(regex.root());
+        check(std::get<StrList>(result.command) == StrList({"echo", "7"}) && result.output_format == CommandOutputFormat::Json);
+        check(result.working_directory.empty() && result.environment.empty());
+        check(result.parse_regex && result.parse_regex->capture_group == -1 && result.parse_regex->pattern == "x");
+        check(!result.parse_json && !result.parse_lines && !result.parse_keyvalue);
+        TaskYamlDetail::YamlDocument json("command: true\nparse_json: {path: '', output_key: value}\n");
+        const auto j = parse_run_command_params(json.root());
+        check(std::get<std::string>(j.command) == "true" && j.parse_json && j.parse_json->path.empty());
+        TaskYamlDetail::YamlDocument lines("command: echo\nparse_lines: {output_key: value}\n");
+        check(parse_run_command_params(lines.root()).parse_lines->filter.empty());
+        TaskYamlDetail::YamlDocument pairs("command: echo\nparse_keyvalue: {output_key: value}\n");
+        const auto p = parse_run_command_params(pairs.root());
+        check(p.parse_keyvalue && p.parse_keyvalue->delimiter == "=" && p.parse_keyvalue->line_separator == "\n");
+    }
+    it("projects Program values and preserves plain scalar-decode failures") {
+        TaskYamlDetail::YamlDocument program("program: 7\nargs: ['a', '', true]\nstdin: 42\noutput_format: JSON\n");
+        const auto p = parse_program_params(program.root());
+        check(p.program == "7" && p.args == StrList({"a", "", "true"}) && p.input == "42" && p.output_format == CommandOutputFormat::Json);
+        TaskYamlDetail::YamlDocument invalid("command: ['', {}]\n");
+        check(praktor_test::throws_containing([&] { (void)parse_run_command_params(invalid.root()); }, {"Expected YAML scalar"}));
+    }
+}
+
 #ifdef PRAKTOR_YAML_FAULT_TEST
 extern "C" void praktor_yaml_test_fail(unsigned point);
 
@@ -333,5 +359,16 @@ spec("YAML typed failure origin preserves legacy allocation exceptions") {
         const auto result = parse_service_params(root);
         check(result.name == "worker" && result.timeout_ms == 30000);
     }
+    it("retains Command and Program constructor allocation/provider categories") {
+        TaskYamlDetail::YamlDocument command("command: echo\nparse_regex: {pattern: x, output_key: match}\n");
+        TaskYamlDetail::YamlDocument program("program: tool\nargs: [one, two]\n");
+        yaml_failure_kind(1, false, [&] { (void)parse_run_command_params(command.root()); });
+        yaml_failure_kind(2, true, [&] { (void)parse_run_command_params(command.root()); });
+        yaml_failure_kind(1, false, [&] { (void)parse_program_params(program.root()); });
+        yaml_failure_kind(2, true, [&] { (void)parse_program_params(program.root()); });
+        check(parse_run_command_params(command.root()).parse_regex->output_key == "match");
+        check(parse_program_params(program.root()).args.size() == 2);
+    }
+
 }
 #endif

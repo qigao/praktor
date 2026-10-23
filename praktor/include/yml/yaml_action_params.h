@@ -7,25 +7,30 @@
 extern "C" {
 #endif
 
-/* Internal migration API, outside the installed SDK ABI. Only the three listed
+/* Internal migration API, outside the installed SDK ABI. Only the listed
  * YAML parameter constructors are provided; this is not an execution backend. */
 typedef enum praktor_yaml_action_kind {
     PRAKTOR_YAML_ACTION_DOWNLOAD,
     PRAKTOR_YAML_ACTION_SERVICE,
-    PRAKTOR_YAML_ACTION_MANAGED_PROCESS
+    PRAKTOR_YAML_ACTION_MANAGED_PROCESS,
+    PRAKTOR_YAML_ACTION_COMMAND,
+    PRAKTOR_YAML_ACTION_PROGRAM
 } praktor_yaml_action_kind;
 #define PRAKTOR_YAML_ACTION_MAX_ARGUMENTS 4096u
 #define PRAKTOR_YAML_ACTION_MAX_BYTES (1024u * 1024u)
 
-/* Unique opaque owner. Create reads the named block from a borrowed task node,
- * copies decoded strings and retains no document/runtime references. On failure
+/* Unique opaque owner. Create reads a borrowed task node: named system blocks
+ * or Command/Program fields with sibling options. It copies decoded strings
+ * and retains no document/runtime references. On failure
  * it frees provisional state and leaves *out untouched. Transfer the pointer,
  * never copy its ownership. Destroy accepts NULL. Independent owners may be used
  * concurrently; no concurrent destruction/read of one owner is permitted.
  *
  * Existing YAML types, defaults, field order, case-sensitive operation names,
  * int timeout conversion and diagnostics are retained. Individual strings retain
- * the 10 KiB field limit. New admission bounds allow at most 4096 arguments and
+ * the 10 KiB field limit for Download/Service/ManagedProcess. Command/Program
+ * scalars keep their prior length policy within the aggregate owner limit.
+ * Admission bounds allow at most 4096 list entries (arguments/commands) and
  * 1 MiB of retained decoded text including NUL terminators; excess fails closed.
  * These do not bound parser/temporary decoding allocations. Error storage follows
  * yaml_fields.h and must be disjoint from inputs and outputs. Returns SALTS_OK,
@@ -60,10 +65,40 @@ typedef struct praktor_yaml_managed_process_view {
     int startup_timeout_ms, stop_timeout_ms;
     bool force_terminate;
 } praktor_yaml_managed_process_view;
+/* The command/program grammar has no existing native output-format enum. These
+ * internal projection tags carry parsing policy, not a runtime capability. */
+typedef enum praktor_yaml_output_format {
+    PRAKTOR_YAML_OUTPUT_TEXT, PRAKTOR_YAML_OUTPUT_JSON
+} praktor_yaml_output_format;
+typedef enum praktor_yaml_postprocessor {
+    PRAKTOR_YAML_POST_NONE, PRAKTOR_YAML_POST_REGEX, PRAKTOR_YAML_POST_JSON,
+    PRAKTOR_YAML_POST_LINES, PRAKTOR_YAML_POST_KEYVALUE
+} praktor_yaml_postprocessor;
+typedef struct praktor_yaml_command_view {
+    bool sequence;
+    vstr command; /* Scalar form only. Sequence entries use action_argument. */
+    size_t command_count;
+    praktor_yaml_output_format output_format;
+    praktor_yaml_postprocessor postprocessor;
+    union {
+        struct { vstr pattern, output_key; int capture_group; } regex;
+        struct { vstr path, output_key; } json;
+        struct { vstr filter, output_key; } lines;
+        struct { vstr delimiter, line_separator, output_key; } keyvalue;
+    } parser;
+} praktor_yaml_command_view;
+typedef struct praktor_yaml_program_view {
+    vstr program, input;
+    size_t argument_count;
+    praktor_yaml_output_format output_format;
+} praktor_yaml_program_view;
+int praktor_yaml_action_command(const praktor_yaml_action_params *params, praktor_yaml_command_view *out);
+int praktor_yaml_action_program(const praktor_yaml_action_params *params, praktor_yaml_program_view *out);
 int praktor_yaml_action_download(const praktor_yaml_action_params *params, praktor_yaml_download_view *out);
 int praktor_yaml_action_service(const praktor_yaml_action_params *params, praktor_yaml_service_view *out);
 int praktor_yaml_action_managed_process(const praktor_yaml_action_params *params, praktor_yaml_managed_process_view *out);
-/* ENOENT for an index outside the argument list; EINVAL for invalid arguments. */
+/* Also reads Command sequence entries. ENOENT for an index outside the list;
+ * EINVAL for invalid arguments. */
 int praktor_yaml_action_argument(const praktor_yaml_action_params *params, size_t index, vstr *out);
 
 #ifdef __cplusplus

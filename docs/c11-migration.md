@@ -57,7 +57,7 @@ the rollback point; partial migration is not released as the completed product.
 | Expressions | C lexer, bounded parser/coercion/comparison/string methods, typed variable/regex Host; old evaluator implementation removed | C context and compatible C regex provider replace the explicit temporary C++ adapter |
 | Structured document queries | C JSONPath/YPATH/XPath/CSVPath dispatch and owned results; explicit temporary C++ value/exception bridge | Migrate remaining `WorkflowValue` callers, then delete the bridge |
 | Workflow values | C exact numeric conversion, borrowed path reads, transactional mutations over the existing Salts JSON owner; temporary C++ container/exception facade | Migrate callers and remove the facade |
-| YAML documents, fields, structured values and system parameters | C source/document owner, node access, scalar/int conversion, bounded field readers, key whitelist validation and owned contract/HostTool value conversion, Download/Service/ManagedProcess parameter construction; explicit temporary C++ iterator/exception facade | Port remaining YAML task/workflow field construction, then delete the facade |
+| YAML documents, fields, structured values and system parameters | C source/document owner, node access, scalar/int conversion, bounded field readers, key whitelist validation and owned contract/HostTool value conversion, Download/Service/ManagedProcess/Command/Program parameter construction; explicit temporary C++ iterator/exception facade | Port remaining YAML task/workflow field construction, then delete the facade |
 | Contracts, effects, profiles, reviewed plans | C++ remains | One C-owned representation and unchanged SDK/YAML contracts |
 | DAG, contexts, triggers, scheduler, actions | C++ application layer and explicit compatibility dispatch remain | Native C execution and atomic Parallel branch state |
 | Shell/application/service adapters | C implementations exist, C++ conversions remain | C callers only; remove adapter headers/translation units |
@@ -301,7 +301,7 @@ truncation, force-terminate compatibility grammar, and full location diagnostics
 are preserved. Owned allocations retain their allocation failure category;
 provider decode failures retain the provider category at the temporary exception
 boundary. The application wrappers now only copy typed views into existing
-C++ structures; the three original validation/construction algorithms are removed.
+C++ structures; the original system validation/construction algorithms are removed.
 
 This branch adds admission limits of 4096 arguments and 1 MiB of retained decoded
 text including NUL terminators, in addition to the existing 10 KiB per-field
@@ -325,6 +325,41 @@ implementation. Application projection and typed-exception tests exercise the
 actual temporary wrappers, and both new C tests join lifecycle ASan and complete-
 source TSan qualification. Other YAML task/workflow construction and application
 execution still require migration.
+
+Command and Program now use the same C-owned parameter boundary. Command retains
+its scalar/sequence distinction and typed Regex/JSON/Lines/KeyValue postprocessor
+configuration; Program owns its executable, scalar-or-sequence arguments and
+stdin. Internal enum/union views carry this parsing policy, without claiming a
+new execution capability. Existing strings, defaults and integer capture groups
+(including zero/negative values) are preserved. Output format remains case-folded
+without trimming. Command checks parser conflicts in the original fixed order,
+before decoding commands; sequence entries all decode before empty-entry checks.
+Program keeps an empty scalar argument as no arguments while preserving empty
+sequence entries. Plain scalar conversion errors retain their original message,
+rather than acquiring an additional Parse-error prefix or string-kind guard.
+
+The owner bounds both Command sequences and Program argument lists to 4096
+entries and their aggregate retained text to 1 MiB including terminators. These
+two constructors previously had no individual 10 KiB restriction; that system-
+parameter guard is not imposed on commands, stdin or postprocessor fields.
+Required-field/key validation, source locations, alias/NUL behavior and failure
+origins reuse the existing C document/field mechanisms. Default delimiters and
+separators borrow static literals. New capacity failures discard all provisional
+strings and vector storage. No additional owner, container, parser,
+retry path or external dependency is introduced. Splitting a second owner for
+these constructors was rejected because it would duplicate the same lifetime
+and admission policy; old C++ construction algorithms are removed and only
+explicit typed-to-STL copying remains until task representations migrate.
+
+Native regression cases cover the two constructors and all four postprocessors,
+validation precedence, scalar/list coercion, aliases, immutable owner lifetimes,
+concurrent independent owners and exact list/text admission edges. Fault walks
+cover each parser branch, CSTL append, stdin/format conversion and early/late
+refusals. A test sends typed KeyValue configuration into the actual C output
+scanner, alongside the existing real C Process-controller boundary test. Both
+native tests and the temporary-wrapper/exception tests remain in the current
+platform, lifecycle sanitizer and complete-source TSan qualification; no test
+selection or configured build graph is narrowed.
 
 All three projects provide release/ASan presets. On Linux,
 `bash cmake/ci/qualify-c-only-tools.sh release` configures/builds/tests all three

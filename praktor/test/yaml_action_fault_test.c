@@ -103,4 +103,21 @@ spec("C YAML Action parameter construction rollback") {
         check_faults("service: {name: worker, operation: START}\n", PRAKTOR_YAML_ACTION_SERVICE, SALTS_EINVAL);
         check_faults("managed_process: {identity: {image_name: worker.exe}, arguments: ['a', 'b'], stop_timeout_ms: +1}\n", PRAKTOR_YAML_ACTION_MANAGED_PROCESS, SALTS_ERANGE);
     }
+    it("rolls back Program arguments, stdin and format conversion") {
+        check_faults("program: tool\nargs: [a, '', true]\nstdin: input\noutput_format: JSON\n", PRAKTOR_YAML_ACTION_PROGRAM, SALTS_OK);
+        check_faults("program: tool\nargs: ''\nstdin: []\n", PRAKTOR_YAML_ACTION_PROGRAM, SALTS_EINVAL);
+    }
+    it("rolls back all Command parser projections and scalar/list forms") {
+        check_faults("command: [echo, 7]\noutput_format: JSON\nparse_regex: {pattern: x, capture_group: -1, output_key: result}\n", PRAKTOR_YAML_ACTION_COMMAND, SALTS_OK);
+        check_faults("command: echo\nparse_json: {path: '$.x', output_key: result}\n", PRAKTOR_YAML_ACTION_COMMAND, SALTS_OK);
+        check_faults("command: echo\nparse_lines: {filter: x, output_key: result}\n", PRAKTOR_YAML_ACTION_COMMAND, SALTS_OK);
+        check_faults("command: echo\nparse_keyvalue: {delimiter: ':', line_separator: ';', output_key: result}\n", PRAKTOR_YAML_ACTION_COMMAND, SALTS_OK);
+    }
+    it("cleans Command conflicts, unsupported format and late required-field refusals") {
+        check_faults("command: echo\nparse_json: {}\nparse_regex: {}\n", PRAKTOR_YAML_ACTION_COMMAND, SALTS_EINVAL);
+        check_faults("command: echo\noutput_format: ' JSON '\n", PRAKTOR_YAML_ACTION_COMMAND, SALTS_EINVAL);
+        check_faults("command: echo\nparse_regex: {pattern: x, capture_group: +1}\n", PRAKTOR_YAML_ACTION_COMMAND, SALTS_ERANGE);
+        check_faults("command: echo\nparse_keyvalue: {delimiter: ':', line_separator: ';'}\n", PRAKTOR_YAML_ACTION_COMMAND, SALTS_EINVAL);
+    }
+
 }

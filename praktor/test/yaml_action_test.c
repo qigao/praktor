@@ -1,4 +1,5 @@
 #include "yml/yaml_action_params.h"
+#include "../../actions/core/output_scan.h"
 #include <cmeta_fs.h>
 #include <fmt.h>
 #include <limits.h>
@@ -126,9 +127,15 @@ static void independent_params(void *argument) {
         praktor_yaml_document *doc = NULL;
         praktor_yaml_action_params *owner = NULL;
         praktor_yaml_service_view view;
-        *passed = praktor_yaml_document_create(vstr_from_cstr("service: {name: worker, arguments: ['a', 'b']}\n"), &doc, NULL) == SALTS_OK &&
-            praktor_yaml_action_params_create(praktor_yaml_root(doc), PRAKTOR_YAML_ACTION_SERVICE, &owner, NULL) == SALTS_OK &&
-            praktor_yaml_action_service(owner, &view) == SALTS_OK && view.argument_count == 2;
+        praktor_yaml_action_kind kind = index % 3 == 0 ? PRAKTOR_YAML_ACTION_SERVICE : index % 3 == 1 ? PRAKTOR_YAML_ACTION_COMMAND : PRAKTOR_YAML_ACTION_PROGRAM;
+        const char *source = index % 3 == 0 ? "service: {name: worker, arguments: ['a', 'b']}\n" :
+            index % 3 == 1 ? "command: [echo, 7]\nparse_lines: {output_key: value}\n" : "program: tool\nargs: [one, two]\n";
+        vstr last = {0};
+        *passed = praktor_yaml_document_create(vstr_from_cstr(source), &doc, NULL) == SALTS_OK &&
+            praktor_yaml_action_params_create(praktor_yaml_root(doc), kind, &owner, NULL) == SALTS_OK &&
+            praktor_yaml_action_argument(owner, 1, &last) == SALTS_OK && last.len != 0;
+        if (*passed && kind == PRAKTOR_YAML_ACTION_SERVICE)
+            *passed = praktor_yaml_action_service(owner, &view) == SALTS_OK && view.argument_count == 2;
         praktor_yaml_action_params_destroy(owner); praktor_yaml_document_destroy(doc);
     }
 }
@@ -238,11 +245,15 @@ spec("C-owned typed YAML Action parameters") {
     it("rejects invalid kinds, view projections and indices without changing outputs") {
         praktor_yaml_action_params *owner = params("download: {url: x, path: y}\n", PRAKTOR_YAML_ACTION_DOWNLOAD), *result = owner;
         praktor_yaml_service_view service = {0};
+        praktor_yaml_command_view command = {0};
+        praktor_yaml_program_view program = {0};
         praktor_yaml_field_error error = {0};
         vstr text = {"retained", 8};
-        service.timeout_ms = 71;
+        service.timeout_ms = 71; command.command_count = 71; program.argument_count = 71;
         check(praktor_yaml_action_params_create((praktor_yaml_node){0}, (praktor_yaml_action_kind)7, &result, &error) == SALTS_EINVAL && result == owner);
         check(praktor_yaml_action_service(owner, &service) == SALTS_EINVAL && service.timeout_ms == 71);
+        check(praktor_yaml_action_command(owner, &command) == SALTS_EINVAL && command.command_count == 71);
+        check(praktor_yaml_action_program(owner, &program) == SALTS_EINVAL && program.argument_count == 71);
         check(praktor_yaml_action_argument(owner, SIZE_MAX, &text) == SALTS_ENOENT && is_text(text, "retained"));
         check(praktor_yaml_action_argument(NULL, 0, &text) == SALTS_EINVAL && is_text(text, "retained"));
         praktor_yaml_field_error_dispose(&error); praktor_yaml_action_params_destroy(owner);
@@ -255,5 +266,151 @@ spec("C-owned typed YAML Action parameters") {
         for (index = 0; index < created; ++index) if (cmeta_thread_join(&threads[index]) != SALTS_OK) joined = false;
         check(joined && created == 4);
         for (index = 0; index < 4; ++index) check(passed[index] && !threads[index]);
+    }
+    it("owns scalar and sequence commands with legacy scalar coercion") {
+        praktor_yaml_action_params *owner = params("command: true\noutput_format: JsOn\n", PRAKTOR_YAML_ACTION_COMMAND);
+        praktor_yaml_command_view view = {0};
+        vstr entry = {0};
+        check(praktor_yaml_action_command(owner, &view) == SALTS_OK && !view.sequence && is_text(view.command, "true"));
+        check(view.command_count == 0 && view.output_format == PRAKTOR_YAML_OUTPUT_JSON && view.postprocessor == PRAKTOR_YAML_POST_NONE);
+        praktor_yaml_action_params_destroy(owner);
+        owner = params("command: [echo, 7, true, 'a b']\n", PRAKTOR_YAML_ACTION_COMMAND);
+        check(praktor_yaml_action_command(owner, &view) == SALTS_OK && view.sequence && view.command_count == 4);
+        check(praktor_yaml_action_argument(owner, 1, &entry) == SALTS_OK && is_text(entry, "7"));
+        check(praktor_yaml_action_argument(owner, 2, &entry) == SALTS_OK && is_text(entry, "true"));
+        praktor_yaml_action_params_destroy(owner);
+    }
+    it("retains regex, JSON and line parser fields including permissive empty values") {
+        praktor_yaml_action_params *owner = params("command: echo\nparse_regex: {pattern: '', output_key: 7}\n", PRAKTOR_YAML_ACTION_COMMAND);
+        praktor_yaml_command_view view = {0};
+        check(praktor_yaml_action_command(owner, &view) == SALTS_OK && view.postprocessor == PRAKTOR_YAML_POST_REGEX);
+        check(!view.parser.regex.pattern.len && is_text(view.parser.regex.output_key, "7") && view.parser.regex.capture_group == 1);
+        praktor_yaml_action_params_destroy(owner);
+        owner = params("command: echo\nparse_regex: {pattern: x, capture_group: -2147483648, output_key: ''}\n", PRAKTOR_YAML_ACTION_COMMAND);
+        check(praktor_yaml_action_command(owner, &view) == SALTS_OK && view.parser.regex.capture_group == INT_MIN && !view.parser.regex.output_key.len);
+        praktor_yaml_action_params_destroy(owner);
+        owner = params("command: echo\nparse_json: {path: '', output_key: value}\n", PRAKTOR_YAML_ACTION_COMMAND);
+        check(praktor_yaml_action_command(owner, &view) == SALTS_OK && view.postprocessor == PRAKTOR_YAML_POST_JSON && !view.parser.json.path.len);
+        praktor_yaml_action_params_destroy(owner);
+        owner = params("command: echo\nparse_lines: {output_key: value}\n", PRAKTOR_YAML_ACTION_COMMAND);
+        check(praktor_yaml_action_command(owner, &view) == SALTS_OK && view.postprocessor == PRAKTOR_YAML_POST_LINES && !view.parser.lines.filter.len);
+        praktor_yaml_action_params_destroy(owner);
+    }
+    it("passes typed key/value configuration to the actual native output scanner") {
+        praktor_yaml_action_params *owner = params("command: echo\nparse_keyvalue: {delimiter: ':', line_separator: ';', output_key: object}\n", PRAKTOR_YAML_ACTION_COMMAND);
+        praktor_yaml_command_view view = {0};
+        praktor_output_pair pairs[16];
+        char output[128];
+        size_t length = 0;
+        const praktor_output_span input = {"z:old;a:first;z:last", sizeof("z:old;a:first;z:last") - 1u};
+        check(praktor_yaml_action_command(owner, &view) == SALTS_OK && view.postprocessor == PRAKTOR_YAML_POST_KEYVALUE);
+        check(praktor_output_key_value_json(input,
+            (praktor_output_span){view.parser.keyvalue.delimiter.data, view.parser.keyvalue.delimiter.len},
+            (praktor_output_span){view.parser.keyvalue.line_separator.data, view.parser.keyvalue.line_separator.len},
+            pairs, 16, output, sizeof(output)) == 0);
+        length = strlen(output);
+        check(length == strlen("{\"a\":\"first\",\"z\":\"last\"}") && strcmp(output, "{\"a\":\"first\",\"z\":\"last\"}") == 0);
+        praktor_yaml_action_params_destroy(owner);
+        owner = params("command: echo\nparse_keyvalue: {output_key: value}\n", PRAKTOR_YAML_ACTION_COMMAND);
+        check(praktor_yaml_action_command(owner, &view) == SALTS_OK && is_text(view.parser.keyvalue.delimiter, "=") && is_text(view.parser.keyvalue.line_separator, "\n"));
+        praktor_yaml_action_params_destroy(owner);
+        owner = params("command: echo\nparse_keyvalue: {delimiter: '', line_separator: '', output_key: ''}\n", PRAKTOR_YAML_ACTION_COMMAND);
+        check(praktor_yaml_action_command(owner, &view) == SALTS_OK && !view.parser.keyvalue.delimiter.len && !view.parser.keyvalue.line_separator.len);
+        praktor_yaml_action_params_destroy(owner);
+    }
+    it("retains Program scalar/list arguments, stdin and empty-scalar argument behavior") {
+        praktor_yaml_action_params *owner = params("program: 7\nargs: ['a', '', true]\nstdin: 42\noutput_format: JSON\n", PRAKTOR_YAML_ACTION_PROGRAM);
+        praktor_yaml_program_view view = {0};
+        vstr text = {0};
+        check(praktor_yaml_action_program(owner, &view) == SALTS_OK && is_text(view.program, "7") && is_text(view.input, "42"));
+        check(view.argument_count == 3 && view.output_format == PRAKTOR_YAML_OUTPUT_JSON);
+        check(praktor_yaml_action_argument(owner, 1, &text) == SALTS_OK && !text.len);
+        praktor_yaml_action_params_destroy(owner);
+        owner = params("program: tool\nargs: ''\noutput_format: ''\n", PRAKTOR_YAML_ACTION_PROGRAM);
+        check(praktor_yaml_action_program(owner, &view) == SALTS_OK && !view.argument_count && !view.input.len && view.output_format == PRAKTOR_YAML_OUTPUT_TEXT);
+        praktor_yaml_action_params_destroy(owner);
+        owner = params("program: tool\nargs: false\n", PRAKTOR_YAML_ACTION_PROGRAM);
+        check(praktor_yaml_action_program(owner, &view) == SALTS_OK && view.argument_count == 1);
+        check(praktor_yaml_action_argument(owner, 0, &text) == SALTS_OK && is_text(text, "false"));
+        praktor_yaml_action_params_destroy(owner);
+    }
+    it("retains command list decode-before-empty and parser conflict precedence") {
+        error_is("command: ['', {}]\n", PRAKTOR_YAML_ACTION_COMMAND, "Expected YAML scalar");
+        error_is("command: ['ok', '']\n", PRAKTOR_YAML_ACTION_COMMAND, "command array entries cannot be empty");
+        error_is("command: []\n", PRAKTOR_YAML_ACTION_COMMAND, "command array must contain at least one entry");
+        error_is("command: ''\n", PRAKTOR_YAML_ACTION_COMMAND, "command string cannot be empty");
+        error_is("command: {}\nparse_json: {}\nparse_regex: {}\n", PRAKTOR_YAML_ACTION_COMMAND, "cannot combine 'parse_regex' and 'parse_json'");
+        error_is("parse_json: {}\nparse_regex: {}\n", PRAKTOR_YAML_ACTION_COMMAND, "run_command task requires a 'command'");
+        error_is("command: echo\noutput_format: ' JSON '\nparse_json: {}\n", PRAKTOR_YAML_ACTION_COMMAND, "Unsupported output_format value: ' JSON '");
+    }
+    it("preserves postprocessor whitelist, required-field and integer diagnostics") {
+        error_is("command: echo\nparse_regex: {bad: 1}\n", PRAKTOR_YAML_ACTION_COMMAND, "Unknown key: 'bad'");
+        error_is("command: echo\nparse_regex: {}\n", PRAKTOR_YAML_ACTION_COMMAND, "parse_regex requires 'pattern' field");
+        error_is("command: echo\nparse_regex: {pattern: x, capture_group: +1}\n", PRAKTOR_YAML_ACTION_COMMAND, "Expected YAML integer");
+        error_is("command: echo\nparse_json: {path: []}\n", PRAKTOR_YAML_ACTION_COMMAND, "Expected YAML scalar");
+        error_is("command: echo\nparse_lines: []\n", PRAKTOR_YAML_ACTION_COMMAND, "parse_lines must be a map");
+        error_is("command: echo\nparse_keyvalue: {delimiter: ':'}\n", PRAKTOR_YAML_ACTION_COMMAND, "parse_keyvalue requires 'output_key' field");
+        error_is("program: tool\nargs: {}\nstdin: []\n", PRAKTOR_YAML_ACTION_PROGRAM, "Expected sequence or scalar when converting to string list");
+        error_is("program: tool\nstdin: []\noutput_format: bad\n", PRAKTOR_YAML_ACTION_PROGRAM, "Expected YAML scalar");
+    }
+    it("retains command/program alias decoding and embedded-NUL truncation") {
+        praktor_yaml_action_params *owner = params("base: &base [echo, \"x\\0y\"]\ncommand: *base\nparse_json: {path: \"$\\0ignored\", output_key: value}\n", PRAKTOR_YAML_ACTION_COMMAND);
+        praktor_yaml_command_view view = {0};
+        vstr text = {0};
+        check(praktor_yaml_action_command(owner, &view) == SALTS_OK && view.sequence && view.command_count == 2 && is_text(view.parser.json.path, "$"));
+        check(praktor_yaml_action_argument(owner, 1, &text) == SALTS_OK && is_text(text, "x"));
+        praktor_yaml_action_params_destroy(owner);
+    }
+    it("bounds both new lists at 4096 entries without applying a string-kind guard") {
+        unsigned kind;
+        for (kind = 0; kind < 2; ++kind) {
+            size_t count;
+            for (count = 4096; count <= 4097; ++count) {
+                size_t index;
+                tstr source = tstr_dup(kind ? "program: tool\nargs: [" : "command: [");
+                for (index = 0; index < count; ++index) { source = tstr_append_format(source, "{}7", index ? "," : ""); check(source); }
+                source = tstr_append_format(source, "{}", "]\n"); check(source);
+                if (count == 4096) {
+                    praktor_yaml_action_params *owner = params(source, kind ? PRAKTOR_YAML_ACTION_PROGRAM : PRAKTOR_YAML_ACTION_COMMAND);
+                    vstr text = {0};
+                    check(praktor_yaml_action_argument(owner, 4095, &text) == SALTS_OK && is_text(text, "7"));
+                    praktor_yaml_action_params_destroy(owner);
+                } else error_is(source, kind ? PRAKTOR_YAML_ACTION_PROGRAM : PRAKTOR_YAML_ACTION_COMMAND, "maximum count of 4096");
+                tstr_free(source);
+            }
+        }
+    }
+    it("retains large command/program scalars and enforces aggregate text edges") {
+        unsigned kind;
+        for (kind = 0; kind < 2; ++kind) {
+            size_t extra;
+            for (extra = 0; extra < 2; ++extra) {
+                size_t size = PRAKTOR_YAML_ACTION_MAX_BYTES - (kind ? 3u : 1u) + extra;
+                tstr text = tstr_new_len(NULL, size), source;
+                check(text); memset(text, 'x', size);
+                source = tstr_format("{}'{}'\n", kind ? "program: p\nstdin: " : "command: ", tstr_to_v(text));
+                tstr_free(text); check(source);
+                if (!extra) {
+                    praktor_yaml_action_params *owner = params(source, kind ? PRAKTOR_YAML_ACTION_PROGRAM : PRAKTOR_YAML_ACTION_COMMAND);
+                    praktor_yaml_command_view command = {0}; praktor_yaml_program_view program = {0};
+                    if (kind) check(praktor_yaml_action_program(owner, &program) == SALTS_OK && program.input.len == size);
+                    else check(praktor_yaml_action_command(owner, &command) == SALTS_OK && command.command.len == size);
+                    praktor_yaml_action_params_destroy(owner);
+                } else error_is(source, kind ? PRAKTOR_YAML_ACTION_PROGRAM : PRAKTOR_YAML_ACTION_COMMAND, "maximum bytes of 1048576");
+                tstr_free(source);
+            }
+        }
+        {
+            tstr text = tstr_repeat("x", PRAKTOR_YAML_ACTION_MAX_BYTES - 3u);
+            tstr source;
+            praktor_yaml_action_params *owner;
+            check(text);
+            source = tstr_format("command: '{}'\nparse_lines: {{output_key: v}}\n", text); check(source);
+            owner = params(source, PRAKTOR_YAML_ACTION_COMMAND);
+            praktor_yaml_action_params_destroy(owner); tstr_free(source);
+            source = tstr_format("command: '{}'\nparse_lines: {{filter: f, output_key: v}}\n", text); check(source);
+            error_is(source, PRAKTOR_YAML_ACTION_COMMAND, "maximum bytes of 1048576");
+            tstr_free(source); tstr_free(text);
+        }
     }
 }

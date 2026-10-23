@@ -9,21 +9,6 @@ namespace {
 
 using namespace TaskYamlDetail;
 
-CommandOutputFormat parse_output_format(const TaskYamlDetail::YamlNodeRef& node, const std::string& value) {
-    if (value.empty()) {
-        return CommandOutputFormat::Text;
-    }
-
-    std::string lowered = to_lower_copy(value);
-    if (lowered == "text") {
-        return CommandOutputFormat::Text;
-    }
-    if (lowered == "json") {
-        return CommandOutputFormat::Json;
-    }
-    throw_parse_error(node, "Unsupported output_format value: '" + value + "'");
-}
-
 struct ActionParamsDeleter {
     void operator()(praktor_yaml_action_params* owner) const noexcept { praktor_yaml_action_params_destroy(owner); }
 };
@@ -42,6 +27,8 @@ StrList owned_arguments(const praktor_yaml_action_params* owner, std::size_t cou
     }
     return result;
 }
+static_assert(static_cast<int>(CommandOutputFormat::Text) == PRAKTOR_YAML_OUTPUT_TEXT);
+static_assert(static_cast<int>(CommandOutputFormat::Json) == PRAKTOR_YAML_OUTPUT_JSON);
 static_assert(static_cast<int>(SystemOperation::Status) == PRAKTOR_PROCESS_STATUS);
 static_assert(static_cast<int>(SystemOperation::Start) == PRAKTOR_PROCESS_START);
 static_assert(static_cast<int>(SystemOperation::Stop) == PRAKTOR_PROCESS_STOP);
@@ -195,176 +182,35 @@ Triggers parse_triggers(const TaskYamlDetail::YamlNodeRef& node) {
 }
 
 RunCommandParams parse_run_command_params(const TaskYamlDetail::YamlNodeRef& node) {
-    if (!node.has_child("command")) {
-        TaskYamlDetail::throw_parse_error(node, "run_command task requires a 'command'");
+    ActionParamsOwner owner(TaskYamlDetail::read_action_params_or_throw(node, PRAKTOR_YAML_ACTION_COMMAND));
+    praktor_yaml_command_view view{};
+    require_native_params(praktor_yaml_action_command(owner.get(), &view));
+    RunCommandParams result;
+    if (view.sequence) result.command = owned_arguments(owner.get(), view.command_count);
+    else result.command = owned_text(view.command);
+    result.output_format = static_cast<CommandOutputFormat>(view.output_format);
+    switch (view.postprocessor) {
+    case PRAKTOR_YAML_POST_REGEX:
+        result.parse_regex = ParseRegexConfig{owned_text(view.parser.regex.pattern), view.parser.regex.capture_group, owned_text(view.parser.regex.output_key)}; break;
+    case PRAKTOR_YAML_POST_JSON:
+        result.parse_json = ParseJsonConfig{owned_text(view.parser.json.path), owned_text(view.parser.json.output_key)}; break;
+    case PRAKTOR_YAML_POST_LINES:
+        result.parse_lines = ParseLinesConfig{owned_text(view.parser.lines.filter), owned_text(view.parser.lines.output_key)}; break;
+    case PRAKTOR_YAML_POST_KEYVALUE:
+        result.parse_keyvalue = ParseKeyValueConfig{owned_text(view.parser.keyvalue.delimiter), owned_text(view.parser.keyvalue.line_separator), owned_text(view.parser.keyvalue.output_key)}; break;
+    case PRAKTOR_YAML_POST_NONE: break;
     }
-
-    const char* selected_parser = nullptr;
-    for (const char* parser_key : {"parse_regex", "parse_json", "parse_lines", "parse_keyvalue"}) {
-        if (!node.has_child(parser_key)) {
-            continue;
-        }
-        if (selected_parser) {
-            TaskYamlDetail::throw_parse_error(
-                node[parser_key], "command task cannot combine '" + std::string(selected_parser) +
-                                      "' and '" + parser_key + "'");
-        }
-        selected_parser = parser_key;
-    }
-
-    RunCommandParams params;
-    const auto& command_node = node["command"];
-    if (command_node.is_seq()) {
-        StrList command_list = node_to_string_vector(command_node);
-        if (command_list.empty()) {
-            TaskYamlDetail::throw_parse_error(command_node, "command array must contain at least one entry");
-        }
-        for (const auto& command : command_list) {
-            if (command.empty()) {
-                TaskYamlDetail::throw_parse_error(
-                    command_node, "command array entries cannot be empty");
-            }
-        }
-        params.command = command_list;
-    } else if (command_node.has_val()) {
-        std::string command = command_node.scalar();
-        if (command.empty()) {
-            TaskYamlDetail::throw_parse_error(command_node, "command string cannot be empty");
-        }
-        params.command = command;
-    } else {
-        TaskYamlDetail::throw_parse_error(command_node, "command must be a scalar or sequence");
-    }
-
-    if (node.has_child("output_format")) {
-        std::string format;
-        node["output_format"] >> format;
-        params.output_format = parse_output_format(node["output_format"], format);
-    }
-
-    if (node.has_child("parse_regex")) {
-        const auto& pr = node["parse_regex"];
-        if (!pr.is_map()) {
-            TaskYamlDetail::throw_parse_error(pr, "parse_regex must be a map");
-        }
-        static const std::unordered_set<std::string> allowed_keys = {
-            "pattern", "capture_group", "output_key"
-        };
-        TaskYamlDetail::check_unknown_keys(pr, allowed_keys);
-
-        ParseRegexConfig config;
-        if (!pr.has_child("pattern")) {
-            TaskYamlDetail::throw_parse_error(pr, "parse_regex requires 'pattern' field");
-        }
-        pr["pattern"] >> config.pattern;
-
-        if (pr.has_child("capture_group")) {
-            pr["capture_group"] >> config.capture_group;
-        }
-        if (!pr.has_child("output_key")) {
-            TaskYamlDetail::throw_parse_error(pr, "parse_regex requires 'output_key' field");
-        }
-        pr["output_key"] >> config.output_key;
-        params.parse_regex = config;
-    }
-
-    if (node.has_child("parse_json")) {
-        const auto& pj = node["parse_json"];
-        if (!pj.is_map()) {
-            TaskYamlDetail::throw_parse_error(pj, "parse_json must be a map");
-        }
-        static const std::unordered_set<std::string> allowed_keys = {"path", "output_key"};
-        TaskYamlDetail::check_unknown_keys(pj, allowed_keys);
-
-        ParseJsonConfig config;
-        if (!pj.has_child("path")) {
-            TaskYamlDetail::throw_parse_error(pj, "parse_json requires 'path' field");
-        }
-        pj["path"] >> config.path;
-
-        if (!pj.has_child("output_key")) {
-            TaskYamlDetail::throw_parse_error(pj, "parse_json requires 'output_key' field");
-        }
-        pj["output_key"] >> config.output_key;
-        params.parse_json = config;
-    }
-
-    if (node.has_child("parse_lines")) {
-        const auto& pl = node["parse_lines"];
-        if (!pl.is_map()) {
-            TaskYamlDetail::throw_parse_error(pl, "parse_lines must be a map");
-        }
-        static const std::unordered_set<std::string> allowed_keys = {"filter", "output_key"};
-        TaskYamlDetail::check_unknown_keys(pl, allowed_keys);
-
-        ParseLinesConfig config;
-        if (pl.has_child("filter")) {
-            pl["filter"] >> config.filter;
-        }
-        if (!pl.has_child("output_key")) {
-            TaskYamlDetail::throw_parse_error(pl, "parse_lines requires 'output_key' field");
-        }
-        pl["output_key"] >> config.output_key;
-        params.parse_lines = config;
-    }
-
-    if (node.has_child("parse_keyvalue")) {
-        const auto& pkv = node["parse_keyvalue"];
-        if (!pkv.is_map()) {
-            TaskYamlDetail::throw_parse_error(pkv, "parse_keyvalue must be a map");
-        }
-        static const std::unordered_set<std::string> allowed_keys = {
-            "delimiter", "line_separator", "output_key"
-        };
-        TaskYamlDetail::check_unknown_keys(pkv, allowed_keys);
-
-        ParseKeyValueConfig config;
-        if (pkv.has_child("delimiter")) {
-            pkv["delimiter"] >> config.delimiter;
-        }
-        if (pkv.has_child("line_separator")) {
-            pkv["line_separator"] >> config.line_separator;
-        }
-        if (!pkv.has_child("output_key")) {
-            TaskYamlDetail::throw_parse_error(pkv, "parse_keyvalue requires 'output_key' field");
-        }
-        pkv["output_key"] >> config.output_key;
-        params.parse_keyvalue = config;
-    }
-
-    return params;
+    return result;
 }
-
 ProgramParams parse_program_params(const TaskYamlDetail::YamlNodeRef& node) {
-    if (!node.has_child("program")) {
-        TaskYamlDetail::throw_parse_error(node, "program task requires a 'program'");
-    }
-
-    ProgramParams params;
-    const auto& program_node = node["program"];
-    if (!program_node.has_val()) {
-        TaskYamlDetail::throw_parse_error(program_node, "program must be a scalar");
-    }
-    program_node >> params.program;
-    if (params.program.empty()) {
-        TaskYamlDetail::throw_parse_error(program_node, "program cannot be empty");
-    }
-
-    if (node.has_child("args")) {
-        params.args = node_to_string_vector(node["args"]);
-    }
-
-    if (node.has_child("stdin")) {
-        node["stdin"] >> params.input;
-    }
-
-    if (node.has_child("output_format")) {
-        std::string format;
-        node["output_format"] >> format;
-        params.output_format = parse_output_format(node["output_format"], format);
-    }
-
-    return params;
+    ActionParamsOwner owner(TaskYamlDetail::read_action_params_or_throw(node, PRAKTOR_YAML_ACTION_PROGRAM));
+    praktor_yaml_program_view view{};
+    require_native_params(praktor_yaml_action_program(owner.get(), &view));
+    ProgramParams result;
+    result.program = owned_text(view.program); result.input = owned_text(view.input);
+    result.args = owned_arguments(owner.get(), view.argument_count);
+    result.output_format = static_cast<CommandOutputFormat>(view.output_format);
+    return result;
 }
 
 // Temporary STL conversion only. Validation/defaults/owned strings live in C.
