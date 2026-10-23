@@ -1,10 +1,9 @@
 #pragma once
 
-#include <cyaml.h>
+#include "yml/yaml_document.h"
 
 #include <cstddef>
 #include <iterator>
-#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -41,14 +40,10 @@ private:
     friend class YamlDocument;
     friend class Iterator;
 
-    YamlNodeRef(const cyaml_doc_t* document, cyaml_node_t* node,
-                cyaml_node_t* key_node = nullptr) noexcept;
-    [[nodiscard]] cyaml_node_t* resolved_node() const noexcept;
+    explicit YamlNodeRef(praktor_yaml_node reference) noexcept;
     [[nodiscard]] YamlNodeRef child_at(std::size_t index) const noexcept;
 
-    const cyaml_doc_t* document_ = nullptr;
-    cyaml_node_t* node_ = nullptr;
-    cyaml_node_t* key_node_ = nullptr;
+    praktor_yaml_node reference_{};
 };
 
 class YamlNodeRef::Iterator {
@@ -85,8 +80,7 @@ public:
     [[nodiscard]] YamlNodeRef root() const noexcept;
 
 private:
-    std::unique_ptr<std::string> source_;
-    cyaml_doc_t* document_ = nullptr;
+    praktor_yaml_document* document_ = nullptr;
 };
 
 } // namespace TaskYamlDetail

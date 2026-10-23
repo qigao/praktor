@@ -1,6 +1,7 @@
 #include "praktor_test.hpp"
 
 #include "data/structured_document_query.hpp"
+#include "../src/yml/yaml_document.hpp"
 
 using Praktor::Data::StructuredDocumentQuery;
 using Praktor::Data::StructuredFormat;
@@ -142,5 +143,37 @@ spec("StructuredDocumentQuery C migration bridge") {
         check(praktor_test::throws_containing([] {
             (void)StructuredDocumentQuery::query(StructuredFormat::Csv, "name\nAda\n", "");
         }, {"CSVPath expression must not be empty"}));
+    }
+}
+
+spec("YAML C ownership through the temporary parser facade") {
+    it("preserves borrowed nodes across moves and owns decoded strings") {
+        TaskYamlDetail::YamlDocument document("name: 'Ada'\nvalues: [1, 2]\n");
+        const auto root = document.root();
+        const auto name = root["name"];
+        TaskYamlDetail::YamlDocument moved(std::move(document));
+        check(!document.root().valid());
+        check(name.scalar() == "Ada" && root.num_children() == 2);
+        TaskYamlDetail::YamlDocument replacement("old: discarded\n");
+        replacement = std::move(moved);
+        check(!moved.root().valid() && root["values"].num_children() == 2);
+        check(name.location() == " at line 1, column 1");
+        size_t count = 0;
+        for (const auto& child : root) { check(!child.key().empty()); ++count; }
+        check(count == 2);
+    }
+    it("preserves quoted decimal integers, boolean classification and error locations") {
+        TaskYamlDetail::YamlDocument document("good: '7'\nbad: +1\nflag: 1\ntext: '1'\n");
+        int result = 71;
+        document.root()["good"] >> result;
+        check(result == 7);
+        check(document.root()["flag"].bool_integer_value() == true);
+        check(!document.root()["text"].bool_integer_value().has_value());
+        check(praktor_test::throws_containing([&] { document.root()["bad"] >> result; },
+            {"Expected YAML integer at line 2, column 1"}));
+        check(result == 7);
+        check(praktor_test::throws_containing([] {
+            TaskYamlDetail::YamlDocument invalid("value: 1\nvalue: 2\n");
+        }, {"Duplicate mapping key at line 2, column 1"}));
     }
 }

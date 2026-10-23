@@ -57,7 +57,8 @@ the rollback point; partial migration is not released as the completed product.
 | Expressions | C lexer, bounded parser/coercion/comparison/string methods, typed variable/regex Host; old evaluator implementation removed | C context and compatible C regex provider replace the explicit temporary C++ adapter |
 | Structured document queries | C JSONPath/YPATH/XPath/CSVPath dispatch and owned results; explicit temporary C++ value/exception bridge | Migrate remaining `WorkflowValue` callers, then delete the bridge |
 | Workflow values | C exact numeric conversion, borrowed path reads, transactional mutations over the existing Salts JSON owner; temporary C++ container/exception facade | Migrate callers and remove the facade |
-| YAML, contracts, effects, profiles, reviewed plans | C++ remains | One C-owned representation and unchanged SDK/YAML contracts |
+| YAML documents | C source/document owner, node access, scalar/int conversion and diagnostics; explicit temporary C++ iterator/exception facade | Port YAML task/workflow field parsers, then delete the facade |
+| Contracts, effects, profiles, reviewed plans | C++ remains | One C-owned representation and unchanged SDK/YAML contracts |
 | DAG, contexts, triggers, scheduler, actions | C++ application layer and explicit compatibility dispatch remain | Native C execution and atomic Parallel branch state |
 | Shell/application/service adapters | C implementations exist, C++ conversions remain | C callers only; remove adapter headers/translation units |
 | SDK, CLI, script wrapper, remaining tools/examples/tests | C++ remains | Preserve the C ABI and CLI behavior, port all consumers/tests |
@@ -168,6 +169,42 @@ conversion, exception mapping and public string conversion for current callers;
 its old numeric/path/mutation algorithms are deleted. It remains a temporary
 C++ dependency of the application, not of the native C value target. Whole-program
 C++ removal still requires migrating those callers and deleting this facade.
+
+YAML documents now have a separate C target linking only Salts Core and the
+existing YAML provider. Its opaque owner copies source into `tstr`, retains that
+buffer for the provider's borrowed spans, and frees parser nodes before source.
+Moving the owner pointer preserves borrowed node handles; destroying it invalidates
+them. Returned scalar/key/location text has independent `tstr` ownership. Failed
+construction or decoding publishes no partial owner, node or text output.
+
+The provider keeps its default parsing policy and duplicate-key refusal. Sources
+larger than its 32-bit span representation are rejected before copying. Alias
+resolution is limited to 128 hops, closing the old unbounded nontrivial alias-cycle
+loop; unresolved/self-target alias metadata retains its previous non-scalar
+behavior. Location lookup preserves the existing 32-level search and mapping-key
+preference, now with iterative C traversal. Strict decoded decimal `int` conversion
+retains quoted integers, rejects plus/whitespace/base prefixes/fractions, checks
+range and leaves outputs unchanged on failure. Optional integer 0/1 booleans use
+the same provider semantics as before.
+
+The supported public provider API supplies decoded C strings without lengths.
+The migration therefore deliberately retains truncation at a decoded NUL and
+raw-span `cyaml_get` key lookup, including its separate decoded-key location search.
+Switching to raw spans for scalar decoding, calling an unpublished length API,
+or replacing the YAML parser was rejected: those would alter the accepted grammar,
+escape/folding behavior or installed-provider contract. `yaml_document.cpp` is
+replaced by the C implementation; `yaml_document_legacy_bridge.cpp` contains only
+class lifetimes, iterator/optional/string conversion and exception mapping for
+field parsers awaiting migration. The source owner is no longer C++ state.
+
+Executable C tests exercise independent source lifetime, pointer transfer,
+aliases, decoding, strict numeric/boolean semantics, diagnostics, admission bounds,
+concurrent independent documents and every module allocation/provider boundary.
+Fault tests also verify parser destruction before retained-source release and
+unchanged outputs. These inject module-boundary failures while using the actual
+provider; they do not simulate its internal allocator or replace its algorithms.
+YAML task/workflow parsing, validation and application execution still require
+migration; this document-owner cut alone does not remove that C++ application layer.
 
 All three projects provide release/ASan presets. On Linux,
 `bash cmake/ci/qualify-c-only-tools.sh release` configures/builds/tests all three
