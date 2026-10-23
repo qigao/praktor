@@ -170,15 +170,14 @@ jobs:
           set -euo pipefail
           cmake -S build/p1-salts-utils-source -B build/p1-salts-utils-tsan \
             -DBUILD_TESTS=ON -DBUILD_BENCHMARKS=OFF -DBUILD_EXAMPLES=OFF
-          cmake --build build/p1-salts-utils-tsan \
-            --target cflow_process_fault_test cflow_process_test --parallel 2
+          cmake --build build/p1-salts-utils-tsan --parallel 2
           export LD_LIBRARY_PATH="$SALTS_SOURCE_TSAN_ROOT/lib:$SALTS_UTILS_SOURCE_TSAN_ROOT/lib:$CHTTP_ROOT/lib:${LD_LIBRARY_PATH:-}"
           ctest --test-dir build/p1-salts-utils-tsan \
             -R '^(cflow_process_fault_test|cflow_process_test)$' \
             --no-tests=error --output-on-failure --parallel 1 \
             --repeat until-fail:3 --timeout 90
 
-      - name: Qualify C-only Schema and Lexer against the instrumented SDKs
+      - name: Qualify C-only tools and queries against the instrumented SDKs
         shell: bash
         env:
           TSAN_OPTIONS: halt_on_error=1:exitcode=66
@@ -305,7 +304,7 @@ jobs:
           export LD_LIBRARY_PATH="$SALTS_SOURCE_TSAN_ROOT/lib:$SALTS_UTILS_SOURCE_TSAN_ROOT/lib:$CHTTP_ROOT/lib:${LD_LIBRARY_PATH:-}"
           ctest --test-dir build/p1-praktor-tsan \
             --no-tests=error --output-on-failure --parallel 1 --timeout 90 \
-            -R '^(schema_projection_cli|schema_projection_test|schema_projection_cli_usage|expression_lexer_test|expression_evaluator_test\.praktor_lib|actions_output_core_test|test_output_parser|shell_executor_test|praktor_process_driver_test|praktor_process_worker_test|praktor_process_control_test|praktor_process_native_test|praktor_service_control_test|praktor_service_process_test|service_executor_test\.praktor_lib|managed_process_executor_test\.praktor_lib|core_only_workflow_test\.praktor_lib|actions_c11_tree_executor_session_test|actions_c11_session_yaml_differential_test)$'
+            -R '^(schema_projection_cli|schema_projection_test|schema_projection_cli_usage|expression_lexer_test|structured_document_query_c_test|structured_document_query_test\.praktor_lib|expression_evaluator_test\.praktor_lib|actions_output_core_test|test_output_parser|shell_executor_test|praktor_process_driver_test|praktor_process_worker_test|praktor_process_control_test|praktor_process_native_test|praktor_service_control_test|praktor_service_process_test|service_executor_test\.praktor_lib|managed_process_executor_test\.praktor_lib|core_only_workflow_test\.praktor_lib|actions_c11_tree_executor_session_test|actions_c11_session_yaml_differential_test)$'
 
       - uses: actions/upload-artifact@v4
         if: always()

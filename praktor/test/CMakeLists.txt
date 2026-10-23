@@ -1,4 +1,5 @@
 include(${CMAKE_CURRENT_SOURCE_DIR}/../src/expressions/lexer_tests.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/../src/data/query_tests.cmake)
 
 # Compile this public header without a transitive include of the
 # legacy actions Executor. The main target links actions privately, so this
@@ -31,13 +32,13 @@ if(ENABLE_SCRIPT_ENGINE)
         matrix_test.cpp
         script_engine_test.cpp
         declarative_tree_executor_test.cpp
-        structured_document_query_test.cpp
     )
 else()
     set(TEST_SOURCES core_only_workflow_test.cpp)
 endif()
 
 list(APPEND TEST_SOURCES
+    structured_document_query_test.cpp
     expression_evaluator_test.cpp
     service_executor_test.cpp
     managed_process_executor_test.cpp

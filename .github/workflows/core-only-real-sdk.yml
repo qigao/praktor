@@ -205,7 +205,7 @@ jobs:
             build/ci-sdk/shared/process/libpraktor_process_native.a \
             build/ci-sdk/shared/process/libpraktor_service_control.a build/ci-sdk/shared/process/libpraktor_service_process_host.a
 
-      - name: C-only Schema tool and expression Lexer
+      - name: C-only Schema tool, expression Lexer and structured queries
         if: matrix.platform == 'linux' && matrix.sdk == 'behavior-tree'
         shell: bash
         run: bash cmake/ci/qualify-c-only-tools.sh release

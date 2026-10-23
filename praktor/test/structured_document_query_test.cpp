@@ -120,3 +120,27 @@ spec("StructuredDocumentQuery uses XPath") {
 spec("StructuredDocumentQuery uses CSVPath filters") {
     it("complete case") { test_structureddocumentquery_uses_csvpath_filters_8(); }
 }
+
+spec("StructuredDocumentQuery C migration bridge") {
+    it("owns query results independently of the borrowed WorkflowValue") {
+        WorkflowValue result;
+        {
+            WorkflowValue root = WorkflowValue::parse(R"({"nested":{"value":7}})");
+            result = StructuredDocumentQuery::queryJson(root, "nested");
+            result["value"] = 9;
+            check((root["nested"]["value"].as<int>() == 7));
+        }
+        check((result["value"].as<int>() == 9));
+    }
+    it("retains invalid-input diagnostics for existing callers") {
+        check(praktor_test::throws_containing([] {
+            (void)StructuredDocumentQuery::query(StructuredFormat::Json, "{", "$");
+        }, {"Invalid JSON input"}));
+        check(praktor_test::throws_containing([] {
+            (void)StructuredDocumentQuery::query(StructuredFormat::Xml, "<root/>", "");
+        }, {"XPath expression must not be empty"}));
+        check(praktor_test::throws_containing([] {
+            (void)StructuredDocumentQuery::query(StructuredFormat::Csv, "name\nAda\n", "");
+        }, {"CSVPath expression must not be empty"}));
+    }
+}

@@ -55,6 +55,7 @@ the rollback point; partial migration is not released as the completed product.
 | --- | --- | --- |
 | Schema maintenance tool | C projection, CLI and TinyTest tests; no `WorkflowValue`, `praktor_lib` or C++ link | Preserve generated grammar and all existing refusal rules |
 | Expression Lexer | C iterator and decoder; removed original C++ implementation/header | Native evaluator consumes C values with bounded parse state |
+| Structured document queries | C JSONPath/YPATH/XPath/CSVPath dispatch and owned results; explicit temporary C++ value/exception bridge | Migrate remaining `WorkflowValue` callers, then delete the bridge |
 | Values, YAML, contracts, effects, profiles, reviewed plans | C++ remains | One C-owned representation and unchanged SDK/YAML contracts |
 | DAG, contexts, triggers, scheduler, actions | C++ application layer and explicit compatibility dispatch remain | Native C execution and atomic Parallel branch state |
 | Shell/application/service adapters | C implementations exist, C++ conversions remain | C callers only; remove adapter headers/translation units |
@@ -89,8 +90,19 @@ are deliberately retained until an evaluator-level syntax change is reviewed.
 The C++ evaluator temporarily converts tokens to its existing value containers;
 its remaining regex/parser/value behavior is not claimed to have moved to C.
 
-Both projects provide release/ASan presets. On Linux,
-`bash cmake/ci/qualify-c-only-tools.sh release` configures/builds/tests both
+`praktor/src/data/standalone` links the real Salts JSON/YAML/XML/CSV query
+providers with a C compiler only. Query results own independent JSON trees;
+borrowed input is unchanged and failure leaves the caller's output untouched.
+Tests cover path defaults/prefixes, zero/one/many match shapes, CSV arrays and
+duplicate headers, scalar types, exact byte lengths and malformed input/query
+cleanup. Provider parsing and query limits remain in force; this DOM API makes
+no allocation-free or fixed-capacity claim. The old C++ query implementation
+has been removed; `structured_document_query_legacy_bridge.cpp` only converts
+values and statuses for callers that have not migrated yet. Its existing
+regressions now run with the script engine both enabled and disabled.
+
+All three projects provide release/ASan presets. On Linux,
+`bash cmake/ci/qualify-c-only-tools.sh release` configures/builds/tests all three
 complete graphs and rejects C++ symbols/libraries in their executable links.
 The complete-source TSan workflow invokes the same qualification with `thread`
 against instrumented Salts and SaltsUtils. Ordinary platform CI continues

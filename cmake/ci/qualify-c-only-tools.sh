@@ -11,10 +11,11 @@ case "$mode" in
   *) echo 'Expected release, address or thread' >&2; exit 2 ;;
 esac
 export LD_LIBRARY_PATH="$SALTS_ROOT/lib:$SALTS_UTILS_ROOT/lib:${LD_LIBRARY_PATH:-}"
-for unit in schema lexer; do
+for unit in schema lexer query; do
   case "$unit" in
     schema) directory=tools/schema/standalone ;;
     lexer) directory=praktor/src/expressions/standalone ;;
+    query) directory=praktor/src/data/standalone ;;
   esac
   (
     cd "$directory"
@@ -23,6 +24,6 @@ for unit in schema lexer; do
     ctest --preset "$unit-c-release" --timeout 90
   )
 done
-for binary in build/schema-c-release/praktor-schema build/schema-c-release/schema_projection_test build/lexer-c-release/expression_lexer_test; do
+for binary in build/schema-c-release/praktor-schema build/schema-c-release/schema_projection_test build/lexer-c-release/expression_lexer_test build/query-c-release/structured_document_query_c_test; do
   python3 cmake/ci/audit-c11-runtime-link.py "$binary"
 done

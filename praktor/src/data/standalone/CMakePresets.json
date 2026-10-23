@@ -1,0 +1,15 @@
+{
+  "version": 6,
+  "configurePresets": [
+    {"name": "query-c-release", "generator": "Ninja", "binaryDir": "${sourceDir}/../../../../build/query-c-release", "cacheVariables": {"CMAKE_BUILD_TYPE": "Release", "CMAKE_EXPORT_COMPILE_COMMANDS": true}},
+    {"name": "query-c-asan", "inherits": "query-c-release", "binaryDir": "${sourceDir}/../../../../build/query-c-asan", "condition": {"type": "equals", "lhs": "${hostSystemName}", "rhs": "Linux"}, "cacheVariables": {"CMAKE_BUILD_TYPE": "Debug", "CMAKE_C_FLAGS": "-fsanitize=address,undefined -fno-omit-frame-pointer -g", "CMAKE_EXE_LINKER_FLAGS": "-fsanitize=address,undefined"}}
+  ],
+  "buildPresets": [
+    {"name": "query-c-release", "configurePreset": "query-c-release", "jobs": 2},
+    {"name": "query-c-asan", "configurePreset": "query-c-asan", "jobs": 2}
+  ],
+  "testPresets": [
+    {"name": "query-c-release", "configurePreset": "query-c-release", "output": {"outputOnFailure": true}, "execution": {"noTestsAction": "error"}},
+    {"name": "query-c-asan", "configurePreset": "query-c-asan", "output": {"outputOnFailure": true}, "execution": {"noTestsAction": "error"}}
+  ]
+}
