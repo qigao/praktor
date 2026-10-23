@@ -1,6 +1,7 @@
 #include "yml/yaml_contract.h"
 #include "yaml_diagnostic_internal.h"
 #include <string.h>
+#include <fmt.h>
 
 static int add_owned(json_value_t *object, const char *key, json_value_t *value) {
     if (value == NULL) return SALTS_ENOMEM;
