@@ -383,14 +383,17 @@ Workflow parse_workflow(const TaskYamlDetail::YamlNodeRef& node, const std::stri
     if (node.has_child("outputs")) {
         workflow.outputs = parse_contract_fields(node["outputs"], true);
     }
-    if (node.has_child("variables")) {
-        workflow.variables = node_to_string_map(node["variables"]);
+    if (metadata.contains("variables")) {
+        for (const auto& item : metadata.at("variables").object_range())
+            workflow.variables[item.key()] = item.value().as<std::string>();
     }
-    if (node.has_child("env")) {
-        workflow.env = node_to_string_map(node["env"]);
+    if (metadata.contains("env")) {
+        for (const auto& item : metadata.at("env").object_range())
+            workflow.env[item.key()] = item.value().as<std::string>();
     }
-    if (node.has_child("dotEnv")) {
-        workflow.dot_env = node_to_string_vector(node["dotEnv"]);
+    if (metadata.contains("dot_env")) {
+        for (const auto& item : metadata.at("dot_env").array_range())
+            workflow.dot_env.push_back(item.as<std::string>());
     }
 
     if (!node.has_child("tasks")) {

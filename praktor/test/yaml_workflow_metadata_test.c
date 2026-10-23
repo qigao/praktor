@@ -17,6 +17,27 @@ spec("C workflow root metadata parser") {
         json_eq(result,"{\"name\":\"demo\",\"description\":\"sample\",\"strict_inputs\":true,\"defaults\":{\"timeout\":\"30s\"}}");
         json_free(result);praktor_yaml_field_error_dispose(&error);praktor_yaml_document_destroy(doc);
     }
+    it("projects variables, env and dotEnv into owned JSON containers") {
+        praktor_yaml_document *doc=doc_for(
+            "variables: {A: one, B: two}\nenv: {MODE: test}\ndotEnv: [.env, .env.local]\ntasks: []\n");
+        json_value_t *result=NULL;praktor_yaml_field_error error={0};
+        check(praktor_yaml_workflow_metadata_create(praktor_yaml_root(doc),&result,&error)==SALTS_OK);
+        json_eq(result,"{\"variables\":{\"A\":\"one\",\"B\":\"two\"},\"env\":{\"MODE\":\"test\"},\"dot_env\":[\".env\",\".env.local\"]}");
+        json_free(result);praktor_yaml_field_error_dispose(&error);praktor_yaml_document_destroy(doc);
+    }
+    it("rejects malformed variable, env and dotEnv containers") {
+        const char *bad[]={
+            "variables: scalar\ntasks: []\n",
+            "env: [not, a, map]\ntasks: []\n",
+            "dotEnv: scalar\ntasks: []\n"
+        };
+        size_t i;
+        for(i=0;i<sizeof(bad)/sizeof(bad[0]);++i) {
+            praktor_yaml_document *doc=doc_for(bad[i]);json_value_t *result=NULL;praktor_yaml_field_error error={0};
+            check(praktor_yaml_workflow_metadata_create(praktor_yaml_root(doc),&result,&error)!=SALTS_OK);
+            check(result==NULL&&error.text!=NULL);praktor_yaml_field_error_dispose(&error);praktor_yaml_document_destroy(doc);
+        }
+    }
     it("preserves absent policy and allow_extra") {
         praktor_yaml_document *doc=doc_for("tasks: []\ninput_policy: allow_extra\n");json_value_t *result=NULL;
         check(praktor_yaml_workflow_metadata_create(praktor_yaml_root(doc),&result,NULL)==SALTS_OK);
