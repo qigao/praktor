@@ -1,13 +1,13 @@
+#include "praktor_test.hpp"
 #include "executors/dynamic_tasks_executor.hpp"
 #include "dag/workflow_context.hpp"
 
-#include <catch2/catch_all.hpp>
 #include <string>
 #include <vector>
 
 using namespace Praktor::Execution;
 
-TEST_CASE("DynamicTasksExecutor placeholder substitution", "[dynamic_tasks]") {
+[[maybe_unused]] static void test_dynamictasksexecutor_placeholder_substitution_1(int section_index) {
     auto executor = createDynamicTasksExecutor();
     auto* dt_executor = static_cast<DynamicTasksExecutor*>(executor.get());
 
@@ -20,7 +20,7 @@ TEST_CASE("DynamicTasksExecutor placeholder substitution", "[dynamic_tasks]") {
 
     WorkflowContext context;
 
-    SECTION("Simple string items with {{ item }}") {
+    if (section_index == 0) {
         // Set up items in context
         WorkflowValue items = WorkflowValue::array();
         items.push_back("service_a");
@@ -42,14 +42,14 @@ TEST_CASE("DynamicTasksExecutor placeholder substitution", "[dynamic_tasks]") {
 
         auto result = executor->execute(task, context);
 
-        REQUIRE(result.success);
-        REQUIRE(generated_tasks.size() == 3);
-        CHECK(generated_tasks[0].name == "deploy_service_a");
-        CHECK(generated_tasks[1].name == "deploy_service_b");
-        CHECK(generated_tasks[2].name == "deploy_service_c");
+        check((result.success));
+        check((generated_tasks.size() == 3));
+        check((generated_tasks[0].name == "deploy_service_a"));
+        check((generated_tasks[1].name == "deploy_service_b"));
+        check((generated_tasks[2].name == "deploy_service_c"));
     }
 
-    SECTION("Object items with {{ item.field }}") {
+    if (section_index == 1) {
         generated_tasks.clear();
 
         WorkflowValue items = WorkflowValue::array();
@@ -77,21 +77,21 @@ TEST_CASE("DynamicTasksExecutor placeholder substitution", "[dynamic_tasks]") {
 
         auto result = executor->execute(task, context);
 
-        REQUIRE(result.success);
-        REQUIRE(generated_tasks.size() == 2);
+        check((result.success));
+        check((generated_tasks.size() == 2));
 
-        CHECK(generated_tasks[0].name == "start_web");
-        CHECK(generated_tasks[1].name == "start_api");
+        check((generated_tasks[0].name == "start_web"));
+        check((generated_tasks[1].name == "start_api"));
 
         // Check command contains substituted values
         const auto& bt0 = std::get<OrchParams>(generated_tasks[0].specifics);
-        CHECK(bt0.root.children[0].params.at("cmd") == "./start.sh --name web --port 8080");
+        check((bt0.root.children[0].params.at("cmd") == "./start.sh --name web --port 8080"));
 
         const auto& bt1 = std::get<OrchParams>(generated_tasks[1].specifics);
-        CHECK(bt1.root.children[0].params.at("cmd") == "./start.sh --name api --port 3000");
+        check((bt1.root.children[0].params.at("cmd") == "./start.sh --name api --port 3000"));
     }
 
-    SECTION("{{ index }} placeholder") {
+    if (section_index == 2) {
         generated_tasks.clear();
 
         WorkflowValue items = WorkflowValue::array();
@@ -112,24 +112,30 @@ TEST_CASE("DynamicTasksExecutor placeholder substitution", "[dynamic_tasks]") {
 
         auto result = executor->execute(task, context);
 
-        REQUIRE(result.success);
-        REQUIRE(generated_tasks.size() == 2);
+        check((result.success));
+        check((generated_tasks.size() == 2));
 
-        CHECK(generated_tasks[0].name == "task_0");
-        CHECK(generated_tasks[1].name == "task_1");
+        check((generated_tasks[0].name == "task_0"));
+        check((generated_tasks[1].name == "task_1"));
 
         const auto& bt0 = std::get<OrchParams>(generated_tasks[0].specifics);
-        CHECK(bt0.root.children[0].params.at("cmd") == "echo a at index 0");
+        check((bt0.root.children[0].params.at("cmd") == "echo a at index 0"));
     }
 }
 
-TEST_CASE("DynamicTasksExecutor error handling", "[dynamic_tasks]") {
+spec("DynamicTasksExecutor placeholder substitution") {
+    it("Simple string items with {{ item }}") { test_dynamictasksexecutor_placeholder_substitution_1(0); }
+    it("Object items with {{ item.field }}") { test_dynamictasksexecutor_placeholder_substitution_1(1); }
+    it("{{ index }} placeholder") { test_dynamictasksexecutor_placeholder_substitution_1(2); }
+}
+
+[[maybe_unused]] static void test_dynamictasksexecutor_error_handling_2(int section_index) {
     auto executor = createDynamicTasksExecutor();
     auto* dt_executor = static_cast<DynamicTasksExecutor*>(executor.get());
 
     WorkflowContext context;
 
-    SECTION("Fails without callback") {
+    if (section_index == 0) {
         Task task;
         task.name = "test";
         task.action = TaskAction::DynamicTasks;
@@ -140,11 +146,11 @@ TEST_CASE("DynamicTasksExecutor error handling", "[dynamic_tasks]") {
 
         auto result = executor->execute(task, context);
 
-        REQUIRE_FALSE(result.success);
-        CHECK(result.error_message.find("callback") != std::string::npos);
+        check_false(result.success);
+        check((result.error_message.find("callback") != std::string::npos));
     }
 
-    SECTION("Fails when items_variable not found") {
+    if (section_index == 1) {
         dt_executor->setSubTaskCallback([](const Task&, WorkflowContext&) { return true; });
 
         Task task;
@@ -159,12 +165,12 @@ TEST_CASE("DynamicTasksExecutor error handling", "[dynamic_tasks]") {
 
         auto result = executor->execute(task, context);
 
-        REQUIRE_FALSE(result.success);
+        check_false(result.success);
         // Error could be "null", "array", or "not found" depending on what getValueByPath returns
-        CHECK_FALSE(result.error_message.empty());
+        check((!(result.error_message.empty())));
     }
 
-    SECTION("Fails when items is not an array") {
+    if (section_index == 2) {
         dt_executor->setSubTaskCallback([](const Task&, WorkflowContext&) { return true; });
 
         context.setValue("items", std::string("not an array"));
@@ -181,11 +187,11 @@ TEST_CASE("DynamicTasksExecutor error handling", "[dynamic_tasks]") {
 
         auto result = executor->execute(task, context);
 
-        REQUIRE_FALSE(result.success);
-        CHECK(result.error_message.find("array") != std::string::npos);
+        check_false(result.success);
+        check((result.error_message.find("array") != std::string::npos));
     }
 
-    SECTION("Fails when subtask fails") {
+    if (section_index == 3) {
         int call_count = 0;
         dt_executor->setSubTaskCallback([&](const Task&, WorkflowContext&) {
             call_count++;
@@ -211,13 +217,20 @@ TEST_CASE("DynamicTasksExecutor error handling", "[dynamic_tasks]") {
 
         auto result = executor->execute(task, context);
 
-        REQUIRE_FALSE(result.success);
-        CHECK(call_count == 2);  // Should stop after second task fails
-        CHECK(result.error_message.find("task_b") != std::string::npos);
+        check_false(result.success);
+        check((call_count == 2));  // Should stop after second task fails
+        check((result.error_message.find("task_b") != std::string::npos));
     }
 }
 
-TEST_CASE("DynamicTasksExecutor template fields", "[dynamic_tasks]") {
+spec("DynamicTasksExecutor error handling") {
+    it("Fails without callback") { test_dynamictasksexecutor_error_handling_2(0); }
+    it("Fails when items_variable not found") { test_dynamictasksexecutor_error_handling_2(1); }
+    it("Fails when items is not an array") { test_dynamictasksexecutor_error_handling_2(2); }
+    it("Fails when subtask fails") { test_dynamictasksexecutor_error_handling_2(3); }
+}
+
+[[maybe_unused]] static void test_dynamictasksexecutor_template_fields_3(int section_index) {
     auto executor = createDynamicTasksExecutor();
     auto* dt_executor = static_cast<DynamicTasksExecutor*>(executor.get());
 
@@ -234,7 +247,7 @@ TEST_CASE("DynamicTasksExecutor template fields", "[dynamic_tasks]") {
 
     context.setValue("items", items);
 
-    SECTION("Template with env vars") {
+    if (section_index == 0) {
         Task task;
         task.name = "env_test";
         task.action = TaskAction::DynamicTasks;
@@ -249,13 +262,13 @@ TEST_CASE("DynamicTasksExecutor template fields", "[dynamic_tasks]") {
 
         auto result = executor->execute(task, context);
 
-        REQUIRE(result.success);
-        REQUIRE(generated.size() == 1);
-        CHECK(generated[0].env["SERVICE_NAME"] == "x");
-        CHECK(generated[0].env["INDEX"] == "0");
+        check((result.success));
+        check((generated.size() == 1));
+        check((generated[0].env["SERVICE_NAME"] == "x"));
+        check((generated[0].env["INDEX"] == "0"));
     }
 
-    SECTION("Template with timeout") {
+    if (section_index == 1) {
         generated.clear();
 
         Task task;
@@ -271,12 +284,12 @@ TEST_CASE("DynamicTasksExecutor template fields", "[dynamic_tasks]") {
 
         auto result = executor->execute(task, context);
 
-        REQUIRE(result.success);
-        REQUIRE(generated[0].timeout.has_value());
-        CHECK(generated[0].timeout.value() == "30s");
+        check((result.success));
+        check((generated[0].timeout.has_value()));
+        check((generated[0].timeout.value() == "30s"));
     }
 
-    SECTION("Template with when condition") {
+    if (section_index == 2) {
         generated.clear();
 
         Task task;
@@ -292,12 +305,12 @@ TEST_CASE("DynamicTasksExecutor template fields", "[dynamic_tasks]") {
 
         auto result = executor->execute(task, context);
 
-        REQUIRE(result.success);
-        REQUIRE(generated[0].when.has_value());
-        CHECK(generated[0].when.value() == "x != 'skip'");
+        check((result.success));
+        check((generated[0].when.has_value()));
+        check((generated[0].when.value() == "x != 'skip'"));
     }
 
-    SECTION("Template with command list") {
+    if (section_index == 3) {
         generated.clear();
 
         Task task;
@@ -312,16 +325,23 @@ TEST_CASE("DynamicTasksExecutor template fields", "[dynamic_tasks]") {
 
         auto result = executor->execute(task, context);
 
-        REQUIRE(result.success);
+        check((result.success));
         const auto& bt = std::get<OrchParams>(generated[0].specifics);
-        REQUIRE(bt.root.children.size() == 3);
-        CHECK(bt.root.children[0].params.at("cmd") == "bash");
-        CHECK(bt.root.children[1].params.at("cmd") == "-c");
-        CHECK(bt.root.children[2].params.at("cmd") == "echo x");
+        check((bt.root.children.size() == 3));
+        check((bt.root.children[0].params.at("cmd") == "bash"));
+        check((bt.root.children[1].params.at("cmd") == "-c"));
+        check((bt.root.children[2].params.at("cmd") == "echo x"));
     }
 }
 
-TEST_CASE("DynamicTasksExecutor items_variable with {{ }} wrapper", "[dynamic_tasks]") {
+spec("DynamicTasksExecutor template fields") {
+    it("Template with env vars") { test_dynamictasksexecutor_template_fields_3(0); }
+    it("Template with timeout") { test_dynamictasksexecutor_template_fields_3(1); }
+    it("Template with when condition") { test_dynamictasksexecutor_template_fields_3(2); }
+    it("Template with command list") { test_dynamictasksexecutor_template_fields_3(3); }
+}
+
+[[maybe_unused]] static void test_dynamictasksexecutor_items_variable_with_wrapper_4(int section_index) {
     auto executor = createDynamicTasksExecutor();
     auto* dt_executor = static_cast<DynamicTasksExecutor*>(executor.get());
 
@@ -338,7 +358,7 @@ TEST_CASE("DynamicTasksExecutor items_variable with {{ }} wrapper", "[dynamic_ta
     WorkflowValue config_services_list = WorkflowValue::array({"item1", "item2"});
     context.setValue("config.services.list", config_services_list);
 
-    SECTION("Unwraps {{ config.services.list }}") {
+    if (section_index == 0) {
         Task task;
         task.name = "deploy";
         task.action = TaskAction::DynamicTasks;
@@ -351,14 +371,18 @@ TEST_CASE("DynamicTasksExecutor items_variable with {{ }} wrapper", "[dynamic_ta
 
         auto result = executor->execute(task, context);
 
-        REQUIRE(result.success);
-        REQUIRE(generated.size() == 2);
-        CHECK(generated[0].name == "deploy_item1");
-        CHECK(generated[1].name == "deploy_item2");
+        check((result.success));
+        check((generated.size() == 2));
+        check((generated[0].name == "deploy_item1"));
+        check((generated[1].name == "deploy_item2"));
     }
 }
 
-TEST_CASE("DynamicTasksExecutor empty items array", "[dynamic_tasks]") {
+spec("DynamicTasksExecutor items_variable with {{ }} wrapper") {
+    it("Unwraps {{ config.services.list }}") { test_dynamictasksexecutor_items_variable_with_wrapper_4(0); }
+}
+
+[[maybe_unused]] static void test_dynamictasksexecutor_empty_items_array_5() {
     auto executor = createDynamicTasksExecutor();
     auto* dt_executor = static_cast<DynamicTasksExecutor*>(executor.get());
 
@@ -383,11 +407,15 @@ TEST_CASE("DynamicTasksExecutor empty items array", "[dynamic_tasks]") {
 
     auto result = executor->execute(task, context);
 
-    REQUIRE(result.success);
-    CHECK(callback_count == 0);  // No tasks generated
+    check((result.success));
+    check((callback_count == 0));  // No tasks generated
 }
 
-TEST_CASE("DynamicTasksExecutor aggregates generated task results", "[dynamic_tasks]") {
+spec("DynamicTasksExecutor empty items array") {
+    it("complete case") { test_dynamictasksexecutor_empty_items_array_5(); }
+}
+
+[[maybe_unused]] static void test_dynamictasksexecutor_aggregates_generated_task_results_6() {
     auto executor = createDynamicTasksExecutor();
     auto* dt_executor = static_cast<DynamicTasksExecutor*>(executor.get());
 
@@ -421,26 +449,30 @@ TEST_CASE("DynamicTasksExecutor aggregates generated task results", "[dynamic_ta
     auto result = executor->execute(task, context);
     context.popTaskScope();
 
-    REQUIRE_FALSE(result.success);
-    REQUIRE(generated_tasks.size() == 2);
-    CHECK(generated_tasks[0].declared_runner == "command");
-    CHECK(generated_tasks[0].source_path == "C:/tmp/workflow.yml");
+    check_false(result.success);
+    check((generated_tasks.size() == 2));
+    check((generated_tasks[0].declared_runner == "command"));
+    check((generated_tasks[0].source_path == "C:/tmp/workflow.yml"));
 
     auto aggregated = context.getValueByPath("tasks.deploy_all.outputs.generated_tasks");
-    REQUIRE(aggregated.is_array());
-    REQUIRE(aggregated.size() == 2);
-    CHECK(aggregated[0]["name"].as<std::string>() == "deploy_a");
-    CHECK(aggregated[0]["status"].as<std::string>() == "success");
-    CHECK(aggregated[0]["outputs"]["stdout"].as<std::string>() == "deploy_a_done");
-    CHECK(aggregated[1]["name"].as<std::string>() == "deploy_b");
-    CHECK(aggregated[1]["status"].as<std::string>() == "failed");
-    CHECK(context.getValueByPath("tasks.deploy_all.outputs.generated_count").as<int64_t>() == 2);
-    CHECK(context.getValueByPath("tasks.deploy_all.outputs.success_count").as<int64_t>() == 1);
-    CHECK(context.getValueByPath("tasks.deploy_all.outputs.failed_count").as<int64_t>() == 1);
-    CHECK(context.getValueByPath("tasks.deploy_all.outputs.skipped_count").as<int64_t>() == 0);
+    check((aggregated.is_array()));
+    check((aggregated.size() == 2));
+    check((aggregated[0]["name"].as<std::string>() == "deploy_a"));
+    check((aggregated[0]["status"].as<std::string>() == "success"));
+    check((aggregated[0]["outputs"]["stdout"].as<std::string>() == "deploy_a_done"));
+    check((aggregated[1]["name"].as<std::string>() == "deploy_b"));
+    check((aggregated[1]["status"].as<std::string>() == "failed"));
+    check((context.getValueByPath("tasks.deploy_all.outputs.generated_count").as<int64_t>() == 2));
+    check((context.getValueByPath("tasks.deploy_all.outputs.success_count").as<int64_t>() == 1));
+    check((context.getValueByPath("tasks.deploy_all.outputs.failed_count").as<int64_t>() == 1));
+    check((context.getValueByPath("tasks.deploy_all.outputs.skipped_count").as<int64_t>() == 0));
 }
 
-TEST_CASE("DynamicTasksExecutor rejects duplicate generated task names", "[dynamic_tasks]") {
+spec("DynamicTasksExecutor aggregates generated task results") {
+    it("complete case") { test_dynamictasksexecutor_aggregates_generated_task_results_6(); }
+}
+
+[[maybe_unused]] static void test_dynamictasksexecutor_rejects_duplicate_generated_task_names_7() {
     auto executor = createDynamicTasksExecutor();
     auto* dt_executor = static_cast<DynamicTasksExecutor*>(executor.get());
     dt_executor->setSubTaskCallback([](const Task&, WorkflowContext&) { return true; });
@@ -463,11 +495,15 @@ TEST_CASE("DynamicTasksExecutor rejects duplicate generated task names", "[dynam
     auto result = executor->execute(task, context);
     context.popTaskScope();
 
-    REQUIRE_FALSE(result.success);
-    CHECK(result.error_message.find("collision") != std::string::npos);
+    check_false(result.success);
+    check((result.error_message.find("collision") != std::string::npos));
 }
 
-TEST_CASE("DynamicTasksExecutor stops at first generated task failure", "[dynamic_tasks]") {
+spec("DynamicTasksExecutor rejects duplicate generated task names") {
+    it("complete case") { test_dynamictasksexecutor_rejects_duplicate_generated_task_names_7(); }
+}
+
+[[maybe_unused]] static void test_dynamictasksexecutor_stops_at_first_generated_task_failure_8() {
     auto executor = createDynamicTasksExecutor();
     auto* dt_executor = static_cast<DynamicTasksExecutor*>(executor.get());
 
@@ -502,13 +538,17 @@ TEST_CASE("DynamicTasksExecutor stops at first generated task failure", "[dynami
     auto result = executor->execute(task, context);
     context.popTaskScope();
 
-    REQUIRE_FALSE(result.success);
-    CHECK(result.error_message.find("Generated task 'job_b' failed") != std::string::npos);
-    REQUIRE(executed.size() == 2);
-    CHECK(executed[0] == "job_a");
-    CHECK(executed[1] == "job_b");
-    CHECK(context.getValueByPath("tasks.fanout_jobs.outputs.generated_count").as<int64_t>() == 2);
-    CHECK(context.getValueByPath("tasks.fanout_jobs.outputs.success_count").as<int64_t>() == 1);
-    CHECK(context.getValueByPath("tasks.fanout_jobs.outputs.failed_count").as<int64_t>() == 1);
-    CHECK(context.getValueByPath("tasks.fanout_jobs.outputs.skipped_count").as<int64_t>() == 0);
+    check_false(result.success);
+    check((result.error_message.find("Generated task 'job_b' failed") != std::string::npos));
+    check((executed.size() == 2));
+    check((executed[0] == "job_a"));
+    check((executed[1] == "job_b"));
+    check((context.getValueByPath("tasks.fanout_jobs.outputs.generated_count").as<int64_t>() == 2));
+    check((context.getValueByPath("tasks.fanout_jobs.outputs.success_count").as<int64_t>() == 1));
+    check((context.getValueByPath("tasks.fanout_jobs.outputs.failed_count").as<int64_t>() == 1));
+    check((context.getValueByPath("tasks.fanout_jobs.outputs.skipped_count").as<int64_t>() == 0));
+}
+
+spec("DynamicTasksExecutor stops at first generated task failure") {
+    it("complete case") { test_dynamictasksexecutor_stops_at_first_generated_task_failure_8(); }
 }

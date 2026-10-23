@@ -1,9 +1,14 @@
 #include "executors/declarative_tree_executor.hpp"
+#include "core/executor.hpp"
 #include "actions/shell_executor.hpp"
 #include "util/path_utils.hpp"
 #include "util/logging.hpp"
 #include "util/variable_substitution.hpp"
 #include "util/env_parser.hpp"
+
+#if PRAKTOR_C11_ACTIONS_ENABLED
+#include "tree_executor_session.hpp"
+#endif
 
 #include <chrono>
 #include <filesystem>
@@ -11,6 +16,7 @@
 #include <regex>
 #include <set>
 #include <sstream>
+#include <thread>
 
 namespace Praktor::Execution
 {
@@ -350,7 +356,7 @@ std::string DeclarativeTreeExecutor::resolveContextRef(
 }
 
 // Task 3.4: Parse parameter value to appropriate type
-actions::Value DeclarativeTreeExecutor::parseValue(const std::string& str) const
+static actions::Value parseActionValue(const std::string& str)
 {
   // Try to parse as number
   try {
@@ -405,7 +411,7 @@ actions::Node DeclarativeTreeExecutor::convertNode(const OrchNode& praktor_node,
     }
     
     // Step 3: Parse to appropriate type
-    node.params[key] = parseValue(substituted);
+    node.params[key] = parseActionValue(substituted);
   }
   
   // Task 3.4: Recursively convert children
@@ -446,8 +452,11 @@ void DeclarativeTreeExecutor::contextToBlackboard(const WorkflowContext& context
   TLOG_DEBUG("Context bridging complete");
 }
 
-DeclarativeTreeExecutor::DeclarativeTreeExecutor(EnvMap base_environment)
-  : base_environment_(std::move(base_environment)) {}
+DeclarativeTreeExecutor::DeclarativeTreeExecutor(
+    EnvMap base_environment, ActionTreeBackend backend,
+    cflow_process_retainer* recovery_owner)
+    : base_environment_(std::move(base_environment)),
+      backend_(backend), recovery_owner_(recovery_owner) {}
 
 // Task 3.7: Map blackboard outputs back to context
 void DeclarativeTreeExecutor::blackboardToContext(const actions::Blackboard& bb, 
@@ -509,6 +518,13 @@ void DeclarativeTreeExecutor::blackboardToContext(const actions::Blackboard& bb,
 TaskResult DeclarativeTreeExecutor::execute(const Task& task, WorkflowContext& context)
 {
   TLOG_DEBUGF("Executing action_orchestration task: {}", task.name);
+#if !PRAKTOR_C11_ACTIONS_ENABLED
+  if (backend_ == ActionTreeBackend::C11) {
+    throw std::runtime_error(
+        "C11 action-tree backend requires PRAKTOR_ENABLE_C11_ACTIONS=ON; "
+        "no legacy fallback is permitted");
+  }
+#endif
 
   auto execution_context = context.fork();
   auto& local_context = *execution_context;
@@ -567,7 +583,81 @@ TaskResult DeclarativeTreeExecutor::execute(const Task& task, WorkflowContext& c
   // Calling it again would cause double expansion if variable values contain {{ }}.
 
   auto start_time = std::chrono::high_resolution_clock::now();
-  actions::NodeStatus status = executor.execute(tree, blackboard);
+  actions::NodeStatus status = actions::NodeStatus::FAILURE;
+  std::string c11_diagnostic;
+
+  if (backend_ == ActionTreeBackend::C11) {
+#if PRAKTOR_C11_ACTIONS_ENABLED
+    // The workflow TaskExecutor API is synchronous. Cooperatively drive the
+    // single-owner C11 session until terminal status, cancellation or deadline.
+    // This bounded experimental entry point does not silently re-run an action
+    // through the legacy Executor on any C11 failure.
+    salts_bt_tree_config config{};
+    salts_bt_tree_config_init(&config);
+    actions::ExecutionContext node_context;
+    actions::c11::TreeExecutorSession session(
+        tree, executor, blackboard, node_context, config,
+        nullptr, recovery_owner_);
+    const int deadline_ms = task.timeout ? parseDurationMs(*task.timeout) : 30000;
+    if (deadline_ms <= 0) {
+      throw std::invalid_argument("C11 action-tree deadline must be positive");
+    }
+    const auto deadline = std::chrono::steady_clock::now() +
+                          std::chrono::milliseconds(deadline_ms);
+    const auto control = local_context.getExecutionControl();
+    salts_bt_node_status c11_status = SALTS_BT_FAILURE;
+    for (;;) {
+      const bool stopped = control && control->stopRequested();
+      const bool expired = std::chrono::steady_clock::now() >= deadline;
+      if (stopped || expired) {
+        c11_diagnostic = stopped
+            ? "C11 action-tree execution cancelled or exceeded the workflow deadline"
+            : "C11 action-tree execution exceeded the task deadline";
+        const int cancel_status = session.cancel();
+        if (cancel_status != SALTS_OK) {
+          c11_diagnostic += "; cancellation cleanup failed (status " +
+                            std::to_string(cancel_status) + ")";
+        }
+        break;
+      }
+
+      const int tick_status = session.tick(&c11_status);
+      if (tick_status != SALTS_OK) {
+        c11_diagnostic = session.lastError();
+        if (c11_diagnostic.empty()) {
+          c11_diagnostic = "C11 action-tree tick failed with status " +
+                           std::to_string(tick_status);
+        }
+        const int cancel_status = session.cancel();
+        if (cancel_status != SALTS_OK) {
+          c11_diagnostic += "; cancellation cleanup failed (status " +
+                            std::to_string(cancel_status) + ")";
+        }
+        break;
+      }
+      if (c11_status == SALTS_BT_SUCCESS) {
+        status = actions::NodeStatus::SUCCESS;
+        break;
+      }
+      if (c11_status == SALTS_BT_FAILURE) {
+        c11_diagnostic = session.lastError();
+        break;
+      }
+      if (c11_status != SALTS_BT_RUNNING) {
+        c11_diagnostic = "C11 action-tree returned invalid node status";
+        const int cancel_status = session.cancel();
+        if (cancel_status != SALTS_OK) {
+          c11_diagnostic += "; cancellation cleanup failed (status " +
+                            std::to_string(cancel_status) + ")";
+        }
+        break;
+      }
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+#endif
+  } else {
+    status = executor.execute(tree, blackboard);
+  }
   auto end_time = std::chrono::high_resolution_clock::now();
   auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
 
@@ -621,7 +711,9 @@ TaskResult DeclarativeTreeExecutor::execute(const Task& task, WorkflowContext& c
   }
   result.output_streamed_live = blackboard.has("shell_exit_code");
 
-  if (!success && result.stderr_data.empty()) {
+  if (!success && !c11_diagnostic.empty()) {
+    result.error_message = c11_diagnostic;
+  } else if (!success && result.stderr_data.empty()) {
     result.error_message = "Action execution failed with status " + status_str;
   } else if (!success) {
     result.error_message = "Command failed with exit code " +
@@ -638,9 +730,12 @@ TaskResult DeclarativeTreeExecutor::execute(const Task& task, WorkflowContext& c
   return result;
 }
 
-std::unique_ptr<TaskExecutor> createDeclarativeTreeExecutor(EnvMap base_environment)
+std::unique_ptr<TaskExecutor> createDeclarativeTreeExecutor(
+    EnvMap base_environment, ActionTreeBackend backend,
+    cflow_process_retainer* recovery_owner)
 {
-  return std::make_unique<DeclarativeTreeExecutor>(std::move(base_environment));
+  return std::make_unique<DeclarativeTreeExecutor>(
+      std::move(base_environment), backend, recovery_owner);
 }
 
 }  // namespace Praktor::Execution

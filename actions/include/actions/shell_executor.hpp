@@ -44,17 +44,6 @@ public:
     }
   }
 
-  static void executeAsync(
-      const std::string& command,
-      const std::string& input = "",
-      const std::string& working_dir = "",
-      const std::map<std::string, std::string>& env = {},
-      bool stream_output = true) {
-    Praktor::Shell::ShellExecutor::executeAsync(command, input, working_dir, env, stream_output);
-  }
-
-  static bool killProcess(int pid);
-
   static void setStreamCallback(StreamCallback callback) {
     Praktor::Shell::ShellExecutor::setStreamCallback(callback);
   }
@@ -73,9 +62,5 @@ private:
   static void setCancellationContext(std::shared_ptr<CancellationContext> cancellation);
   static std::shared_ptr<CancellationContext> getCancellationContext();
 };
-
-inline bool ShellExecutor::killProcess(int pid) {
-  return Praktor::Shell::ShellExecutor::killProcess(pid);
-}
 
 } // namespace actions

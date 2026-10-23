@@ -41,6 +41,13 @@ public:
     ~WorkflowRunner(); // Declared destructor
 
     WorkflowExecutionResult execute(bool useConcurrent = false, int maxConcurrency = 4);
+    // Explicit C11 action execution. The retainer belongs to the caller and
+    // MUST outlive the WorkflowRunner, including any adopted Shell Process.
+    // Drive the retainer after the workflow returns; this API never launches
+    // an unowned cleanup worker or enables parallel DAG scheduling.
+    WorkflowExecutionResult executeWithC11ProcessOwner(
+        cflow_process_retainer* recoveryOwner,
+        std::shared_ptr<Praktor::Execution::ExecutionControl> executionControl = {});
     WorkflowExecutionResult executeWithControl(
         std::shared_ptr<Praktor::Execution::ExecutionControl> executionControl,
         bool useConcurrent = false, int maxConcurrency = 4);
@@ -52,7 +59,10 @@ public:
         std::shared_ptr<Praktor::Execution::ExecutionControl> executionControl,
         std::shared_ptr<Praktor::Execution::ExecutionObserver> executionObserver,
         std::shared_ptr<Praktor::Execution::HostToolHost> hostToolHost,
-        bool useConcurrent = false, int maxConcurrency = 4);
+        bool useConcurrent = false, int maxConcurrency = 4,
+        Praktor::Execution::ActionTreeBackend actionBackend =
+            Praktor::Execution::ActionTreeBackend::Legacy,
+        cflow_process_retainer* recoveryOwner = nullptr);
     bool run(bool useConcurrent = false, int maxConcurrency = 4);
     bool runTask(std::string const& taskName, bool useConcurrent = false, int maxConcurrency = 4);
 

@@ -1,7 +1,7 @@
+#include "praktor_test.hpp"
 #include "praktor.h"
 #include "data/workflow_value.hpp"
 
-#include <catch2/catch_all.hpp>
 
 #include <chrono>
 #include <cstdint>
@@ -62,7 +62,7 @@ std::string inlineRetryHostToolWorkflow(std::uint32_t retry_count) {
 
 void writeHostToolWorkflow(const std::filesystem::path& path) {
     std::ofstream out(path);
-    REQUIRE(out.is_open());
+    check((out.is_open()));
     out << inlineHostToolWorkflow();
 }
 
@@ -212,9 +212,9 @@ praktor_workflow_plan* compileInlinePlan(
     request.workflow_yaml_size = source.size();
     praktor_workflow_plan* plan = nullptr;
     praktor_error error = PRAKTOR_ERROR_INIT;
-    REQUIRE(praktor_compile_workflow_inline(&request, &plan, &error) ==
-            PRAKTOR_RESULT_SUCCESS);
-    REQUIRE(plan != nullptr);
+    check((praktor_compile_workflow_inline(&request, &plan, &error) ==
+            PRAKTOR_RESULT_SUCCESS));
+    check((plan != nullptr));
     return plan;
 }
 
@@ -224,9 +224,9 @@ praktor_workflow_plan* compilePlan(const std::filesystem::path& workflow) {
     request.workflow_path = path.c_str();
     praktor_workflow_plan* plan = nullptr;
     praktor_error error = PRAKTOR_ERROR_INIT;
-    REQUIRE(praktor_compile_workflow(&request, &plan, &error) ==
-            PRAKTOR_RESULT_SUCCESS);
-    REQUIRE(plan != nullptr);
+    check((praktor_compile_workflow(&request, &plan, &error) ==
+            PRAKTOR_RESULT_SUCCESS));
+    check((plan != nullptr));
     return plan;
 }
 
@@ -261,18 +261,20 @@ praktor_execution_observer observerFor(std::vector<EventRecord>& events) {
 
 } // namespace
 
-TEST_CASE("HostTool C ABI is additive and advertised",
-          "[sdk][plan][host-tool]") {
+[[maybe_unused]] static void test_hosttool_c_abi_is_additive_and_advertised_1() {
     const praktor_api* api = praktor_get_api();
-    REQUIRE(api != nullptr);
-    CHECK(api->abi_major == PRAKTOR_ABI_MAJOR);
-    CHECK(api->abi_minor >= 5);
-    CHECK((api->capabilities & PRAKTOR_CAPABILITY_HOST_TOOL) != 0);
-    REQUIRE(api->execute_workflow_plan_host_tools != nullptr);
+    check((api != nullptr));
+    check((api->abi_major == PRAKTOR_ABI_MAJOR));
+    check((api->abi_minor >= 5));
+    check(((api->capabilities & PRAKTOR_CAPABILITY_HOST_TOOL) != 0));
+    check((api->execute_workflow_plan_host_tools != nullptr));
 }
 
-TEST_CASE("reviewed HostTool plan preflights and returns typed result",
-          "[sdk][plan][host-tool]") {
+spec("HostTool C ABI is additive and advertised") {
+    it("complete case") { test_hosttool_c_abi_is_additive_and_advertised_1(); }
+}
+
+[[maybe_unused]] static void test_reviewed_hosttool_plan_preflights_and_returns_typed_result_2() {
     const auto dir = hostToolTempDir();
     const auto workflow = dir / "workflow.yml";
     writeHostToolWorkflow(workflow);
@@ -291,39 +293,39 @@ TEST_CASE("reviewed HostTool plan preflights and returns typed result",
     praktor_owned_json output = PRAKTOR_OWNED_JSON_INIT;
     praktor_error error = PRAKTOR_ERROR_INIT;
 
-    REQUIRE(praktor_execute_workflow_plan_host_tools(
+    check((praktor_execute_workflow_plan_host_tools(
                 &request, &control, &observer, &host, &output, &error) ==
-            PRAKTOR_RESULT_SUCCESS);
-    REQUIRE(output.data != nullptr);
-    CHECK(probe.validate_calls == 1);
-    CHECK(probe.invoke_calls == 1);
-    CHECK(probe.saw_control);
-    CHECK(probe.saw_observer);
+            PRAKTOR_RESULT_SUCCESS));
+    check((output.data != nullptr));
+    check((probe.validate_calls == 1));
+    check((probe.invoke_calls == 1));
+    check((probe.saw_control));
+    check((probe.saw_observer));
 
     const auto template_value = WorkflowValue::parse(probe.template_json);
-    CHECK(template_value.at("path").as<std::string>() ==
-          "{{ variables.path }}");
-    CHECK(template_value.at("limit").as<int>() == 2);
+    check((template_value.at("path").as<std::string>() ==
+          "{{ variables.path }}"));
+    check((template_value.at("limit").as<int>() == 2));
 
     const auto arguments = WorkflowValue::parse(probe.arguments_json);
-    CHECK(arguments.at("path").as<std::string>() == "src");
-    CHECK(arguments.at("limit").as<int>() == 2);
+    check((arguments.at("path").as<std::string>() == "src"));
+    check((arguments.at("limit").as<int>() == 2));
 
     const auto result = WorkflowValue::parse(
         std::string_view(output.data, output.size));
-    CHECK(result.at("workflow_status").as<std::string>() == "success");
+    check((result.at("workflow_status").as<std::string>() == "success"));
     const auto host_result =
         result.at("tasks").at("inspect").at("outputs").at("result");
-    CHECK(host_result.at("status").as<std::string>() == "ok");
-    CHECK(host_result.at("source").as<std::string>() == "host");
+    check((host_result.at("status").as<std::string>() == "ok"));
+    check((host_result.at("source").as<std::string>() == "host"));
 
     bool saw_task_start = false;
     bool saw_task_complete = false;
     for (const auto& event : events) {
-        CHECK(event.thread_id == "thread-host");
-        CHECK(event.run_id == "run-host");
-        CHECK(event.turn_id == "turn-host");
-        CHECK(event.tool_call_id == "call-host");
+        check((event.thread_id == "thread-host"));
+        check((event.run_id == "run-host"));
+        check((event.turn_id == "turn-host"));
+        check((event.tool_call_id == "call-host"));
         if (event.type == PRAKTOR_EVENT_TASK_STARTED &&
             event.task_name == "inspect") {
             saw_task_start = true;
@@ -333,16 +335,19 @@ TEST_CASE("reviewed HostTool plan preflights and returns typed result",
             saw_task_complete = true;
         }
     }
-    CHECK(saw_task_start);
-    CHECK(saw_task_complete);
+    check((saw_task_start));
+    check((saw_task_complete));
 
     praktor_release_json(&output);
     praktor_release_workflow_plan(plan);
     std::filesystem::remove_all(dir);
 }
 
-TEST_CASE("HostTool plan is rejected before workflow start when host denies",
-          "[sdk][plan][host-tool]") {
+spec("reviewed HostTool plan preflights and returns typed result") {
+    it("complete case") { test_reviewed_hosttool_plan_preflights_and_returns_typed_result_2(); }
+}
+
+[[maybe_unused]] static void test_hosttool_plan_is_rejected_before_workflow_start_when_host_denies_3() {
     const auto dir = hostToolTempDir();
     const auto workflow = dir / "workflow.yml";
     writeHostToolWorkflow(workflow);
@@ -358,24 +363,27 @@ TEST_CASE("HostTool plan is rejected before workflow start when host denies",
     praktor_owned_json output = PRAKTOR_OWNED_JSON_INIT;
     praktor_error error = PRAKTOR_ERROR_INIT;
 
-    CHECK(praktor_execute_workflow_plan_host_tools(
+    check((praktor_execute_workflow_plan_host_tools(
               &request, nullptr, &observer, &host, &output, &error) ==
-          PRAKTOR_RESULT_HOST_TOOL_REJECTED);
-    CHECK(output.data == nullptr);
-    CHECK(output.size == 0);
-    CHECK(error.phase == PRAKTOR_ERROR_PHASE_HOST_TOOL);
-    CHECK(std::string_view(error.message).find("denied") !=
-          std::string_view::npos);
-    CHECK(probe.validate_calls == 1);
-    CHECK(probe.invoke_calls == 0);
-    CHECK(events.empty());
+          PRAKTOR_RESULT_HOST_TOOL_REJECTED));
+    check((output.data == nullptr));
+    check((output.size == 0));
+    check((error.phase == PRAKTOR_ERROR_PHASE_HOST_TOOL));
+    check((std::string_view(error.message).find("denied") !=
+          std::string_view::npos));
+    check((probe.validate_calls == 1));
+    check((probe.invoke_calls == 0));
+    check((events.empty()));
 
     praktor_release_workflow_plan(plan);
     std::filesystem::remove_all(dir);
 }
 
-TEST_CASE("ordinary plan execution cannot bypass HostTool authority",
-          "[sdk][plan][host-tool]") {
+spec("HostTool plan is rejected before workflow start when host denies") {
+    it("complete case") { test_hosttool_plan_is_rejected_before_workflow_start_when_host_denies_3(); }
+}
+
+[[maybe_unused]] static void test_ordinary_plan_execution_cannot_bypass_hosttool_authority_4() {
     const auto dir = hostToolTempDir();
     const auto workflow = dir / "workflow.yml";
     writeHostToolWorkflow(workflow);
@@ -385,18 +393,21 @@ TEST_CASE("ordinary plan execution cannot bypass HostTool authority",
     praktor_owned_json output = PRAKTOR_OWNED_JSON_INIT;
     praktor_error error = PRAKTOR_ERROR_INIT;
 
-    CHECK(praktor_execute_workflow_plan(
+    check((praktor_execute_workflow_plan(
               &request, nullptr, &output, &error) ==
-          PRAKTOR_RESULT_HOST_TOOL_REJECTED);
-    CHECK(output.data == nullptr);
-    CHECK(error.phase == PRAKTOR_ERROR_PHASE_HOST_TOOL);
+          PRAKTOR_RESULT_HOST_TOOL_REJECTED));
+    check((output.data == nullptr));
+    check((error.phase == PRAKTOR_ERROR_PHASE_HOST_TOOL));
 
     praktor_release_workflow_plan(plan);
     std::filesystem::remove_all(dir);
 }
 
-TEST_CASE("HostTool success requires exactly one accepted result payload",
-          "[sdk][plan][host-tool]") {
+spec("ordinary plan execution cannot bypass HostTool authority") {
+    it("complete case") { test_ordinary_plan_execution_cannot_bypass_hosttool_authority_4(); }
+}
+
+[[maybe_unused]] static void test_hosttool_success_requires_exactly_one_accepted_result_payload_5() {
     const auto dir = hostToolTempDir();
     const auto workflow = dir / "workflow.yml";
     writeHostToolWorkflow(workflow);
@@ -409,37 +420,43 @@ TEST_CASE("HostTool success requires exactly one accepted result payload",
     praktor_owned_json output = PRAKTOR_OWNED_JSON_INIT;
     praktor_error error = PRAKTOR_ERROR_INIT;
 
-    CHECK(praktor_execute_workflow_plan_host_tools(
+    check((praktor_execute_workflow_plan_host_tools(
               &request, nullptr, nullptr, &host, &output, &error) ==
-          PRAKTOR_RESULT_EXECUTION_FAILED);
-    REQUIRE(output.data != nullptr);
-    CHECK(probe.validate_calls == 1);
-    CHECK(probe.invoke_calls == 1);
+          PRAKTOR_RESULT_EXECUTION_FAILED));
+    check((output.data != nullptr));
+    check((probe.validate_calls == 1));
+    check((probe.invoke_calls == 1));
 
     const auto result = WorkflowValue::parse(
         std::string_view(output.data, output.size));
-    CHECK(result.at("workflow_status").as<std::string>() == "failed");
+    check((result.at("workflow_status").as<std::string>() == "failed"));
     const auto failure = result.at("agent_output").at("failure");
-    CHECK(failure.at("error_phase").as<std::string>() == "host_tool");
+    check((failure.at("error_phase").as<std::string>() == "host_tool"));
 
     praktor_release_json(&output);
     praktor_release_workflow_plan(plan);
     std::filesystem::remove_all(dir);
 }
 
-
-TEST_CASE("inline WorkflowPlan ABI is additive and advertised",
-          "[sdk][plan][inline]") {
-    const praktor_api* api = praktor_get_api();
-    REQUIRE(api != nullptr);
-    CHECK(api->abi_major == PRAKTOR_ABI_MAJOR);
-    CHECK(api->abi_minor >= 6);
-    CHECK((api->capabilities & PRAKTOR_CAPABILITY_INLINE_WORKFLOW_PLAN) != 0);
-    REQUIRE(api->compile_workflow_inline != nullptr);
+spec("HostTool success requires exactly one accepted result payload") {
+    it("complete case") { test_hosttool_success_requires_exactly_one_accepted_result_payload_5(); }
 }
 
-TEST_CASE("inline HostTool plan owns source and executes without filesystem",
-          "[sdk][plan][inline][host-tool]") {
+
+[[maybe_unused]] static void test_inline_workflowplan_abi_is_additive_and_advertised_6() {
+    const praktor_api* api = praktor_get_api();
+    check((api != nullptr));
+    check((api->abi_major == PRAKTOR_ABI_MAJOR));
+    check((api->abi_minor >= 6));
+    check(((api->capabilities & PRAKTOR_CAPABILITY_INLINE_WORKFLOW_PLAN) != 0));
+    check((api->compile_workflow_inline != nullptr));
+}
+
+spec("inline WorkflowPlan ABI is additive and advertised") {
+    it("complete case") { test_inline_workflowplan_abi_is_additive_and_advertised_6(); }
+}
+
+[[maybe_unused]] static void test_inline_hosttool_plan_owns_source_and_executes_without_filesystem_7() {
     std::string source = inlineHostToolWorkflow();
     praktor_workflow_plan* plan =
         compileInlinePlan("turboagent:plan:inline-test", source);
@@ -449,16 +466,16 @@ TEST_CASE("inline HostTool plan owns source and executes without filesystem",
 
     praktor_owned_json metadata = PRAKTOR_OWNED_JSON_INIT;
     praktor_error error = PRAKTOR_ERROR_INIT;
-    REQUIRE(praktor_describe_workflow_plan(plan, &metadata, &error) ==
-            PRAKTOR_RESULT_SUCCESS);
-    REQUIRE(metadata.data != nullptr);
+    check((praktor_describe_workflow_plan(plan, &metadata, &error) ==
+            PRAKTOR_RESULT_SUCCESS));
+    check((metadata.data != nullptr));
     const auto description = WorkflowValue::parse(
         std::string_view(metadata.data, metadata.size));
-    CHECK(description.at("source_kind").as<std::string>() == "inline");
-    CHECK(description.at("source_id").as<std::string>() ==
-          "turboagent:plan:inline-test");
-    CHECK(description.at("dependencies").size() == 0);
-    CHECK_FALSE(description.at("digest").as<std::string>().empty());
+    check((description.at("source_kind").as<std::string>() == "inline"));
+    check((description.at("source_id").as<std::string>() ==
+          "turboagent:plan:inline-test"));
+    check((description.at("dependencies").size() == 0));
+    check((!(description.at("digest").as<std::string>().empty())));
     praktor_release_json(&metadata);
 
     HostProbe probe;
@@ -471,27 +488,30 @@ TEST_CASE("inline HostTool plan owns source and executes without filesystem",
 
     auto request = executeRequest(plan);
     praktor_owned_json output = PRAKTOR_OWNED_JSON_INIT;
-    REQUIRE(praktor_execute_workflow_plan_host_tools(
+    check((praktor_execute_workflow_plan_host_tools(
                 &request, &control, &observer, &host, &output, &error) ==
-            PRAKTOR_RESULT_SUCCESS);
-    REQUIRE(output.data != nullptr);
-    CHECK(probe.validate_calls == 1);
-    CHECK(probe.invoke_calls == 1);
-    CHECK(probe.saw_control);
-    CHECK(probe.saw_observer);
+            PRAKTOR_RESULT_SUCCESS));
+    check((output.data != nullptr));
+    check((probe.validate_calls == 1));
+    check((probe.invoke_calls == 1));
+    check((probe.saw_control));
+    check((probe.saw_observer));
 
     const auto result = WorkflowValue::parse(
         std::string_view(output.data, output.size));
-    CHECK(result.at("workflow_status").as<std::string>() == "success");
-    CHECK(result.at("tasks").at("inspect").at("outputs").at("result")
-              .at("status").as<std::string>() == "ok");
+    check((result.at("workflow_status").as<std::string>() == "success"));
+    check((result.at("tasks").at("inspect").at("outputs").at("result")
+              .at("status").as<std::string>() == "ok"));
 
     praktor_release_json(&output);
     praktor_release_workflow_plan(plan);
 }
 
-TEST_CASE("inline WorkflowPlan rejects external and dynamic topology",
-          "[sdk][plan][inline][security]") {
+spec("inline HostTool plan owns source and executes without filesystem") {
+    it("complete case") { test_inline_hosttool_plan_owns_source_and_executes_without_filesystem_7(); }
+}
+
+[[maybe_unused]] static void test_inline_workflowplan_rejects_external_and_dynamic_topology_8() {
     struct Case {
         const char* name;
         const char* source;
@@ -520,7 +540,7 @@ TEST_CASE("inline WorkflowPlan rejects external and dynamic topology",
     };
 
     for (const auto& test_case : cases) {
-        INFO(test_case.name);
+        info("%s", praktor_test::message([&](std::ostream& out) { out << test_case.name; }).c_str());
         praktor_compile_inline_request request =
             PRAKTOR_COMPILE_INLINE_REQUEST_INIT;
         request.source_id = "turboagent:plan:reject";
@@ -528,10 +548,10 @@ TEST_CASE("inline WorkflowPlan rejects external and dynamic topology",
         request.workflow_yaml_size = std::strlen(test_case.source);
         praktor_workflow_plan* plan = nullptr;
         praktor_error error = PRAKTOR_ERROR_INIT;
-        CHECK(praktor_compile_workflow_inline(&request, &plan, &error) ==
-              PRAKTOR_RESULT_PLAN_INVALID);
-        CHECK(plan == nullptr);
-        CHECK(error.phase == PRAKTOR_ERROR_PHASE_PLAN);
+        check((praktor_compile_workflow_inline(&request, &plan, &error) ==
+              PRAKTOR_RESULT_PLAN_INVALID));
+        check((plan == nullptr));
+        check((error.phase == PRAKTOR_ERROR_PHASE_PLAN));
     }
 
     const std::string valid = inlineHostToolWorkflow();
@@ -542,13 +562,16 @@ TEST_CASE("inline WorkflowPlan rejects external and dynamic topology",
     bad_id.workflow_yaml_size = valid.size();
     praktor_workflow_plan* plan = nullptr;
     praktor_error error = PRAKTOR_ERROR_INIT;
-    CHECK(praktor_compile_workflow_inline(&bad_id, &plan, &error) ==
-          PRAKTOR_RESULT_PLAN_INVALID);
-    CHECK(plan == nullptr);
+    check((praktor_compile_workflow_inline(&bad_id, &plan, &error) ==
+          PRAKTOR_RESULT_PLAN_INVALID));
+    check((plan == nullptr));
 }
 
-TEST_CASE("inline plan preserves input contract before HostTool invocation",
-          "[sdk][plan][inline][contract]") {
+spec("inline WorkflowPlan rejects external and dynamic topology") {
+    it("complete case") { test_inline_workflowplan_rejects_external_and_dynamic_topology_8(); }
+}
+
+[[maybe_unused]] static void test_inline_plan_preserves_input_contract_before_hosttool_invocation_9() {
     const std::string source = inlineHostToolWorkflow();
     praktor_workflow_plan* plan =
         compileInlinePlan("turboagent:plan:input-contract", source);
@@ -563,19 +586,22 @@ TEST_CASE("inline plan preserves input contract before HostTool invocation",
     praktor_owned_json output = PRAKTOR_OWNED_JSON_INIT;
     praktor_error error = PRAKTOR_ERROR_INIT;
 
-    CHECK(praktor_execute_workflow_plan_host_tools(
+    check((praktor_execute_workflow_plan_host_tools(
               &request, nullptr, nullptr, &host, &output, &error) ==
-          PRAKTOR_RESULT_INPUT_CONTRACT);
-    CHECK(output.data == nullptr);
-    CHECK(probe.invoke_calls == 0);
+          PRAKTOR_RESULT_INPUT_CONTRACT));
+    check((output.data == nullptr));
+    check((probe.invoke_calls == 0));
 
     praktor_release_workflow_plan(plan);
 }
 
-TEST_CASE("inline strict plans with no input fields reject unknown inputs before invocation",
-          "[sdk][plan][inline][contract]") {
-    const std::string policy = GENERATE("strict", "allow_extra");
-    const bool explicit_empty = GENERATE(false, true);
+spec("inline plan preserves input contract before HostTool invocation") {
+    it("complete case") { test_inline_plan_preserves_input_contract_before_hosttool_invocation_9(); }
+}
+
+[[maybe_unused]] static void test_inline_strict_plans_with_no_input_fields_reject_unknown_inputs_before_invocation_10(std::size_t row_0, std::size_t row_1, std::size_t row_2) {
+    const std::string policy = std::array{"strict", "allow_extra"}.at(row_0);
+    const bool explicit_empty = std::array{false, true}.at(row_1);
     const std::string source = "input_policy: " + policy + "\n" +
         (explicit_empty ? "inputs: {}\n" : "") +
         "tasks:\n  - name: inspect\n    tool: repo.inspect\n    with: {}\n";
@@ -584,8 +610,7 @@ TEST_CASE("inline strict plans with no input fields reject unknown inputs before
 
     HostProbe probe;
     auto host = hostExecutor(probe);
-    const std::string input = GENERATE(std::string("{}"),
-                                      std::string(R"({"extra":true})"));
+    const std::string input = std::array{std::string("{}"), std::string(R"({"extra":true})")}.at(row_2);
     const bool rejects = policy == "strict" && input != "{}";
     praktor_plan_execute_request request = PRAKTOR_PLAN_EXECUTE_REQUEST_INIT;
     request.plan = plan;
@@ -593,37 +618,46 @@ TEST_CASE("inline strict plans with no input fields reject unknown inputs before
     request.input_json_size = input.size();
     praktor_owned_json output = PRAKTOR_OWNED_JSON_INIT;
     praktor_error error = PRAKTOR_ERROR_INIT;
-    CHECK(praktor_execute_workflow_plan_host_tools(
+    check((praktor_execute_workflow_plan_host_tools(
               &request, nullptr, nullptr, &host, &output, &error) ==
-          (rejects ? PRAKTOR_RESULT_INPUT_CONTRACT : PRAKTOR_RESULT_SUCCESS));
-    CHECK(probe.invoke_calls == (rejects ? 0 : 1));
+          (rejects ? PRAKTOR_RESULT_INPUT_CONTRACT : PRAKTOR_RESULT_SUCCESS)));
+    check((probe.invoke_calls == (rejects ? 0 : 1)));
     if (rejects) {
-        CHECK(error.phase == PRAKTOR_ERROR_PHASE_INPUT_CONTRACT);
-        CHECK(output.data == nullptr);
-        CHECK(output.size == 0);
+        check((error.phase == PRAKTOR_ERROR_PHASE_INPUT_CONTRACT));
+        check((output.data == nullptr));
+        check((output.size == 0));
     } else {
-        CHECK(WorkflowValue::parse(std::string_view(output.data, output.size))
-                  .at("workflow_status").as<std::string>() == "success");
+        check((WorkflowValue::parse(std::string_view(output.data, output.size))
+                  .at("workflow_status").as<std::string>() == "success"));
     }
     praktor_release_json(&output);
     praktor_release_workflow_plan(plan);
 }
 
+spec("inline strict plans with no input fields reject unknown inputs before invocation") {
+    for (std::size_t row_0 = 0; row_0 < 2; ++row_0) {
+        for (std::size_t row_1 = 0; row_1 < 2; ++row_1) {
+            for (std::size_t row_2 = 0; row_2 < 2; ++row_2) {
+                it("%s / row %zu %zu %zu", "complete case", row_0, row_1, row_2) { test_inline_strict_plans_with_no_input_fields_reject_unknown_inputs_before_invocation_10(row_0, row_1, row_2); }
+            }
+        }
+    }
+}
 
-TEST_CASE("inline HostTool retries only the admitted task invocation",
-          "[sdk][plan][inline][host-tool][retry]") {
+
+[[maybe_unused]] static void test_inline_hosttool_retries_only_the_admitted_task_invocation_11() {
     const std::string source = inlineRetryHostToolWorkflow(2u);
     praktor_workflow_plan* plan =
         compileInlinePlan("turboagent:plan:retry-success", source);
 
     praktor_owned_json metadata = PRAKTOR_OWNED_JSON_INIT;
     praktor_error error = PRAKTOR_ERROR_INIT;
-    REQUIRE(praktor_describe_workflow_plan(plan, &metadata, &error) ==
-            PRAKTOR_RESULT_SUCCESS);
+    check((praktor_describe_workflow_plan(plan, &metadata, &error) ==
+            PRAKTOR_RESULT_SUCCESS));
     const auto description = WorkflowValue::parse(
         std::string_view(metadata.data, metadata.size));
-    REQUIRE(description.at("host_tools").size() == 1);
-    CHECK(description.at("host_tools").at(0).at("retry_count").as<int>() == 2);
+    check((description.at("host_tools").size() == 1));
+    check((description.at("host_tools").at(0).at("retry_count").as<int>() == 2));
     praktor_release_json(&metadata);
 
     HostProbe probe;
@@ -635,24 +669,27 @@ TEST_CASE("inline HostTool retries only the admitted task invocation",
     control.timeout_ms = 5000;
     praktor_owned_json output = PRAKTOR_OWNED_JSON_INIT;
 
-    REQUIRE(praktor_execute_workflow_plan_host_tools(
+    check((praktor_execute_workflow_plan_host_tools(
                 &request, &control, nullptr, &host, &output, &error) ==
-            PRAKTOR_RESULT_SUCCESS);
-    CHECK(probe.validate_calls == 1);
-    CHECK(probe.invoke_calls == 3);
+            PRAKTOR_RESULT_SUCCESS));
+    check((probe.validate_calls == 1));
+    check((probe.invoke_calls == 3));
 
     const auto result = WorkflowValue::parse(
         std::string_view(output.data, output.size));
-    CHECK(result.at("workflow_status").as<std::string>() == "success");
-    CHECK(result.at("tasks").at("inspect").at("outputs").at("result")
-              .at("status").as<std::string>() == "ok");
+    check((result.at("workflow_status").as<std::string>() == "success"));
+    check((result.at("tasks").at("inspect").at("outputs").at("result")
+              .at("status").as<std::string>() == "ok"));
 
     praktor_release_json(&output);
     praktor_release_workflow_plan(plan);
 }
 
-TEST_CASE("inline HostTool retry exhaustion is finite and deterministic",
-          "[sdk][plan][inline][host-tool][retry]") {
+spec("inline HostTool retries only the admitted task invocation") {
+    it("complete case") { test_inline_hosttool_retries_only_the_admitted_task_invocation_11(); }
+}
+
+[[maybe_unused]] static void test_inline_hosttool_retry_exhaustion_is_finite_and_deterministic_12() {
     const std::string source = inlineRetryHostToolWorkflow(1u);
     praktor_workflow_plan* plan =
         compileInlinePlan("turboagent:plan:retry-exhausted", source);
@@ -664,23 +701,26 @@ TEST_CASE("inline HostTool retry exhaustion is finite and deterministic",
     praktor_owned_json output = PRAKTOR_OWNED_JSON_INIT;
     praktor_error error = PRAKTOR_ERROR_INIT;
 
-    CHECK(praktor_execute_workflow_plan_host_tools(
+    check((praktor_execute_workflow_plan_host_tools(
               &request, nullptr, nullptr, &host, &output, &error) ==
-          PRAKTOR_RESULT_EXECUTION_FAILED);
-    CHECK(probe.validate_calls == 1);
-    CHECK(probe.invoke_calls == 2);
-    REQUIRE(output.data != nullptr);
+          PRAKTOR_RESULT_EXECUTION_FAILED));
+    check((probe.validate_calls == 1));
+    check((probe.invoke_calls == 2));
+    check((output.data != nullptr));
 
     const auto result = WorkflowValue::parse(
         std::string_view(output.data, output.size));
-    CHECK(result.at("workflow_status").as<std::string>() == "failed");
+    check((result.at("workflow_status").as<std::string>() == "failed"));
 
     praktor_release_json(&output);
     praktor_release_workflow_plan(plan);
 }
 
-TEST_CASE("HostTool retry stops before a cancelled next attempt",
-          "[sdk][plan][inline][host-tool][retry][cancel]") {
+spec("inline HostTool retry exhaustion is finite and deterministic") {
+    it("complete case") { test_inline_hosttool_retry_exhaustion_is_finite_and_deterministic_12(); }
+}
+
+[[maybe_unused]] static void test_hosttool_retry_stops_before_a_cancelled_next_attempt_13() {
     const std::string source = inlineRetryHostToolWorkflow(3u);
     praktor_workflow_plan* plan =
         compileInlinePlan("turboagent:plan:retry-cancel", source);
@@ -696,22 +736,25 @@ TEST_CASE("HostTool retry stops before a cancelled next attempt",
     praktor_owned_json output = PRAKTOR_OWNED_JSON_INIT;
     praktor_error error = PRAKTOR_ERROR_INIT;
 
-    CHECK(praktor_execute_workflow_plan_host_tools(
+    check((praktor_execute_workflow_plan_host_tools(
               &request, &control, nullptr, &host, &output, &error) ==
-          PRAKTOR_RESULT_CANCELLED);
-    CHECK(probe.invoke_calls == 1);
-    REQUIRE(output.data != nullptr);
+          PRAKTOR_RESULT_CANCELLED));
+    check((probe.invoke_calls == 1));
+    check((output.data != nullptr));
 
     const auto result = WorkflowValue::parse(
         std::string_view(output.data, output.size));
-    CHECK(result.at("workflow_status").as<std::string>() == "cancelled");
+    check((result.at("workflow_status").as<std::string>() == "cancelled"));
 
     praktor_release_json(&output);
     praktor_release_workflow_plan(plan);
 }
 
-TEST_CASE("HostTool timeout is terminal and is never retried",
-          "[sdk][plan][inline][host-tool][retry][timeout]") {
+spec("HostTool retry stops before a cancelled next attempt") {
+    it("complete case") { test_hosttool_retry_stops_before_a_cancelled_next_attempt_13(); }
+}
+
+[[maybe_unused]] static void test_hosttool_timeout_is_terminal_and_is_never_retried_14() {
     const std::string source = inlineRetryHostToolWorkflow(3u);
     praktor_workflow_plan* plan =
         compileInlinePlan("turboagent:plan:retry-timeout", source);
@@ -726,16 +769,20 @@ TEST_CASE("HostTool timeout is terminal and is never retried",
     praktor_owned_json output = PRAKTOR_OWNED_JSON_INIT;
     praktor_error error = PRAKTOR_ERROR_INIT;
 
-    CHECK(praktor_execute_workflow_plan_host_tools(
+    check((praktor_execute_workflow_plan_host_tools(
               &request, &control, nullptr, &host, &output, &error) ==
-          PRAKTOR_RESULT_EXECUTION_FAILED);
-    CHECK(probe.invoke_calls == 1);
-    REQUIRE(output.data != nullptr);
+          PRAKTOR_RESULT_EXECUTION_FAILED));
+    check((probe.invoke_calls == 1));
+    check((output.data != nullptr));
 
     const auto result = WorkflowValue::parse(
         std::string_view(output.data, output.size));
-    CHECK(result.at("workflow_status").as<std::string>() == "failed");
+    check((result.at("workflow_status").as<std::string>() == "failed"));
 
     praktor_release_json(&output);
     praktor_release_workflow_plan(plan);
+}
+
+spec("HostTool timeout is terminal and is never retried") {
+    it("complete case") { test_hosttool_timeout_is_terminal_and_is_never_retried_14(); }
 }

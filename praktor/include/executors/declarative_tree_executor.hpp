@@ -2,18 +2,32 @@
 
 #include "dag/task_executor.hpp"
 #include "yml/task_types.hpp"
-#include "core/executor.hpp"
-
 #include <functional>
 #include <unordered_map>
+
+// Only forward declarations are needed at this public API boundary.
+// The legacy Executor implementation belongs in the .cpp, not consumers.
+namespace actions {
+struct Node;
+class Blackboard;
+}
+
+struct cflow_process_retainer;
 
 namespace Praktor::Execution
 {
 
+// Explicitly selected per executor instance. Legacy remains the default for all
+// workflow-scheduler call sites; C11 is only available in qualified builds.
+enum class ActionTreeBackend { Legacy, C11 };
+
 class DeclarativeTreeExecutor : public TaskExecutor
 {
 public:
-  explicit DeclarativeTreeExecutor(std::unordered_map<std::string, std::string> base_environment = {});
+  explicit DeclarativeTreeExecutor(
+      std::unordered_map<std::string, std::string> base_environment = {},
+      ActionTreeBackend backend = ActionTreeBackend::Legacy,
+      cflow_process_retainer* recovery_owner = nullptr);
   ~DeclarativeTreeExecutor() override = default;
 
   TaskResult execute(const Task& task, WorkflowContext& context) override;
@@ -43,13 +57,14 @@ private:
   // Extract outputs from blackboard to context
   void blackboardToContext(const actions::Blackboard& bb, WorkflowContext& context, const std::string& taskName);
 
-  // Parse string value to appropriate type (string, number, bool)
-  actions::Value parseValue(const std::string& str) const;
-
   std::unordered_map<std::string, std::string> base_environment_;
+  ActionTreeBackend backend_ = ActionTreeBackend::Legacy;
+  cflow_process_retainer* recovery_owner_ = nullptr;
 };
 
 std::unique_ptr<TaskExecutor> createDeclarativeTreeExecutor(
-    std::unordered_map<std::string, std::string> base_environment = {});
+    std::unordered_map<std::string, std::string> base_environment = {},
+    ActionTreeBackend backend = ActionTreeBackend::Legacy,
+    cflow_process_retainer* recovery_owner = nullptr);
 
 }  // namespace Praktor::Execution

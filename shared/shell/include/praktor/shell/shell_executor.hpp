@@ -52,8 +52,6 @@ public:
 
   /** Returns whether this handle owns a process session. */
   bool valid() const noexcept;
-  /** Returns the root process ID after spawn, or -1 while unavailable. */
-  int pid() const noexcept;
   /** Returns the current lifecycle state. Safe to call concurrently. */
   ProcessState state() const noexcept;
   /** Returns true while starting, running, or cancelling. */
@@ -98,15 +96,6 @@ public:
       const std::map<std::string, std::string>& env = {},
       bool stream_output = true);
 
-  static void executeAsync(
-      const std::string& command,
-      const std::string& input = "",
-      const std::string& working_dir = "",
-      const std::map<std::string, std::string>& env = {},
-      bool stream_output = true);
-
-  static bool killProcess(int pid);
-
   static void setStreamCallback(StreamCallback callback);
   static void emitStreamLine(const std::string& line);
 
@@ -115,10 +104,6 @@ private:
   friend class ProcessExecutor;
 
   static StreamCallback getStreamCallback();
-
-  static bool killWindowsProcess(int pid);
-  static bool killLinuxProcess(int pid);
-  static bool killBsdProcess(int pid);
 };
 
 } // namespace Praktor::Shell

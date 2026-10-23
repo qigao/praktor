@@ -1,4 +1,4 @@
-#include <catch2/catch_test_macros.hpp>
+#include "praktor_test.hpp"
 #include "util/system_info.hpp"
 #include "dag/workflow_context.hpp"
 #include <string>
@@ -6,112 +6,129 @@
 
 using namespace Praktor::system;
 
-TEST_CASE("SystemInfoProvider - Basic OS Information", "[system_info][libuv]") {
+[[maybe_unused]] static void test_systeminfoprovider_basic_os_information_1(int section_index) {
     SystemInfoProvider provider;
 
-    SECTION("OS Name") {
+    if (section_index == 0) {
         std::string osName = provider.getOSName();
-        REQUIRE_FALSE(osName.empty());
-        REQUIRE((osName == "windows" || osName == "linux" || osName == "macos" || osName == "unix" || osName == "unknown"));
+        check_false(osName.empty());
+        check(((osName == "windows" || osName == "linux" || osName == "macos" || osName == "unix" || osName == "unknown")));
     }
 
-    SECTION("OS Version") {
+    if (section_index == 1) {
         std::string osVersion = provider.getOSVersion();
-        REQUIRE_FALSE(osVersion.empty());
-        REQUIRE((osVersion == "unknown" || osVersion.find_first_of("0123456789") != std::string::npos));
+        check_false(osVersion.empty());
+        check(((osVersion == "unknown" || osVersion.find_first_of("0123456789") != std::string::npos)));
     }
 
-    SECTION("Architecture") {
+    if (section_index == 2) {
         std::string arch = provider.getArchitecture();
-        REQUIRE_FALSE(arch.empty());
-        REQUIRE((arch == "x86_64" || arch == "arm64" || arch == "x86" || arch == "arm" ||
-                 arch == "i386" || arch == "aarch64" || arch == "unknown"));
+        check_false(arch.empty());
+        check(((arch == "x86_64" || arch == "arm64" || arch == "x86" || arch == "arm" ||
+                 arch == "i386" || arch == "aarch64" || arch == "unknown")));
     }
 }
 
-TEST_CASE("SystemInfoProvider - User and Network Information", "[system_info][libuv]") {
+spec("SystemInfoProvider - Basic OS Information") {
+    it("OS Name") { test_systeminfoprovider_basic_os_information_1(0); }
+    it("OS Version") { test_systeminfoprovider_basic_os_information_1(1); }
+    it("Architecture") { test_systeminfoprovider_basic_os_information_1(2); }
+}
+
+[[maybe_unused]] static void test_systeminfoprovider_user_and_network_information_2(int section_index) {
     SystemInfoProvider provider;
 
-    SECTION("Username") {
+    if (section_index == 0) {
         std::string username = provider.getUsername();
-        REQUIRE_FALSE(username.empty());
+        check_false(username.empty());
         // Username should be a valid string (not just "unknown")
         if (username != "unknown") {
-            REQUIRE(username.length() > 0);
-            REQUIRE(username.find_first_not_of(" \t\n\r") != std::string::npos);
+            check((username.length() > 0));
+            check((username.find_first_not_of(" \t\n\r") != std::string::npos));
         }
     }
 
-    SECTION("Hostname") {
+    if (section_index == 1) {
         std::string hostname = provider.getHostname();
-        REQUIRE_FALSE(hostname.empty());
+        check_false(hostname.empty());
         if (hostname != "unknown") {
-            REQUIRE(hostname.length() > 0);
+            check((hostname.length() > 0));
         }
     }
 
-    SECTION("Shell Name") {
+    if (section_index == 2) {
         std::string shell = provider.getShellName();
-        REQUIRE_FALSE(shell.empty());
-        REQUIRE((shell == "bash" || shell == "zsh" || shell == "fish" ||
-                 shell == "cmd" || shell == "powershell" || shell == "sh" || shell == "unknown"));
+        check_false(shell.empty());
+        check(((shell == "bash" || shell == "zsh" || shell == "fish" ||
+                 shell == "cmd" || shell == "powershell" || shell == "sh" || shell == "unknown")));
     }
 }
 
-TEST_CASE("SystemInfoProvider - Hardware Information", "[system_info][libuv][hardware]") {
+spec("SystemInfoProvider - User and Network Information") {
+    it("Username") { test_systeminfoprovider_user_and_network_information_2(0); }
+    it("Hostname") { test_systeminfoprovider_user_and_network_information_2(1); }
+    it("Shell Name") { test_systeminfoprovider_user_and_network_information_2(2); }
+}
+
+[[maybe_unused]] static void test_systeminfoprovider_hardware_information_3(int section_index) {
     SystemInfoProvider provider;
 
-    SECTION("CPU Information") {
+    if (section_index == 0) {
         auto cpu_info = provider.getCPUInfo();
 
         // CPU model should be available on most systems
-        REQUIRE_FALSE(cpu_info.model.empty());
+        check_false(cpu_info.model.empty());
 
         // Core count should be positive
-        REQUIRE(cpu_info.core_count > 0);
-        REQUIRE(cpu_info.core_count <= 256); // Reasonable upper bound
+        check((cpu_info.core_count > 0));
+        check((cpu_info.core_count <= 256)); // Reasonable upper bound
 
         // CPU speed should be reasonable (in MHz)
         if (cpu_info.speed_mhz > 0) {
-            REQUIRE(cpu_info.speed_mhz >= 100.0);    // At least 100 MHz
-            REQUIRE(cpu_info.speed_mhz <= 10000.0);  // Less than 10 GHz
+            check((cpu_info.speed_mhz >= 100.0));    // At least 100 MHz
+            check((cpu_info.speed_mhz <= 10000.0));  // Less than 10 GHz
         }
     }
 
-    SECTION("Memory Information") {
+    if (section_index == 1) {
         auto mem_info = provider.getMemoryInfo();
 
         // Total memory should be positive
-        REQUIRE(mem_info.total_memory > 0);
+        check((mem_info.total_memory > 0));
 
         // Free memory should be less than or equal to total
-        REQUIRE(mem_info.free_memory <= mem_info.total_memory);
+        check((mem_info.free_memory <= mem_info.total_memory));
 
         // Available memory should be reasonable
-        REQUIRE(mem_info.available_memory <= mem_info.total_memory);
+        check((mem_info.available_memory <= mem_info.total_memory));
 
         // Minimum reasonable memory: 512MB
-        REQUIRE(mem_info.total_memory >= 512 * 1024 * 1024);
+        check((mem_info.total_memory >= 512 * 1024 * 1024));
     }
 }
 
-TEST_CASE("SystemInfoProvider - Network Interfaces", "[system_info][libuv][network]") {
+spec("SystemInfoProvider - Hardware Information") {
+    it("CPU Information") { test_systeminfoprovider_hardware_information_3(0); }
+    it("Memory Information") { test_systeminfoprovider_hardware_information_3(1); }
+}
+
+[[maybe_unused]] static void test_systeminfoprovider_network_interfaces_4() {
     SystemInfoProvider provider;
 
     auto interfaces = provider.getNetworkInterfaces();
 
     // Should have at least one interface (loopback)
-    REQUIRE(interfaces.size() > 0);
+    check((interfaces.size() > 0));
 
     bool has_loopback = false;
     bool has_external = false;
 
     for (const auto& iface : interfaces) {
         // Interface name should not be empty
-        REQUIRE_FALSE(iface.name.empty());
+        check_false(iface.name.empty());
 
         // Address should not be empty
-        REQUIRE_FALSE(iface.address.empty());
+        check_false(iface.address.empty());
 
         const bool looks_like_loopback =
             iface.is_internal ||
@@ -129,101 +146,118 @@ TEST_CASE("SystemInfoProvider - Network Interfaces", "[system_info][libuv][netwo
         // Check for common interface patterns
         if (iface.address.find("127.0.0.1") != std::string::npos ||
             iface.address.find("::1") != std::string::npos) {
-            CHECK(looks_like_loopback);
+            check((looks_like_loopback));
         }
     }
 
     // Most systems should have a loopback interface
-    REQUIRE(has_loopback);
+    check((has_loopback));
 }
 
-TEST_CASE("SystemInfoProvider - Load Average", "[system_info][libuv][performance]") {
+spec("SystemInfoProvider - Network Interfaces") {
+    it("complete case") { test_systeminfoprovider_network_interfaces_4(); }
+}
+
+[[maybe_unused]] static void test_systeminfoprovider_load_average_5() {
     SystemInfoProvider provider;
 
     auto load = provider.getLoadAverage();
 
     // Load averages should be non-negative
-    REQUIRE(load.one_minute >= 0.0);
-    REQUIRE(load.five_minutes >= 0.0);
-    REQUIRE(load.fifteen_minutes >= 0.0);
+    check((load.one_minute >= 0.0));
+    check((load.five_minutes >= 0.0));
+    check((load.fifteen_minutes >= 0.0));
 
     // Load averages should be reasonable (less than 1000)
-    REQUIRE(load.one_minute < 1000.0);
-    REQUIRE(load.five_minutes < 1000.0);
-    REQUIRE(load.fifteen_minutes < 1000.0);
+    check((load.one_minute < 1000.0));
+    check((load.five_minutes < 1000.0));
+    check((load.fifteen_minutes < 1000.0));
 }
 
-TEST_CASE("SystemInfoProvider - All System Properties", "[system_info][libuv]") {
+spec("SystemInfoProvider - Load Average") {
+    it("complete case") { test_systeminfoprovider_load_average_5(); }
+}
+
+[[maybe_unused]] static void test_systeminfoprovider_all_system_properties_6(int section_index) {
     SystemInfoProvider provider;
 
-    SECTION("Basic Properties") {
+    if (section_index == 0) {
         auto props = provider.getAllSystemProperties();
 
         // Should contain all expected basic properties
-        REQUIRE(props.find("PRAKTOR_OS_NAME") != props.end());
-        REQUIRE(props.find("PRAKTOR_OS_VERSION") != props.end());
-        REQUIRE(props.find("PRAKTOR_ARCH") != props.end());
-        REQUIRE(props.find("PRAKTOR_SHELL") != props.end());
-        REQUIRE(props.find("PRAKTOR_USER") != props.end());
-        REQUIRE(props.find("PRAKTOR_HOST") != props.end());
+        check((props.find("PRAKTOR_OS_NAME") != props.end()));
+        check((props.find("PRAKTOR_OS_VERSION") != props.end()));
+        check((props.find("PRAKTOR_ARCH") != props.end()));
+        check((props.find("PRAKTOR_SHELL") != props.end()));
+        check((props.find("PRAKTOR_USER") != props.end()));
+        check((props.find("PRAKTOR_HOST") != props.end()));
 
         // All values should be non-empty
         for (const auto& [key, value] : props) {
-            INFO("Property " << key << " should not be empty");
-            REQUIRE_FALSE(value.empty());
+            info("%s", praktor_test::message([&](std::ostream& out) { out << "Property " << key << " should not be empty"; }).c_str());
+            check_false(value.empty());
         }
     }
 
-    SECTION("Extended Properties") {
+    if (section_index == 1) {
         auto props = provider.getExtendedSystemProperties();
 
         // Should contain hardware information
-        REQUIRE(props.find("PRAKTOR_CPU_MODEL") != props.end());
-        REQUIRE(props.find("PRAKTOR_CPU_CORES") != props.end());
-        REQUIRE(props.find("PRAKTOR_MEMORY_TOTAL_GB") != props.end());
-        REQUIRE(props.find("PRAKTOR_NETWORK_INTERFACES") != props.end());
+        check((props.find("PRAKTOR_CPU_MODEL") != props.end()));
+        check((props.find("PRAKTOR_CPU_CORES") != props.end()));
+        check((props.find("PRAKTOR_MEMORY_TOTAL_GB") != props.end()));
+        check((props.find("PRAKTOR_NETWORK_INTERFACES") != props.end()));
 
         // CPU cores should be a valid number
         int cores = std::stoi(props["PRAKTOR_CPU_CORES"]);
-        REQUIRE(cores > 0);
-        REQUIRE(cores <= 256);
+        check((cores > 0));
+        check((cores <= 256));
 
         // Memory should be reasonable
         int memory_gb = std::stoi(props["PRAKTOR_MEMORY_TOTAL_GB"]);
-        REQUIRE(memory_gb >= 0); // Could be 0 if less than 1GB
+        check((memory_gb >= 0)); // Could be 0 if less than 1GB
 
         // Network interfaces count should be positive
         int iface_count = std::stoi(props["PRAKTOR_NETWORK_INTERFACES"]);
-        REQUIRE(iface_count > 0);
+        check((iface_count > 0));
 
         // Check for environment variables in extended properties
         auto env_vars = provider.getEnvironmentVariables();
         for (const auto& pair : env_vars) {
             std::string expected_key = "PRAKTOR_ENV_" + pair.first;
-            REQUIRE(props.count(expected_key) > 0);
-            REQUIRE(props[expected_key] == pair.second);
+            check((props.count(expected_key) > 0));
+            check((props[expected_key] == pair.second));
         }
     }
 }
 
-TEST_CASE("SystemInfoProvider - Async Operations", "[system_info][libuv][async]") {
+spec("SystemInfoProvider - All System Properties") {
+    it("Basic Properties") { test_systeminfoprovider_all_system_properties_6(0); }
+    it("Extended Properties") { test_systeminfoprovider_all_system_properties_6(1); }
+}
+
+[[maybe_unused]] static void test_systeminfoprovider_async_operations_7() {
     SystemInfoProvider provider;
 
     auto future = provider.getAllSystemPropertiesAsync();
 
     // Should complete within reasonable time
     auto status = future.wait_for(std::chrono::seconds(5));
-    REQUIRE(status == std::future_status::ready);
+    check((status == std::future_status::ready));
 
     auto props = future.get();
-    REQUIRE_FALSE(props.empty());
-    REQUIRE(props.find("PRAKTOR_OS_NAME") != props.end());
+    check_false(props.empty());
+    check((props.find("PRAKTOR_OS_NAME") != props.end()));
 }
 
-TEST_CASE("SystemInfoProvider - Performance", "[system_info][libuv][performance]") {
+spec("SystemInfoProvider - Async Operations") {
+    it("complete case") { test_systeminfoprovider_async_operations_7(); }
+}
+
+[[maybe_unused]] static void test_systeminfoprovider_performance_8(int section_index) {
     SystemInfoProvider provider;
 
-    SECTION("Basic Info Performance") {
+    if (section_index == 0) {
         auto start = std::chrono::high_resolution_clock::now();
 
         // Call basic info functions multiple times
@@ -237,10 +271,10 @@ TEST_CASE("SystemInfoProvider - Performance", "[system_info][libuv][performance]
         auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
 
         // Should complete quickly (less than 1 second for 100 calls)
-        REQUIRE(duration.count() < 1000);
+        check((duration.count() < 1000));
     }
 
-    SECTION("Hardware Info Performance") {
+    if (section_index == 1) {
         auto start = std::chrono::high_resolution_clock::now();
 
         // Hardware info might be slower but should still be reasonable
@@ -253,71 +287,88 @@ TEST_CASE("SystemInfoProvider - Performance", "[system_info][libuv][performance]
         auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
 
         // Should complete within 5 seconds for 10 calls
-        REQUIRE(duration.count() < 5000);
+        check((duration.count() < 5000));
     }
 }
 
-TEST_CASE("SystemInfoProvider - Convenience Functions", "[system_info][libuv]") {
+spec("SystemInfoProvider - Performance") {
+    it("Basic Info Performance") { test_systeminfoprovider_performance_8(0); }
+    it("Hardware Info Performance") { test_systeminfoprovider_performance_8(1); }
+}
+
+[[maybe_unused]] static void test_systeminfoprovider_convenience_functions_9() {
     // Test the convenience functions that use singleton
     std::string osName = getOSName();
     std::string arch = getArchitecture();
     std::string user = getUsername();
 
-    REQUIRE_FALSE(osName.empty());
-    REQUIRE_FALSE(arch.empty());
-    REQUIRE_FALSE(user.empty());
+    check_false(osName.empty());
+    check_false(arch.empty());
+    check_false(user.empty());
 
     auto props = getAllSystemProperties();
-    REQUIRE_FALSE(props.empty());
-    REQUIRE(props["PRAKTOR_OS_NAME"] == osName);
-    REQUIRE(props["PRAKTOR_ARCH"] == arch);
-    REQUIRE(props["PRAKTOR_USER"] == user);
+    check_false(props.empty());
+    check((props["PRAKTOR_OS_NAME"] == osName));
+    check((props["PRAKTOR_ARCH"] == arch));
+    check((props["PRAKTOR_USER"] == user));
 }
 
-TEST_CASE("WorkflowContext - libuv System Variables Integration", "[workflow_context][libuv]") {
+spec("SystemInfoProvider - Convenience Functions") {
+    it("complete case") { test_systeminfoprovider_convenience_functions_9(); }
+}
+
+[[maybe_unused]] static void test_workflowcontext_libuv_system_variables_integration_10() {
     // Test integration with WorkflowContext using new libuv-based system info
     WorkflowContext context;
 
     // Should contain all built-in system variables
-    REQUIRE(context.hasKey("PRAKTOR_OS_NAME"));
-    REQUIRE(context.hasKey("PRAKTOR_OS_VERSION"));
-    REQUIRE(context.hasKey("PRAKTOR_ARCH"));
-    REQUIRE(context.hasKey("PRAKTOR_SHELL"));
-    REQUIRE(context.hasKey("PRAKTOR_USER"));
-    REQUIRE(context.hasKey("PRAKTOR_HOST"));
+    check((context.hasKey("PRAKTOR_OS_NAME")));
+    check((context.hasKey("PRAKTOR_OS_VERSION")));
+    check((context.hasKey("PRAKTOR_ARCH")));
+    check((context.hasKey("PRAKTOR_SHELL")));
+    check((context.hasKey("PRAKTOR_USER")));
+    check((context.hasKey("PRAKTOR_HOST")));
 
     // Values should match the libuv-based function calls
-    REQUIRE(context.getVariable("PRAKTOR_OS_NAME") == getOSName());
-    REQUIRE(context.getVariable("PRAKTOR_ARCH") == getArchitecture());
-    REQUIRE(context.getVariable("PRAKTOR_USER") == getUsername());
+    check((context.getVariable("PRAKTOR_OS_NAME") == getOSName()));
+    check((context.getVariable("PRAKTOR_ARCH") == getArchitecture()));
+    check((context.getVariable("PRAKTOR_USER") == getUsername()));
 }
 
-TEST_CASE("SystemInfoProvider - Error Handling", "[system_info][libuv][error]") {
+spec("WorkflowContext - libuv System Variables Integration") {
+    it("complete case") { test_workflowcontext_libuv_system_variables_integration_10(); }
+}
+
+[[maybe_unused]] static void test_systeminfoprovider_error_handling_11() {
     SystemInfoProvider provider;
 
     // Test that functions handle errors gracefully
     // These should not throw exceptions even if system calls fail
-    REQUIRE_NOTHROW(provider.getOSName());
-    REQUIRE_NOTHROW(provider.getArchitecture());
-    REQUIRE_NOTHROW(provider.getUsername());
-    REQUIRE_NOTHROW(provider.getHostname());
-    REQUIRE_NOTHROW(provider.getCPUInfo());
-    REQUIRE_NOTHROW(provider.getMemoryInfo());
-    REQUIRE_NOTHROW(provider.getNetworkInterfaces());
-    REQUIRE_NOTHROW(provider.getLoadAverage());
+    check_nothrow(provider.getOSName());
+    check_nothrow(provider.getArchitecture());
+    check_nothrow(provider.getUsername());
+    check_nothrow(provider.getHostname());
+    check_nothrow(provider.getCPUInfo());
+    check_nothrow(provider.getMemoryInfo());
+    check_nothrow(provider.getNetworkInterfaces());
+    check_nothrow(provider.getLoadAverage());
 }
 
-TEST_CASE("SystemInfoProvider - Environment Variables", "[system_info][libuv][environment]") {
+spec("SystemInfoProvider - Error Handling") {
+    it("complete case") { test_systeminfoprovider_error_handling_11(); }
+}
+
+[[maybe_unused]] static void test_systeminfoprovider_environment_variables_12(int section_index) {
     SystemInfoProvider provider;
 
-    SECTION("Get Environment Variables") {
+    if (section_index == 0) {
         auto env_vars = provider.getEnvironmentVariables();
-        REQUIRE_FALSE(env_vars.empty());
+        check_false(env_vars.empty());
 
         // Check for common environment variables
         #ifdef _WIN32
-        REQUIRE(env_vars.count("SystemRoot") > 0);
-        REQUIRE(env_vars.count("USERPROFILE") > 0);
+        check((env_vars.count("SystemRoot") > 0));
+        check((env_vars.count("USERPROFILE") > 0));
 
         bool found_path = false;
         for (const auto& pair : env_vars) {
@@ -328,12 +379,12 @@ TEST_CASE("SystemInfoProvider - Environment Variables", "[system_info][libuv][en
                 break;
             }
         }
-        REQUIRE(found_path);
+        check((found_path));
 
         #else
-        REQUIRE(env_vars.count("HOME") > 0);
-        REQUIRE(env_vars.count("PATH") > 0);
-        REQUIRE(env_vars.count("SHELL") > 0);
+        check((env_vars.count("HOME") > 0));
+        check((env_vars.count("PATH") > 0));
+        check((env_vars.count("SHELL") > 0));
         #endif
 
         // Verify values are not empty for critical variables, or allow empty for others
@@ -342,8 +393,12 @@ TEST_CASE("SystemInfoProvider - Environment Variables", "[system_info][libuv][en
             if (key == "VSCODE_L10N_BUNDLE_LOCATION") {
                 continue;
             }
-            INFO("Environment variable " << key << " should not have an empty value");
-            //REQUIRE_FALSE(value.empty());
+            info("%s", praktor_test::message([&](std::ostream& out) { out << "Environment variable " << key << " should not have an empty value"; }).c_str());
+            //check_false(value.empty());
         }
     }
+}
+
+spec("SystemInfoProvider - Environment Variables") {
+    it("Get Environment Variables") { test_systeminfoprovider_environment_variables_12(0); }
 }

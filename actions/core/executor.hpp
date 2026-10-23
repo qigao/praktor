@@ -130,6 +130,10 @@ private:
   NodeStatus executeParallel(const Node& node, Blackboard& bb, ExecutionContext& ctx);
   NodeStatus executeReactiveSequence(const Node& node, Blackboard& bb);
   NodeStatus executeReactiveSequence(const Node& node, Blackboard& bb, ExecutionContext& ctx);
+  NodeStatus executeReactiveFallback(const Node& node, Blackboard& bb);
+  NodeStatus executeReactiveFallback(const Node& node, Blackboard& bb, ExecutionContext& ctx);
+  NodeStatus executeRetry(const Node& node, Blackboard& bb);
+  NodeStatus executeRetry(const Node& node, Blackboard& bb, ExecutionContext& ctx);
 
   // Built-in decorator implementations
   NodeStatus executeInverter(const Node& node, Blackboard& bb);

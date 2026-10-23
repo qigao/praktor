@@ -1,8 +1,8 @@
+#include "praktor_test.hpp"
 #include "praktor.h"
 
 #include "data/workflow_value.hpp"
 
-#include <catch2/catch_all.hpp>
 
 #include <chrono>
 #include <filesystem>
@@ -24,7 +24,7 @@ std::filesystem::path createPlanTempDir() {
 void writePlanFile(const std::filesystem::path& path, std::string_view text) {
     std::filesystem::create_directories(path.parent_path());
     std::ofstream output(path, std::ios::binary);
-    REQUIRE(output.is_open());
+    check((output.is_open()));
     output.write(text.data(), static_cast<std::streamsize>(text.size()));
 }
 
@@ -35,28 +35,31 @@ praktor_workflow_plan* compilePlan(const std::filesystem::path& path,
     request.workflow_path = stable_path.c_str();
     praktor_workflow_plan* plan = nullptr;
     const auto result = praktor_compile_workflow(&request, &plan, &error);
-    INFO(error.message);
-    REQUIRE(result == PRAKTOR_RESULT_SUCCESS);
-    REQUIRE(plan != nullptr);
+    info("%s", praktor_test::message([&](std::ostream& out) { out << error.message; }).c_str());
+    check((result == PRAKTOR_RESULT_SUCCESS));
+    check((plan != nullptr));
     return plan;
 }
 
 } // namespace
 
-TEST_CASE("WorkflowPlan ABI publishes immutable plan capability", "[sdk][plan]") {
+[[maybe_unused]] static void test_workflowplan_abi_publishes_immutable_plan_capability_1() {
     const praktor_api* api = praktor_get_api();
-    REQUIRE(api != nullptr);
-    CHECK(api->abi_major == PRAKTOR_ABI_MAJOR);
-    CHECK(api->abi_minor >= 2);
-    CHECK((api->capabilities & PRAKTOR_CAPABILITY_WORKFLOW_PLAN) != 0);
-    REQUIRE(api->compile_workflow != nullptr);
-    REQUIRE(api->describe_workflow_plan != nullptr);
-    REQUIRE(api->execute_workflow_plan != nullptr);
-    REQUIRE(api->release_workflow_plan != nullptr);
+    check((api != nullptr));
+    check((api->abi_major == PRAKTOR_ABI_MAJOR));
+    check((api->abi_minor >= 2));
+    check(((api->capabilities & PRAKTOR_CAPABILITY_WORKFLOW_PLAN) != 0));
+    check((api->compile_workflow != nullptr));
+    check((api->describe_workflow_plan != nullptr));
+    check((api->execute_workflow_plan != nullptr));
+    check((api->release_workflow_plan != nullptr));
 }
 
-TEST_CASE("WorkflowPlan describes reviewed dependency closure with SHA-256",
-          "[sdk][plan][closure]") {
+spec("WorkflowPlan ABI publishes immutable plan capability") {
+    it("complete case") { test_workflowplan_abi_publishes_immutable_plan_capability_1(); }
+}
+
+[[maybe_unused]] static void test_workflowplan_describes_reviewed_dependency_closure_with_sha_256_2() {
     const auto dir = createPlanTempDir();
     const auto root = dir / "workflow.yml";
     const auto included = dir / "shared.yml";
@@ -95,36 +98,40 @@ tasks:
     praktor_workflow_plan* plan = compilePlan(root, error);
 
     praktor_owned_json metadata = PRAKTOR_OWNED_JSON_INIT;
-    REQUIRE(praktor_describe_workflow_plan(plan, &metadata, &error) ==
-            PRAKTOR_RESULT_SUCCESS);
-    REQUIRE(metadata.data != nullptr);
+    check((praktor_describe_workflow_plan(plan, &metadata, &error) ==
+            PRAKTOR_RESULT_SUCCESS));
+    check((metadata.data != nullptr));
 
     const auto json =
         WorkflowValue::parse(std::string_view(metadata.data, metadata.size));
     const auto digest = json.at("digest").as<std::string>();
-    CHECK(digest.size() == 64);
-    REQUIRE(json.at("dependencies").is_array());
-    CHECK(json.at("dependencies").size() == 6);
+    check((digest.size() == 64));
+    check((json.at("dependencies").is_array()));
+    check((json.at("dependencies").size() == 6));
 
     const std::string serialized(metadata.data, metadata.size);
-    CHECK(serialized.find("workflow.yml") != std::string::npos);
-    CHECK(serialized.find("shared.yml") != std::string::npos);
-    CHECK(serialized.find("nested.yml") != std::string::npos);
-    CHECK(serialized.find("model.tbs") != std::string::npos);
-    CHECK(serialized.find("config.env") != std::string::npos);
-    CHECK(serialized.find("shared.env") != std::string::npos);
-    CHECK(serialized.find("\"root\"") != std::string::npos);
-    CHECK(serialized.find("\"include\"") != std::string::npos);
-    CHECK(serialized.find("\"uses\"") != std::string::npos);
-    CHECK(serialized.find("\"script\"") != std::string::npos);
-    CHECK(serialized.find("\"dotenv\"") != std::string::npos);
+    check((serialized.find("workflow.yml") != std::string::npos));
+    check((serialized.find("shared.yml") != std::string::npos));
+    check((serialized.find("nested.yml") != std::string::npos));
+    check((serialized.find("model.tbs") != std::string::npos));
+    check((serialized.find("config.env") != std::string::npos));
+    check((serialized.find("shared.env") != std::string::npos));
+    check((serialized.find("\"root\"") != std::string::npos));
+    check((serialized.find("\"include\"") != std::string::npos));
+    check((serialized.find("\"uses\"") != std::string::npos));
+    check((serialized.find("\"script\"") != std::string::npos));
+    check((serialized.find("\"dotenv\"") != std::string::npos));
 
     praktor_release_json(&metadata);
     praktor_release_workflow_plan(plan);
     std::filesystem::remove_all(dir);
 }
 
-TEST_CASE("WorkflowPlan executes unchanged reviewed workflow", "[sdk][plan][execute]") {
+spec("WorkflowPlan describes reviewed dependency closure with SHA-256") {
+    it("complete case") { test_workflowplan_describes_reviewed_dependency_closure_with_sha_256_2(); }
+}
+
+[[maybe_unused]] static void test_workflowplan_executes_unchanged_reviewed_workflow_3() {
     const auto dir = createPlanTempDir();
     const auto root = dir / "workflow.yml";
     writePlanFile(root, R"(tasks:
@@ -142,19 +149,22 @@ TEST_CASE("WorkflowPlan executes unchanged reviewed workflow", "[sdk][plan][exec
     request.input_json_size = sizeof(input) - 1;
 
     praktor_owned_json output = PRAKTOR_OWNED_JSON_INIT;
-    REQUIRE(praktor_execute_workflow_plan(&request, nullptr, &output, &error) ==
-            PRAKTOR_RESULT_SUCCESS);
-    REQUIRE(output.data != nullptr);
-    CHECK(std::string_view(output.data, output.size).find(
-              "\"workflow_status\":\"success\"") != std::string_view::npos);
+    check((praktor_execute_workflow_plan(&request, nullptr, &output, &error) ==
+            PRAKTOR_RESULT_SUCCESS));
+    check((output.data != nullptr));
+    check((std::string_view(output.data, output.size).find(
+              "\"workflow_status\":\"success\"") != std::string_view::npos));
 
     praktor_release_json(&output);
     praktor_release_workflow_plan(plan);
     std::filesystem::remove_all(dir);
 }
 
-TEST_CASE("WorkflowPlan rejects dependency mutation before execution",
-          "[sdk][plan][mismatch]") {
+spec("WorkflowPlan executes unchanged reviewed workflow") {
+    it("complete case") { test_workflowplan_executes_unchanged_reviewed_workflow_3(); }
+}
+
+[[maybe_unused]] static void test_workflowplan_rejects_dependency_mutation_before_execution_4() {
     const auto dir = createPlanTempDir();
     const auto root = dir / "workflow.yml";
     const auto nested = dir / "nested.yml";
@@ -183,19 +193,22 @@ TEST_CASE("WorkflowPlan rejects dependency mutation before execution",
     request.input_json_size = sizeof(input) - 1;
 
     praktor_owned_json output = PRAKTOR_OWNED_JSON_INIT;
-    CHECK(praktor_execute_workflow_plan(&request, nullptr, &output, &error) ==
-          PRAKTOR_RESULT_PLAN_MISMATCH);
-    CHECK(error.phase == PRAKTOR_ERROR_PHASE_PLAN);
-    CHECK(std::string(error.message).find("nested.yml") != std::string::npos);
-    CHECK(output.data == nullptr);
-    CHECK(output.size == 0);
+    check((praktor_execute_workflow_plan(&request, nullptr, &output, &error) ==
+          PRAKTOR_RESULT_PLAN_MISMATCH));
+    check((error.phase == PRAKTOR_ERROR_PHASE_PLAN));
+    check((std::string(error.message).find("nested.yml") != std::string::npos));
+    check((output.data == nullptr));
+    check((output.size == 0));
 
     praktor_release_workflow_plan(plan);
     std::filesystem::remove_all(dir);
 }
 
-TEST_CASE("WorkflowPlan rejects transitive workflow escape outside root",
-          "[sdk][plan][root]") {
+spec("WorkflowPlan rejects dependency mutation before execution") {
+    it("complete case") { test_workflowplan_rejects_dependency_mutation_before_execution_4(); }
+}
+
+[[maybe_unused]] static void test_workflowplan_rejects_transitive_workflow_escape_outside_root_5() {
     const auto parent = createPlanTempDir();
     const auto root_dir = parent / "reviewed";
     const auto root = root_dir / "workflow.yml";
@@ -216,12 +229,16 @@ TEST_CASE("WorkflowPlan rejects transitive workflow escape outside root",
     praktor_workflow_plan* plan = nullptr;
     praktor_error error = PRAKTOR_ERROR_INIT;
 
-    CHECK(praktor_compile_workflow(&request, &plan, &error) ==
-          PRAKTOR_RESULT_PLAN_INVALID);
-    CHECK(plan == nullptr);
-    CHECK(error.phase == PRAKTOR_ERROR_PHASE_PLAN);
-    CHECK(std::string(error.message).find("escapes workflow root") !=
-          std::string::npos);
+    check((praktor_compile_workflow(&request, &plan, &error) ==
+          PRAKTOR_RESULT_PLAN_INVALID));
+    check((plan == nullptr));
+    check((error.phase == PRAKTOR_ERROR_PHASE_PLAN));
+    check((std::string(error.message).find("escapes workflow root") !=
+          std::string::npos));
 
     std::filesystem::remove_all(parent);
+}
+
+spec("WorkflowPlan rejects transitive workflow escape outside root") {
+    it("complete case") { test_workflowplan_rejects_transitive_workflow_escape_outside_root_5(); }
 }

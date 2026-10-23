@@ -1097,7 +1097,7 @@ parse_regex:
 
 **Parameters**:
 - `input_key` (required) - Blackboard key containing text
-- `filter` (optional) - Substring filter
+- `filter` (optional) - Regular expression searched within each line; Legacy ignores invalid expressions
 - `output_key` (default: "parsed_lines") - Result storage key
 
 **Returns**:

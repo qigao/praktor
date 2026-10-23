@@ -1,6 +1,6 @@
+#include "praktor_test.hpp"
 #include "workflow_runner.hpp"
 #include "util/file_utils.hpp"
-#include <catch2/catch_all.hpp>
 #include <filesystem>
 #include <fstream>
 #include <random>
@@ -27,12 +27,11 @@ void writeFile(const std::filesystem::path& path, const std::string& content)
 
 }
 
-TEST_CASE("matrix and each functionality")
-{
+[[maybe_unused]] static void test_matrix_and_each_functionality_1(int section_index) {
     auto original_cwd = std::filesystem::current_path();
     auto dir = createTempDir();
 
-    SECTION("matrix build generates correct tasks")
+    if (section_index == 0)
     {
         std::filesystem::current_path(dir);
         auto workflow_path = dir / "workflow.yml";
@@ -51,10 +50,10 @@ tasks:
         );
 
         WorkflowRunner runner(workflow_path.string());
-        REQUIRE(runner.run());
+        check((runner.run()));
     }
 
-    SECTION("each items generates tasks")
+    if (section_index == 1)
     {
         std::filesystem::current_path(dir);
         auto workflow_path = dir / "workflow_items.yml";
@@ -71,9 +70,14 @@ tasks:
         );
 
         WorkflowRunner runner(workflow_path.string());
-        REQUIRE(runner.run());
+        check((runner.run()));
     }
 
     std::filesystem::current_path(original_cwd);
     std::filesystem::remove_all(dir);
+}
+
+spec("matrix and each functionality") {
+    it("matrix build generates correct tasks") { test_matrix_and_each_functionality_1(0); }
+    it("each items generates tasks") { test_matrix_and_each_functionality_1(1); }
 }

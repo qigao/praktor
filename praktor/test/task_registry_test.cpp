@@ -1,6 +1,6 @@
+#include "praktor_test.hpp"
 #include "dag/task_registry.hpp"
 
-#include <catch2/catch_all.hpp>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
@@ -9,184 +9,210 @@ using InnerFailureElement =
     typename decltype(TaskFailureContext{}.inner_failure)::element_type;
 static_assert(std::is_const_v<InnerFailureElement>);
 
-TEST_CASE("TaskRegistry State Machine", "[registry]") {
+[[maybe_unused]] static void test_taskregistry_state_machine_1(int section_index) {
     TaskRegistry registry;
 
-    SECTION("Initial state is Pending") {
-        REQUIRE(registry.getState("new_task") == TaskState::Pending);
-        REQUIRE(registry.getStatus("new_task") == "pending");
+    if (section_index == 0) {
+        check((registry.getState("new_task") == TaskState::Pending));
+        check((registry.getStatus("new_task") == "pending"));
     }
 
-    SECTION("startTask transitions Pending -> Running") {
+    if (section_index == 1) {
         registry.startTask("task_a");
-        REQUIRE(registry.getState("task_a") == TaskState::Running);
-        REQUIRE(registry.getStatus("task_a") == "running");
+        check((registry.getState("task_a") == TaskState::Running));
+        check((registry.getStatus("task_a") == "running"));
     }
 
-    SECTION("markCompleted transitions Running -> Completed") {
+    if (section_index == 2) {
         registry.startTask("task_a");
         registry.markCompleted("task_a");
-        REQUIRE(registry.getState("task_a") == TaskState::Completed);
-        REQUIRE(registry.isCompleted("task_a"));
-        REQUIRE(registry.isFinalized("task_a"));
+        check((registry.getState("task_a") == TaskState::Completed));
+        check((registry.isCompleted("task_a")));
+        check((registry.isFinalized("task_a")));
     }
 
-    SECTION("markFailed transitions Running -> Failed") {
+    if (section_index == 3) {
         registry.startTask("task_a");
         registry.markFailed("task_a", "something went wrong");
-        REQUIRE(registry.getState("task_a") == TaskState::Failed);
-        REQUIRE(registry.isFailed("task_a"));
-        REQUIRE(registry.isFinalized("task_a"));
-        REQUIRE(registry.getFailureReason("task_a") == "something went wrong");
+        check((registry.getState("task_a") == TaskState::Failed));
+        check((registry.isFailed("task_a")));
+        check((registry.isFinalized("task_a")));
+        check((registry.getFailureReason("task_a") == "something went wrong"));
     }
 
-    SECTION("Task re-entry support") {
+    if (section_index == 4) {
         registry.startTask("task_a");
         registry.setOutput("task_a", "before", WorkflowValue("stale"));
         registry.markCompleted("task_a");
-        REQUIRE(registry.isCompleted("task_a"));
+        check((registry.isCompleted("task_a")));
 
         // Restarting already completed task should work
         registry.startTask("task_a");
-        REQUIRE(registry.getState("task_a") == TaskState::Running);
-        REQUIRE_FALSE(registry.isCompleted("task_a"));
-        REQUIRE(registry.getAllOutputs("task_a").empty());
+        check((registry.getState("task_a") == TaskState::Running));
+        check_false(registry.isCompleted("task_a"));
+        check((registry.getAllOutputs("task_a").empty()));
 
         registry.markFailed("task_a", "re-entry failure");
-        REQUIRE(registry.isFailed("task_a"));
-        REQUIRE(registry.getFailureReason("task_a") == "re-entry failure");
+        check((registry.isFailed("task_a")));
+        check((registry.getFailureReason("task_a") == "re-entry failure"));
     }
 
-    SECTION("startTask can be called multiple times") {
+    if (section_index == 5) {
         registry.startTask("task_a");
-        REQUIRE_NOTHROW(registry.startTask("task_a"));
-        REQUIRE(registry.getState("task_a") == TaskState::Running);
+        check_nothrow(registry.startTask("task_a"));
+        check((registry.getState("task_a") == TaskState::Running));
     }
 }
 
-TEST_CASE("TaskRegistry Output Immutability", "[registry]") {
+spec("TaskRegistry State Machine") {
+    it("Initial state is Pending") { test_taskregistry_state_machine_1(0); }
+    it("startTask transitions Pending -> Running") { test_taskregistry_state_machine_1(1); }
+    it("markCompleted transitions Running -> Completed") { test_taskregistry_state_machine_1(2); }
+    it("markFailed transitions Running -> Failed") { test_taskregistry_state_machine_1(3); }
+    it("Task re-entry support") { test_taskregistry_state_machine_1(4); }
+    it("startTask can be called multiple times") { test_taskregistry_state_machine_1(5); }
+}
+
+[[maybe_unused]] static void test_taskregistry_output_immutability_2(int section_index) {
     TaskRegistry registry;
 
-    SECTION("setOutput allowed during Running state") {
+    if (section_index == 0) {
         registry.startTask("task_a");
-        REQUIRE_NOTHROW(registry.setOutput("task_a", "result", WorkflowValue("value")));
+        check_nothrow(registry.setOutput("task_a", "result", WorkflowValue("value")));
 
         auto outputs = registry.getAllOutputs("task_a");
-        REQUIRE(outputs["result"].as<std::string>() == "value");
+        check((outputs["result"].as<std::string>() == "value"));
     }
 
-    SECTION("setOutput auto-starts Pending task") {
-        REQUIRE(registry.getState("task_a") == TaskState::Pending);
+    if (section_index == 1) {
+        check((registry.getState("task_a") == TaskState::Pending));
         registry.setOutput("task_a", "key", WorkflowValue(42));
-        REQUIRE(registry.getState("task_a") == TaskState::Running);
+        check((registry.getState("task_a") == TaskState::Running));
     }
 
-    SECTION("setOutput throws after Completed") {
+    if (section_index == 2) {
         registry.startTask("task_a");
         registry.setOutput("task_a", "before", WorkflowValue("ok"));
         registry.markCompleted("task_a");
 
-        REQUIRE_THROWS_WITH(
-            registry.setOutput("task_a", "after", WorkflowValue("fail")),
-            Catch::Matchers::ContainsSubstring("immutable after completion"));
+        check((praktor_test::throws_containing([&] { (void)(registry.setOutput("task_a", "after", WorkflowValue("fail"))); }, {"immutable after completion"})));
     }
 
-    SECTION("setOutput throws after Failed") {
+    if (section_index == 3) {
         registry.startTask("task_a");
         registry.markFailed("task_a", "error");
 
-        REQUIRE_THROWS_WITH(
-            registry.setOutput("task_a", "key", WorkflowValue("value")),
-            Catch::Matchers::ContainsSubstring("immutable after completion"));
+        check((praktor_test::throws_containing([&] { (void)(registry.setOutput("task_a", "key", WorkflowValue("value"))); }, {"immutable after completion"})));
     }
 
-    SECTION("mergeOutputs works during Running") {
+    if (section_index == 4) {
         registry.startTask("task_a");
 
         WorkflowValue outputs = WorkflowValue::object();
         outputs["stdout"] = "hello world";
         outputs["exit_code"] = 0;
 
-        REQUIRE_NOTHROW(registry.mergeOutputs("task_a", outputs));
+        check_nothrow(registry.mergeOutputs("task_a", outputs));
 
         auto all = registry.getAllOutputs("task_a");
-        REQUIRE(all["stdout"].as<std::string>() == "hello world");
-        REQUIRE(all["exit_code"].as<int>() == 0);
+        check((all["stdout"].as<std::string>() == "hello world"));
+        check((all["exit_code"].as<int>() == 0));
     }
 }
 
-TEST_CASE("TaskRegistry Output Access", "[registry]") {
+spec("TaskRegistry Output Immutability") {
+    it("setOutput allowed during Running state") { test_taskregistry_output_immutability_2(0); }
+    it("setOutput auto-starts Pending task") { test_taskregistry_output_immutability_2(1); }
+    it("setOutput throws after Completed") { test_taskregistry_output_immutability_2(2); }
+    it("setOutput throws after Failed") { test_taskregistry_output_immutability_2(3); }
+    it("mergeOutputs works during Running") { test_taskregistry_output_immutability_2(4); }
+}
+
+[[maybe_unused]] static void test_taskregistry_output_access_3(int section_index) {
     TaskRegistry registry;
 
-    SECTION("getOutput returns correct value") {
+    if (section_index == 0) {
         registry.startTask("task_a");
         registry.setOutput("task_a", "data", WorkflowValue::array({1, 2, 3}));
         registry.markCompleted("task_a");
 
         auto data = registry.getOutput("task_a", "data");
-        REQUIRE(data.is_array());
-        REQUIRE(data.size() == 3);
+        check((data.is_array()));
+        check((data.size() == 3));
     }
 
-    SECTION("getOutput throws for missing task") {
-        REQUIRE_THROWS_WITH(registry.getOutput("nonexistent", "key"),
-            Catch::Matchers::ContainsSubstring("Task not found"));
+    if (section_index == 1) {
+        check((praktor_test::throws_containing([&] { (void)(registry.getOutput("nonexistent", "key")); }, {"Task not found"})));
     }
 
-    SECTION("getOutput throws for missing key") {
+    if (section_index == 2) {
         registry.startTask("task_a");
         registry.setOutput("task_a", "exists", WorkflowValue(true));
         registry.markCompleted("task_a");
 
-        REQUIRE_THROWS_WITH(registry.getOutput("task_a", "missing"),
-            Catch::Matchers::ContainsSubstring("Output key not found"));
+        check((praktor_test::throws_containing([&] { (void)(registry.getOutput("task_a", "missing")); }, {"Output key not found"})));
     }
 
-    SECTION("getAllOutputs returns empty object for task without outputs") {
+    if (section_index == 3) {
         registry.startTask("task_a");
         registry.markCompleted("task_a");
 
         auto outputs = registry.getAllOutputs("task_a");
-        REQUIRE(outputs.is_object());
-        REQUIRE(outputs.empty());
+        check((outputs.is_object()));
+        check((outputs.empty()));
     }
 }
 
-TEST_CASE("TaskRegistry Backward Compatibility", "[registry]") {
+spec("TaskRegistry Output Access") {
+    it("getOutput returns correct value") { test_taskregistry_output_access_3(0); }
+    it("getOutput throws for missing task") { test_taskregistry_output_access_3(1); }
+    it("getOutput throws for missing key") { test_taskregistry_output_access_3(2); }
+    it("getAllOutputs returns empty object for task without outputs") { test_taskregistry_output_access_3(3); }
+}
+
+[[maybe_unused]] static void test_taskregistry_backward_compatibility_4(int section_index) {
     TaskRegistry registry;
 
-    SECTION("setStatus with 'running' starts task") {
+    if (section_index == 0) {
         registry.setStatus("task_a", "running");
-        REQUIRE(registry.getState("task_a") == TaskState::Running);
+        check((registry.getState("task_a") == TaskState::Running));
     }
 
-    SECTION("setStatus with 'success' completes task") {
+    if (section_index == 1) {
         registry.setStatus("task_a", "running");
         registry.setStatus("task_a", "success");
-        REQUIRE(registry.getState("task_a") == TaskState::Completed);
-        REQUIRE(registry.isCompleted("task_a"));
+        check((registry.getState("task_a") == TaskState::Completed));
+        check((registry.isCompleted("task_a")));
     }
 
-    SECTION("setStatus with 'completed' completes task") {
+    if (section_index == 2) {
         registry.setStatus("task_a", "running");
         registry.setStatus("task_a", "completed");
-        REQUIRE(registry.isCompleted("task_a"));
+        check((registry.isCompleted("task_a")));
     }
 
-    SECTION("setStatus with 'skipped' marks as completed") {
+    if (section_index == 3) {
         registry.setStatus("task_a", "skipped");
-        REQUIRE(registry.getState("task_a") == TaskState::Skipped);
-        REQUIRE(registry.isCompleted("task_a"));
+        check((registry.getState("task_a") == TaskState::Skipped));
+        check((registry.isCompleted("task_a")));
     }
 
-    SECTION("setStatus with 'failed' marks as failed") {
+    if (section_index == 4) {
         registry.setStatus("task_a", "running");
         registry.setStatus("task_a", "failed");
-        REQUIRE(registry.getState("task_a") == TaskState::Failed);
+        check((registry.getState("task_a") == TaskState::Failed));
     }
 }
 
-TEST_CASE("TaskRegistry toJson", "[registry]") {
+spec("TaskRegistry Backward Compatibility") {
+    it("setStatus with 'running' starts task") { test_taskregistry_backward_compatibility_4(0); }
+    it("setStatus with 'success' completes task") { test_taskregistry_backward_compatibility_4(1); }
+    it("setStatus with 'completed' completes task") { test_taskregistry_backward_compatibility_4(2); }
+    it("setStatus with 'skipped' marks as completed") { test_taskregistry_backward_compatibility_4(3); }
+    it("setStatus with 'failed' marks as failed") { test_taskregistry_backward_compatibility_4(4); }
+}
+
+[[maybe_unused]] static void test_taskregistry_tojson_5() {
     TaskRegistry registry;
 
     registry.startTask("task_a");
@@ -198,17 +224,21 @@ TEST_CASE("TaskRegistry toJson", "[registry]") {
 
     auto json = registry.toJson();
 
-    REQUIRE(json.is_object());
-    REQUIRE(json.contains("task_a"));
-    REQUIRE(json.contains("task_b"));
+    check((json.is_object()));
+    check((json.contains("task_a")));
+    check((json.contains("task_b")));
 
-    REQUIRE(json["task_a"]["status"].as<std::string>() == "success");
-    REQUIRE(json["task_a"]["outputs"]["result"].as<std::string>() == "success");
+    check((json["task_a"]["status"].as<std::string>() == "success"));
+    check((json["task_a"]["outputs"]["result"].as<std::string>() == "success"));
 
-    REQUIRE(json["task_b"]["status"].as<std::string>() == "failed");
+    check((json["task_b"]["status"].as<std::string>() == "failed"));
 }
 
-TEST_CASE("TaskRegistry Query Methods", "[registry]") {
+spec("TaskRegistry toJson") {
+    it("complete case") { test_taskregistry_tojson_5(); }
+}
+
+[[maybe_unused]] static void test_taskregistry_query_methods_6(int section_index) {
     TaskRegistry registry;
 
     registry.startTask("a");
@@ -223,22 +253,27 @@ TEST_CASE("TaskRegistry Query Methods", "[registry]") {
     registry.startTask("d");
     registry.markFailed("d", "error d");
 
-    SECTION("getCompletedTasks returns all completed") {
+    if (section_index == 0) {
         auto completed = registry.getCompletedTasks();
-        REQUIRE(completed.size() == 2);
-        REQUIRE(completed.count("a"));
-        REQUIRE(completed.count("b"));
+        check((completed.size() == 2));
+        check((completed.count("a")));
+        check((completed.count("b")));
     }
 
-    SECTION("getFailedTasks returns all failed with reasons") {
+    if (section_index == 1) {
         auto failed = registry.getFailedTasks();
-        REQUIRE(failed.size() == 2);
-        REQUIRE(failed["c"] == "error c");
-        REQUIRE(failed["d"] == "error d");
+        check((failed.size() == 2));
+        check((failed["c"] == "error c"));
+        check((failed["d"] == "error d"));
     }
 }
 
-TEST_CASE("TaskRegistry failure snapshot is assigned once", "[registry]") {
+spec("TaskRegistry Query Methods") {
+    it("getCompletedTasks returns all completed") { test_taskregistry_query_methods_6(0); }
+    it("getFailedTasks returns all failed with reasons") { test_taskregistry_query_methods_6(1); }
+}
+
+[[maybe_unused]] static void test_taskregistry_failure_snapshot_is_assigned_once_7() {
     TaskRegistry registry;
     registry.startTask("task_a");
 
@@ -252,36 +287,44 @@ TEST_CASE("TaskRegistry failure snapshot is assigned once", "[registry]") {
     second.task_name = "task_a";
     second.error_code = "service_state_failed";
     second.error_message = "second";
-    CHECK_THROWS_AS(registry.markFailed("task_a", second), std::logic_error);
+    check_throws_as(registry.markFailed("task_a", second), std::logic_error);
 
     const auto stored = registry.getFailureSnapshot("task_a");
-    REQUIRE(stored.has_value());
-    CHECK(stored->error_code == "timeout");
-    CHECK(stored->error_message == "first");
+    check((stored.has_value()));
+    check((stored->error_code == "timeout"));
+    check((stored->error_message == "first"));
 }
 
-TEST_CASE("TaskRegistry rejects failure after another terminal state",
-          "[registry]") {
-    SECTION("completed") {
+spec("TaskRegistry failure snapshot is assigned once") {
+    it("complete case") { test_taskregistry_failure_snapshot_is_assigned_once_7(); }
+}
+
+[[maybe_unused]] static void test_taskregistry_rejects_failure_after_another_terminal_state_8(int section_index) {
+    if (section_index == 0) {
         TaskRegistry registry;
         registry.startTask("task_a");
         registry.markCompleted("task_a");
 
-        CHECK_THROWS_AS(registry.markFailed("task_a", "late failure"),
+        check_throws_as(registry.markFailed("task_a", "late failure"),
                         std::logic_error);
-        CHECK(registry.getState("task_a") == TaskState::Completed);
-        CHECK(registry.isCompleted("task_a"));
-        CHECK_FALSE(registry.getFailureSnapshot("task_a").has_value());
+        check((registry.getState("task_a") == TaskState::Completed));
+        check((registry.isCompleted("task_a")));
+        check((!(registry.getFailureSnapshot("task_a").has_value())));
     }
 
-    SECTION("skipped") {
+    if (section_index == 1) {
         TaskRegistry registry;
         registry.setStatus("task_a", "skipped");
 
-        CHECK_THROWS_AS(registry.markFailed("task_a", "late failure"),
+        check_throws_as(registry.markFailed("task_a", "late failure"),
                         std::logic_error);
-        CHECK(registry.getState("task_a") == TaskState::Skipped);
-        CHECK(registry.isCompleted("task_a"));
-        CHECK_FALSE(registry.getFailureSnapshot("task_a").has_value());
+        check((registry.getState("task_a") == TaskState::Skipped));
+        check((registry.isCompleted("task_a")));
+        check((!(registry.getFailureSnapshot("task_a").has_value())));
     }
+}
+
+spec("TaskRegistry rejects failure after another terminal state") {
+    it("completed") { test_taskregistry_rejects_failure_after_another_terminal_state_8(0); }
+    it("skipped") { test_taskregistry_rejects_failure_after_another_terminal_state_8(1); }
 }

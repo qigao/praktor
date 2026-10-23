@@ -33,9 +33,9 @@ set(SOURCE_FILES
     src/executors/service_executor.cpp
     src/executors/managed_process_executor.cpp
     src/executors/host_tool_executor.cpp
-    src/system/service_controller.cpp
-    src/system/managed_process.cpp
-    src/system/managed_process_win.cpp
+    src/system/service_control_legacy_bridge.cpp
+    src/system/process_control_legacy_bridge.cpp
+    src/system/process_native_legacy_bridge.cpp
     src/expressions/expression_evaluator.cpp
     src/expressions/expression_lexer.cpp
     src/util/system_info.cpp
@@ -73,16 +73,24 @@ target_link_libraries(
            CHttp::Client
            Salts::CNet
            CHttp::S3
-           actions
+           praktor_shell
+    PRIVATE actions praktor_process_driver praktor_process_native praktor_service_control
 )
 if(ENABLE_SCRIPT_ENGINE)
     target_link_libraries(${TARGET_NAME_LIB} PUBLIC TurboScript::TurboScript)
+endif()
+# C11 remains opt-in; the Legacy runtime is a PRIVATE link dependency
+# for the current implementation, not a public header/compile requirement.
+# Do not remove its actual production link until full parity is accepted.
+if(PRAKTOR_ENABLE_C11_ACTIONS)
+    target_link_libraries(${TARGET_NAME_LIB} PRIVATE praktor_actions_c11)
 endif()
 if(UNIX AND NOT APPLE)
     target_link_libraries(${TARGET_NAME_LIB} PUBLIC ${CMAKE_DL_LIBS})
 endif()
 target_compile_definitions(
     ${TARGET_NAME_LIB} PUBLIC PRAKTOR_SCRIPT_ENGINE_ENABLED=$<BOOL:${ENABLE_SCRIPT_ENGINE}>
+                               PRAKTOR_C11_ACTIONS_ENABLED=$<BOOL:${PRAKTOR_ENABLE_C11_ACTIONS}>
                               $<$<BOOL:WIN32>:NOMINMAX>
                               $<$<BOOL:WIN32>:WIN32_LEAN_AND_MEAN>
 )

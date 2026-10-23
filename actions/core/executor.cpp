@@ -4,6 +4,7 @@
 #include "actions/output_parser.hpp"
 #include <json_parser.h>
 #include <cmath>
+#include <cstdint>
 #include <limits>
 #include <stdexcept>
 #include <chrono>
@@ -15,6 +16,26 @@
 namespace actions {
 
 namespace {
+
+void resetRetrySubtreeState(const Node& node, ExecutionContext& ctx) {
+  const std::string suffix =
+      std::to_string(reinterpret_cast<uintptr_t>(&node));
+  if (node.id == "Sequence") ctx.reset("Sequence_" + suffix);
+  if (node.id == "Fallback" || node.id == "Selector")
+    ctx.reset("Fallback_" + suffix);
+  if (node.id == "Retry") ctx.reset("Retry_" + suffix);
+  /*
+   * RunOnce and EntryUpdated keep persistent per-context observations. Reset
+   * their transient descendants, but preserve their own cached terminal state,
+   * matching Salts::BehaviorTree reset_node_state semantics.
+   */
+  if (node.id == "ConsumeQueue") ctx.reset("ConsumeQueue_" + suffix);
+  if (node.id == "PipelineSequence") ctx.reset("PipelineSequence_" + suffix);
+
+  for (const Node& child : node.children) {
+    resetRetrySubtreeState(child, ctx);
+  }
+}
 
 struct JsonDeleter {
   void operator()(json_value_t* value) const noexcept {
@@ -320,6 +341,12 @@ void Executor::registerBuiltins() {
   dispatch_["ReactiveSequence"] = [this](const Node& node, Blackboard& bb) {
     return executeReactiveSequence(node, bb);
   };
+  dispatch_["ReactiveFallback"] = [this](const Node& node, Blackboard& bb) {
+    return executeReactiveFallback(node, bb);
+  };
+  dispatch_["Retry"] = [this](const Node& node, Blackboard& bb) {
+    return executeRetry(node, bb);
+  };
   dispatch_["PipelineSequence"] = [this](const Node& node, Blackboard& bb) {
     return executePipelineSequence(node, bb);
   };
@@ -376,6 +403,12 @@ void Executor::registerBuiltins() {
   stateful_dispatch_["ReactiveSequence"] = [this](const Node& node, Blackboard& bb, ExecutionContext& ctx) {
     return executeReactiveSequence(node, bb, ctx);
   };
+  stateful_dispatch_["ReactiveFallback"] = [this](const Node& node, Blackboard& bb, ExecutionContext& ctx) {
+    return executeReactiveFallback(node, bb, ctx);
+  };
+  stateful_dispatch_["Retry"] = [this](const Node& node, Blackboard& bb, ExecutionContext& ctx) {
+    return executeRetry(node, bb, ctx);
+  };
   stateful_dispatch_["PipelineSequence"] = [this](const Node& node, Blackboard& bb, ExecutionContext& ctx) {
     return executePipelineSequence(node, bb, ctx);
   };
@@ -431,6 +464,8 @@ void Executor::registerBuiltins() {
   tasks_["Selector"] = nullptr;
   tasks_["Parallel"] = nullptr;
   tasks_["ReactiveSequence"] = nullptr;
+  tasks_["ReactiveFallback"] = nullptr;
+  tasks_["Retry"] = nullptr;
   tasks_["Switch"] = nullptr;
   tasks_["WhileDo"] = nullptr;
   tasks_["IfThenElse"] = nullptr;
@@ -495,6 +530,14 @@ void Executor::registerBuiltins() {
     }
 
     // Execute command with environment variables
+    // Preserve the Legacy action's empty-command no-op without spawning a
+    // shell. Salts::Process (and the C11 Session) reject empty commands.
+    if (cmd.empty() && timeout > 0) {
+      bb.set(output_key, "");
+      bb.set(stderr_key, "");
+      bb.set(exit_code_key, "0");
+      return NodeStatus::SUCCESS;
+    }
     auto result = ShellExecutor::execute(cmd, input, working_dir, timeout, env_vars, stream_output);
 
     // Store results in blackboard
@@ -998,6 +1041,35 @@ NodeStatus Executor::executeReactiveSequence(const Node& node, Blackboard& bb, E
   return NodeStatus::SUCCESS;
 }
 
+NodeStatus Executor::executeReactiveFallback(const Node& node, Blackboard& bb) {
+  // Re-evaluate priorities from the first child on every execution.
+  for (const auto& child : node.children) {
+    NodeStatus status = execute(child, bb);
+    if (status == NodeStatus::SUCCESS) {
+      return NodeStatus::SUCCESS;
+    }
+    if (status == NodeStatus::RUNNING) {
+      return NodeStatus::RUNNING;
+    }
+  }
+  return NodeStatus::FAILURE;
+}
+
+NodeStatus Executor::executeReactiveFallback(const Node& node, Blackboard& bb,
+                                             ExecutionContext& ctx) {
+  // Do not retain the failed-child cursor from Fallback: priority is reactive.
+  for (const auto& child : node.children) {
+    NodeStatus status = execute(child, bb, ctx);
+    if (status == NodeStatus::SUCCESS) {
+      return NodeStatus::SUCCESS;
+    }
+    if (status == NodeStatus::RUNNING) {
+      return NodeStatus::RUNNING;
+    }
+  }
+  return NodeStatus::FAILURE;
+}
+
 // ============ Decorators ============
 
 NodeStatus Executor::executeInverter(const Node& node, Blackboard& bb) {
@@ -1073,6 +1145,55 @@ NodeStatus Executor::executeForceFailure(const Node& node, Blackboard& bb, Execu
   if (status == NodeStatus::RUNNING) {
     return NodeStatus::RUNNING;
   }
+  return NodeStatus::FAILURE;
+}
+
+NodeStatus Executor::executeRetry(const Node& node, Blackboard& bb) {
+  if (node.children.size() != 1u) {
+    throw std::runtime_error("Retry must have exactly 1 child");
+  }
+
+  const int num_attempts = getIntParam(node, "num_attempts", bb, 3);
+  if (num_attempts < 0) {
+    throw std::runtime_error("Retry num_attempts must be non-negative");
+  }
+  for (int attempt = 0; attempt < num_attempts; ++attempt) {
+    const NodeStatus status = execute(node.children[0], bb);
+    if (status != NodeStatus::FAILURE) return status;
+  }
+  return NodeStatus::FAILURE;
+}
+
+NodeStatus Executor::executeRetry(const Node& node, Blackboard& bb,
+                                  ExecutionContext& ctx) {
+  if (node.children.size() != 1u) {
+    throw std::runtime_error("Retry must have exactly 1 child");
+  }
+
+  const int num_attempts = getIntParam(node, "num_attempts", bb, 3);
+  if (num_attempts < 0) {
+    throw std::runtime_error("Retry num_attempts must be non-negative");
+  }
+  const std::string node_id =
+      "Retry_" + std::to_string(reinterpret_cast<uintptr_t>(&node));
+  if (num_attempts == 0) {
+    ctx.reset(node_id);
+    return NodeStatus::FAILURE;
+  }
+
+  NodeState& state = ctx.getState(node_id);
+  while (state.retry_count < num_attempts) {
+    const NodeStatus status = execute(node.children[0], bb, ctx);
+    if (status == NodeStatus::RUNNING) return NodeStatus::RUNNING;
+    if (status == NodeStatus::SUCCESS) {
+      ctx.reset(node_id);
+      return NodeStatus::SUCCESS;
+    }
+
+    ++state.retry_count;
+    resetRetrySubtreeState(node.children[0], ctx);
+  }
+  ctx.reset(node_id);
   return NodeStatus::FAILURE;
 }
 
@@ -1595,36 +1716,46 @@ NodeStatus Executor::executeConsumeQueue(const Node& node, Blackboard& bb, Execu
     throw std::runtime_error("ConsumeQueue must have exactly 1 child");
   }
 
-  std::string queue_key = getTaskStringParam(node.params, bb, "queue_key", "task_queue");
-
-  if (!bb.has(queue_key)) {
-    return NodeStatus::FAILURE;
-  }
-
-  std::string queue_data = bb.get(queue_key);
-
+  const std::string node_id =
+      "ConsumeQueue_" + std::to_string(reinterpret_cast<uintptr_t>(&node));
+  NodeState& state = ctx.getState(node_id);
   try {
-    std::string item;
-    std::string remaining;
-    bool has_more = false;
-    if (!consumeJsonArrayFront(queue_data, item, remaining, has_more)) {
-      return NodeStatus::FAILURE;
+    if (!state.has_run) {
+      const std::string queue_key =
+          getTaskStringParam(node.params, bb, "queue_key", "task_queue");
+      if (!bb.has(queue_key)) {
+        ctx.reset(node_id);
+        return NodeStatus::FAILURE;
+      }
+
+      std::string item;
+      std::string remaining;
+      bool has_more = false;
+      if (!consumeJsonArrayFront(bb.get(queue_key), item, remaining, has_more)) {
+        ctx.reset(node_id);
+        return NodeStatus::FAILURE;
+      }
+
+      const std::string item_key =
+          getTaskStringParam(node.params, bb, "item_key", "current_item");
+      // Commit the dequeue before invoking the child, as the C11 runtime does.
+      bb.set(queue_key, remaining);
+      bb.set(item_key, item);
+      state.retry_count = has_more ? 1 : 0;
+      state.has_run = true;
     }
 
-    bb.set(queue_key, remaining);
+    const NodeStatus status = execute(node.children[0], bb, ctx);
+    if (status == NodeStatus::RUNNING) return NodeStatus::RUNNING;
 
-    std::string item_key = getTaskStringParam(node.params, bb, "item_key", "current_item");
-    bb.set(item_key, item);
-
-    NodeStatus status = execute(node.children[0], bb, ctx);
-
+    const bool has_more = state.retry_count != 0;
+    ctx.reset(node_id);
     if (status == NodeStatus::SUCCESS && has_more) {
       return NodeStatus::RUNNING;
     }
-
     return status;
-
   } catch (const std::exception&) {
+    ctx.reset(node_id);
     return NodeStatus::FAILURE;
   }
 }
@@ -1773,37 +1904,48 @@ NodeStatus Executor::executePipelineSequence(const Node& node, Blackboard& bb) {
 }
 
 NodeStatus Executor::executePipelineSequence(const Node& node, Blackboard& bb, ExecutionContext& ctx) {
+  const std::string node_id =
+      "PipelineSequence_" +
+      std::to_string(reinterpret_cast<uintptr_t>(&node));
   if (node.children.empty()) {
+    ctx.reset(node_id);
     return NodeStatus::SUCCESS;
   }
 
+  NodeState& state = ctx.getState(node_id);
   std::string pipeline_data;
-  std::string input_key = getTaskStringParam(node.params, bb, "input_key", "pipeline_input");
-  if (bb.has(input_key)) {
-    pipeline_data = bb.get(input_key);
+  if (state.has_run) {
+    // Preserve the input of the currently running stage, not an output it
+    // may have partially published before yielding.
+    pipeline_data = state.last_value;
+  } else {
+    const std::string input_key =
+        getTaskStringParam(node.params, bb, "input_key", "pipeline_input");
+    if (bb.has(input_key)) pipeline_data = bb.get(input_key);
   }
 
-  for (size_t i = 0; i < node.children.size(); ++i) {
+  for (size_t i = state.current_child; i < node.children.size(); ++i) {
     bb.set("pipeline_input", pipeline_data);
-
-    NodeStatus status = execute(node.children[i], bb, ctx);
+    const NodeStatus status = execute(node.children[i], bb, ctx);
 
     if (status == NodeStatus::FAILURE) {
+      ctx.reset(node_id);
       return NodeStatus::FAILURE;
     }
-
     if (status == NodeStatus::RUNNING) {
+      state.current_child = i;
+      state.last_value = pipeline_data;
+      state.has_run = true;
       return NodeStatus::RUNNING;
     }
 
-    if (bb.has("pipeline_output")) {
-      pipeline_data = bb.get("pipeline_output");
-    }
+    if (bb.has("pipeline_output")) pipeline_data = bb.get("pipeline_output");
   }
 
-  std::string output_key = getTaskStringParam(node.params, bb, "output_key", "pipeline_result");
+  const std::string output_key =
+      getTaskStringParam(node.params, bb, "output_key", "pipeline_result");
   bb.set(output_key, pipeline_data);
-
+  ctx.reset(node_id);
   return NodeStatus::SUCCESS;
 }
 

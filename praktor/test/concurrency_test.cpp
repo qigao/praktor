@@ -1,5 +1,5 @@
+#include "praktor_test.hpp"
 
-#include <catch2/catch_all.hpp>
 #include "dag/workflow_executor.hpp"
 #include "dag/workflow_context.hpp"
 #include "yml/task.hpp"
@@ -21,7 +21,7 @@ static constexpr long long SEQUENTIAL_MIN_MS = 900;   // ~500ms + ~500ms
 static constexpr long long CONCURRENT_MIN_MS = 400;
 #endif
 
-TEST_CASE("WorkflowExecutor Concurrency", "[executor][concurrency]") {
+[[maybe_unused]] static void test_workflowexecutor_concurrency_1(int section_index) {
     DependencyGraph<Task> graph("test_graph");
 
     // Create 3 tasks: A and B are independent, C depends on both.
@@ -66,7 +66,7 @@ TEST_CASE("WorkflowExecutor Concurrency", "[executor][concurrency]") {
     graph.addEdge(taskA, taskC);
     graph.addEdge(taskB, taskC);
 
-    SECTION("Sequential Execution (1 thread)") {
+    if (section_index == 0) {
         WorkflowContext context;
         WorkflowExecutor executor(graph, {}, 1);
 
@@ -76,12 +76,12 @@ TEST_CASE("WorkflowExecutor Concurrency", "[executor][concurrency]") {
 
         auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
 
-        REQUIRE(context.getValueOrDefault<std::string>("workflow_status", "") == "success");
+        check((context.getValueOrDefault<std::string>("workflow_status", "") == "success"));
         // Sequential: both tasks run one after another
-        REQUIRE(duration >= SEQUENTIAL_MIN_MS);
+        check((duration >= SEQUENTIAL_MIN_MS));
     }
 
-    SECTION("Concurrent Execution (2+ threads)") {
+    if (section_index == 1) {
         WorkflowContext context;
         WorkflowExecutor executor(graph, {}, 4);
 
@@ -91,14 +91,19 @@ TEST_CASE("WorkflowExecutor Concurrency", "[executor][concurrency]") {
 
         auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
 
-        REQUIRE(context.getValueOrDefault<std::string>("workflow_status", "") == "success");
+        check((context.getValueOrDefault<std::string>("workflow_status", "") == "success"));
         // Concurrent: both tasks run in parallel, so total < sequential
-        REQUIRE(duration < SEQUENTIAL_MIN_MS);
-        REQUIRE(duration >= CONCURRENT_MIN_MS);
+        check((duration < SEQUENTIAL_MIN_MS));
+        check((duration >= CONCURRENT_MIN_MS));
     }
 }
 
-TEST_CASE("WorkflowExecutor respects max concurrency for ready tasks", "[executor][concurrency]") {
+spec("WorkflowExecutor Concurrency") {
+    it("Sequential Execution (1 thread)") { test_workflowexecutor_concurrency_1(0); }
+    it("Concurrent Execution (2+ threads)") { test_workflowexecutor_concurrency_1(1); }
+}
+
+[[maybe_unused]] static void test_workflowexecutor_respects_max_concurrency_for_ready_tasks_2() {
     DependencyGraph<Task> graph("bounded_ready_graph");
     std::vector<Task> tasks;
 
@@ -129,12 +134,15 @@ TEST_CASE("WorkflowExecutor respects max concurrency for ready tasks", "[executo
 
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
 
-    REQUIRE(context.getValueOrDefault<std::string>("workflow_status", "") == "success");
-    REQUIRE(duration >= 1000);
+    check((context.getValueOrDefault<std::string>("workflow_status", "") == "success"));
+    check((duration >= 1000));
 }
 
-TEST_CASE("Forked task contexts merge local writes back to the parent context",
-          "[executor][concurrency][context_merge]") {
+spec("WorkflowExecutor respects max concurrency for ready tasks") {
+    it("complete case") { test_workflowexecutor_respects_max_concurrency_for_ready_tasks_2(); }
+}
+
+[[maybe_unused]] static void test_forked_task_contexts_merge_local_writes_back_to_the_parent_context_3() {
     DependencyGraph<Task> graph("merge_graph");
 
     Task task;
@@ -149,12 +157,15 @@ TEST_CASE("Forked task contexts merge local writes back to the parent context",
     WorkflowExecutor executor(graph, {task}, {}, 4, false);
     executor.execute(context);
 
-    REQUIRE(context.getValueOrDefault<std::string>("workflow_status", "") == "success");
-    CHECK(context.getValueOrDefault<std::string>("from_forked_task", "") == "visible");
+    check((context.getValueOrDefault<std::string>("workflow_status", "") == "success"));
+    check((context.getValueOrDefault<std::string>("from_forked_task", "") == "visible"));
 }
 
-TEST_CASE("Each iterations merge local writes back to the parent context",
-          "[executor][each][context_merge]") {
+spec("Forked task contexts merge local writes back to the parent context") {
+    it("complete case") { test_forked_task_contexts_merge_local_writes_back_to_the_parent_context_3(); }
+}
+
+[[maybe_unused]] static void test_each_iterations_merge_local_writes_back_to_the_parent_context_4() {
     DependencyGraph<Task> graph("each_merge_graph");
 
     Task task;
@@ -172,13 +183,16 @@ TEST_CASE("Each iterations merge local writes back to the parent context",
     WorkflowExecutor executor(graph, {task}, {}, 1, false);
     executor.execute(context);
 
-    REQUIRE(context.getValueOrDefault<std::string>("workflow_status", "") == "success");
-    CHECK(context.getValueOrDefault<std::string>("last_item_seen", "") == "gamma");
-    CHECK(context.getVariable("item").empty());
+    check((context.getValueOrDefault<std::string>("workflow_status", "") == "success"));
+    check((context.getValueOrDefault<std::string>("last_item_seen", "") == "gamma"));
+    check((context.getVariable("item").empty()));
 }
 
-TEST_CASE("Each iteration index variable does not leak into the parent context",
-          "[executor][each][context_merge]") {
+spec("Each iterations merge local writes back to the parent context") {
+    it("complete case") { test_each_iterations_merge_local_writes_back_to_the_parent_context_4(); }
+}
+
+[[maybe_unused]] static void test_each_iteration_index_variable_does_not_leak_into_the_parent_context_5() {
     DependencyGraph<Task> graph("each_index_graph");
 
     Task task;
@@ -197,13 +211,16 @@ TEST_CASE("Each iteration index variable does not leak into the parent context",
     WorkflowExecutor executor(graph, {task}, {}, 1, false);
     executor.execute(context);
 
-    REQUIRE(context.getValueOrDefault<std::string>("workflow_status", "") == "success");
-    CHECK(context.getValueOrDefault<std::string>("last_index_seen", "") == "1");
-    CHECK(context.getVariable("idx").empty());
+    check((context.getValueOrDefault<std::string>("workflow_status", "") == "success"));
+    check((context.getValueOrDefault<std::string>("last_index_seen", "") == "1"));
+    check((context.getVariable("idx").empty()));
 }
 
-TEST_CASE("Concurrent script tasks complete without corrupting TurboScript state",
-          "[executor][concurrency][script]") {
+spec("Each iteration index variable does not leak into the parent context") {
+    it("complete case") { test_each_iteration_index_variable_does_not_leak_into_the_parent_context_5(); }
+}
+
+[[maybe_unused]] static void test_concurrent_script_tasks_complete_without_corrupting_turboscript_state_6() {
     DependencyGraph<Task> graph("script_concurrency_graph");
 
     Task taskA;
@@ -227,7 +244,11 @@ TEST_CASE("Concurrent script tasks complete without corrupting TurboScript state
     WorkflowExecutor executor(graph, {taskA, taskB}, {}, 4, false);
     executor.execute(context);
 
-    REQUIRE(context.getValueOrDefault<std::string>("workflow_status", "") == "success");
-    CHECK(context.getValue<double>("script_a_value") == Catch::Approx(42.0));
-    CHECK(context.getValue<double>("script_b_count") == Catch::Approx(3.0));
+    check((context.getValueOrDefault<std::string>("workflow_status", "") == "success"));
+    check_within(context.getValue<double>("script_a_value"), 42.0, 100.0 * std::numeric_limits<float>::epsilon() * std::abs(42.0));
+    check_within(context.getValue<double>("script_b_count"), 3.0, 100.0 * std::numeric_limits<float>::epsilon() * std::abs(3.0));
+}
+
+spec("Concurrent script tasks complete without corrupting TurboScript state") {
+    it("complete case") { test_concurrent_script_tasks_complete_without_corrupting_turboscript_state_6(); }
 }

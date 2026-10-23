@@ -1,7 +1,7 @@
+#include "praktor_test.hpp"
 #include "praktor.h"
 #include "data/workflow_value.hpp"
 
-#include <catch2/catch_all.hpp>
 
 #include <chrono>
 #include <filesystem>
@@ -23,7 +23,7 @@ std::filesystem::path projectionTempDir() {
 void writeProjectionFile(const std::filesystem::path& path,
                          const std::string& content) {
     std::ofstream out(path);
-    REQUIRE(out.is_open());
+    check((out.is_open()));
     out << content;
 }
 
@@ -40,15 +40,14 @@ praktor_result executeProjection(const std::filesystem::path& workflow,
 }
 
 WorkflowValue parseProjection(const praktor_owned_json& output) {
-    REQUIRE(output.data != nullptr);
+    check((output.data != nullptr));
     return WorkflowValue::parse(
         std::string_view(output.data, output.size));
 }
 
 } // namespace
 
-TEST_CASE("agent_output exposes only declared workflow outputs",
-          "[sdk][projection]") {
+[[maybe_unused]] static void test_agent_output_exposes_only_declared_workflow_outputs_1() {
     const auto dir = projectionTempDir();
     const auto workflow = dir / "success.yml";
 
@@ -70,29 +69,32 @@ tasks:
 
     praktor_owned_json output = PRAKTOR_OWNED_JSON_INIT;
     praktor_error error = PRAKTOR_ERROR_INIT;
-    REQUIRE(executeProjection(workflow, output, error) ==
-            PRAKTOR_RESULT_SUCCESS);
+    check((executeProjection(workflow, output, error) ==
+            PRAKTOR_RESULT_SUCCESS));
 
     const auto result = parseProjection(output);
-    REQUIRE(result.at("tasks").is_object());
-    CHECK(result.at("tasks").at("secret").at("outputs")
+    check((result.at("tasks").is_object()));
+    check((result.at("tasks").at("secret").at("outputs")
               .at("stdout").as<std::string>()
-              .find("SECRET-RAW-DETAIL") != std::string::npos);
+              .find("SECRET-RAW-DETAIL") != std::string::npos));
 
     const auto agent = result.at("agent_output");
-    CHECK(agent.at("workflow_status").as<std::string>() == "success");
-    REQUIRE(agent.at("outputs").is_object());
-    CHECK(agent.at("outputs").at("summary").as<std::string>()
-              .find("public-summary") != std::string::npos);
-    CHECK_FALSE(agent.contains("tasks"));
-    CHECK(agent.to_string().find("SECRET-RAW-DETAIL") == std::string::npos);
+    check((agent.at("workflow_status").as<std::string>() == "success"));
+    check((agent.at("outputs").is_object()));
+    check((agent.at("outputs").at("summary").as<std::string>()
+              .find("public-summary") != std::string::npos));
+    check((!(agent.contains("tasks"))));
+    check((agent.to_string().find("SECRET-RAW-DETAIL") == std::string::npos));
 
     praktor_release_json(&output);
     std::filesystem::remove_all(dir);
 }
 
-TEST_CASE("failure projection preserves failure identity without requiring outputs",
-          "[sdk][projection]") {
+spec("agent_output exposes only declared workflow outputs") {
+    it("complete case") { test_agent_output_exposes_only_declared_workflow_outputs_1(); }
+}
+
+[[maybe_unused]] static void test_failure_projection_preserves_failure_identity_without_requiring_outputs_2() {
     const auto dir = projectionTempDir();
     const auto workflow = dir / "failure.yml";
 
@@ -110,25 +112,29 @@ tasks:
 
     praktor_owned_json output = PRAKTOR_OWNED_JSON_INIT;
     praktor_error error = PRAKTOR_ERROR_INIT;
-    REQUIRE(executeProjection(workflow, output, error) ==
-            PRAKTOR_RESULT_EXECUTION_FAILED);
+    check((executeProjection(workflow, output, error) ==
+            PRAKTOR_RESULT_EXECUTION_FAILED));
 
     const auto result = parseProjection(output);
-    CHECK(result.at("workflow_status").as<std::string>() == "failed");
-    CHECK(result.at("error").as<std::string>() ==
-          "Workflow execution failed");
+    check((result.at("workflow_status").as<std::string>() == "failed"));
+    check((result.at("error").as<std::string>() ==
+          "Workflow execution failed"));
 
     const auto agent = result.at("agent_output");
-    CHECK(agent.at("workflow_status").as<std::string>() == "failed");
-    CHECK(agent.at("error").as<std::string>() ==
-          "Workflow execution failed");
-    REQUIRE(agent.at("failure").is_object());
-    CHECK(agent.at("failure").at("task_name").as<std::string>() == "fail");
-    CHECK(agent.at("failure").at("task_type").as<std::string>() == "program");
-    CHECK_FALSE(agent.at("failure").contains("stdout"));
-    CHECK_FALSE(agent.at("failure").contains("stderr"));
-    CHECK_FALSE(agent.contains("outputs"));
+    check((agent.at("workflow_status").as<std::string>() == "failed"));
+    check((agent.at("error").as<std::string>() ==
+          "Workflow execution failed"));
+    check((agent.at("failure").is_object()));
+    check((agent.at("failure").at("task_name").as<std::string>() == "fail"));
+    check((agent.at("failure").at("task_type").as<std::string>() == "program"));
+    check((!(agent.at("failure").contains("stdout"))));
+    check((!(agent.at("failure").contains("stderr"))));
+    check((!(agent.contains("outputs"))));
 
     praktor_release_json(&output);
     std::filesystem::remove_all(dir);
+}
+
+spec("failure projection preserves failure identity without requiring outputs") {
+    it("complete case") { test_failure_projection_preserves_failure_identity_without_requiring_outputs_2(); }
 }

@@ -1,0 +1,28 @@
+name: Native CI dependencies with curl
+description: Pinned vcpkg contract and GitHub package downloads without Mono or NuGet.
+runs:
+  using: composite
+  steps:
+    - name: Checkout immutable shared cache contract
+      uses: actions/checkout@v4
+      with:
+        repository: qigao/vcpkg-cache
+        ref: 0dc254695917bc180504d916240292e9096e9da5
+        path: build/ci-vcpkg-contract
+        persist-credentials: false
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+    - name: Verify curl package downloads and cache conversion
+      shell: bash
+      run: python cmake/ci/github_packages_test.py
+    - name: Bootstrap canonical vcpkg and read-only curl cache
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+      run: python cmake/ci/setup_native_ci.py build/ci-vcpkg-contract
+    - name: Download re2c host package with curl
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+      run: python cmake/ci/github_packages.py re2c --packages build/native-sdk/packages

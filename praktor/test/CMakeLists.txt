@@ -1,3 +1,13 @@
+# Compile this public header without a transitive include of the
+# legacy actions Executor. The main target links actions privately, so this
+# isolated consumer has only Praktor's declared public include interface.
+add_library(praktor_public_header_contract OBJECT
+    c11_public_header_contract.cpp)
+target_link_libraries(praktor_public_header_contract PRIVATE ${TARGET_NAME_LIB})
+target_compile_features(praktor_public_header_contract PRIVATE cxx_std_17)
+set_target_properties(praktor_public_header_contract PROPERTIES
+    FOLDER "praktor/test/contracts")
+
 if(ENABLE_SCRIPT_ENGINE)
     string(REPLACE "\\" "\\\\" PYTHON3_EXECUTABLE_ESCAPED "${Python3_EXECUTABLE}")
     string(REPLACE "\\" "\\\\" FORCE_TERMINATE_CORPUS_ESCAPED
@@ -20,8 +30,6 @@ if(ENABLE_SCRIPT_ENGINE)
         matrix_test.cpp
         script_engine_test.cpp
         declarative_tree_executor_test.cpp
-        service_executor_test.cpp
-        managed_process_executor_test.cpp
         structured_document_query_test.cpp
     )
 else()
@@ -29,6 +37,8 @@ else()
 endif()
 
 list(APPEND TEST_SOURCES
+    service_executor_test.cpp
+    managed_process_executor_test.cpp
     download_executor_test.cpp
     workflow_execution_regression_test.cpp
     system_info_test.cpp
@@ -37,7 +47,7 @@ list(APPEND TEST_SOURCES
 
 cmake_add_test(
     SOURCES ${TEST_SOURCES}
-    LIBS Catch2::Catch2WithMain ${TARGET_NAME_LIB}
+    LIBS praktor_test_support ${TARGET_NAME_LIB}
     TARGET_SUFFIX ".${TARGET_NAME_LIB}"
     FOLDER "${folder_name}/test"
     OUT_TARGETS PRAKTOR_TEST_TARGETS
@@ -49,6 +59,14 @@ target_include_directories(workflow_execution_regression_test.${TARGET_NAME_LIB}
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../src)
 set_tests_properties(workflow_execution_regression_test.${TARGET_NAME_LIB}
     PROPERTIES TIMEOUT 60)
+
+# The opt-in C11 test suite exercises native process cancellation. Keep a
+# hard CTest timeout so a shutdown fault is reported as a failed qualification,
+# not an unbounded CI job; this is not a substitute for a lease-safe API.
+if(PRAKTOR_ENABLE_C11_ACTIONS AND NOT ENABLE_SCRIPT_ENGINE)
+    set_tests_properties(core_only_workflow_test.${TARGET_NAME_LIB}
+        PROPERTIES TIMEOUT 40)
+endif()
 
 if(ENABLE_SCRIPT_ENGINE)
     target_compile_definitions(script_engine_test.${TARGET_NAME_LIB} PRIVATE
@@ -64,53 +82,72 @@ if(ENABLE_SCRIPT_ENGINE)
         workflow_runner_test.${TARGET_NAME_LIB}
         PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../src
     )
+endif()
 
-    if(WIN32)
-        add_executable(managed_process_fixture helpers/managed_process_fixture.cpp)
-        add_executable(managed_process_fixture_alt helpers/managed_process_fixture.cpp)
+if(WIN32)
+    add_executable(managed_process_fixture helpers/managed_process_fixture.c)
+    add_executable(managed_process_fixture_alt helpers/managed_process_fixture.c)
+    set_target_properties(managed_process_fixture managed_process_fixture_alt PROPERTIES
+        C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF LINKER_LANGUAGE C)
+    set_target_properties(managed_process_fixture_alt PROPERTIES
+        OUTPUT_NAME "managed_process_fixture"
+        SUFFIX ".com"
+    )
+    if(MSVC)
         set_target_properties(managed_process_fixture_alt PROPERTIES
-            OUTPUT_NAME "managed_process_fixture"
-            SUFFIX ".com"
+            PDB_NAME "managed_process_fixture_alt"
         )
-        if(MSVC)
-            set_target_properties(managed_process_fixture_alt PROPERTIES
-                PDB_NAME "managed_process_fixture_alt"
-            )
-            target_link_options(managed_process_fixture_alt PRIVATE
-                "/ILK:$<TARGET_FILE_DIR:managed_process_fixture_alt>/managed_process_fixture_alt.ilk"
-            )
-        endif()
-        cmake_config_target(
-            managed_process_fixture
-            NO_INSTALL
-            NO_VERSION
-            FOLDER "${folder_name}/test/helpers"
+        target_link_options(managed_process_fixture_alt PRIVATE
+            "/ILK:$<TARGET_FILE_DIR:managed_process_fixture_alt>/managed_process_fixture_alt.ilk"
         )
-        cmake_config_target(
-            managed_process_fixture_alt
-            NO_INSTALL
-            NO_VERSION
-            FOLDER "${folder_name}/test/helpers"
-        )
-        add_dependencies(managed_process_executor_test.${TARGET_NAME_LIB}
-                         managed_process_fixture
-                         managed_process_fixture_alt)
-        add_dependencies(workflow_runner_test.${TARGET_NAME_LIB}
-                         managed_process_fixture)
-        target_compile_definitions(
-            managed_process_executor_test.${TARGET_NAME_LIB}
-            PRIVATE PRAKTOR_MANAGED_PROCESS_FIXTURE="$<TARGET_FILE:managed_process_fixture>"
-                    PRAKTOR_MANAGED_PROCESS_FIXTURE_ALT="$<TARGET_FILE:managed_process_fixture_alt>"
-        )
+    endif()
+    cmake_config_target(
+        managed_process_fixture
+        NO_INSTALL
+        NO_VERSION
+        FOLDER "${folder_name}/test/helpers"
+    )
+    cmake_config_target(
+        managed_process_fixture_alt
+        NO_INSTALL
+        NO_VERSION
+        FOLDER "${folder_name}/test/helpers"
+    )
+    add_dependencies(managed_process_executor_test.${TARGET_NAME_LIB}
+                     managed_process_fixture
+                     managed_process_fixture_alt)
+    target_compile_definitions(
+        managed_process_executor_test.${TARGET_NAME_LIB}
+        PRIVATE PRAKTOR_MANAGED_PROCESS_FIXTURE="$<TARGET_FILE:managed_process_fixture>"
+                PRAKTOR_MANAGED_PROCESS_FIXTURE_ALT="$<TARGET_FILE:managed_process_fixture_alt>"
+    )
+    if(TARGET praktor_process_native_test)
+        add_dependencies(praktor_process_native_test managed_process_fixture)
+        target_compile_definitions(praktor_process_native_test PRIVATE
+            PRAKTOR_NATIVE_FIXTURE="$<TARGET_FILE:managed_process_fixture>")
+    endif()
+    if(TARGET workflow_runner_test.${TARGET_NAME_LIB})
+        add_dependencies(workflow_runner_test.${TARGET_NAME_LIB} managed_process_fixture)
         target_compile_definitions(
             workflow_runner_test.${TARGET_NAME_LIB}
             PRIVATE PRAKTOR_MANAGED_PROCESS_FIXTURE="$<TARGET_FILE:managed_process_fixture>"
                     PRAKTOR_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
         )
-        set_tests_properties(
-            managed_process_executor_test.${TARGET_NAME_LIB}
-            workflow_runner_test.${TARGET_NAME_LIB}
-            PROPERTIES RESOURCE_LOCK praktor_managed_process_fixture
-        )
+        set_tests_properties(workflow_runner_test.${TARGET_NAME_LIB}
+            PROPERTIES RESOURCE_LOCK praktor_managed_process_fixture)
     endif()
+    set_tests_properties(
+        managed_process_executor_test.${TARGET_NAME_LIB}
+        PROPERTIES RESOURCE_LOCK praktor_managed_process_fixture
+    )
+endif()
+
+if(PRAKTOR_ENABLE_C11_ACTIONS)
+    add_executable(actions_c11_session_yaml_differential_test
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../actions/c11/session_yaml_differential_test.cpp)
+    target_link_libraries(actions_c11_session_yaml_differential_test PRIVATE
+        ${TARGET_NAME_LIB} actions praktor_c11_session praktor_c11_native_host praktor_test_support)
+    add_test(NAME actions_c11_session_yaml_differential_test
+        COMMAND actions_c11_session_yaml_differential_test)
+    set_tests_properties(actions_c11_session_yaml_differential_test PROPERTIES TIMEOUT 30)
 endif()

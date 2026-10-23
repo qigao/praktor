@@ -1,7 +1,7 @@
+#include "praktor_test.hpp"
 #include "yml/task_parser.hpp"
 #include "yml/task_yaml.hpp"
 
-#include <catch2/catch_all.hpp>
 
 #include <filesystem>
 #include <fstream>
@@ -137,8 +137,7 @@ std::vector<ForceTerminateCase> loadForceTerminateCorpus()
 
 }
 
-TEST_CASE("parse minimal run_command task")
-{
+[[maybe_unused]] static void test_parse_minimal_run_command_task_1() {
     const std::string content =
         "variables:\n"
         "  APP_NAME: praktor\n"
@@ -154,20 +153,23 @@ TEST_CASE("parse minimal run_command task")
     auto wf = writeTempWorkflow("minimal.yml", content);
 
     Workflow workflow = TaskParser::parseFile(wf.string());
-    REQUIRE(workflow.tasks.size() == 1);
+    check((workflow.tasks.size() == 1));
     const Task& build = workflow.tasks[0];
-    CHECK(build.name == "build");
-    CHECK(build.action == TaskAction::Orch);
-    REQUIRE(std::holds_alternative<OrchParams>(build.specifics));
+    check((build.name == "build"));
+    check((build.action == TaskAction::Orch));
+    check((std::holds_alternative<OrchParams>(build.specifics)));
     const auto& params = std::get<OrchParams>(build.specifics);
-    REQUIRE(!params.root.children.empty());
-    CHECK(params.root.children[0].params.at("cmd") == "echo building");
-    CHECK(build.vars.at("MESSAGE") == "{{ APP_NAME }}");
-    CHECK(build.when.has_value());
+    check((!params.root.children.empty()));
+    check((params.root.children[0].params.at("cmd") == "echo building"));
+    check((build.vars.at("MESSAGE") == "{{ APP_NAME }}"));
+    check((build.when.has_value()));
 }
 
-TEST_CASE("parse command post-processor as part of the command runner")
-{
+spec("parse minimal run_command task") {
+    it("complete case") { test_parse_minimal_run_command_task_1(); }
+}
+
+[[maybe_unused]] static void test_parse_command_post_processor_as_part_of_the_command_runner_2() {
     auto wf = writeTempWorkflow("command_parse_json.yml",
         "tasks:\n"
         "  - name: query\n"
@@ -177,21 +179,24 @@ TEST_CASE("parse command post-processor as part of the command runner")
         "      output_key: status\n");
 
     Workflow workflow = TaskParser::parseFile(wf.string());
-    REQUIRE(workflow.tasks.size() == 1);
+    check((workflow.tasks.size() == 1));
     const Task& task = workflow.tasks[0];
-    CHECK(task.declared_runner == "command");
-    REQUIRE(std::holds_alternative<OrchParams>(task.specifics));
+    check((task.declared_runner == "command"));
+    check((std::holds_alternative<OrchParams>(task.specifics)));
 
     const auto& params = std::get<OrchParams>(task.specifics);
-    REQUIRE(params.root.children.size() == 2);
-    CHECK(params.root.children[0].type == "Shell");
-    CHECK(params.root.children[1].type == "ParseJson");
-    CHECK(params.root.children[1].params.at("path") == "$.status");
-    CHECK(params.root.children[1].params.at("output_key") == "status");
+    check((params.root.children.size() == 2));
+    check((params.root.children[0].type == "Shell"));
+    check((params.root.children[1].type == "ParseJson"));
+    check((params.root.children[1].params.at("path") == "$.status"));
+    check((params.root.children[1].params.at("output_key") == "status"));
 }
 
-TEST_CASE("parse rejects multiple command post-processors")
-{
+spec("parse command post-processor as part of the command runner") {
+    it("complete case") { test_parse_command_post_processor_as_part_of_the_command_runner_2(); }
+}
+
+[[maybe_unused]] static void test_parse_rejects_multiple_command_post_processors_3() {
     auto wf = writeTempWorkflow("multiple_command_parsers.yml",
         "tasks:\n"
         "  - name: ambiguous\n"
@@ -202,14 +207,15 @@ TEST_CASE("parse rejects multiple command post-processors")
         "    parse_lines:\n"
         "      output_key: lines\n");
 
-    REQUIRE_THROWS_WITH(TaskParser::parseFile(wf.string()),
-        Catch::Matchers::ContainsSubstring(
-            "command task cannot combine 'parse_json' and 'parse_lines'") &&
-        Catch::Matchers::ContainsSubstring("line 7"));
+    check((praktor_test::throws_containing([&] { (void)(TaskParser::parseFile(wf.string())); }, {
+            "command task cannot combine 'parse_json' and 'parse_lines'", "line 7"})));
 }
 
-TEST_CASE("parse uses tasks")
-{
+spec("parse rejects multiple command post-processors") {
+    it("complete case") { test_parse_rejects_multiple_command_post_processors_3(); }
+}
+
+[[maybe_unused]] static void test_parse_uses_tasks_4() {
     auto reused = writeTempWorkflow("reusable.yml",
         "tasks:\n"
         "  - name: step\n"
@@ -226,21 +232,24 @@ TEST_CASE("parse uses tasks")
     auto wf = writeTempWorkflow("main.yml", main_content);
 
     Workflow workflow = TaskParser::parseFile(wf.string());
-    REQUIRE(workflow.tasks.size() == 2);
+    check((workflow.tasks.size() == 2));
 
     const Task& cmdTask = workflow.tasks[0];
-    CHECK(cmdTask.action == TaskAction::Orch);
-    REQUIRE(std::holds_alternative<OrchParams>(cmdTask.specifics));
+    check((cmdTask.action == TaskAction::Orch));
+    check((std::holds_alternative<OrchParams>(cmdTask.specifics)));
 
     const Task& usesTask = workflow.tasks[1];
-    CHECK(usesTask.action == TaskAction::Uses);
-    REQUIRE(std::holds_alternative<UsesParams>(usesTask.specifics));
-    CHECK_FALSE(std::get<UsesParams>(usesTask.specifics).path.empty());
-    CHECK(usesTask.vars.at("INPUT") == "data");
+    check((usesTask.action == TaskAction::Uses));
+    check((std::holds_alternative<UsesParams>(usesTask.specifics)));
+    check((!(std::get<UsesParams>(usesTask.specifics).path.empty())));
+    check((usesTask.vars.at("INPUT") == "data"));
 }
 
-TEST_CASE("parse program task")
-{
+spec("parse uses tasks") {
+    it("complete case") { test_parse_uses_tasks_4(); }
+}
+
+[[maybe_unused]] static void test_parse_program_task_5() {
     const std::string content =
         "tasks:\n"
         "  - name: probe\n"
@@ -254,24 +263,27 @@ TEST_CASE("parse program task")
     auto wf = writeTempWorkflow("program.yml", content);
 
     Workflow workflow = TaskParser::parseFile(wf.string());
-    REQUIRE(workflow.tasks.size() == 1);
+    check((workflow.tasks.size() == 1));
 
     const Task& task = workflow.tasks[0];
-    CHECK(task.action == TaskAction::Program);
-    CHECK(task.declared_runner == "program");
-    REQUIRE(std::holds_alternative<ProgramParams>(task.specifics));
+    check((task.action == TaskAction::Program));
+    check((task.declared_runner == "program"));
+    check((std::holds_alternative<ProgramParams>(task.specifics)));
 
     const auto& params = std::get<ProgramParams>(task.specifics);
-    CHECK(params.program == "tool");
-    REQUIRE(params.args.size() == 2);
-    CHECK(params.args[0] == "alpha beta");
-    CHECK(params.args[1] == "--flag");
-    CHECK(params.input == "payload");
-    CHECK(params.output_format == CommandOutputFormat::Json);
+    check((params.program == "tool"));
+    check((params.args.size() == 2));
+    check((params.args[0] == "alpha beta"));
+    check((params.args[1] == "--flag"));
+    check((params.input == "payload"));
+    check((params.output_format == CommandOutputFormat::Json));
 }
 
-TEST_CASE("parse download task")
-{
+spec("parse program task") {
+    it("complete case") { test_parse_program_task_5(); }
+}
+
+[[maybe_unused]] static void test_parse_download_task_6() {
     const std::string content =
         "tasks:\n"
         "  - name: fetch_package\n"
@@ -284,22 +296,25 @@ TEST_CASE("parse download task")
 
     auto wf = writeTempWorkflow("download.yml", content);
     Workflow workflow = TaskParser::parseFile(wf.string());
-    REQUIRE(workflow.tasks.size() == 1);
+    check((workflow.tasks.size() == 1));
 
     const Task& task = workflow.tasks[0];
-    CHECK(task.action == TaskAction::Download);
-    CHECK(task.declared_runner == "download");
-    REQUIRE(std::holds_alternative<DownloadParams>(task.specifics));
+    check((task.action == TaskAction::Download));
+    check((task.declared_runner == "download"));
+    check((std::holds_alternative<DownloadParams>(task.specifics)));
     const auto& params = std::get<DownloadParams>(task.specifics);
-    CHECK(params.url == "{{ DOWNLOAD_URL }}");
-    CHECK(params.path == "packages/release.zip");
-    CHECK(params.sha256 == "{{ SHA256 }}");
-    CHECK(params.overwrite);
-    CHECK(params.timeout_ms == 300000);
+    check((params.url == "{{ DOWNLOAD_URL }}"));
+    check((params.path == "packages/release.zip"));
+    check((params.sha256 == "{{ SHA256 }}"));
+    check((params.overwrite));
+    check((params.timeout_ms == 300000));
 }
 
-TEST_CASE("parse service and managed_process tasks")
-{
+spec("parse download task") {
+    it("complete case") { test_parse_download_task_6(); }
+}
+
+[[maybe_unused]] static void test_parse_service_and_managed_process_tasks_7() {
     auto wf = writeTempWorkflow("system_actions.yml", R"(
 tasks:
   - name: start_camera
@@ -324,37 +339,40 @@ tasks:
 )");
 
     Workflow workflow = TaskParser::parseFile(wf.string());
-    REQUIRE(workflow.tasks.size() == 2);
+    check((workflow.tasks.size() == 2));
 
     const Task& service_task = workflow.tasks[0];
-    CHECK(service_task.action == TaskAction::Service);
-    CHECK(service_task.declared_runner == "service");
-    REQUIRE(std::holds_alternative<ServiceParams>(service_task.specifics));
+    check((service_task.action == TaskAction::Service));
+    check((service_task.declared_runner == "service"));
+    check((std::holds_alternative<ServiceParams>(service_task.specifics)));
     const auto& service = std::get<ServiceParams>(service_task.specifics);
-    CHECK(service.operation == SystemOperation::Start);
-    CHECK(service.name == "RetroCamera");
-    CHECK(service.profile == "windows_scm");
-    CHECK(service.arguments == StrList{"--verbose"});
-    CHECK(service.timeout_ms == 30000);
-    CHECK(service.poll_interval_ms == 200);
+    check((service.operation == SystemOperation::Start));
+    check((service.name == "RetroCamera"));
+    check((service.profile == "windows_scm"));
+    check((service.arguments == StrList{"--verbose"}));
+    check((service.timeout_ms == 30000));
+    check((service.poll_interval_ms == 200));
 
     const Task& process_task = workflow.tasks[1];
-    CHECK(process_task.action == TaskAction::ManagedProcess);
-    CHECK(process_task.declared_runner == "managed_process");
-    REQUIRE(std::holds_alternative<ManagedProcessParams>(process_task.specifics));
+    check((process_task.action == TaskAction::ManagedProcess));
+    check((process_task.declared_runner == "managed_process"));
+    check((std::holds_alternative<ManagedProcessParams>(process_task.specifics)));
     const auto& process = std::get<ManagedProcessParams>(process_task.specifics);
-    CHECK(process.operation == SystemOperation::Start);
-    CHECK(process.executable == "RetroScreenSaver.exe");
-    CHECK(process.arguments == StrList{"--fullscreen"});
-    CHECK(process.working_directory == "C:/Retro");
-    CHECK(process.identity.image_name == "RetroScreenSaver.exe");
-    CHECK(process.startup_timeout_ms == 5000);
-    CHECK(process.stop_timeout_ms == 5000);
-    CHECK(process.force_terminate);
+    check((process.operation == SystemOperation::Start));
+    check((process.executable == "RetroScreenSaver.exe"));
+    check((process.arguments == StrList{"--fullscreen"}));
+    check((process.working_directory == "C:/Retro"));
+    check((process.identity.image_name == "RetroScreenSaver.exe"));
+    check((process.startup_timeout_ms == 5000));
+    check((process.stop_timeout_ms == 5000));
+    check((process.force_terminate));
 }
 
-TEST_CASE("parse system action defaults")
-{
+spec("parse service and managed_process tasks") {
+    it("complete case") { test_parse_service_and_managed_process_tasks_7(); }
+}
+
+[[maybe_unused]] static void test_parse_system_action_defaults_8() {
     auto wf = writeTempWorkflow("system_action_defaults.yml", R"(
 tasks:
   - name: query_camera
@@ -367,26 +385,29 @@ tasks:
 )");
 
     Workflow workflow = TaskParser::parseFile(wf.string());
-    REQUIRE(workflow.tasks.size() == 2);
+    check((workflow.tasks.size() == 2));
 
     const auto& service = std::get<ServiceParams>(workflow.tasks[0].specifics);
-    CHECK(service.operation == SystemOperation::Status);
-    CHECK(service.profile == "windows_scm");
-    CHECK(service.timeout_ms == 30000);
-    CHECK(service.poll_interval_ms == 200);
+    check((service.operation == SystemOperation::Status));
+    check((service.profile == "windows_scm"));
+    check((service.timeout_ms == 30000));
+    check((service.poll_interval_ms == 200));
 
     const auto& process = std::get<ManagedProcessParams>(workflow.tasks[1].specifics);
-    CHECK(process.operation == SystemOperation::Status);
-    CHECK(process.executable.empty());
-    CHECK(process.startup_timeout_ms == 5000);
-    CHECK(process.stop_timeout_ms == 5000);
-    CHECK_FALSE(process.force_terminate);
+    check((process.operation == SystemOperation::Status));
+    check((process.executable.empty()));
+    check((process.startup_timeout_ms == 5000));
+    check((process.stop_timeout_ms == 5000));
+    check((!(process.force_terminate)));
 }
 
-TEST_CASE("force_terminate corpus has identical TaskParser boolean semantics")
-{
+spec("parse system action defaults") {
+    it("complete case") { test_parse_system_action_defaults_8(); }
+}
+
+[[maybe_unused]] static void test_force_terminate_corpus_has_identical_taskparser_boolean_semantics_9() {
     for (const auto& test_case : loadForceTerminateCorpus()) {
-        CAPTURE(test_case.name, test_case.scalar);
+        info("%s", praktor_test::message([&](std::ostream& out) { out << test_case.name << ", " << test_case.scalar; }).c_str());
         const auto wf = writeTempWorkflow(
             "force_terminate_" + test_case.name + ".yml",
             "tasks:\n"
@@ -398,63 +419,65 @@ TEST_CASE("force_terminate corpus has identical TaskParser boolean semantics")
             "      force_terminate: " + test_case.scalar + "\n");
 
         if (!test_case.should_pass) {
-            REQUIRE_THROWS_WITH(
-                TaskParser::parseFile(wf.string()),
-                Catch::Matchers::ContainsSubstring("'force_terminate' must be a boolean"));
+            check((praktor_test::throws_containing([&] { (void)(TaskParser::parseFile(wf.string())); }, {"'force_terminate' must be a boolean"})));
             continue;
         }
 
         const Workflow workflow = TaskParser::parseFile(wf.string());
-        REQUIRE(workflow.tasks.size() == 1);
+        check((workflow.tasks.size() == 1));
         const auto& process = std::get<ManagedProcessParams>(workflow.tasks[0].specifics);
-        CHECK(process.force_terminate == test_case.expected_value);
+        check((process.force_terminate == test_case.expected_value));
     }
 }
 
-TEST_CASE("system action string corpus has strict TaskParser scalar semantics")
-{
+spec("force_terminate corpus has identical TaskParser boolean semantics") {
+    it("complete case") { test_force_terminate_corpus_has_identical_taskparser_boolean_semantics_9(); }
+}
+
+[[maybe_unused]] static void test_system_action_string_corpus_has_strict_taskparser_scalar_semantics_10() {
     for (const auto& test_case : loadSystemActionStringCorpus()) {
-        CAPTURE(test_case.name, test_case.action, test_case.field, test_case.scalar);
+        info("%s", praktor_test::message([&](std::ostream& out) { out << test_case.name << ", " << test_case.action << ", " << test_case.field << ", " << test_case.scalar; }).c_str());
         const auto wf = writeTempWorkflow(
             "system_action_string_" + test_case.name + ".yml",
             systemActionCorpusWorkflow(test_case));
 
         if (!test_case.should_pass) {
-            REQUIRE_THROWS_WITH(
-                TaskParser::parseFile(wf.string()),
-                Catch::Matchers::ContainsSubstring(test_case.error_fragment));
+            check((praktor_test::throws_containing([&] { (void)(TaskParser::parseFile(wf.string())); }, {test_case.error_fragment})));
             continue;
         }
 
         const Workflow workflow = TaskParser::parseFile(wf.string());
-        REQUIRE(workflow.tasks.size() == 1);
+        check((workflow.tasks.size() == 1));
         if (test_case.action == "service") {
             const auto& parsed = std::get<ServiceParams>(workflow.tasks[0].specifics);
             if (test_case.field == "name") {
-                CHECK(parsed.name == test_case.expected);
+                check((parsed.name == test_case.expected));
             } else if (test_case.field == "profile") {
-                CHECK(parsed.profile == test_case.expected);
+                check((parsed.profile == test_case.expected));
             } else {
-                REQUIRE(parsed.arguments.size() == 1);
-                CHECK(parsed.arguments.front() == test_case.expected);
+                check((parsed.arguments.size() == 1));
+                check((parsed.arguments.front() == test_case.expected));
             }
         } else {
             const auto& parsed = std::get<ManagedProcessParams>(workflow.tasks[0].specifics);
             if (test_case.field == "executable") {
-                CHECK(parsed.executable == test_case.expected);
+                check((parsed.executable == test_case.expected));
             } else if (test_case.field == "image_name") {
-                CHECK(parsed.identity.image_name == test_case.expected);
+                check((parsed.identity.image_name == test_case.expected));
             } else {
-                REQUIRE(parsed.arguments.size() == 1);
-                CHECK(parsed.arguments.front() == test_case.expected);
+                check((parsed.arguments.size() == 1));
+                check((parsed.arguments.front() == test_case.expected));
             }
         }
     }
 }
 
-TEST_CASE("parse rejects invalid system action schemas with source lines")
-{
-    SECTION("service rejects unknown keys and invalid operation") {
+spec("system action string corpus has strict TaskParser scalar semantics") {
+    it("complete case") { test_system_action_string_corpus_has_strict_taskparser_scalar_semantics_10(); }
+}
+
+[[maybe_unused]] static void test_parse_rejects_invalid_system_action_schemas_with_source_lines_11(int section_index) {
+    if (section_index == 0) {
         auto unknown_key = writeTempWorkflow("service_unknown_key.yml", R"(
 tasks:
   - name: start_camera
@@ -462,9 +485,7 @@ tasks:
       name: RetroCamera
       profile_name: windows_scm
 )");
-        REQUIRE_THROWS_WITH(TaskParser::parseFile(unknown_key.string()),
-            Catch::Matchers::ContainsSubstring("Unknown key: 'profile_name'") &&
-            Catch::Matchers::ContainsSubstring("line 6"));
+        check((praktor_test::throws_containing([&] { (void)(TaskParser::parseFile(unknown_key.string())); }, {"Unknown key: 'profile_name'", "line 6"})));
 
         auto invalid_operation = writeTempWorkflow("service_invalid_operation.yml", R"(
 tasks:
@@ -473,21 +494,17 @@ tasks:
       operation: enable
       name: RetroCamera
 )");
-        REQUIRE_THROWS_WITH(TaskParser::parseFile(invalid_operation.string()),
-            Catch::Matchers::ContainsSubstring("Unsupported service.operation value: 'enable'") &&
-            Catch::Matchers::ContainsSubstring("line 5"));
+        check((praktor_test::throws_containing([&] { (void)(TaskParser::parseFile(invalid_operation.string())); }, {"Unsupported service.operation value: 'enable'", "line 5"})));
     }
 
-    SECTION("service rejects empty names and non-positive timeouts") {
+    if (section_index == 1) {
         auto empty_name = writeTempWorkflow("service_empty_name.yml", R"(
 tasks:
   - name: start_camera
     service:
       name: ""
 )");
-        REQUIRE_THROWS_WITH(TaskParser::parseFile(empty_name.string()),
-            Catch::Matchers::ContainsSubstring("service.name cannot be empty") &&
-            Catch::Matchers::ContainsSubstring("line 5"));
+        check((praktor_test::throws_containing([&] { (void)(TaskParser::parseFile(empty_name.string())); }, {"service.name cannot be empty", "line 5"})));
 
         auto zero_timeout = writeTempWorkflow("service_zero_timeout.yml", R"(
 tasks:
@@ -496,9 +513,7 @@ tasks:
       name: RetroCamera
       timeout_ms: 0
 )");
-        REQUIRE_THROWS_WITH(TaskParser::parseFile(zero_timeout.string()),
-            Catch::Matchers::ContainsSubstring("service.timeout_ms must be positive") &&
-            Catch::Matchers::ContainsSubstring("line 6"));
+        check((praktor_test::throws_containing([&] { (void)(TaskParser::parseFile(zero_timeout.string())); }, {"service.timeout_ms must be positive", "line 6"})));
 
         auto scalar_arguments = writeTempWorkflow("service_scalar_arguments.yml", R"(
 tasks:
@@ -507,12 +522,10 @@ tasks:
       name: RetroCamera
       arguments: --verbose
 )");
-        REQUIRE_THROWS_WITH(TaskParser::parseFile(scalar_arguments.string()),
-            Catch::Matchers::ContainsSubstring("service.arguments must be a sequence") &&
-            Catch::Matchers::ContainsSubstring("line 6"));
+        check((praktor_test::throws_containing([&] { (void)(TaskParser::parseFile(scalar_arguments.string())); }, {"service.arguments must be a sequence", "line 6"})));
     }
 
-    SECTION("managed process rejects invalid fields and missing start executable") {
+    if (section_index == 2) {
         auto unknown_identity_key = writeTempWorkflow("managed_process_unknown_identity_key.yml", R"(
 tasks:
   - name: start_saver
@@ -520,9 +533,7 @@ tasks:
       identity:
         image: RetroScreenSaver.exe
 )");
-        REQUIRE_THROWS_WITH(TaskParser::parseFile(unknown_identity_key.string()),
-            Catch::Matchers::ContainsSubstring("Unknown key: 'image'") &&
-            Catch::Matchers::ContainsSubstring("line 6"));
+        check((praktor_test::throws_containing([&] { (void)(TaskParser::parseFile(unknown_identity_key.string())); }, {"Unknown key: 'image'", "line 6"})));
 
         auto missing_executable = writeTempWorkflow("managed_process_missing_executable.yml", R"(
 tasks:
@@ -532,9 +543,7 @@ tasks:
       identity:
         image_name: RetroScreenSaver.exe
 )");
-        REQUIRE_THROWS_WITH(TaskParser::parseFile(missing_executable.string()),
-            Catch::Matchers::ContainsSubstring("managed_process.start requires 'executable'") &&
-            Catch::Matchers::ContainsSubstring("line 4"));
+        check((praktor_test::throws_containing([&] { (void)(TaskParser::parseFile(missing_executable.string())); }, {"managed_process.start requires 'executable'", "line 4"})));
 
         auto scalar_arguments = writeTempWorkflow("managed_process_scalar_arguments.yml", R"(
 tasks:
@@ -545,12 +554,10 @@ tasks:
       identity:
         image_name: RetroScreenSaver.exe
 )");
-        REQUIRE_THROWS_WITH(TaskParser::parseFile(scalar_arguments.string()),
-            Catch::Matchers::ContainsSubstring("managed_process.arguments must be a sequence") &&
-            Catch::Matchers::ContainsSubstring("line 6"));
+        check((praktor_test::throws_containing([&] { (void)(TaskParser::parseFile(scalar_arguments.string())); }, {"managed_process.arguments must be a sequence", "line 6"})));
     }
 
-    SECTION("managed process rejects empty identity, non-positive timeout, and missing identity") {
+    if (section_index == 3) {
         auto empty_identity = writeTempWorkflow("managed_process_empty_identity.yml", R"(
 tasks:
   - name: stop_saver
@@ -558,9 +565,7 @@ tasks:
       identity:
         image_name: ""
 )");
-        REQUIRE_THROWS_WITH(TaskParser::parseFile(empty_identity.string()),
-            Catch::Matchers::ContainsSubstring("managed_process.identity.image_name cannot be empty") &&
-            Catch::Matchers::ContainsSubstring("line 6"));
+        check((praktor_test::throws_containing([&] { (void)(TaskParser::parseFile(empty_identity.string())); }, {"managed_process.identity.image_name cannot be empty", "line 6"})));
 
         auto negative_timeout = writeTempWorkflow("managed_process_negative_timeout.yml", R"(
 tasks:
@@ -570,9 +575,7 @@ tasks:
         image_name: RetroScreenSaver.exe
       stop_timeout_ms: -1
 )");
-        REQUIRE_THROWS_WITH(TaskParser::parseFile(negative_timeout.string()),
-            Catch::Matchers::ContainsSubstring("managed_process.stop_timeout_ms must be positive") &&
-            Catch::Matchers::ContainsSubstring("line 7"));
+        check((praktor_test::throws_containing([&] { (void)(TaskParser::parseFile(negative_timeout.string())); }, {"managed_process.stop_timeout_ms must be positive", "line 7"})));
 
         auto missing_identity = writeTempWorkflow("managed_process_missing_identity.yml", R"(
 tasks:
@@ -580,12 +583,10 @@ tasks:
     managed_process:
       operation: stop
 )");
-        REQUIRE_THROWS_WITH(TaskParser::parseFile(missing_identity.string()),
-            Catch::Matchers::ContainsSubstring("managed_process requires 'identity'") &&
-            Catch::Matchers::ContainsSubstring("line 4"));
+        check((praktor_test::throws_containing([&] { (void)(TaskParser::parseFile(missing_identity.string())); }, {"managed_process requires 'identity'", "line 4"})));
     }
 
-    SECTION("system actions remain mutually exclusive runners") {
+    if (section_index == 4) {
         auto wf = writeTempWorkflow("multiple_system_runners.yml", R"(
 tasks:
   - name: ambiguous
@@ -595,14 +596,19 @@ tasks:
       identity:
         image_name: RetroScreenSaver.exe
 )");
-        REQUIRE_THROWS_WITH(TaskParser::parseFile(wf.string()),
-            Catch::Matchers::ContainsSubstring("declares multiple runners") &&
-            Catch::Matchers::ContainsSubstring("line 3"));
+        check((praktor_test::throws_containing([&] { (void)(TaskParser::parseFile(wf.string())); }, {"declares multiple runners", "line 3"})));
     }
 }
 
-TEST_CASE("download task rejects missing required fields")
-{
+spec("parse rejects invalid system action schemas with source lines") {
+    it("service rejects unknown keys and invalid operation") { test_parse_rejects_invalid_system_action_schemas_with_source_lines_11(0); }
+    it("service rejects empty names and non-positive timeouts") { test_parse_rejects_invalid_system_action_schemas_with_source_lines_11(1); }
+    it("managed process rejects invalid fields and missing start executable") { test_parse_rejects_invalid_system_action_schemas_with_source_lines_11(2); }
+    it("managed process rejects empty identity, non-positive timeout, and missing identity") { test_parse_rejects_invalid_system_action_schemas_with_source_lines_11(3); }
+    it("system actions remain mutually exclusive runners") { test_parse_rejects_invalid_system_action_schemas_with_source_lines_11(4); }
+}
+
+[[maybe_unused]] static void test_download_task_rejects_missing_required_fields_12() {
     const std::string content =
         "tasks:\n"
         "  - name: fetch_package\n"
@@ -610,14 +616,16 @@ TEST_CASE("download task rejects missing required fields")
         "      path: packages/release.zip\n";
 
     auto wf = writeTempWorkflow("download_missing_url.yml", content);
-    CHECK_THROWS_WITH(TaskParser::parseFile(wf.string()),
-                      Catch::Matchers::ContainsSubstring("download requires 'url'"));
+    check((praktor_test::throws_containing([&] { (void)(TaskParser::parseFile(wf.string())); }, {"download requires 'url'"})));
+}
+
+spec("download task rejects missing required fields") {
+    it("complete case") { test_download_task_rejects_missing_required_fields_12(); }
 }
 
 
 
-TEST_CASE("parse scalar depends_on and dotEnv fields")
-{
+[[maybe_unused]] static void test_parse_scalar_depends_on_and_dotenv_fields_13() {
     const std::string content =
         "dotEnv: \".env.global\"\n"
         "tasks:\n"
@@ -631,20 +639,23 @@ TEST_CASE("parse scalar depends_on and dotEnv fields")
     auto wf = writeTempWorkflow("scalar_fields.yml", content);
 
     Workflow workflow = TaskParser::parseFile(wf.string());
-    REQUIRE(workflow.dot_env.size() == 1);
-    CHECK(workflow.dot_env[0] == ".env.global");
+    check((workflow.dot_env.size() == 1));
+    check((workflow.dot_env[0] == ".env.global"));
 
-    REQUIRE(workflow.tasks.size() == 2);
+    check((workflow.tasks.size() == 2));
     const Task& deploy = workflow.tasks[1];
-    REQUIRE(deploy.depends_on.size() == 1);
-    CHECK(deploy.depends_on[0] == "build");
-    REQUIRE(deploy.dot_env.size() == 1);
-    CHECK(deploy.dot_env[0] == ".env.deploy");
+    check((deploy.depends_on.size() == 1));
+    check((deploy.depends_on[0] == "build"));
+    check((deploy.dot_env.size() == 1));
+    check((deploy.dot_env[0] == ".env.deploy"));
+}
+
+spec("parse scalar depends_on and dotEnv fields") {
+    it("complete case") { test_parse_scalar_depends_on_and_dotenv_fields_13(); }
 }
 
 
-TEST_CASE("parse task triggers and environment")
-{
+[[maybe_unused]] static void test_parse_task_triggers_and_environment_14() {
     const std::string content =
         "tasks:\n"
         "  - name: notify_http\n"
@@ -662,16 +673,19 @@ TEST_CASE("parse task triggers and environment")
     auto wf = writeTempWorkflow("triggers.yml", content);
 
     Workflow workflow = TaskParser::parseFile(wf.string());
-    REQUIRE(workflow.tasks.size() == 2);
+    check((workflow.tasks.size() == 2));
     const Task& build = workflow.tasks[1];
-    REQUIRE(build.triggers.has_value());
+    check((build.triggers.has_value()));
     const Triggers& triggers = *build.triggers;
-    REQUIRE(triggers.on_failure.size() == 1);
-    CHECK(triggers.on_failure[0] == "notify_http");
+    check((triggers.on_failure.size() == 1));
+    check((triggers.on_failure[0] == "notify_http"));
 }
 
-TEST_CASE("parse working_dir attribute")
-{
+spec("parse task triggers and environment") {
+    it("complete case") { test_parse_task_triggers_and_environment_14(); }
+}
+
+[[maybe_unused]] static void test_parse_working_dir_attribute_15() {
     const std::string content =
         "tasks:\n"
         "  - name: build_frontend\n"
@@ -686,19 +700,22 @@ TEST_CASE("parse working_dir attribute")
     auto wf = writeTempWorkflow("working_dir.yml", content);
 
     Workflow workflow = TaskParser::parseFile(wf.string());
-    REQUIRE(workflow.tasks.size() == 3);
+    check((workflow.tasks.size() == 3));
 
-    REQUIRE(workflow.tasks[0].working_dir.has_value());
-    CHECK(workflow.tasks[0].working_dir.value() == "./packages/frontend");
+    check((workflow.tasks[0].working_dir.has_value()));
+    check((workflow.tasks[0].working_dir.value() == "./packages/frontend"));
 
-    REQUIRE(workflow.tasks[1].working_dir.has_value());
-    CHECK(workflow.tasks[1].working_dir.value() == "./packages/backend");
+    check((workflow.tasks[1].working_dir.has_value()));
+    check((workflow.tasks[1].working_dir.value() == "./packages/backend"));
 
-    CHECK_FALSE(workflow.tasks[2].working_dir.has_value());  // default - not set
+    check((!(workflow.tasks[2].working_dir.has_value())));  // default - not set
 }
 
-TEST_CASE("parse silent attribute")
-{
+spec("parse working_dir attribute") {
+    it("complete case") { test_parse_working_dir_attribute_15(); }
+}
+
+[[maybe_unused]] static void test_parse_silent_attribute_16() {
     const std::string content =
         "tasks:\n"
         "  - name: noisy_task\n"
@@ -710,29 +727,33 @@ TEST_CASE("parse silent attribute")
     auto wf = writeTempWorkflow("silent.yml", content);
 
     Workflow workflow = TaskParser::parseFile(wf.string());
-    REQUIRE(workflow.tasks.size() == 2);
+    check((workflow.tasks.size() == 2));
 
-    CHECK(workflow.tasks[0].silent == false);  // default
-    CHECK(workflow.tasks[1].silent == true);
+    check((workflow.tasks[0].silent == false));  // default
+    check((workflow.tasks[1].silent == true));
 }
 
-TEST_CASE("parse rejects invalid silent values")
-{
+spec("parse silent attribute") {
+    it("complete case") { test_parse_silent_attribute_16(); }
+}
+
+[[maybe_unused]] static void test_parse_rejects_invalid_silent_values_17() {
     auto wf = writeTempWorkflow("invalid_silent.yml",
         "tasks:\n"
         "  - name: quiet\n"
         "    command: echo quiet\n"
         "    silent: ture\n");
 
-    REQUIRE_THROWS_WITH(TaskParser::parseFile(wf.string()),
-        Catch::Matchers::ContainsSubstring("'silent' must be a boolean") &&
-        Catch::Matchers::ContainsSubstring("line 4"));
+    check((praktor_test::throws_containing([&] { (void)(TaskParser::parseFile(wf.string())); }, {"'silent' must be a boolean", "line 4"})));
 }
 
-TEST_CASE("silent rejects managed-process-only numeric boolean forms")
-{
+spec("parse rejects invalid silent values") {
+    it("complete case") { test_parse_rejects_invalid_silent_values_17(); }
+}
+
+[[maybe_unused]] static void test_silent_rejects_managed_process_only_numeric_boolean_forms_18() {
     for (const std::string scalar : {"01", "0x1"}) {
-        CAPTURE(scalar);
+        info("%s", praktor_test::message([&](std::ostream& out) { out << scalar; }).c_str());
         auto wf = writeTempWorkflow(
             "invalid_numeric_silent_" + scalar + ".yml",
             "tasks:\n"
@@ -740,52 +761,53 @@ TEST_CASE("silent rejects managed-process-only numeric boolean forms")
             "    command: echo quiet\n"
             "    silent: " + scalar + "\n");
 
-        REQUIRE_THROWS_WITH(
-            TaskParser::parseFile(wf.string()),
-            Catch::Matchers::ContainsSubstring("'silent' must be a boolean"));
+        check((praktor_test::throws_containing([&] { (void)(TaskParser::parseFile(wf.string())); }, {"'silent' must be a boolean"})));
     }
 }
 
-TEST_CASE("parse rejects removed continue_on_error field")
-{
+spec("silent rejects managed-process-only numeric boolean forms") {
+    it("complete case") { test_silent_rejects_managed_process_only_numeric_boolean_forms_18(); }
+}
+
+[[maybe_unused]] static void test_parse_rejects_removed_continue_on_error_field_19() {
     auto wf = writeTempWorkflow("removed_continue_on_error.yml",
         "tasks:\n"
         "  - name: tolerant\n"
         "    command: echo tolerant\n"
         "    continue_on_error: true\n");
 
-    REQUIRE_THROWS_WITH(TaskParser::parseFile(wf.string()),
-        Catch::Matchers::ContainsSubstring("Unknown key: 'continue_on_error'") &&
-        Catch::Matchers::ContainsSubstring("line 4"));
+    check((praktor_test::throws_containing([&] { (void)(TaskParser::parseFile(wf.string())); }, {"Unknown key: 'continue_on_error'", "line 4"})));
 }
 
-TEST_CASE("parse rejects empty script-only tasks")
-{
+spec("parse rejects removed continue_on_error field") {
+    it("complete case") { test_parse_rejects_removed_continue_on_error_field_19(); }
+}
+
+[[maybe_unused]] static void test_parse_rejects_empty_script_only_tasks_20() {
     auto wf = writeTempWorkflow("empty_script.yml",
         "tasks:\n"
         "  - name: empty\n"
         "    script: \"\"\n");
 
-    REQUIRE_THROWS_WITH(TaskParser::parseFile(wf.string()),
-        Catch::Matchers::ContainsSubstring("'script' cannot be empty") &&
-        Catch::Matchers::ContainsSubstring("line 3"));
+    check((praktor_test::throws_containing([&] { (void)(TaskParser::parseFile(wf.string())); }, {"'script' cannot be empty", "line 3"})));
 }
 
-TEST_CASE("parse rejects empty task lifecycle values")
-{
-    SECTION("finally") {
+spec("parse rejects empty script-only tasks") {
+    it("complete case") { test_parse_rejects_empty_script_only_tasks_20(); }
+}
+
+[[maybe_unused]] static void test_parse_rejects_empty_task_lifecycle_values_21(int section_index) {
+    if (section_index == 0) {
         auto wf = writeTempWorkflow("empty_finally.yml",
             "tasks:\n"
             "  - name: build\n"
             "    command: echo build\n"
             "    finally: \"\"\n");
 
-        REQUIRE_THROWS_WITH(TaskParser::parseFile(wf.string()),
-            Catch::Matchers::ContainsSubstring("'finally' cannot be empty") &&
-            Catch::Matchers::ContainsSubstring("line 4"));
+        check((praktor_test::throws_containing([&] { (void)(TaskParser::parseFile(wf.string())); }, {"'finally' cannot be empty", "line 4"})));
     }
 
-    SECTION("dynamic template") {
+    if (section_index == 1) {
         auto wf = writeTempWorkflow("empty_dynamic_template.yml",
             "tasks:\n"
             "  - name: fanout\n"
@@ -795,41 +817,45 @@ TEST_CASE("parse rejects empty task lifecycle values")
             "        name: \"\"\n"
             "        command: \"\"\n");
 
-        REQUIRE_THROWS_WITH(TaskParser::parseFile(wf.string()),
-            Catch::Matchers::ContainsSubstring(
-                "dynamic_tasks template 'name' cannot be empty") &&
-            Catch::Matchers::ContainsSubstring("line 6"));
+        check((praktor_test::throws_containing([&] { (void)(TaskParser::parseFile(wf.string())); }, {
+                "dynamic_tasks template 'name' cannot be empty", "line 6"})));
     }
 }
 
-TEST_CASE("parse rejects empty command array entries")
-{
+spec("parse rejects empty task lifecycle values") {
+    it("finally") { test_parse_rejects_empty_task_lifecycle_values_21(0); }
+    it("dynamic template") { test_parse_rejects_empty_task_lifecycle_values_21(1); }
+}
+
+[[maybe_unused]] static void test_parse_rejects_empty_command_array_entries_22() {
     auto wf = writeTempWorkflow("empty_command_entry.yml",
         "tasks:\n"
         "  - name: build\n"
         "    command: [echo build, \"\"]\n");
 
-    REQUIRE_THROWS_WITH(TaskParser::parseFile(wf.string()),
-        Catch::Matchers::ContainsSubstring("command array entries cannot be empty") &&
-        Catch::Matchers::ContainsSubstring("line 3"));
+    check((praktor_test::throws_containing([&] { (void)(TaskParser::parseFile(wf.string())); }, {"command array entries cannot be empty", "line 3"})));
 }
 
-TEST_CASE("parse rejects removed native_modules field")
-{
+spec("parse rejects empty command array entries") {
+    it("complete case") { test_parse_rejects_empty_command_array_entries_22(); }
+}
+
+[[maybe_unused]] static void test_parse_rejects_removed_native_modules_field_23() {
     auto wf = writeTempWorkflow("removed_native_modules.yml",
         "native_modules: []\n"
         "tasks:\n"
         "  - name: build\n"
         "    command: echo build\n");
 
-    REQUIRE_THROWS_WITH(TaskParser::parseFile(wf.string()),
-        Catch::Matchers::ContainsSubstring("Unknown key: 'native_modules'") &&
-        Catch::Matchers::ContainsSubstring("line 1"));
+    check((praktor_test::throws_containing([&] { (void)(TaskParser::parseFile(wf.string())); }, {"Unknown key: 'native_modules'", "line 1"})));
 }
 
-TEST_CASE("parse rejects unknown nested workflow keys")
-{
-    SECTION("defaults") {
+spec("parse rejects removed native_modules field") {
+    it("complete case") { test_parse_rejects_removed_native_modules_field_23(); }
+}
+
+[[maybe_unused]] static void test_parse_rejects_unknown_nested_workflow_keys_24(int section_index) {
+    if (section_index == 0) {
         auto wf = writeTempWorkflow("invalid_defaults_key.yml",
             "defaults:\n"
             "  timeuot: 30s\n"
@@ -837,42 +863,43 @@ TEST_CASE("parse rejects unknown nested workflow keys")
             "  - name: build\n"
             "    command: echo build\n");
 
-        REQUIRE_THROWS_WITH(TaskParser::parseFile(wf.string()),
-            Catch::Matchers::ContainsSubstring("Unknown key: 'timeuot'") &&
-            Catch::Matchers::ContainsSubstring("line 2"));
+        check((praktor_test::throws_containing([&] { (void)(TaskParser::parseFile(wf.string())); }, {"Unknown key: 'timeuot'", "line 2"})));
     }
 
 }
 
-TEST_CASE("parse rejects removed workflow module fields")
-{
-    SECTION("embedded") {
+spec("parse rejects unknown nested workflow keys") {
+    it("defaults") { test_parse_rejects_unknown_nested_workflow_keys_24(0); }
+}
+
+[[maybe_unused]] static void test_parse_rejects_removed_workflow_module_fields_25(int section_index) {
+    if (section_index == 0) {
         auto wf = writeTempWorkflow("removed_embedded.yml",
             "embedded: {}\n"
             "tasks:\n"
             "  - name: build\n"
             "    command: echo build\n");
 
-        REQUIRE_THROWS_WITH(TaskParser::parseFile(wf.string()),
-            Catch::Matchers::ContainsSubstring("Unknown key: 'embedded'") &&
-            Catch::Matchers::ContainsSubstring("line 1"));
+        check((praktor_test::throws_containing([&] { (void)(TaskParser::parseFile(wf.string())); }, {"Unknown key: 'embedded'", "line 1"})));
     }
 
-    SECTION("imports") {
+    if (section_index == 1) {
         auto wf = writeTempWorkflow("removed_imports.yml",
             "imports: []\n"
             "tasks:\n"
             "  - name: build\n"
             "    command: echo build\n");
 
-        REQUIRE_THROWS_WITH(TaskParser::parseFile(wf.string()),
-            Catch::Matchers::ContainsSubstring("Unknown key: 'imports'") &&
-            Catch::Matchers::ContainsSubstring("line 1"));
+        check((praktor_test::throws_containing([&] { (void)(TaskParser::parseFile(wf.string())); }, {"Unknown key: 'imports'", "line 1"})));
     }
 }
 
-TEST_CASE("parse rejects unknown top-level workflow keys")
-{
+spec("parse rejects removed workflow module fields") {
+    it("embedded") { test_parse_rejects_removed_workflow_module_fields_25(0); }
+    it("imports") { test_parse_rejects_removed_workflow_module_fields_25(1); }
+}
+
+[[maybe_unused]] static void test_parse_rejects_unknown_top_level_workflow_keys_26() {
     auto wf = writeTempWorkflow("invalid_workflow_key.yml",
         "name: invalid-root\n"
         "varibles:\n"
@@ -881,14 +908,15 @@ TEST_CASE("parse rejects unknown top-level workflow keys")
         "  - name: build\n"
         "    command: echo build\n");
 
-    REQUIRE_THROWS_WITH(TaskParser::parseFile(wf.string()),
-        Catch::Matchers::ContainsSubstring("Unknown key: 'varibles'") &&
-        Catch::Matchers::ContainsSubstring("line 2"));
+    check((praktor_test::throws_containing([&] { (void)(TaskParser::parseFile(wf.string())); }, {"Unknown key: 'varibles'", "line 2"})));
 }
 
-TEST_CASE("parse rejects unknown nested task configuration keys")
-{
-    SECTION("each") {
+spec("parse rejects unknown top-level workflow keys") {
+    it("complete case") { test_parse_rejects_unknown_top_level_workflow_keys_26(); }
+}
+
+[[maybe_unused]] static void test_parse_rejects_unknown_nested_task_configuration_keys_27(int section_index) {
+    if (section_index == 0) {
         auto wf = writeTempWorkflow("invalid_each_key.yml",
             "tasks:\n"
             "  - name: fanout\n"
@@ -897,12 +925,10 @@ TEST_CASE("parse rejects unknown nested task configuration keys")
             "      items: [one]\n"
             "      index_varible: index\n");
 
-        REQUIRE_THROWS_WITH(TaskParser::parseFile(wf.string()),
-            Catch::Matchers::ContainsSubstring("Unknown key: 'index_varible'") &&
-            Catch::Matchers::ContainsSubstring("line 6"));
+        check((praktor_test::throws_containing([&] { (void)(TaskParser::parseFile(wf.string())); }, {"Unknown key: 'index_varible'", "line 6"})));
     }
 
-    SECTION("triggers") {
+    if (section_index == 1) {
         auto wf = writeTempWorkflow("invalid_trigger_key.yml",
             "tasks:\n"
             "  - name: build\n"
@@ -910,12 +936,10 @@ TEST_CASE("parse rejects unknown nested task configuration keys")
             "    triggers:\n"
             "      on_failuer: [notify]\n");
 
-        REQUIRE_THROWS_WITH(TaskParser::parseFile(wf.string()),
-            Catch::Matchers::ContainsSubstring("Unknown key: 'on_failuer'") &&
-            Catch::Matchers::ContainsSubstring("line 5"));
+        check((praktor_test::throws_containing([&] { (void)(TaskParser::parseFile(wf.string())); }, {"Unknown key: 'on_failuer'", "line 5"})));
     }
 
-    SECTION("command parser") {
+    if (section_index == 2) {
         auto wf = writeTempWorkflow("invalid_command_parser_key.yml",
             "tasks:\n"
             "  - name: query\n"
@@ -925,12 +949,10 @@ TEST_CASE("parse rejects unknown nested task configuration keys")
             "      output_ky: value\n"
             "      output_key: value\n");
 
-        REQUIRE_THROWS_WITH(TaskParser::parseFile(wf.string()),
-            Catch::Matchers::ContainsSubstring("Unknown key: 'output_ky'") &&
-            Catch::Matchers::ContainsSubstring("line 6"));
+        check((praktor_test::throws_containing([&] { (void)(TaskParser::parseFile(wf.string())); }, {"Unknown key: 'output_ky'", "line 6"})));
     }
 
-    SECTION("dynamic task template") {
+    if (section_index == 3) {
         auto wf = writeTempWorkflow("invalid_dynamic_template_key.yml",
             "tasks:\n"
             "  - name: fanout\n"
@@ -941,14 +963,18 @@ TEST_CASE("parse rejects unknown nested task configuration keys")
             "        command: echo generated\n"
             "        timeuot: 5s\n");
 
-        REQUIRE_THROWS_WITH(TaskParser::parseFile(wf.string()),
-            Catch::Matchers::ContainsSubstring("Unknown key: 'timeuot'") &&
-            Catch::Matchers::ContainsSubstring("line 8"));
+        check((praktor_test::throws_containing([&] { (void)(TaskParser::parseFile(wf.string())); }, {"Unknown key: 'timeuot'", "line 8"})));
     }
 }
 
-TEST_CASE("parse rejects empty trigger action lists")
-{
+spec("parse rejects unknown nested task configuration keys") {
+    it("each") { test_parse_rejects_unknown_nested_task_configuration_keys_27(0); }
+    it("triggers") { test_parse_rejects_unknown_nested_task_configuration_keys_27(1); }
+    it("command parser") { test_parse_rejects_unknown_nested_task_configuration_keys_27(2); }
+    it("dynamic task template") { test_parse_rejects_unknown_nested_task_configuration_keys_27(3); }
+}
+
+[[maybe_unused]] static void test_parse_rejects_empty_trigger_action_lists_28() {
     auto wf = writeTempWorkflow("empty_trigger_list.yml",
         "tasks:\n"
         "  - name: build\n"
@@ -957,27 +983,29 @@ TEST_CASE("parse rejects empty trigger action lists")
         "      on_success: []\n"
         "      on_failure: [notify]\n");
 
-    REQUIRE_THROWS_WITH(TaskParser::parseFile(wf.string()),
-        Catch::Matchers::ContainsSubstring(
-            "Trigger action list must contain at least one task name") &&
-        Catch::Matchers::ContainsSubstring("line 5"));
+    check((praktor_test::throws_containing([&] { (void)(TaskParser::parseFile(wf.string())); }, {
+            "Trigger action list must contain at least one task name", "line 5"})));
 }
 
-TEST_CASE("parse rejects mapping command values with source location")
-{
+spec("parse rejects empty trigger action lists") {
+    it("complete case") { test_parse_rejects_empty_trigger_action_lists_28(); }
+}
+
+[[maybe_unused]] static void test_parse_rejects_mapping_command_values_with_source_location_29() {
     auto wf = writeTempWorkflow("mapping_command.yml",
         "tasks:\n"
         "  - name: invalid\n"
         "    command:\n"
         "      cmd: echo invalid\n");
 
-    REQUIRE_THROWS_WITH(TaskParser::parseFile(wf.string()),
-        Catch::Matchers::ContainsSubstring("command must be a scalar or sequence") &&
-        Catch::Matchers::ContainsSubstring("line 3"));
+    check((praktor_test::throws_containing([&] { (void)(TaskParser::parseFile(wf.string())); }, {"command must be a scalar or sequence", "line 3"})));
 }
 
-TEST_CASE("top-level defaults apply to included tasks")
-{
+spec("parse rejects mapping command values with source location") {
+    it("complete case") { test_parse_rejects_mapping_command_values_with_source_location_29(); }
+}
+
+[[maybe_unused]] static void test_top_level_defaults_apply_to_included_tasks_30() {
     auto included = writeTempWorkflow("defaults_included.yml",
         "tasks:\n"
         "  - name: included_step\n"
@@ -998,14 +1026,17 @@ TEST_CASE("top-level defaults apply to included tasks")
     auto it = std::find_if(workflow.tasks.begin(), workflow.tasks.end(),
         [](const Task& task) { return task.name == "included_step"; });
 
-    REQUIRE(it != workflow.tasks.end());
-    REQUIRE(it->timeout.has_value());
-    CHECK(it->timeout.value() == "30s");
+    check((it != workflow.tasks.end()));
+    check((it->timeout.has_value()));
+    check((it->timeout.value() == "30s"));
 }
 
-TEST_CASE("parse rejects invalid include shapes")
-{
-    SECTION("includes must be a map") {
+spec("top-level defaults apply to included tasks") {
+    it("complete case") { test_top_level_defaults_apply_to_included_tasks_30(); }
+}
+
+[[maybe_unused]] static void test_parse_rejects_invalid_include_shapes_31(int section_index) {
+    if (section_index == 0) {
         auto wf = writeTempWorkflow("invalid_includes.yml",
             "includes:\n"
             "  - child.yml\n"
@@ -1013,12 +1044,10 @@ TEST_CASE("parse rejects invalid include shapes")
             "  - name: root\n"
             "    command: echo root\n");
 
-        REQUIRE_THROWS_WITH(TaskParser::parseFile(wf.string()),
-            Catch::Matchers::ContainsSubstring("'includes' must be a map") &&
-            Catch::Matchers::ContainsSubstring("line 1"));
+        check((praktor_test::throws_containing([&] { (void)(TaskParser::parseFile(wf.string())); }, {"'includes' must be a map", "line 1"})));
     }
 
-    SECTION("include paths cannot be empty") {
+    if (section_index == 1) {
         auto wf = writeTempWorkflow("empty_include_path.yml",
             "includes:\n"
             "  child: \"\"\n"
@@ -1026,15 +1055,17 @@ TEST_CASE("parse rejects invalid include shapes")
             "  - name: root\n"
             "    command: echo root\n");
 
-        REQUIRE_THROWS_WITH(TaskParser::parseFile(wf.string()),
-            Catch::Matchers::ContainsSubstring("include path cannot be empty") &&
-            Catch::Matchers::ContainsSubstring("line 2"));
+        check((praktor_test::throws_containing([&] { (void)(TaskParser::parseFile(wf.string())); }, {"include path cannot be empty", "line 2"})));
     }
 
 }
 
-TEST_CASE("parseFileWithIncludes resolves a relative workflow against basePath")
-{
+spec("parse rejects invalid include shapes") {
+    it("includes must be a map") { test_parse_rejects_invalid_include_shapes_31(0); }
+    it("include paths cannot be empty") { test_parse_rejects_invalid_include_shapes_31(1); }
+}
+
+[[maybe_unused]] static void test_parsefilewithincludes_resolves_a_relative_workflow_against_basepath_32() {
     auto wf = writeTempWorkflow("relative_main.yml",
         "tasks:\n"
         "  - name: root\n"
@@ -1043,13 +1074,16 @@ TEST_CASE("parseFileWithIncludes resolves a relative workflow against basePath")
     Workflow workflow = TaskParser::parseFileWithIncludes(
         wf.filename().string(), wf.parent_path().string());
 
-    REQUIRE(workflow.tasks.size() == 1);
-    CHECK(workflow.tasks[0].name == "root");
-    CHECK(std::filesystem::path(workflow.source_path) == std::filesystem::absolute(wf));
+    check((workflow.tasks.size() == 1));
+    check((workflow.tasks[0].name == "root"));
+    check((std::filesystem::path(workflow.source_path) == std::filesystem::absolute(wf)));
 }
 
-TEST_CASE("build graph rejects duplicate task names")
-{
+spec("parseFileWithIncludes resolves a relative workflow against basePath") {
+    it("complete case") { test_parsefilewithincludes_resolves_a_relative_workflow_against_basepath_32(); }
+}
+
+[[maybe_unused]] static void test_build_graph_rejects_duplicate_task_names_33() {
     const std::string content =
         "tasks:\n"
         "  - name: duplicate\n"
@@ -1060,12 +1094,14 @@ TEST_CASE("build graph rejects duplicate task names")
     auto wf = writeTempWorkflow("duplicate_names.yml", content);
     Workflow workflow = TaskParser::parseFile(wf.string());
 
-    REQUIRE_THROWS_WITH(TaskParser::buildGraph(workflow),
-        Catch::Matchers::ContainsSubstring("Duplicate task name: 'duplicate'"));
+    check((praktor_test::throws_containing([&] { (void)(TaskParser::buildGraph(workflow)); }, {"Duplicate task name: 'duplicate'"})));
 }
 
-TEST_CASE("parse rejects duplicate YAML mapping keys with source location")
-{
+spec("build graph rejects duplicate task names") {
+    it("complete case") { test_build_graph_rejects_duplicate_task_names_33(); }
+}
+
+[[maybe_unused]] static void test_parse_rejects_duplicate_yaml_mapping_keys_with_source_location_34() {
     const std::string content =
         "tasks:\n"
         "  - name: first\n"
@@ -1074,13 +1110,14 @@ TEST_CASE("parse rejects duplicate YAML mapping keys with source location")
 
     auto wf = writeTempWorkflow("duplicate_yaml_key.yml", content);
 
-    REQUIRE_THROWS_WITH(TaskParser::parseFile(wf.string()),
-        Catch::Matchers::ContainsSubstring("Duplicate mapping key") &&
-        Catch::Matchers::ContainsSubstring("line 3"));
+    check((praktor_test::throws_containing([&] { (void)(TaskParser::parseFile(wf.string())); }, {"Duplicate mapping key", "line 3"})));
 }
 
-TEST_CASE("parse rejects http_request BT node in workflow grammar")
-{
+spec("parse rejects duplicate YAML mapping keys with source location") {
+    it("complete case") { test_parse_rejects_duplicate_yaml_mapping_keys_with_source_location_34(); }
+}
+
+[[maybe_unused]] static void test_parse_rejects_http_request_bt_node_in_workflow_grammar_35() {
     const std::string content =
         "tasks:\n"
         "  - name: api_call\n"
@@ -1091,12 +1128,14 @@ TEST_CASE("parse rejects http_request BT node in workflow grammar")
 
     auto wf = writeTempWorkflow("http_request_forbidden.yml", content);
 
-    REQUIRE_THROWS_WITH(TaskParser::parseFile(wf.string()),
-        Catch::Matchers::ContainsSubstring("Unknown orchestration node type: 'http_request'"));
+    check((praktor_test::throws_containing([&] { (void)(TaskParser::parseFile(wf.string())); }, {"Unknown orchestration node type: 'http_request'"})));
 }
 
-TEST_CASE("parse accepts snake_case BT leaf nodes in explicit YAML trees")
-{
+spec("parse rejects http_request BT node in workflow grammar") {
+    it("complete case") { test_parse_rejects_http_request_bt_node_in_workflow_grammar_35(); }
+}
+
+[[maybe_unused]] static void test_parse_accepts_snake_case_bt_leaf_nodes_in_explicit_yaml_trees_36() {
     const std::string content =
         "tasks:\n"
         "  - name: inspect_json\n"
@@ -1111,20 +1150,23 @@ TEST_CASE("parse accepts snake_case BT leaf nodes in explicit YAML trees")
     auto wf = writeTempWorkflow("snake_case_bt_leaf.yml", content);
 
     Workflow workflow = TaskParser::parseFile(wf.string());
-    REQUIRE(workflow.tasks.size() == 1);
-    REQUIRE(std::holds_alternative<OrchParams>(workflow.tasks[0].specifics));
+    check((workflow.tasks.size() == 1));
+    check((std::holds_alternative<OrchParams>(workflow.tasks[0].specifics)));
 
     const auto& params = std::get<OrchParams>(workflow.tasks[0].specifics);
-    REQUIRE(params.root.children.size() == 2);
-    CHECK(params.root.children[0].type == "Shell");
-    CHECK(params.root.children[1].type == "ParseJson");
-    CHECK(params.root.children[1].params.at("input_key") == "stdout");
-    CHECK(params.root.children[1].params.at("output_key") == "data");
-    CHECK(params.root.children[1].params.find("path") == params.root.children[1].params.end());
+    check((params.root.children.size() == 2));
+    check((params.root.children[0].type == "Shell"));
+    check((params.root.children[1].type == "ParseJson"));
+    check((params.root.children[1].params.at("input_key") == "stdout"));
+    check((params.root.children[1].params.at("output_key") == "data"));
+    check((params.root.children[1].params.find("path") == params.root.children[1].params.end()));
 }
 
-TEST_CASE("parse accepts BT shorthand leaf roots")
-{
+spec("parse accepts snake_case BT leaf nodes in explicit YAML trees") {
+    it("complete case") { test_parse_accepts_snake_case_bt_leaf_nodes_in_explicit_yaml_trees_36(); }
+}
+
+[[maybe_unused]] static void test_parse_accepts_bt_shorthand_leaf_roots_37() {
     const std::string content =
         "tasks:\n"
         "  - name: wait_briefly\n"
@@ -1135,22 +1177,25 @@ TEST_CASE("parse accepts BT shorthand leaf roots")
     auto wf = writeTempWorkflow("bt_shorthand_leaf_roots.yml", content);
 
     Workflow workflow = TaskParser::parseFile(wf.string());
-    REQUIRE(workflow.tasks.size() == 2);
+    check((workflow.tasks.size() == 2));
 
-    REQUIRE(std::holds_alternative<OrchParams>(workflow.tasks[0].specifics));
-    REQUIRE(std::holds_alternative<OrchParams>(workflow.tasks[1].specifics));
+    check((std::holds_alternative<OrchParams>(workflow.tasks[0].specifics)));
+    check((std::holds_alternative<OrchParams>(workflow.tasks[1].specifics)));
 
     const auto& sleep_params = std::get<OrchParams>(workflow.tasks[0].specifics);
     const auto& file_params = std::get<OrchParams>(workflow.tasks[1].specifics);
 
-    CHECK(sleep_params.root.type == "Sleep");
-    CHECK(sleep_params.root.params.at("duration") == "1s");
-    CHECK(file_params.root.type == "FileExists");
-    CHECK(file_params.root.params.at("path") == "./config.yml");
+    check((sleep_params.root.type == "Sleep"));
+    check((sleep_params.root.params.at("duration") == "1s"));
+    check((file_params.root.type == "FileExists"));
+    check((file_params.root.params.at("path") == "./config.yml"));
 }
 
-TEST_CASE("parse rejects multiple task runners including BT shorthand")
-{
+spec("parse accepts BT shorthand leaf roots") {
+    it("complete case") { test_parse_accepts_bt_shorthand_leaf_roots_37(); }
+}
+
+[[maybe_unused]] static void test_parse_rejects_multiple_task_runners_including_bt_shorthand_38() {
     const std::string command_and_shell =
         "tasks:\n"
         "  - name: confused\n"
@@ -1159,8 +1204,7 @@ TEST_CASE("parse rejects multiple task runners including BT shorthand")
 
     auto wf = writeTempWorkflow("multiple_runner_shorthand.yml", command_and_shell);
 
-    REQUIRE_THROWS_WITH(TaskParser::parseFile(wf.string()),
-        Catch::Matchers::ContainsSubstring("declares multiple runners"));
+    check((praktor_test::throws_containing([&] { (void)(TaskParser::parseFile(wf.string())); }, {"declares multiple runners"})));
 
     const std::string command_and_program =
         "tasks:\n"
@@ -1170,8 +1214,7 @@ TEST_CASE("parse rejects multiple task runners including BT shorthand")
 
     auto program_wf = writeTempWorkflow("multiple_command_program.yml", command_and_program);
 
-    REQUIRE_THROWS_WITH(TaskParser::parseFile(program_wf.string()),
-        Catch::Matchers::ContainsSubstring("declares multiple runners"));
+    check((praktor_test::throws_containing([&] { (void)(TaskParser::parseFile(program_wf.string())); }, {"declares multiple runners"})));
 
     const std::string two_shorthands =
         "tasks:\n"
@@ -1181,12 +1224,14 @@ TEST_CASE("parse rejects multiple task runners including BT shorthand")
 
     auto shorthand_wf = writeTempWorkflow("multiple_bt_shorthand.yml", two_shorthands);
 
-    REQUIRE_THROWS_WITH(TaskParser::parseFile(shorthand_wf.string()),
-        Catch::Matchers::ContainsSubstring("declares multiple runners"));
+    check((praktor_test::throws_containing([&] { (void)(TaskParser::parseFile(shorthand_wf.string())); }, {"declares multiple runners"})));
 }
 
-TEST_CASE("parse rejects text orch blocks in workflow grammar")
-{
+spec("parse rejects multiple task runners including BT shorthand") {
+    it("complete case") { test_parse_rejects_multiple_task_runners_including_bt_shorthand_38(); }
+}
+
+[[maybe_unused]] static void test_parse_rejects_text_orch_blocks_in_workflow_grammar_39() {
     const std::string content =
         "tasks:\n"
         "  - name: legacy_orch\n"
@@ -1195,12 +1240,14 @@ TEST_CASE("parse rejects text orch blocks in workflow grammar")
 
     auto wf = writeTempWorkflow("legacy_text_orch.yml", content);
 
-    REQUIRE_THROWS_WITH(TaskParser::parseFile(wf.string()),
-        Catch::Matchers::ContainsSubstring("orch node must be a map"));
+    check((praktor_test::throws_containing([&] { (void)(TaskParser::parseFile(wf.string())); }, {"orch node must be a map"})));
 }
 
-TEST_CASE("parse accepts flat if syntax with then and else branches")
-{
+spec("parse rejects text orch blocks in workflow grammar") {
+    it("complete case") { test_parse_rejects_text_orch_blocks_in_workflow_grammar_39(); }
+}
+
+[[maybe_unused]] static void test_parse_accepts_flat_if_syntax_with_then_and_else_branches_40() {
     const std::string content =
         "tasks:\n"
         "  - name: verify_status\n"
@@ -1214,26 +1261,29 @@ TEST_CASE("parse accepts flat if syntax with then and else branches")
     auto wf = writeTempWorkflow("if_bt.yml", content);
 
     Workflow workflow = TaskParser::parseFile(wf.string());
-    REQUIRE(workflow.tasks.size() == 1);
-    REQUIRE(std::holds_alternative<OrchParams>(workflow.tasks[0].specifics));
+    check((workflow.tasks.size() == 1));
+    check((std::holds_alternative<OrchParams>(workflow.tasks[0].specifics)));
 
     const auto& params = std::get<OrchParams>(workflow.tasks[0].specifics);
-    REQUIRE(params.root.children.size() == 1);
+    check((params.root.children.size() == 1));
 
     const auto& if_node = params.root.children[0];
-    CHECK(if_node.type == "IfThenElse");
-    CHECK(if_node.params.at("condition") == "{ctx.tasks.fetch.outputs.ok}");
-    REQUIRE(if_node.children.size() == 2);
-    CHECK(if_node.children[0].type == "Sequence");
-    CHECK(if_node.children[1].type == "Sequence");
-    REQUIRE(if_node.children[0].children.size() == 1);
-    REQUIRE(if_node.children[1].children.size() == 1);
-    CHECK(if_node.children[0].children[0].type == "Shell");
-    CHECK(if_node.children[1].children[0].type == "Shell");
+    check((if_node.type == "IfThenElse"));
+    check((if_node.params.at("condition") == "{ctx.tasks.fetch.outputs.ok}"));
+    check((if_node.children.size() == 2));
+    check((if_node.children[0].type == "Sequence"));
+    check((if_node.children[1].type == "Sequence"));
+    check((if_node.children[0].children.size() == 1));
+    check((if_node.children[1].children.size() == 1));
+    check((if_node.children[0].children[0].type == "Shell"));
+    check((if_node.children[1].children[0].type == "Shell"));
 }
 
-TEST_CASE("parse rejects legacy if_then_else and while_do grammar")
-{
+spec("parse accepts flat if syntax with then and else branches") {
+    it("complete case") { test_parse_accepts_flat_if_syntax_with_then_and_else_branches_40(); }
+}
+
+[[maybe_unused]] static void test_parse_rejects_legacy_if_then_else_and_while_do_grammar_41() {
     const std::string if_content =
         "tasks:\n"
         "  - name: legacy_controls\n"
@@ -1245,8 +1295,7 @@ TEST_CASE("parse rejects legacy if_then_else and while_do grammar")
 
     auto wf = writeTempWorkflow("legacy_if_orch.yml", if_content);
 
-    REQUIRE_THROWS_WITH(TaskParser::parseFile(wf.string()),
-        Catch::Matchers::ContainsSubstring("Legacy orchestration node type 'if_then_else'"));
+    check((praktor_test::throws_containing([&] { (void)(TaskParser::parseFile(wf.string())); }, {"Legacy orchestration node type 'if_then_else'"})));
 
     const std::string while_content =
         "tasks:\n"
@@ -1259,12 +1308,14 @@ TEST_CASE("parse rejects legacy if_then_else and while_do grammar")
 
     auto while_wf = writeTempWorkflow("legacy_while_orch.yml", while_content);
 
-    REQUIRE_THROWS_WITH(TaskParser::parseFile(while_wf.string()),
-        Catch::Matchers::ContainsSubstring("Legacy orchestration node type 'while_do'"));
+    check((praktor_test::throws_containing([&] { (void)(TaskParser::parseFile(while_wf.string())); }, {"Legacy orchestration node type 'while_do'"})));
 }
 
-TEST_CASE("parse accepts flat timeout orch roots without treating them as task timeout")
-{
+spec("parse rejects legacy if_then_else and while_do grammar") {
+    it("complete case") { test_parse_rejects_legacy_if_then_else_and_while_do_grammar_41(); }
+}
+
+[[maybe_unused]] static void test_parse_accepts_flat_timeout_orch_roots_without_treating_them_as_task_timeout_42() {
     const std::string content =
         "tasks:\n"
         "  - name: guard\n"
@@ -1275,19 +1326,22 @@ TEST_CASE("parse accepts flat timeout orch roots without treating them as task t
     auto wf = writeTempWorkflow("timeout_bt_root.yml", content);
 
     Workflow workflow = TaskParser::parseFile(wf.string());
-    REQUIRE(workflow.tasks.size() == 1);
-    CHECK_FALSE(workflow.tasks[0].timeout.has_value());
-    REQUIRE(std::holds_alternative<OrchParams>(workflow.tasks[0].specifics));
+    check((workflow.tasks.size() == 1));
+    check((!(workflow.tasks[0].timeout.has_value())));
+    check((std::holds_alternative<OrchParams>(workflow.tasks[0].specifics)));
 
     const auto& params = std::get<OrchParams>(workflow.tasks[0].specifics);
-    CHECK(params.root.type == "Timeout");
-    CHECK(params.root.params.at("timeout_ms") == "250");
-    REQUIRE(params.root.children.size() == 1);
-    CHECK(params.root.children[0].type == "Shell");
+    check((params.root.type == "Timeout"));
+    check((params.root.params.at("timeout_ms") == "250"));
+    check((params.root.children.size() == 1));
+    check((params.root.children[0].type == "Shell"));
 }
 
-TEST_CASE("parse rejects unknown BT node parameters")
-{
+spec("parse accepts flat timeout orch roots without treating them as task timeout") {
+    it("complete case") { test_parse_accepts_flat_timeout_orch_roots_without_treating_them_as_task_timeout_42(); }
+}
+
+[[maybe_unused]] static void test_parse_rejects_unknown_bt_node_parameters_43() {
     const std::string content =
         "tasks:\n"
         "  - name: broken\n"
@@ -1298,12 +1352,14 @@ TEST_CASE("parse rejects unknown BT node parameters")
 
     auto wf = writeTempWorkflow("unknown_bt_param.yml", content);
 
-    REQUIRE_THROWS_WITH(TaskParser::parseFile(wf.string()),
-        Catch::Matchers::ContainsSubstring("Unknown orchestration parameter 'not_a_real_param'"));
+    check((praktor_test::throws_containing([&] { (void)(TaskParser::parseFile(wf.string())); }, {"Unknown orchestration parameter 'not_a_real_param'"})));
 }
 
-TEST_CASE("parse rejects malformed BT integer parameters")
-{
+spec("parse rejects unknown BT node parameters") {
+    it("complete case") { test_parse_rejects_unknown_bt_node_parameters_43(); }
+}
+
+[[maybe_unused]] static void test_parse_rejects_malformed_bt_integer_parameters_44() {
     const std::string content =
         "tasks:\n"
         "  - name: broken_timeout\n"
@@ -1314,12 +1370,14 @@ TEST_CASE("parse rejects malformed BT integer parameters")
 
     auto wf = writeTempWorkflow("invalid_bt_integer_param.yml", content);
 
-    REQUIRE_THROWS_WITH(TaskParser::parseFile(wf.string()),
-        Catch::Matchers::ContainsSubstring("Orchestration parameter 'timeout_ms'"));
+    check((praktor_test::throws_containing([&] { (void)(TaskParser::parseFile(wf.string())); }, {"Orchestration parameter 'timeout_ms'"})));
 }
 
-TEST_CASE("parse rejects malformed BT boolean parameters")
-{
+spec("parse rejects malformed BT integer parameters") {
+    it("complete case") { test_parse_rejects_malformed_bt_integer_parameters_44(); }
+}
+
+[[maybe_unused]] static void test_parse_rejects_malformed_bt_boolean_parameters_45() {
     const std::string content =
         "tasks:\n"
         "  - name: noisy\n"
@@ -1329,12 +1387,14 @@ TEST_CASE("parse rejects malformed BT boolean parameters")
 
     auto wf = writeTempWorkflow("invalid_bt_bool_param.yml", content);
 
-    REQUIRE_THROWS_WITH(TaskParser::parseFile(wf.string()),
-        Catch::Matchers::ContainsSubstring("Orchestration parameter 'stream_output'"));
+    check((praktor_test::throws_containing([&] { (void)(TaskParser::parseFile(wf.string())); }, {"Orchestration parameter 'stream_output'"})));
 }
 
-TEST_CASE("parse accepts subtree shorthand with tree parameter")
-{
+spec("parse rejects malformed BT boolean parameters") {
+    it("complete case") { test_parse_rejects_malformed_bt_boolean_parameters_45(); }
+}
+
+[[maybe_unused]] static void test_parse_accepts_subtree_shorthand_with_tree_parameter_46() {
     const std::string content =
         "tasks:\n"
         "  - name: run_subtree\n"
@@ -1343,16 +1403,19 @@ TEST_CASE("parse accepts subtree shorthand with tree parameter")
     auto wf = writeTempWorkflow("subtree_bt.yml", content);
 
     Workflow workflow = TaskParser::parseFile(wf.string());
-    REQUIRE(workflow.tasks.size() == 1);
-    REQUIRE(std::holds_alternative<OrchParams>(workflow.tasks[0].specifics));
+    check((workflow.tasks.size() == 1));
+    check((std::holds_alternative<OrchParams>(workflow.tasks[0].specifics)));
 
     const auto& params = std::get<OrchParams>(workflow.tasks[0].specifics);
-    CHECK(params.root.type == "SubTree");
-    CHECK(params.root.params.at("tree") == "build_inner");
+    check((params.root.type == "SubTree"));
+    check((params.root.params.at("tree") == "build_inner"));
 }
 
-TEST_CASE("parse accepts flat set_variable syntax and rejects legacy map syntax")
-{
+spec("parse accepts subtree shorthand with tree parameter") {
+    it("complete case") { test_parse_accepts_subtree_shorthand_with_tree_parameter_46(); }
+}
+
+[[maybe_unused]] static void test_parse_accepts_flat_set_variable_syntax_and_rejects_legacy_map_syntax_47() {
     const std::string content =
         "tasks:\n"
         "  - name: state_update\n"
@@ -1365,17 +1428,17 @@ TEST_CASE("parse accepts flat set_variable syntax and rejects legacy map syntax"
     auto wf = writeTempWorkflow("set_variable_bt.yml", content);
 
     Workflow workflow = TaskParser::parseFile(wf.string());
-    REQUIRE(workflow.tasks.size() == 1);
-    REQUIRE(std::holds_alternative<OrchParams>(workflow.tasks[0].specifics));
+    check((workflow.tasks.size() == 1));
+    check((std::holds_alternative<OrchParams>(workflow.tasks[0].specifics)));
 
     const auto& params = std::get<OrchParams>(workflow.tasks[0].specifics);
-    REQUIRE(params.root.children.size() == 2);
-    CHECK(params.root.children[0].type == "SetVariable");
-    CHECK(params.root.children[0].params.at("key") == "deployment_status");
-    CHECK(params.root.children[0].params.at("value") == "ready");
-    CHECK(params.root.children[1].type == "SetVariable");
-    CHECK(params.root.children[1].params.at("key") == "deployed_version");
-    CHECK(params.root.children[1].params.at("from") == "build_version");
+    check((params.root.children.size() == 2));
+    check((params.root.children[0].type == "SetVariable"));
+    check((params.root.children[0].params.at("key") == "deployment_status"));
+    check((params.root.children[0].params.at("value") == "ready"));
+    check((params.root.children[1].type == "SetVariable"));
+    check((params.root.children[1].params.at("key") == "deployed_version"));
+    check((params.root.children[1].params.at("from") == "build_version"));
 
     const std::string legacy_content =
         "tasks:\n"
@@ -1387,12 +1450,14 @@ TEST_CASE("parse accepts flat set_variable syntax and rejects legacy map syntax"
 
     auto legacy_wf = writeTempWorkflow("legacy_set_variable_orch.yml", legacy_content);
 
-    REQUIRE_THROWS_WITH(TaskParser::parseFile(legacy_wf.string()),
-        Catch::Matchers::ContainsSubstring("Legacy orchestration node type 'set_variable'"));
+    check((praktor_test::throws_containing([&] { (void)(TaskParser::parseFile(legacy_wf.string())); }, {"Legacy orchestration node type 'set_variable'"})));
 }
 
-TEST_CASE("parse accepts flat while syntax and flat switch syntax")
-{
+spec("parse accepts flat set_variable syntax and rejects legacy map syntax") {
+    it("complete case") { test_parse_accepts_flat_set_variable_syntax_and_rejects_legacy_map_syntax_47(); }
+}
+
+[[maybe_unused]] static void test_parse_accepts_flat_while_syntax_and_flat_switch_syntax_48() {
     const std::string content =
         "tasks:\n"
         "  - name: advanced_nodes\n"
@@ -1409,28 +1474,31 @@ TEST_CASE("parse accepts flat while syntax and flat switch syntax")
     auto wf = writeTempWorkflow("advanced_bt_nodes.yml", content);
 
     Workflow workflow = TaskParser::parseFile(wf.string());
-    REQUIRE(workflow.tasks.size() == 1);
-    REQUIRE(std::holds_alternative<OrchParams>(workflow.tasks[0].specifics));
+    check((workflow.tasks.size() == 1));
+    check((std::holds_alternative<OrchParams>(workflow.tasks[0].specifics)));
 
     const auto& params = std::get<OrchParams>(workflow.tasks[0].specifics);
-    REQUIRE(params.root.children.size() == 2);
+    check((params.root.children.size() == 2));
 
     const auto& while_node = params.root.children[0];
-    CHECK(while_node.type == "WhileDo");
-    CHECK(while_node.params.at("condition") == "{ctx.variables.keep_running}");
-    REQUIRE(while_node.children.size() == 1);
-    CHECK(while_node.children[0].type == "Sequence");
+    check((while_node.type == "WhileDo"));
+    check((while_node.params.at("condition") == "{ctx.variables.keep_running}"));
+    check((while_node.children.size() == 1));
+    check((while_node.children[0].type == "Sequence"));
 
     const auto& switch_node = params.root.children[1];
-    CHECK(switch_node.type == "Switch");
-    CHECK(switch_node.params.at("variable") == "selected_case");
-    REQUIRE(switch_node.children.size() == 2);
-    CHECK(switch_node.children[0].type == "Shell");
-    CHECK(switch_node.children[1].type == "Sequence");
+    check((switch_node.type == "Switch"));
+    check((switch_node.params.at("variable") == "selected_case"));
+    check((switch_node.children.size() == 2));
+    check((switch_node.children[0].type == "Shell"));
+    check((switch_node.children[1].type == "Sequence"));
 }
 
-TEST_CASE("parse rejects legacy switch and timeout grammar")
-{
+spec("parse accepts flat while syntax and flat switch syntax") {
+    it("complete case") { test_parse_accepts_flat_while_syntax_and_flat_switch_syntax_48(); }
+}
+
+[[maybe_unused]] static void test_parse_rejects_legacy_switch_and_timeout_grammar_49() {
     const std::string switch_content =
         "tasks:\n"
         "  - name: legacy_switch\n"
@@ -1442,8 +1510,7 @@ TEST_CASE("parse rejects legacy switch and timeout grammar")
 
     auto switch_wf = writeTempWorkflow("legacy_switch_orch.yml", switch_content);
 
-    REQUIRE_THROWS_WITH(TaskParser::parseFile(switch_wf.string()),
-        Catch::Matchers::ContainsSubstring("Legacy orchestration node type 'switch'"));
+    check((praktor_test::throws_containing([&] { (void)(TaskParser::parseFile(switch_wf.string())); }, {"Legacy orchestration node type 'switch'"})));
 
     const std::string timeout_content =
         "tasks:\n"
@@ -1456,12 +1523,14 @@ TEST_CASE("parse rejects legacy switch and timeout grammar")
 
     auto timeout_wf = writeTempWorkflow("legacy_timeout_orch.yml", timeout_content);
 
-    REQUIRE_THROWS_WITH(TaskParser::parseFile(timeout_wf.string()),
-        Catch::Matchers::ContainsSubstring("Legacy orchestration node type 'timeout'"));
+    check((praktor_test::throws_containing([&] { (void)(TaskParser::parseFile(timeout_wf.string())); }, {"Legacy orchestration node type 'timeout'"})));
 }
 
-TEST_CASE("parse accepts flat run_once root syntax")
-{
+spec("parse rejects legacy switch and timeout grammar") {
+    it("complete case") { test_parse_rejects_legacy_switch_and_timeout_grammar_49(); }
+}
+
+[[maybe_unused]] static void test_parse_accepts_flat_run_once_root_syntax_50() {
     const std::string content =
         "tasks:\n"
         "  - name: only_once\n"
@@ -1472,18 +1541,21 @@ TEST_CASE("parse accepts flat run_once root syntax")
     auto wf = writeTempWorkflow("run_once_bt_root.yml", content);
 
     Workflow workflow = TaskParser::parseFile(wf.string());
-    REQUIRE(workflow.tasks.size() == 1);
-    REQUIRE(std::holds_alternative<OrchParams>(workflow.tasks[0].specifics));
+    check((workflow.tasks.size() == 1));
+    check((std::holds_alternative<OrchParams>(workflow.tasks[0].specifics)));
 
     const auto& params = std::get<OrchParams>(workflow.tasks[0].specifics);
-    CHECK(params.root.type == "RunOnce");
-    REQUIRE(params.root.children.size() == 1);
-    CHECK(params.root.children[0].type == "Shell");
+    check((params.root.type == "RunOnce"));
+    check((params.root.children.size() == 1));
+    check((params.root.children[0].type == "Shell"));
+}
+
+spec("parse accepts flat run_once root syntax") {
+    it("complete case") { test_parse_accepts_flat_run_once_root_syntax_50(); }
 }
 
 
-TEST_CASE("parse host tool task preserves typed with arguments",
-          "[host-tool][parser]") {
+[[maybe_unused]] static void test_parse_host_tool_task_preserves_typed_with_arguments_51() {
     auto wf = writeTempWorkflow("host_tool.yml", R"(
 tasks:
   - name: inspect
@@ -1498,52 +1570,51 @@ tasks:
 )");
 
     const Workflow workflow = TaskParser::parseFile(wf.string());
-    REQUIRE(workflow.tasks.size() == 1);
+    check((workflow.tasks.size() == 1));
     const Task& task = workflow.tasks[0];
-    CHECK(task.action == TaskAction::HostTool);
-    CHECK(task.declared_runner == "tool");
-    REQUIRE(std::holds_alternative<HostToolParams>(task.specifics));
+    check((task.action == TaskAction::HostTool));
+    check((task.declared_runner == "tool"));
+    check((std::holds_alternative<HostToolParams>(task.specifics)));
 
     const auto& params = std::get<HostToolParams>(task.specifics);
-    CHECK(params.tool == "repo.inspect");
-    REQUIRE(params.arguments.is_object());
-    CHECK(params.arguments.at("path").as<std::string>() ==
-          "{{ variables.path }}");
-    CHECK(params.arguments.at("limit").as<int>() == 2);
-    CHECK(params.arguments.at("enabled").as<bool>());
-    REQUIRE(params.arguments.at("tags").is_array());
-    CHECK(params.arguments.at("tags").at(0).as<std::string>() == "alpha");
-    CHECK(params.arguments.at("nested").at("mode").as<std::string>() == "safe");
+    check((params.tool == "repo.inspect"));
+    check((params.arguments.is_object()));
+    check((params.arguments.at("path").as<std::string>() ==
+          "{{ variables.path }}"));
+    check((params.arguments.at("limit").as<int>() == 2));
+    check((params.arguments.at("enabled").as<bool>()));
+    check((params.arguments.at("tags").is_array()));
+    check((params.arguments.at("tags").at(0).as<std::string>() == "alpha"));
+    check((params.arguments.at("nested").at("mode").as<std::string>() == "safe"));
 }
 
-TEST_CASE("host tool grammar rejects untyped identity and malformed with",
-          "[host-tool][parser]") {
-    SECTION("tool identity must be a string scalar") {
+spec("parse host tool task preserves typed with arguments") {
+    it("complete case") { test_parse_host_tool_task_preserves_typed_with_arguments_51(); }
+}
+
+[[maybe_unused]] static void test_host_tool_grammar_rejects_untyped_identity_and_malformed_with_52(int section_index) {
+    if (section_index == 0) {
         auto wf = writeTempWorkflow("host_tool_numeric.yml",
             "tasks:\n"
             "  - name: inspect\n"
             "    tool: 7\n");
 
-        REQUIRE_THROWS_WITH(
-            TaskParser::parseFile(wf.string()),
-            Catch::Matchers::ContainsSubstring(
-                "'tool' must be a string stable host-tool identity"));
+        check((praktor_test::throws_containing([&] { (void)(TaskParser::parseFile(wf.string())); }, {
+                "'tool' must be a string stable host-tool identity"})));
     }
 
-    SECTION("with must be a map") {
+    if (section_index == 1) {
         auto wf = writeTempWorkflow("host_tool_with_array.yml",
             "tasks:\n"
             "  - name: inspect\n"
             "    tool: repo.inspect\n"
             "    with: [one, two]\n");
 
-        REQUIRE_THROWS_WITH(
-            TaskParser::parseFile(wf.string()),
-            Catch::Matchers::ContainsSubstring(
-                "'with' must be a map of typed host-tool arguments"));
+        check((praktor_test::throws_containing([&] { (void)(TaskParser::parseFile(wf.string())); }, {
+                "'with' must be a map of typed host-tool arguments"})));
     }
 
-    SECTION("with cannot appear without tool") {
+    if (section_index == 2) {
         auto wf = writeTempWorkflow("host_tool_orphan_with.yml",
             "tasks:\n"
             "  - name: inspect\n"
@@ -1551,17 +1622,20 @@ TEST_CASE("host tool grammar rejects untyped identity and malformed with",
             "    with:\n"
             "      path: src\n");
 
-        REQUIRE_THROWS_WITH(
-            TaskParser::parseFile(wf.string()),
-            Catch::Matchers::ContainsSubstring(
-                "'with' is valid only with the 'tool' runner"));
+        check((praktor_test::throws_containing([&] { (void)(TaskParser::parseFile(wf.string())); }, {
+                "'with' is valid only with the 'tool' runner"})));
     }
 }
 
+spec("host tool grammar rejects untyped identity and malformed with") {
+    it("tool identity must be a string scalar") { test_host_tool_grammar_rejects_untyped_identity_and_malformed_with_52(0); }
+    it("with must be a map") { test_host_tool_grammar_rejects_untyped_identity_and_malformed_with_52(1); }
+    it("with cannot appear without tool") { test_host_tool_grammar_rejects_untyped_identity_and_malformed_with_52(2); }
+}
 
-TEST_CASE("host tool grammar parses finite retries and rejects unsupported retry shapes",
-          "[host-tool][parser][retry]") {
-    SECTION("tool retry count is preserved") {
+
+[[maybe_unused]] static void test_host_tool_grammar_parses_finite_retries_and_rejects_unsupported_retry_shapes_53(int section_index) {
+    if (section_index == 0) {
         auto wf = writeTempWorkflow("host_tool_retry.yml",
             "tasks:\n"
             "  - name: inspect\n"
@@ -1571,12 +1645,12 @@ TEST_CASE("host tool grammar parses finite retries and rejects unsupported retry
             "    with: {}\n");
 
         const Workflow workflow = TaskParser::parseFile(wf.string());
-        REQUIRE(workflow.tasks.size() == 1);
-        CHECK(workflow.tasks[0].action == TaskAction::HostTool);
-        CHECK(workflow.tasks[0].retry_count == 2u);
+        check((workflow.tasks.size() == 1));
+        check((workflow.tasks[0].action == TaskAction::HostTool));
+        check((workflow.tasks[0].retry_count == 2u));
     }
 
-    SECTION("retry count must be non-negative") {
+    if (section_index == 1) {
         auto wf = writeTempWorkflow("host_tool_retry_negative.yml",
             "tasks:\n"
             "  - name: inspect\n"
@@ -1584,13 +1658,11 @@ TEST_CASE("host tool grammar parses finite retries and rejects unsupported retry
             "    retries:\n"
             "      count: -1\n");
 
-        REQUIRE_THROWS_WITH(
-            TaskParser::parseFile(wf.string()),
-            Catch::Matchers::ContainsSubstring(
-                "retry count must be between 0 and 1024"));
+        check((praktor_test::throws_containing([&] { (void)(TaskParser::parseFile(wf.string())); }, {
+                "retry count must be between 0 and 1024"})));
     }
 
-    SECTION("retry count above the hard bound is rejected") {
+    if (section_index == 2) {
         auto wf = writeTempWorkflow("host_tool_retry_too_large.yml",
             "tasks:\n"
             "  - name: inspect\n"
@@ -1598,13 +1670,11 @@ TEST_CASE("host tool grammar parses finite retries and rejects unsupported retry
             "    retries:\n"
             "      count: 1025\n");
 
-        REQUIRE_THROWS_WITH(
-            TaskParser::parseFile(wf.string()),
-            Catch::Matchers::ContainsSubstring(
-                "retry count must be between 0 and 1024"));
+        check((praktor_test::throws_containing([&] { (void)(TaskParser::parseFile(wf.string())); }, {
+                "retry count must be between 0 and 1024"})));
     }
 
-    SECTION("retry count is currently tool-only") {
+    if (section_index == 3) {
         auto wf = writeTempWorkflow("command_retry_rejected.yml",
             "tasks:\n"
             "  - name: inspect\n"
@@ -1612,13 +1682,11 @@ TEST_CASE("host tool grammar parses finite retries and rejects unsupported retry
             "    retries:\n"
             "      count: 1\n");
 
-        REQUIRE_THROWS_WITH(
-            TaskParser::parseFile(wf.string()),
-            Catch::Matchers::ContainsSubstring(
-                "'retries' is currently supported only with the 'tool' runner"));
+        check((praktor_test::throws_containing([&] { (void)(TaskParser::parseFile(wf.string())); }, {
+                "'retries' is currently supported only with the 'tool' runner"})));
     }
 
-    SECTION("zero retry count is still tool-only grammar") {
+    if (section_index == 4) {
         auto wf = writeTempWorkflow("command_zero_retry_rejected.yml",
             "tasks:\n"
             "  - name: inspect\n"
@@ -1626,22 +1694,27 @@ TEST_CASE("host tool grammar parses finite retries and rejects unsupported retry
             "    retries:\n"
             "      count: 0\n");
 
-        REQUIRE_THROWS_WITH(
-            TaskParser::parseFile(wf.string()),
-            Catch::Matchers::ContainsSubstring(
-                "'retries' is currently supported only with the 'tool' runner"));
+        check((praktor_test::throws_containing([&] { (void)(TaskParser::parseFile(wf.string())); }, {
+                "'retries' is currently supported only with the 'tool' runner"})));
     }
 
-    SECTION("retry policy requires count") {
+    if (section_index == 5) {
         auto wf = writeTempWorkflow("host_tool_retry_missing_count.yml",
             "tasks:\n"
             "  - name: inspect\n"
             "    tool: repo.inspect\n"
             "    retries: {}\n");
 
-        REQUIRE_THROWS_WITH(
-            TaskParser::parseFile(wf.string()),
-            Catch::Matchers::ContainsSubstring(
-                "'retries' requires a non-negative integer 'count'"));
+        check((praktor_test::throws_containing([&] { (void)(TaskParser::parseFile(wf.string())); }, {
+                "'retries' requires a non-negative integer 'count'"})));
     }
+}
+
+spec("host tool grammar parses finite retries and rejects unsupported retry shapes") {
+    it("tool retry count is preserved") { test_host_tool_grammar_parses_finite_retries_and_rejects_unsupported_retry_shapes_53(0); }
+    it("retry count must be non-negative") { test_host_tool_grammar_parses_finite_retries_and_rejects_unsupported_retry_shapes_53(1); }
+    it("retry count above the hard bound is rejected") { test_host_tool_grammar_parses_finite_retries_and_rejects_unsupported_retry_shapes_53(2); }
+    it("retry count is currently tool-only") { test_host_tool_grammar_parses_finite_retries_and_rejects_unsupported_retry_shapes_53(3); }
+    it("zero retry count is still tool-only grammar") { test_host_tool_grammar_parses_finite_retries_and_rejects_unsupported_retry_shapes_53(4); }
+    it("retry policy requires count") { test_host_tool_grammar_parses_finite_retries_and_rejects_unsupported_retry_shapes_53(5); }
 }

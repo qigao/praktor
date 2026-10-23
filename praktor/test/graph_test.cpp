@@ -1,48 +1,48 @@
+#include "praktor_test.hpp"
 #include "dag/graph.hpp"
 #include "dag/dependency_graph.hpp"
 
-#include <catch2/catch_all.hpp>
 
-TEST_CASE("Graph::getInDegree O(1) optimization", "[graph]") {
+[[maybe_unused]] static void test_graph_getindegree_o_1_optimization_1(int section_index) {
     Graph<std::string> g("test");
 
-    SECTION("Empty graph returns 0 for any node") {
-        REQUIRE(g.getInDegree("nonexistent") == 0);
+    if (section_index == 0) {
+        check((g.getInDegree("nonexistent") == 0));
     }
 
-    SECTION("Node with no incoming edges has in-degree 0") {
+    if (section_index == 1) {
         g.addNode("A");
-        REQUIRE(g.getInDegree("A") == 0);
+        check((g.getInDegree("A") == 0));
     }
 
-    SECTION("Single edge increments in-degree") {
+    if (section_index == 2) {
         g.addEdge("A", "B");
-        REQUIRE(g.getInDegree("A") == 0);
-        REQUIRE(g.getInDegree("B") == 1);
+        check((g.getInDegree("A") == 0));
+        check((g.getInDegree("B") == 1));
     }
 
-    SECTION("Multiple edges to same node") {
+    if (section_index == 3) {
         g.addEdge("A", "C");
         g.addEdge("B", "C");
         g.addEdge("D", "C");
-        REQUIRE(g.getInDegree("C") == 3);
-        REQUIRE(g.getInDegree("A") == 0);
-        REQUIRE(g.getInDegree("B") == 0);
-        REQUIRE(g.getInDegree("D") == 0);
+        check((g.getInDegree("C") == 3));
+        check((g.getInDegree("A") == 0));
+        check((g.getInDegree("B") == 0));
+        check((g.getInDegree("D") == 0));
     }
 
-    SECTION("Chain of dependencies") {
+    if (section_index == 4) {
         // A -> B -> C -> D
         g.addEdge("A", "B");
         g.addEdge("B", "C");
         g.addEdge("C", "D");
-        REQUIRE(g.getInDegree("A") == 0);
-        REQUIRE(g.getInDegree("B") == 1);
-        REQUIRE(g.getInDegree("C") == 1);
-        REQUIRE(g.getInDegree("D") == 1);
+        check((g.getInDegree("A") == 0));
+        check((g.getInDegree("B") == 1));
+        check((g.getInDegree("C") == 1));
+        check((g.getInDegree("D") == 1));
     }
 
-    SECTION("Diamond dependency pattern") {
+    if (section_index == 5) {
         //     A
         //    / \
         //   B   C
@@ -52,14 +52,23 @@ TEST_CASE("Graph::getInDegree O(1) optimization", "[graph]") {
         g.addEdge("A", "C");
         g.addEdge("B", "D");
         g.addEdge("C", "D");
-        REQUIRE(g.getInDegree("A") == 0);
-        REQUIRE(g.getInDegree("B") == 1);
-        REQUIRE(g.getInDegree("C") == 1);
-        REQUIRE(g.getInDegree("D") == 2);
+        check((g.getInDegree("A") == 0));
+        check((g.getInDegree("B") == 1));
+        check((g.getInDegree("C") == 1));
+        check((g.getInDegree("D") == 2));
     }
 }
 
-TEST_CASE("DependencyGraph inherits getInDegree", "[graph]") {
+spec("Graph::getInDegree O(1) optimization") {
+    it("Empty graph returns 0 for any node") { test_graph_getindegree_o_1_optimization_1(0); }
+    it("Node with no incoming edges has in-degree 0") { test_graph_getindegree_o_1_optimization_1(1); }
+    it("Single edge increments in-degree") { test_graph_getindegree_o_1_optimization_1(2); }
+    it("Multiple edges to same node") { test_graph_getindegree_o_1_optimization_1(3); }
+    it("Chain of dependencies") { test_graph_getindegree_o_1_optimization_1(4); }
+    it("Diamond dependency pattern") { test_graph_getindegree_o_1_optimization_1(5); }
+}
+
+[[maybe_unused]] static void test_dependencygraph_inherits_getindegree_2() {
     DependencyGraph<std::string> dg("dep_test");
 
     dg.addEdge("task1", "task2");
@@ -67,8 +76,12 @@ TEST_CASE("DependencyGraph inherits getInDegree", "[graph]") {
     dg.addEdge("task2", "task4");
     dg.addEdge("task3", "task4");
 
-    REQUIRE(dg.getInDegree("task1") == 0);
-    REQUIRE(dg.getInDegree("task2") == 1);
-    REQUIRE(dg.getInDegree("task3") == 1);
-    REQUIRE(dg.getInDegree("task4") == 2);
+    check((dg.getInDegree("task1") == 0));
+    check((dg.getInDegree("task2") == 1));
+    check((dg.getInDegree("task3") == 1));
+    check((dg.getInDegree("task4") == 2));
+}
+
+spec("DependencyGraph inherits getInDegree") {
+    it("complete case") { test_dependencygraph_inherits_getindegree_2(); }
 }

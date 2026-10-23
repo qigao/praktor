@@ -1,14 +1,14 @@
+#include "praktor_test.hpp"
 #include "util/thread_pool.hpp"
 
 
-#include <catch2/catch_all.hpp>
 #include <atomic>
 #include <chrono>
 #include <thread>
 
-TEST_CASE("ThreadPool Tests", "[thread_pool]") {
+[[maybe_unused]] static void test_threadpool_tests_1(int section_index) {
 
-    SECTION("Tasks are executed by the pool") {
+    if (section_index == 0) {
         pubcxx::ThreadPool pool(4);
         std::atomic<int> counter(0);
 
@@ -38,7 +38,7 @@ TEST_CASE("ThreadPool Tests", "[thread_pool]") {
         // This test implicitly tests the destructor's blocking behavior.
     }
 
-    SECTION("Destructor waits for tasks") {
+    if (section_index == 1) {
         std::atomic<int> counter(0);
         { // Create a scope for the ThreadPool
             pubcxx::ThreadPool pool(2);
@@ -52,6 +52,11 @@ TEST_CASE("ThreadPool Tests", "[thread_pool]") {
 
         // If the destructor waited correctly, the counter should be 5.
         // If it didn't wait, the program might crash or the count would be less than 5.
-        REQUIRE(counter == 5);
+        check((counter == 5));
     }
+}
+
+spec("ThreadPool Tests") {
+    it("Tasks are executed by the pool") { test_threadpool_tests_1(0); }
+    it("Destructor waits for tasks") { test_threadpool_tests_1(1); }
 }

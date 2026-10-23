@@ -22,6 +22,10 @@
 #include "util/variable_substitution.hpp"
 #include "yml/task_parser.hpp"
 
+#if PRAKTOR_C11_ACTIONS_ENABLED
+#include <salts/process_retainer.h>
+#endif
+
 #include "util/logging.hpp"
 #include <algorithm>
 #include <chrono>
@@ -383,15 +387,45 @@ WorkflowExecutor::WorkflowExecutor(DependencyGraph<Task> &graph,
                                    std::unordered_map<std::string, std::string> base_environment,
                                    size_t num_threads,
                                    bool schedule_trigger_tasks,
-                                   size_t max_trigger_depth)
+                                   size_t max_trigger_depth,
+                                   Praktor::Execution::ActionTreeBackend action_backend,
+                                   cflow_process_retainer* recovery_owner)
     : graph_(graph), base_environment_(std::move(base_environment)), max_concurrency_(std::max<size_t>(1, num_threads)),
-      use_shared_pool_(num_threads > 1), all_tasks_(std::move(all_tasks)),
+      action_backend_(action_backend), use_shared_pool_(num_threads > 1), all_tasks_(std::move(all_tasks)),
       schedule_trigger_tasks_(schedule_trigger_tasks) {
+
+  // The Process retainer and Shell callbacks are single-driver. Never share
+  // one with a DAG thread pool or fall back to a different action backend.
+  if (action_backend == Praktor::Execution::ActionTreeBackend::C11) {
+#if PRAKTOR_C11_ACTIONS_ENABLED
+    if (num_threads != 1u)
+      throw std::invalid_argument(
+          "C11 workflow action execution requires a single driver");
+    if (recovery_owner == nullptr || recovery_owner->impl == nullptr)
+      throw std::invalid_argument(
+          "C11 workflow action execution requires an initialized Process recovery owner");
+#else
+    throw std::invalid_argument(
+        "C11 workflow action execution requires PRAKTOR_ENABLE_C11_ACTIONS=ON");
+#endif
+  }
 
   trigger_executor_.setMaxTriggerDepth(max_trigger_depth);
 
   if (all_tasks_.empty()) {
     all_tasks_ = graph_.getNodes();
+  }
+
+  if (action_backend_ == Praktor::Execution::ActionTreeBackend::C11) {
+    // UsesExecutor currently constructs an independent WorkflowExecutor with
+    // default Legacy semantics and no transferred Process recovery owner.
+    // Reject the entire graph before any leaf effects until nested owner
+    // propagation has an independently qualified contract.
+    for (const auto& task : all_tasks_) {
+      if (task.action == TaskAction::Uses)
+        throw std::invalid_argument(
+            "C11 workflow nested uses requires explicit recovery-owner propagation");
+    }
   }
 
 #if !PRAKTOR_SCRIPT_ENGINE_ENABLED
@@ -426,7 +460,8 @@ WorkflowExecutor::WorkflowExecutor(DependencyGraph<Task> &graph,
   executors_[TaskAction::Uses] =
       Praktor::Execution::createUsesExecutor(base_environment_, num_threads);
   executors_[TaskAction::Orch] =
-      Praktor::Execution::createDeclarativeTreeExecutor(base_environment_);
+      Praktor::Execution::createDeclarativeTreeExecutor(
+          base_environment_, action_backend, recovery_owner);
   executors_[TaskAction::Program] =
       Praktor::Execution::createProgramExecutor(base_environment_);
   executors_[TaskAction::Download] =
@@ -453,9 +488,12 @@ WorkflowExecutor::WorkflowExecutor(DependencyGraph<Task> &graph,
 WorkflowExecutor::WorkflowExecutor(DependencyGraph<Task> &graph,
                                    std::unordered_map<std::string, std::string> base_environment,
                                    size_t num_threads,
-                                   size_t max_trigger_depth)
-    : WorkflowExecutor(graph, graph.getNodes(), std::move(base_environment), num_threads, false,
-                       max_trigger_depth) {}
+                                   size_t max_trigger_depth,
+                                   Praktor::Execution::ActionTreeBackend action_backend,
+                                   cflow_process_retainer* recovery_owner)
+    : WorkflowExecutor(graph, graph.getNodes(), std::move(base_environment),
+                       num_threads, false, max_trigger_depth,
+                       action_backend, recovery_owner) {}
 
 void WorkflowExecutor::execute(WorkflowContext &context, std::optional<std::string> alias) {
   auto nodes = graph_.getNodes();
@@ -1082,6 +1120,14 @@ WorkflowValue WorkflowExecutor::getTaskOutputsSnapshot(const Task& task,
 WorkflowExecutor::TaskExecutionOutcome WorkflowExecutor::executeTaskInternal(
     const Task &task, WorkflowContext &context, std::optional<std::string> alias, bool ignore_when,
     bool report_terminal_status) {
+  // Dynamic/trigger task creation can introduce a Uses action after the
+  // initial DAG preflight. Never permit a nested Legacy executor to bypass
+  // the selected C11 backend or its single-owner Process policy.
+  if (action_backend_ == Praktor::Execution::ActionTreeBackend::C11 &&
+      task.action == TaskAction::Uses) {
+    throw std::invalid_argument(
+        "C11 workflow nested uses requires explicit recovery-owner propagation");
+  }
   if (!Praktor::Logging::isVerboseEnabled()) {
     // Report RUNNING once per task per run; a task can execute many times
     // (each/matrix iterations, trigger re-entry) and repeating the same

@@ -1,6 +1,13 @@
+add_executable(actions_output_core_test ../core/output_scan_test.c)
+target_include_directories(actions_output_core_test PRIVATE ../core)
+target_link_libraries(actions_output_core_test PRIVATE praktor_output_core Salts::TinyTest)
+set_target_properties(actions_output_core_test PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
+add_test(NAME actions_output_core_test COMMAND actions_output_core_test)
+
 cmake_add_test(
     SOURCES
         test_ast.cpp
+        test_output_parser.cpp
         test_advanced_decorators.cpp
         test_thread_pool.cpp
         test_parallel_performance.cpp

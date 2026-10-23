@@ -1,7 +1,7 @@
+#include "praktor_test.hpp"
 #include "praktor.h"
 #include "data/workflow_value.hpp"
 
-#include <catch2/catch_all.hpp>
 
 #include <chrono>
 #include <filesystem>
@@ -24,12 +24,12 @@ std::filesystem::path contractTempDir() {
 void writeContractFile(const std::filesystem::path& path,
                        const std::string& content) {
     std::ofstream out(path);
-    REQUIRE(out.is_open());
+    check((out.is_open()));
     out << content;
 }
 
 WorkflowValue parseOwned(const praktor_owned_json& value) {
-    REQUIRE(value.data != nullptr);
+    check((value.data != nullptr));
     return WorkflowValue::parse(std::string_view(value.data, value.size));
 }
 
@@ -84,8 +84,7 @@ tasks:
 
 } // namespace
 
-TEST_CASE("WorkflowPlan publishes generated input and output schemas",
-          "[sdk][contract][plan]") {
+[[maybe_unused]] static void test_workflowplan_publishes_generated_input_and_output_schemas_1() {
     const auto dir = contractTempDir();
     const auto workflow = dir / "workflow.yml";
     writeContractFile(workflow, contractWorkflow());
@@ -96,38 +95,41 @@ TEST_CASE("WorkflowPlan publishes generated input and output schemas",
 
     praktor_workflow_plan* plan = nullptr;
     praktor_error error = PRAKTOR_ERROR_INIT;
-    REQUIRE(praktor_compile_workflow(&request, &plan, &error) ==
-            PRAKTOR_RESULT_SUCCESS);
-    REQUIRE(plan != nullptr);
+    check((praktor_compile_workflow(&request, &plan, &error) ==
+            PRAKTOR_RESULT_SUCCESS));
+    check((plan != nullptr));
 
     praktor_owned_json description = PRAKTOR_OWNED_JSON_INIT;
-    REQUIRE(praktor_describe_workflow_plan(plan, &description, &error) ==
-            PRAKTOR_RESULT_SUCCESS);
+    check((praktor_describe_workflow_plan(plan, &description, &error) ==
+            PRAKTOR_RESULT_SUCCESS));
 
     const auto value = parseOwned(description);
     const auto input_schema = value.at("input_schema");
     const auto output_schema = value.at("output_schema");
 
-    CHECK(input_schema.at("type").as<std::string>() == "object");
-    CHECK_FALSE(input_schema.at("additionalProperties").as<bool>());
-    CHECK(input_schema.at("properties").at("name").at("type").as<std::string>() ==
-          "string");
-    CHECK(input_schema.at("properties").at("count").at("default").as<int>() == 2);
-    REQUIRE(input_schema.at("properties").at("mode").at("enum").is_array());
-    CHECK(input_schema.at("properties").at("tags").at("type").as<std::string>() ==
-          "array");
-    CHECK(input_schema.at("properties").at("payload").at("type").as<std::string>() ==
-          "object");
-    CHECK(output_schema.at("properties").at("result").at("type").as<std::string>() ==
-          "string");
+    check((input_schema.at("type").as<std::string>() == "object"));
+    check((!(input_schema.at("additionalProperties").as<bool>())));
+    check((input_schema.at("properties").at("name").at("type").as<std::string>() ==
+          "string"));
+    check((input_schema.at("properties").at("count").at("default").as<int>() == 2));
+    check((input_schema.at("properties").at("mode").at("enum").is_array()));
+    check((input_schema.at("properties").at("tags").at("type").as<std::string>() ==
+          "array"));
+    check((input_schema.at("properties").at("payload").at("type").as<std::string>() ==
+          "object"));
+    check((output_schema.at("properties").at("result").at("type").as<std::string>() ==
+          "string"));
 
     praktor_release_json(&description);
     praktor_release_workflow_plan(plan);
     std::filesystem::remove_all(dir);
 }
 
-TEST_CASE("workflow input contracts fail before task execution",
-          "[sdk][contract][input]") {
+spec("WorkflowPlan publishes generated input and output schemas") {
+    it("complete case") { test_workflowplan_publishes_generated_input_and_output_schemas_1(); }
+}
+
+[[maybe_unused]] static void test_workflow_input_contracts_fail_before_task_execution_2(int section_index) {
     const auto dir = contractTempDir();
     const auto workflow = dir / "workflow.yml";
     writeContractFile(workflow, contractWorkflow());
@@ -135,15 +137,15 @@ TEST_CASE("workflow input contracts fail before task execution",
     const std::string valid =
         R"({"name":"Ada","tags":["ci"],"payload":{"branch":"main"}})";
 
-    SECTION("valid typed inputs execute and defaults are accepted") {
+    if (section_index == 0) {
         praktor_owned_json output = PRAKTOR_OWNED_JSON_INIT;
         praktor_error error = PRAKTOR_ERROR_INIT;
-        REQUIRE(executeContract(workflow, valid, output, error) ==
-                PRAKTOR_RESULT_SUCCESS);
+        check((executeContract(workflow, valid, output, error) ==
+                PRAKTOR_RESULT_SUCCESS));
         const auto result = parseOwned(output);
-        CHECK(result.at("workflow_status").as<std::string>() == "success");
-        REQUIRE(result.at("outputs").is_object());
-        CHECK(result.at("outputs").at("result").is_string());
+        check((result.at("workflow_status").as<std::string>() == "success"));
+        check((result.at("outputs").is_object()));
+        check((result.at("outputs").at("result").is_string()));
         praktor_release_json(&output);
     }
 
@@ -153,26 +155,31 @@ TEST_CASE("workflow input contracts fail before task execution",
         R"({"name":"Ada","tags":[],"payload":{},"mode":"slow"})",
         R"({"name":"Ada","tags":[],"payload":{},"extra":true})"
     };
-    for (const auto& input : invalid) {
-        DYNAMIC_SECTION("rejects " << input) {
-            praktor_owned_json output = PRAKTOR_OWNED_JSON_INIT;
-            praktor_error error = PRAKTOR_ERROR_INIT;
-            CHECK(executeContract(workflow, input, output, error) ==
-                  PRAKTOR_RESULT_INPUT_CONTRACT);
-            CHECK(error.phase == PRAKTOR_ERROR_PHASE_INPUT_CONTRACT);
-            CHECK(error.message[0] != '\0');
-            CHECK(output.data == nullptr);
-            CHECK(output.size == 0);
-        }
+    if (section_index > 0) {
+        const auto& input = invalid.at(static_cast<std::size_t>(section_index - 1));
+        praktor_owned_json output = PRAKTOR_OWNED_JSON_INIT;
+        praktor_error error = PRAKTOR_ERROR_INIT;
+        check((executeContract(workflow, input, output, error) ==
+              PRAKTOR_RESULT_INPUT_CONTRACT));
+        check((error.phase == PRAKTOR_ERROR_PHASE_INPUT_CONTRACT));
+        check((error.message[0] != '\0'));
+        check((output.data == nullptr));
+        check((output.size == 0));
     }
 
     std::filesystem::remove_all(dir);
 }
 
-TEST_CASE("empty input contracts enforce their published additionalProperties policy",
-          "[sdk][contract][input][plan]") {
-    const std::string policy = GENERATE("strict", "allow_extra");
-    const bool explicit_empty = GENERATE(false, true);
+spec("workflow input contracts fail before task execution") {
+    it("valid typed inputs execute and defaults are accepted") { test_workflow_input_contracts_fail_before_task_execution_2(0); }
+    for (int input = 1; input <= 4; ++input) {
+        it("invalid input %d", input) { test_workflow_input_contracts_fail_before_task_execution_2(input); }
+    }
+}
+
+[[maybe_unused]] static void test_empty_input_contracts_enforce_their_published_additionalproperties_policy_3(std::size_t row_0, std::size_t row_1, std::size_t row_2, std::size_t row_3) {
+    const std::string policy = std::array{"strict", "allow_extra"}.at(row_0);
+    const bool explicit_empty = std::array{false, true}.at(row_1);
     const auto dir = contractTempDir();
     const auto workflow = dir / "workflow.yml";
     writeContractFile(workflow,
@@ -185,22 +192,21 @@ TEST_CASE("empty input contracts enforce their published additionalProperties po
     compile.workflow_path = path.c_str();
     praktor_workflow_plan* plan = nullptr;
     praktor_error error = PRAKTOR_ERROR_INIT;
-    REQUIRE(praktor_compile_workflow(&compile, &plan, &error) ==
-            PRAKTOR_RESULT_SUCCESS);
+    check((praktor_compile_workflow(&compile, &plan, &error) ==
+            PRAKTOR_RESULT_SUCCESS));
 
     praktor_owned_json description = PRAKTOR_OWNED_JSON_INIT;
-    REQUIRE(praktor_describe_workflow_plan(plan, &description, &error) ==
-            PRAKTOR_RESULT_SUCCESS);
+    check((praktor_describe_workflow_plan(plan, &description, &error) ==
+            PRAKTOR_RESULT_SUCCESS));
     const auto schema = parseOwned(description).at("input_schema");
-    CHECK(schema.at("properties").size() == 0);
-    CHECK(schema.at("additionalProperties").as<bool>() ==
-          (policy == "allow_extra"));
+    check((schema.at("properties").size() == 0));
+    check((schema.at("additionalProperties").as<bool>() ==
+          (policy == "allow_extra")));
     praktor_release_json(&description);
 
-    const std::string input = GENERATE(std::string("{}"),
-                                      std::string(R"({"extra":true})"));
+    const std::string input = std::array{std::string("{}"), std::string(R"({"extra":true})")}.at(row_2);
     const bool rejects = policy == "strict" && input != "{}";
-    const bool reviewed = GENERATE(false, true);
+    const bool reviewed = std::array{false, true}.at(row_3);
     praktor_owned_json output = PRAKTOR_OWNED_JSON_INIT;
     praktor_result status;
     if (reviewed) {
@@ -212,23 +218,34 @@ TEST_CASE("empty input contracts enforce their published additionalProperties po
     } else {
         status = executeContract(workflow, input, output, error);
     }
-    CHECK(status == (rejects ? PRAKTOR_RESULT_INPUT_CONTRACT
-                            : PRAKTOR_RESULT_SUCCESS));
+    check((status == (rejects ? PRAKTOR_RESULT_INPUT_CONTRACT
+                            : PRAKTOR_RESULT_SUCCESS)));
     if (rejects) {
-        CHECK(error.phase == PRAKTOR_ERROR_PHASE_INPUT_CONTRACT);
-        CHECK(std::string(error.message).find("extra") != std::string::npos);
-        CHECK(output.data == nullptr);
-        CHECK(output.size == 0);
+        check((error.phase == PRAKTOR_ERROR_PHASE_INPUT_CONTRACT));
+        check((std::string(error.message).find("extra") != std::string::npos));
+        check((output.data == nullptr));
+        check((output.size == 0));
     } else {
-        CHECK(parseOwned(output).at("workflow_status").as<std::string>() == "success");
+        check((parseOwned(output).at("workflow_status").as<std::string>() == "success"));
     }
     praktor_release_json(&output);
     praktor_release_workflow_plan(plan);
     std::filesystem::remove_all(dir);
 }
 
-TEST_CASE("output contracts interpolate composite templates and preserve single-path types",
-          "[sdk][contract][output]") {
+spec("empty input contracts enforce their published additionalProperties policy") {
+    for (std::size_t row_0 = 0; row_0 < 2; ++row_0) {
+        for (std::size_t row_1 = 0; row_1 < 2; ++row_1) {
+            for (std::size_t row_2 = 0; row_2 < 2; ++row_2) {
+                for (std::size_t row_3 = 0; row_3 < 2; ++row_3) {
+                    it("%s / row %zu %zu %zu %zu", "complete case", row_0, row_1, row_2, row_3) { test_empty_input_contracts_enforce_their_published_additionalproperties_policy_3(row_0, row_1, row_2, row_3); }
+                }
+            }
+        }
+    }
+}
+
+[[maybe_unused]] static void test_output_contracts_interpolate_composite_templates_and_preserve_single_path_types_4() {
     const auto dir = contractTempDir();
     const auto workflow = dir / "workflow.yml";
     writeContractFile(workflow, R"(
@@ -277,21 +294,25 @@ tasks:
 
     praktor_owned_json output = PRAKTOR_OWNED_JSON_INIT;
     praktor_error error = PRAKTOR_ERROR_INIT;
-    REQUIRE(executeContract(workflow,
+    check((executeContract(workflow,
         R"({"first":"alpha","second":"beta","count":7,"tags":["ci"],"payload":{"branch":"main"}})",
-        output, error) == PRAKTOR_RESULT_SUCCESS);
+        output, error) == PRAKTOR_RESULT_SUCCESS));
     const auto result = parseOwned(output);
     for (const auto& outputs : {result.at("outputs"),
                                 result.at("agent_output").at("outputs")}) {
-        CHECK(outputs.at("joined").as<std::string>() == "alpha + beta");
-        CHECK(outputs.at("spaced").as<std::string>() == "  alpha:beta  ");
-        CHECK((outputs.at("count").is_int64() || outputs.at("count").is_uint64()));
-        CHECK(outputs.at("count").as<int>() == 7);
-        REQUIRE(outputs.at("tags").is_array());
-        CHECK(outputs.at("tags").at(0).as<std::string>() == "ci");
-        REQUIRE(outputs.at("payload").is_object());
-        CHECK(outputs.at("payload").at("branch").as<std::string>() == "main");
+        check((outputs.at("joined").as<std::string>() == "alpha + beta"));
+        check((outputs.at("spaced").as<std::string>() == "  alpha:beta  "));
+        check(((outputs.at("count").is_int64() || outputs.at("count").is_uint64())));
+        check((outputs.at("count").as<int>() == 7));
+        check((outputs.at("tags").is_array()));
+        check((outputs.at("tags").at(0).as<std::string>() == "ci"));
+        check((outputs.at("payload").is_object()));
+        check((outputs.at("payload").at("branch").as<std::string>() == "main"));
     }
     praktor_release_json(&output);
     std::filesystem::remove_all(dir);
+}
+
+spec("output contracts interpolate composite templates and preserve single-path types") {
+    it("complete case") { test_output_contracts_interpolate_composite_templates_and_preserve_single_path_types_4(); }
 }

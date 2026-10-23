@@ -1,133 +1,154 @@
+#include "praktor_test.hpp"
 #include "expressions/expression_evaluator.hpp"
 #include "dag/workflow_context.hpp"
 
-#include <catch2/catch_all.hpp>
 
 using namespace Praktor::Expressions;
 
-TEST_CASE("ExpressionEvaluator Tests", "[evaluator]") {
+[[maybe_unused]] static void test_expressionevaluator_tests_1(int section_index) {
     ExpressionEvaluator evaluator;
     WorkflowContext context;
 
-    SECTION("Simple Equality") {
+    if (section_index == 0) {
         context.setValue("env", "prod");
-        REQUIRE(evaluator.evaluateAsBool("$env == 'prod'", context) == true);
-        REQUIRE(evaluator.evaluateAsBool("$env == 'dev'", context) == false);
+        check((evaluator.evaluateAsBool("$env == 'prod'", context) == true));
+        check((evaluator.evaluateAsBool("$env == 'dev'", context) == false));
     }
 
-    SECTION("Not Equal") {
+    if (section_index == 1) {
         context.setValue("env", "prod");
-        REQUIRE(evaluator.evaluateAsBool("$env != 'dev'", context) == true);
-        REQUIRE(evaluator.evaluateAsBool("$env != 'prod'", context) == false);
+        check((evaluator.evaluateAsBool("$env != 'dev'", context) == true));
+        check((evaluator.evaluateAsBool("$env != 'prod'", context) == false));
     }
 
-    SECTION("Boolean Literals") {
-        REQUIRE(evaluator.evaluateAsBool("true == true", context) == true);
-        REQUIRE(evaluator.evaluateAsBool("true != false", context) == true);
-        REQUIRE(evaluator.evaluateAsBool("true", context) == true);
-        REQUIRE(evaluator.evaluateAsBool("false", context) == false);
+    if (section_index == 2) {
+        check((evaluator.evaluateAsBool("true == true", context) == true));
+        check((evaluator.evaluateAsBool("true != false", context) == true));
+        check((evaluator.evaluateAsBool("true", context) == true));
+        check((evaluator.evaluateAsBool("false", context) == false));
     }
 
-    SECTION("Number Literals") {
-        REQUIRE(evaluator.evaluateAsBool("123 == 123.0", context) == true);
-        REQUIRE(evaluator.evaluateAsBool("123 != 456", context) == true);
+    if (section_index == 3) {
+        check((evaluator.evaluateAsBool("123 == 123.0", context) == true));
+        check((evaluator.evaluateAsBool("123 != 456", context) == true));
     }
 
-    SECTION("Logical AND") {
+    if (section_index == 4) {
         context.setValue("env", "prod");
         context.setValue("tag", "v1.0");
-        REQUIRE(evaluator.evaluateAsBool("$env == 'prod' && $tag == 'v1.0'", context) == true);
-        REQUIRE(evaluator.evaluateAsBool("$env == 'prod' && $tag == 'v2.0'", context) == false);
+        check((evaluator.evaluateAsBool("$env == 'prod' && $tag == 'v1.0'", context) == true));
+        check((evaluator.evaluateAsBool("$env == 'prod' && $tag == 'v2.0'", context) == false));
     }
 
-    SECTION("Logical OR") {
+    if (section_index == 5) {
         context.setValue("env", "staging");
-        REQUIRE(evaluator.evaluateAsBool("$env == 'prod' || $env == 'staging'", context) == true);
-        REQUIRE(evaluator.evaluateAsBool("$env == 'prod' || $env == 'dev'", context) == false);
+        check((evaluator.evaluateAsBool("$env == 'prod' || $env == 'staging'", context) == true));
+        check((evaluator.evaluateAsBool("$env == 'prod' || $env == 'dev'", context) == false));
     }
 
-    SECTION("Parentheses for Precedence") {
+    if (section_index == 6) {
         context.setValue("a", "1");
         context.setValue("b", "2");
         context.setValue("c", "3");
-        REQUIRE(evaluator.evaluateAsBool("($a == '1' || $b == '1') && $c == '3'", context) == true);
-        REQUIRE(evaluator.evaluateAsBool("$a == '1' || ($b == '2' && $c == '3')", context) == true);
-        REQUIRE(evaluator.evaluateAsBool("$a == '2' || ($b == '2' && $c == '4')", context) == false);
+        check((evaluator.evaluateAsBool("($a == '1' || $b == '1') && $c == '3'", context) == true));
+        check((evaluator.evaluateAsBool("$a == '1' || ($b == '2' && $c == '3')", context) == true));
+        check((evaluator.evaluateAsBool("$a == '2' || ($b == '2' && $c == '4')", context) == false));
     }
 
-    SECTION("Truthy evaluation of single variable") {
+    if (section_index == 7) {
         context.setValue("my_var", "some_value");
         context.setValue("empty_var", "");
-        REQUIRE(evaluator.evaluateAsBool("$my_var", context) == true);
-        REQUIRE(evaluator.evaluateAsBool("$empty_var", context) == false);
-        REQUIRE(evaluator.evaluateAsBool("$non_existent_var", context) == false);
+        check((evaluator.evaluateAsBool("$my_var", context) == true));
+        check((evaluator.evaluateAsBool("$empty_var", context) == false));
+        check((evaluator.evaluateAsBool("$non_existent_var", context) == false));
     }
 
-    SECTION("Less Than") {
+    if (section_index == 8) {
         context.setValue("count", "5");
-        REQUIRE(evaluator.evaluateAsBool("$count < 10", context) == true);
-        REQUIRE(evaluator.evaluateAsBool("$count < 5", context) == false);
-        REQUIRE(evaluator.evaluateAsBool("$count < 3", context) == false);
+        check((evaluator.evaluateAsBool("$count < 10", context) == true));
+        check((evaluator.evaluateAsBool("$count < 5", context) == false));
+        check((evaluator.evaluateAsBool("$count < 3", context) == false));
     }
 
-    SECTION("Greater Than") {
+    if (section_index == 9) {
         context.setValue("count", "5");
-        REQUIRE(evaluator.evaluateAsBool("$count > 3", context) == true);
-        REQUIRE(evaluator.evaluateAsBool("$count > 5", context) == false);
-        REQUIRE(evaluator.evaluateAsBool("$count > 10", context) == false);
+        check((evaluator.evaluateAsBool("$count > 3", context) == true));
+        check((evaluator.evaluateAsBool("$count > 5", context) == false));
+        check((evaluator.evaluateAsBool("$count > 10", context) == false));
     }
 
-    SECTION("Less Than or Equal") {
+    if (section_index == 10) {
         context.setValue("count", "5");
-        REQUIRE(evaluator.evaluateAsBool("$count <= 10", context) == true);
-        REQUIRE(evaluator.evaluateAsBool("$count <= 5", context) == true);
-        REQUIRE(evaluator.evaluateAsBool("$count <= 3", context) == false);
+        check((evaluator.evaluateAsBool("$count <= 10", context) == true));
+        check((evaluator.evaluateAsBool("$count <= 5", context) == true));
+        check((evaluator.evaluateAsBool("$count <= 3", context) == false));
     }
 
-    SECTION("Greater Than or Equal") {
+    if (section_index == 11) {
         context.setValue("count", "5");
-        REQUIRE(evaluator.evaluateAsBool("$count >= 3", context) == true);
-        REQUIRE(evaluator.evaluateAsBool("$count >= 5", context) == true);
-        REQUIRE(evaluator.evaluateAsBool("$count >= 10", context) == false);
+        check((evaluator.evaluateAsBool("$count >= 3", context) == true));
+        check((evaluator.evaluateAsBool("$count >= 5", context) == true));
+        check((evaluator.evaluateAsBool("$count >= 10", context) == false));
     }
 
-    SECTION("Logical NOT") {
-        REQUIRE(evaluator.evaluateAsBool("!true", context) == false);
-        REQUIRE(evaluator.evaluateAsBool("!false", context) == true);
+    if (section_index == 12) {
+        check((evaluator.evaluateAsBool("!true", context) == false));
+        check((evaluator.evaluateAsBool("!false", context) == true));
         context.setValue("flag", "yes");
-        REQUIRE(evaluator.evaluateAsBool("!$flag", context) == false);
+        check((evaluator.evaluateAsBool("!$flag", context) == false));
         context.setValue("empty", "");
-        REQUIRE(evaluator.evaluateAsBool("!$empty", context) == true);
+        check((evaluator.evaluateAsBool("!$empty", context) == true));
     }
 
-    SECTION("Combined Comparison and Logical") {
+    if (section_index == 13) {
         context.setValue("age", "25");
-        REQUIRE(evaluator.evaluateAsBool("$age >= 18 && $age < 65", context) == true);
-        REQUIRE(evaluator.evaluateAsBool("$age < 18 || $age >= 65", context) == false);
-        REQUIRE(evaluator.evaluateAsBool("!($age < 18)", context) == true);
+        check((evaluator.evaluateAsBool("$age >= 18 && $age < 65", context) == true));
+        check((evaluator.evaluateAsBool("$age < 18 || $age >= 65", context) == false));
+        check((evaluator.evaluateAsBool("!($age < 18)", context) == true));
     }
 
-    SECTION("JavaScript String Methods") {
-        REQUIRE(evaluator.evaluateAsBool("'hello world'.includes('world')", context) == true);
-        REQUIRE(evaluator.evaluateAsBool("'hello world'.startsWith('hello')", context) == true);
-        REQUIRE(evaluator.evaluateAsBool("'hello world'.endsWith('world')", context) == true);
-        REQUIRE(evaluator.evaluateAsBool("/.*@.*\\.com/.test('admin@test.com')", context) == true);
+    if (section_index == 14) {
+        check((evaluator.evaluateAsBool("'hello world'.includes('world')", context) == true));
+        check((evaluator.evaluateAsBool("'hello world'.startsWith('hello')", context) == true));
+        check((evaluator.evaluateAsBool("'hello world'.endsWith('world')", context) == true));
+        check((evaluator.evaluateAsBool("/.*@.*\\.com/.test('admin@test.com')", context) == true));
     }
 
-    SECTION("Invalid Expression") {
+    if (section_index == 15) {
         // TurboScript returns false on error, doesn't throw
-        REQUIRE(evaluator.evaluateAsBool("$env === 'prod'", context) == false);
-        REQUIRE(evaluator.evaluateAsBool("$env == 'prod", context) == false);
+        check((evaluator.evaluateAsBool("$env === 'prod'", context) == false));
+        check((evaluator.evaluateAsBool("$env == 'prod", context) == false));
     }
 
-    SECTION("Whitespace Handling") {
+    if (section_index == 16) {
         context.setValue("my_var", "value");
-        REQUIRE(evaluator.evaluateAsBool("$my_var == 'value'", context) == true);
-        REQUIRE(evaluator.evaluateAsBool("  true  &&  false  ", context) == false);
+        check((evaluator.evaluateAsBool("$my_var == 'value'", context) == true));
+        check((evaluator.evaluateAsBool("  true  &&  false  ", context) == false));
     }
 
-    SECTION("Dotted Path Variables") {
+    if (section_index == 17) {
         context.setValue("env.ENVIRONMENT", "production");
-        REQUIRE(evaluator.evaluateAsBool("$env.ENVIRONMENT == 'production'", context) == true);
+        check((evaluator.evaluateAsBool("$env.ENVIRONMENT == 'production'", context) == true));
     }
+}
+
+spec("ExpressionEvaluator Tests") {
+    it("Simple Equality") { test_expressionevaluator_tests_1(0); }
+    it("Not Equal") { test_expressionevaluator_tests_1(1); }
+    it("Boolean Literals") { test_expressionevaluator_tests_1(2); }
+    it("Number Literals") { test_expressionevaluator_tests_1(3); }
+    it("Logical AND") { test_expressionevaluator_tests_1(4); }
+    it("Logical OR") { test_expressionevaluator_tests_1(5); }
+    it("Parentheses for Precedence") { test_expressionevaluator_tests_1(6); }
+    it("Truthy evaluation of single variable") { test_expressionevaluator_tests_1(7); }
+    it("Less Than") { test_expressionevaluator_tests_1(8); }
+    it("Greater Than") { test_expressionevaluator_tests_1(9); }
+    it("Less Than or Equal") { test_expressionevaluator_tests_1(10); }
+    it("Greater Than or Equal") { test_expressionevaluator_tests_1(11); }
+    it("Logical NOT") { test_expressionevaluator_tests_1(12); }
+    it("Combined Comparison and Logical") { test_expressionevaluator_tests_1(13); }
+    it("JavaScript String Methods") { test_expressionevaluator_tests_1(14); }
+    it("Invalid Expression") { test_expressionevaluator_tests_1(15); }
+    it("Whitespace Handling") { test_expressionevaluator_tests_1(16); }
+    it("Dotted Path Variables") { test_expressionevaluator_tests_1(17); }
 }

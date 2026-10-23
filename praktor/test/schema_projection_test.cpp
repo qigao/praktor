@@ -1,6 +1,6 @@
+#include "praktor_test.hpp"
 #include "projection.hpp"
 
-#include <catch2/catch_test_macros.hpp>
 
 #include <fstream>
 #include <iterator>
@@ -32,20 +32,24 @@ bool equal(const WorkflowValue& left, const WorkflowValue& right) {
 }
 }
 
-TEST_CASE("checked-in editor schema matches the published SDK IDL projection") {
+[[maybe_unused]] static void test_checked_in_editor_schema_matches_the_published_sdk_idl_projection_1() {
     const auto generated = Praktor::Schema::project(readSource("schema/workflow.schema"),
         WorkflowValue::parse(readSource("schema/workflow.editor.json")));
     const auto checkedIn = WorkflowValue::parse(readSource("grammar.schema.json"));
-    REQUIRE(equal(generated, checkedIn));
+    check((equal(generated, checkedIn)));
     const WorkflowValue task = generated["$defs"]["taskDefinition"];
-    CHECK(task["properties"]["tool"]["minLength"].as<int>() == 1);
-    CHECK(task["dependencies"]["with"][0].as<std::string>() == "tool");
-    CHECK(task["properties"]["with"]["type"].as<std::string>() == "object");
-    CHECK(generated["$defs"]["workflowInputField"]["properties"]["default"].size() == 0);
-    CHECK(generated["$defs"]["eachBlock"]["properties"]["items"]["oneOf"][0]["minLength"].as<int>() == 1);
+    check((task["properties"]["tool"]["minLength"].as<int>() == 1));
+    check((task["dependencies"]["with"][0].as<std::string>() == "tool"));
+    check((task["properties"]["with"]["type"].as<std::string>() == "object"));
+    check((generated["$defs"]["workflowInputField"]["properties"]["default"].size() == 0));
+    check((generated["$defs"]["eachBlock"]["properties"]["items"]["oneOf"][0]["minLength"].as<int>() == 1));
 }
 
-TEST_CASE("IDL shapes, aliases, presence, defaults and constraints drive projection") {
+spec("checked-in editor schema matches the published SDK IDL projection") {
+    it("complete case") { test_checked_in_editor_schema_matches_the_published_sdk_idl_projection_1(); }
+}
+
+[[maybe_unused]] static void test_idl_shapes_aliases_presence_defaults_and_constraints_drive_projection_2() {
     const auto result = Praktor::Schema::project(R"(
         schema Projection [version(1)];
         message Workflow {
@@ -58,28 +62,36 @@ TEST_CASE("IDL shapes, aliases, presence, defaults and constraints drive project
         }
     )", WorkflowValue::parse(R"({"$defs":{},"properties":{"title":{"description":"A title"}}})"));
     const auto properties = result["properties"];
-    CHECK(properties["title"]["type"].as<std::string>() == "string");
-    CHECK(properties["title"]["minLength"].as<int>() == 1);
-    CHECK(properties["title"]["maxLength"].as<int>() == 9);
-    CHECK(properties["title"]["description"].as<std::string>() == "A title");
-    CHECK(result["required"].size() == 1);
-    CHECK(result["required"][0].as<std::string>() == "title");
-    CHECK_FALSE(properties["enabled"]["default"].as<bool>());
-    CHECK(properties["policy"]["default"].as<std::string>() == "strict");
-    CHECK(properties["retries"]["minimum"].as<int>() == 0);
-    CHECK(properties["retries"]["maximum"].as<int>() == 1024);
-    CHECK(properties["arguments"]["items"]["type"].as<std::string>() == "string");
-    CHECK(properties["arguments"]["minItems"].as<int>() == 1);
-    CHECK(properties["tag"]["pattern"].as<std::string>() == "^[a-z]+$");
+    check((properties["title"]["type"].as<std::string>() == "string"));
+    check((properties["title"]["minLength"].as<int>() == 1));
+    check((properties["title"]["maxLength"].as<int>() == 9));
+    check((properties["title"]["description"].as<std::string>() == "A title"));
+    check((result["required"].size() == 1));
+    check((result["required"][0].as<std::string>() == "title"));
+    check((!(properties["enabled"]["default"].as<bool>())));
+    check((properties["policy"]["default"].as<std::string>() == "strict"));
+    check((properties["retries"]["minimum"].as<int>() == 0));
+    check((properties["retries"]["maximum"].as<int>() == 1024));
+    check((properties["arguments"]["items"]["type"].as<std::string>() == "string"));
+    check((properties["arguments"]["minItems"].as<int>() == 1));
+    check((properties["tag"]["pattern"].as<std::string>() == "^[a-z]+$"));
 }
 
-TEST_CASE("schema projection rejects conflicting ownership and unsupported IDL") {
+spec("IDL shapes, aliases, presence, defaults and constraints drive projection") {
+    it("complete case") { test_idl_shapes_aliases_presence_defaults_and_constraints_drive_projection_2(); }
+}
+
+[[maybe_unused]] static void test_schema_projection_rejects_conflicting_ownership_and_unsupported_idl_3() {
     const auto empty = WorkflowValue::parse(R"({"$defs":{}})");
-    CHECK_THROWS(Praktor::Schema::project("message Workflow { string value;", empty));
-    CHECK_THROWS(Praktor::Schema::project("message Workflow { Unknown value; }", empty));
-    CHECK_THROWS(Praktor::Schema::project("message Workflow { bytes value; }", empty));
-    CHECK_THROWS(Praktor::Schema::project("message Workflow { string value; }",
+    check_throws(Praktor::Schema::project("message Workflow { string value;", empty));
+    check_throws(Praktor::Schema::project("message Workflow { Unknown value; }", empty));
+    check_throws(Praktor::Schema::project("message Workflow { bytes value; }", empty));
+    check_throws(Praktor::Schema::project("message Workflow { string value; }",
         WorkflowValue::parse(R"({"$defs":{},"properties":{"value":{"type":"integer"}}})")));
-    CHECK_THROWS(Praktor::Schema::project("message Workflow { [alias(old)] string value; }", empty));
-    CHECK_THROWS(Praktor::Schema::project("message Workflow { [name(x)] string a; [name(x)] string b; }", empty));
+    check_throws(Praktor::Schema::project("message Workflow { [alias(old)] string value; }", empty));
+    check_throws(Praktor::Schema::project("message Workflow { [name(x)] string a; [name(x)] string b; }", empty));
+}
+
+spec("schema projection rejects conflicting ownership and unsupported IDL") {
+    it("complete case") { test_schema_projection_rejects_conflicting_ownership_and_unsupported_idl_3(); }
 }

@@ -272,10 +272,12 @@ tasks:
 
 ### 2. Build the project
 
-Praktor uses CMake user presets, vcpkg manifest mode, and the latest published
-Salts.Native, SaltsUtils.Native, CHttp.Native, and TurboScript.Native SDKs.
-Salts.Native and SaltsUtils.Native use `*-*` to include prereleases when selecting
-the latest version; CHttp.Native and TurboScript.Native select stable releases.
+Praktor uses CMake user presets and vcpkg manifest mode. The default
+SaltsUtils.Native version is pinned to `4.3.0-rc.11`, whose C11 Process suppresses
+Darwin pipe SIGPIPE at the owned endpoint. Experimental C11/P1 CI uses an exact
+source candidate containing both that fix and the current lifecycle hardening.
+Salts.Native uses `*-*` to include prereleases; CHttp.Native and TurboScript.Native
+select stable releases.
 Release presets read `SALTS_ROOT`, `SALTS_UTILS_ROOT`, `CHTTP_ROOT`, and
 `TURBOSCRIPT_ROOT` from the parent environment. Each root must contain the
 matching platform's installed SDK; stale CMake package locations are discarded.
@@ -741,7 +743,7 @@ praktor/
 │   ├── include/       # Public headers
 │   ├── src/           # Implementation
 │   │   └── script/    # Script engine (re2c + lemon)
-│   └── test/          # Unit tests (Catch2)
+│   └── test/          # Unit tests (Salts::TinyTest)
 ├── docs/              # System & feature documentation
 ├── examples/          # Sample workflow files
 └── grammar.md         # Authoritative DSL specification

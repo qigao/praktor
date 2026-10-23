@@ -1,10 +1,9 @@
+#include "praktor_test.hpp"
 /**
  * @file declarative_tree_executor_test.cpp
  * @brief Unit tests for DeclarativeTreeExecutor with Mustache preprocessing
  */
 
-#include <catch2/catch_test_macros.hpp>
-#include <catch2/matchers/catch_matchers_string.hpp>
 #include "executors/declarative_tree_executor.hpp"
 #include "dag/workflow_context.hpp"
 #include "yml/task_types.hpp"
@@ -15,20 +14,20 @@
 
 using namespace Praktor::Execution;
 
-TEST_CASE("DeclarativeTreeExecutor Mustache preprocessing", "[declarative_tree_executor]") {
+[[maybe_unused]] static void test_declarativetreeexecutor_mustache_preprocessing_1(int section_index) {
     WorkflowContext context;
     context.setValue("BUILD_DIR", "build");
     context.setValue("PROJECT_NAME", "MyApp");
     context.setValue("BUILD_TYPE", "Release");
 
-    SECTION("Simple Mustache template in shell command") {
-        // Create a simple orchestration tree
-        OrchNode shell_node;
-        shell_node.type = "Shell";
-        shell_node.params["cmd"] = "cmake --build {{ BUILD_DIR }}";
+    if (section_index == 0) {
+        OrchNode set_node;
+        set_node.type = "SetVariable";
+        set_node.params["key"] = "build_dir";
+        set_node.params["value"] = "{{ BUILD_DIR }}";
 
         OrchParams params;
-        params.root = shell_node;
+        params.root = set_node;
 
         Task task;
         task.name = "test_mustache";
@@ -36,23 +35,22 @@ TEST_CASE("DeclarativeTreeExecutor Mustache preprocessing", "[declarative_tree_e
         task.specifics = params;
 
         DeclarativeTreeExecutor executor;
-
-        // Note: This will actually execute the command, so we just test that it doesn't crash
-        // In a real test environment, we'd mock the shell execution
         auto result = executor.execute(task, context);
 
-        // The command will likely fail (no cmake project), but preprocessing should work
-        // We're mainly testing that Mustache templates are expanded without errors
-        REQUIRE(true); // If we get here, preprocessing didn't crash
+        check((result.success));
+        auto value = context.getValueByPath("tasks.test_mustache.outputs.build_dir");
+        check((value.is_string()));
+        check((value.as<std::string>() == "build"));
     }
 
-    SECTION("Multiple Mustache templates") {
-        OrchNode shell_node;
-        shell_node.type = "Shell";
-        shell_node.params["cmd"] = "echo {{ PROJECT_NAME }} {{ BUILD_TYPE }}";
+    if (section_index == 1) {
+        OrchNode set_node;
+        set_node.type = "SetVariable";
+        set_node.params["key"] = "description";
+        set_node.params["value"] = "{{ PROJECT_NAME }}-{{ BUILD_TYPE }}";
 
         OrchParams params;
-        params.root = shell_node;
+        params.root = set_node;
 
         Task task;
         task.name = "test_multiple_mustache";
@@ -62,10 +60,13 @@ TEST_CASE("DeclarativeTreeExecutor Mustache preprocessing", "[declarative_tree_e
         DeclarativeTreeExecutor executor;
         auto result = executor.execute(task, context);
 
-        REQUIRE(true); // Preprocessing should handle multiple templates
+        check((result.success));
+        auto value = context.getValueByPath("tasks.test_multiple_mustache.outputs.description");
+        check((value.is_string()));
+        check((value.as<std::string>() == "MyApp-Release"));
     }
 
-    SECTION("Nested nodes with Mustache templates") {
+    if (section_index == 2) {
         // Create a sequence with multiple shell commands
         OrchNode sequence_node;
         sequence_node.type = "Sequence";
@@ -93,10 +94,10 @@ TEST_CASE("DeclarativeTreeExecutor Mustache preprocessing", "[declarative_tree_e
         auto result = executor.execute(task, context);
 
         // Should preprocess all nested nodes recursively
-        REQUIRE(result.success);
+        check((result.success));
     }
 
-    SECTION("Mixed variable syntax") {
+    if (section_index == 3) {
         // Test that Mustache {{ }} and blackboard {key} can coexist
         OrchNode sequence_node;
         sequence_node.type = "Sequence";
@@ -126,16 +127,23 @@ TEST_CASE("DeclarativeTreeExecutor Mustache preprocessing", "[declarative_tree_e
         DeclarativeTreeExecutor executor;
         auto result = executor.execute(task, context);
 
-        REQUIRE(result.success);
+        check((result.success));
     }
 }
 
-TEST_CASE("DeclarativeTreeExecutor context bridge", "[declarative_tree_executor]") {
+spec("DeclarativeTreeExecutor Mustache preprocessing") {
+    it("Simple Mustache template is expanded into an observable output") { test_declarativetreeexecutor_mustache_preprocessing_1(0); }
+    it("Multiple Mustache templates preserve both resolved values") { test_declarativetreeexecutor_mustache_preprocessing_1(1); }
+    it("Nested nodes with Mustache templates") { test_declarativetreeexecutor_mustache_preprocessing_1(2); }
+    it("Mixed variable syntax") { test_declarativetreeexecutor_mustache_preprocessing_1(3); }
+}
+
+[[maybe_unused]] static void test_declarativetreeexecutor_context_bridge_2(int section_index) {
     WorkflowContext context;
     context.setValue("TEST_VAR", "test_value");
     context.setTaskOutput("previous_task", "result", "success");
 
-    SECTION("Context reference {ctx.*} still works") {
+    if (section_index == 0) {
         OrchNode shell_node;
         shell_node.type = "Shell";
         shell_node.params["cmd"] = "echo {ctx.variables.TEST_VAR}";
@@ -152,10 +160,10 @@ TEST_CASE("DeclarativeTreeExecutor context bridge", "[declarative_tree_executor]
         auto result = executor.execute(task, context);
 
         // Context bridge should still work alongside Mustache
-        REQUIRE(result.success);
+        check((result.success));
     }
 
-    SECTION("Task output reference") {
+    if (section_index == 1) {
         OrchNode shell_node;
         shell_node.type = "Shell";
         shell_node.params["cmd"] = "echo {ctx.tasks.previous_task.outputs.result}";
@@ -171,10 +179,10 @@ TEST_CASE("DeclarativeTreeExecutor context bridge", "[declarative_tree_executor]
         DeclarativeTreeExecutor executor;
         auto result = executor.execute(task, context);
 
-        REQUIRE(result.success);
+        check((result.success));
     }
 
-    SECTION("Multiple context references in one parameter") {
+    if (section_index == 2) {
         context.setValue("OTHER_VAR", "other_value");
 
         OrchNode set_node;
@@ -193,18 +201,24 @@ TEST_CASE("DeclarativeTreeExecutor context bridge", "[declarative_tree_executor]
         DeclarativeTreeExecutor executor;
         auto result = executor.execute(task, context);
 
-        REQUIRE(result.success);
+        check((result.success));
         auto stdout_value = context.getValueByPath("tasks.test_multi_ctx_reference.outputs.stdout");
-        REQUIRE(stdout_value.is_string());
-        CHECK(stdout_value.as<std::string>() == "test_value-other_value");
+        check((stdout_value.is_string()));
+        check((stdout_value.as<std::string>() == "test_value-other_value"));
     }
 }
 
-TEST_CASE("DeclarativeTreeExecutor variable resolution order", "[declarative_tree_executor]") {
+spec("DeclarativeTreeExecutor context bridge") {
+    it("Context reference {ctx.*} still works") { test_declarativetreeexecutor_context_bridge_2(0); }
+    it("Task output reference") { test_declarativetreeexecutor_context_bridge_2(1); }
+    it("Multiple context references in one parameter") { test_declarativetreeexecutor_context_bridge_2(2); }
+}
+
+[[maybe_unused]] static void test_declarativetreeexecutor_variable_resolution_order_3(int section_index) {
     WorkflowContext context;
     context.setValue("VAR1", "from_context");
 
-    SECTION("Mustache takes precedence for {{ }}") {
+    if (section_index == 0) {
         OrchNode shell_node;
         shell_node.type = "Shell";
         shell_node.params["cmd"] = "echo {{ VAR1 }}";
@@ -221,10 +235,10 @@ TEST_CASE("DeclarativeTreeExecutor variable resolution order", "[declarative_tre
         auto result = executor.execute(task, context);
 
         // {{ VAR1 }} should be expanded to "from_context" during preprocessing
-        REQUIRE(result.success);
+        check((result.success));
     }
 
-    SECTION("Blackboard for {key}") {
+    if (section_index == 1) {
         OrchNode sequence_node;
         sequence_node.type = "Sequence";
 
@@ -252,14 +266,19 @@ TEST_CASE("DeclarativeTreeExecutor variable resolution order", "[declarative_tre
         auto result = executor.execute(task, context);
 
         // {VAR2} should be resolved from blackboard during action execution
-        REQUIRE(result.success);
+        check((result.success));
     }
 }
 
-TEST_CASE("DeclarativeTreeExecutor no Mustache templates", "[declarative_tree_executor]") {
+spec("DeclarativeTreeExecutor variable resolution order") {
+    it("Mustache takes precedence for {{ }}") { test_declarativetreeexecutor_variable_resolution_order_3(0); }
+    it("Blackboard for {key}") { test_declarativetreeexecutor_variable_resolution_order_3(1); }
+}
+
+[[maybe_unused]] static void test_declarativetreeexecutor_no_mustache_templates_4(int section_index) {
     WorkflowContext context;
 
-    SECTION("Plain string without templates") {
+    if (section_index == 0) {
         OrchNode shell_node;
         shell_node.type = "Shell";
         shell_node.params["cmd"] = "echo hello world";
@@ -276,11 +295,15 @@ TEST_CASE("DeclarativeTreeExecutor no Mustache templates", "[declarative_tree_ex
         auto result = executor.execute(task, context);
 
         // Should work fine without any templates
-        REQUIRE(result.success);
+        check((result.success));
     }
 }
 
-TEST_CASE("DeclarativeTreeExecutor Parallel runs sleep children concurrently", "[declarative_tree_executor]") {
+spec("DeclarativeTreeExecutor no Mustache templates") {
+    it("Plain string without templates") { test_declarativetreeexecutor_no_mustache_templates_4(0); }
+}
+
+[[maybe_unused]] static void test_declarativetreeexecutor_parallel_runs_sleep_children_concurrently_5() {
     WorkflowContext context;
 
     OrchNode parallel_node;
@@ -312,11 +335,15 @@ TEST_CASE("DeclarativeTreeExecutor Parallel runs sleep children concurrently", "
     const auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now() - start).count();
 
-    REQUIRE(result.success);
-    CHECK(elapsed_ms < 1700);
+    check((result.success));
+    check((elapsed_ms < 1700));
 }
 
-TEST_CASE("DeclarativeTreeExecutor Repeat without finite num_cycles fails fast", "[declarative_tree_executor]") {
+spec("DeclarativeTreeExecutor Parallel runs sleep children concurrently") {
+    it("complete case") { test_declarativetreeexecutor_parallel_runs_sleep_children_concurrently_5(); }
+}
+
+[[maybe_unused]] static void test_declarativetreeexecutor_repeat_without_finite_num_cycles_fails_fast_6() {
     WorkflowContext context;
 
     OrchNode repeat_node;
@@ -338,12 +365,14 @@ TEST_CASE("DeclarativeTreeExecutor Repeat without finite num_cycles fails fast",
 
     DeclarativeTreeExecutor executor;
 
-    REQUIRE_THROWS_WITH(
-        executor.execute(task, context),
-        Catch::Matchers::ContainsSubstring("Repeat requires a finite 'num_cycles'"));
+    check((praktor_test::throws_containing([&] { (void)(executor.execute(task, context)); }, {"Repeat requires a finite 'num_cycles'"})));
 }
 
-TEST_CASE("DeclarativeTreeExecutor Timeout fails when child overruns budget", "[declarative_tree_executor]") {
+spec("DeclarativeTreeExecutor Repeat without finite num_cycles fails fast") {
+    it("complete case") { test_declarativetreeexecutor_repeat_without_finite_num_cycles_fails_fast_6(); }
+}
+
+[[maybe_unused]] static void test_declarativetreeexecutor_timeout_fails_when_child_overruns_budget_7() {
     WorkflowContext context;
 
     OrchNode timeout_node;
@@ -367,11 +396,15 @@ TEST_CASE("DeclarativeTreeExecutor Timeout fails when child overruns budget", "[
     DeclarativeTreeExecutor executor;
     auto result = executor.execute(task, context);
 
-    REQUIRE_FALSE(result.success);
-    CHECK(result.error_message.find("Action execution failed") != std::string::npos);
+    check_false(result.success);
+    check((result.error_message.find("Action execution failed") != std::string::npos));
 }
 
-TEST_CASE("DeclarativeTreeExecutor rejects malformed integer BT parameters", "[declarative_tree_executor]") {
+spec("DeclarativeTreeExecutor Timeout fails when child overruns budget") {
+    it("complete case") { test_declarativetreeexecutor_timeout_fails_when_child_overruns_budget_7(); }
+}
+
+[[maybe_unused]] static void test_declarativetreeexecutor_rejects_malformed_integer_bt_parameters_8() {
     WorkflowContext context;
 
     OrchNode timeout_node;
@@ -393,12 +426,14 @@ TEST_CASE("DeclarativeTreeExecutor rejects malformed integer BT parameters", "[d
     task.specifics = params;
 
     DeclarativeTreeExecutor executor;
-    REQUIRE_THROWS_WITH(
-        executor.execute(task, context),
-        Catch::Matchers::ContainsSubstring("Parameter 'timeout_ms' on node 'Timeout' must be an integer"));
+    check((praktor_test::throws_containing([&] { (void)(executor.execute(task, context)); }, {"Parameter 'timeout_ms' on node 'Timeout' must be an integer"})));
 }
 
-TEST_CASE("DeclarativeTreeExecutor rejects malformed boolean BT parameters", "[declarative_tree_executor]") {
+spec("DeclarativeTreeExecutor rejects malformed integer BT parameters") {
+    it("complete case") { test_declarativetreeexecutor_rejects_malformed_integer_bt_parameters_8(); }
+}
+
+[[maybe_unused]] static void test_declarativetreeexecutor_rejects_malformed_boolean_bt_parameters_9() {
     WorkflowContext context;
 
     OrchNode shell_node;
@@ -416,12 +451,14 @@ TEST_CASE("DeclarativeTreeExecutor rejects malformed boolean BT parameters", "[d
     task.specifics = params;
 
     DeclarativeTreeExecutor executor;
-    REQUIRE_THROWS_WITH(
-        executor.execute(task, context),
-        Catch::Matchers::ContainsSubstring("Parameter 'stream_output' on node 'Shell' must be a boolean"));
+    check((praktor_test::throws_containing([&] { (void)(executor.execute(task, context)); }, {"Parameter 'stream_output' on node 'Shell' must be a boolean"})));
 }
 
-TEST_CASE("DeclarativeTreeExecutor Switch resolves bare blackboard key names", "[declarative_tree_executor]") {
+spec("DeclarativeTreeExecutor rejects malformed boolean BT parameters") {
+    it("complete case") { test_declarativetreeexecutor_rejects_malformed_boolean_bt_parameters_9(); }
+}
+
+[[maybe_unused]] static void test_declarativetreeexecutor_switch_resolves_bare_blackboard_key_names_10() {
     WorkflowContext context;
 
     OrchNode sequence_node;
@@ -460,10 +497,14 @@ TEST_CASE("DeclarativeTreeExecutor Switch resolves bare blackboard key names", "
 
     DeclarativeTreeExecutor executor;
     auto result = executor.execute(task, context);
-    REQUIRE(result.success);
+    check((result.success));
 }
 
-TEST_CASE("DeclarativeTreeExecutor Switch rejects malformed case indices", "[declarative_tree_executor]") {
+spec("DeclarativeTreeExecutor Switch resolves bare blackboard key names") {
+    it("complete case") { test_declarativetreeexecutor_switch_resolves_bare_blackboard_key_names_10(); }
+}
+
+[[maybe_unused]] static void test_declarativetreeexecutor_switch_rejects_malformed_case_indices_11() {
     WorkflowContext context;
 
     OrchNode switch_node;
@@ -485,15 +526,17 @@ TEST_CASE("DeclarativeTreeExecutor Switch rejects malformed case indices", "[dec
     task.specifics = params;
 
     DeclarativeTreeExecutor executor;
-    REQUIRE_THROWS_WITH(
-        executor.execute(task, context),
-        Catch::Matchers::ContainsSubstring("Parameter 'variable' on node 'Switch' must be an integer"));
+    check((praktor_test::throws_containing([&] { (void)(executor.execute(task, context)); }, {"Parameter 'variable' on node 'Switch' must be an integer"})));
 }
 
-TEST_CASE("DeclarativeTreeExecutor empty parameters", "[declarative_tree_executor]") {
+spec("DeclarativeTreeExecutor Switch rejects malformed case indices") {
+    it("complete case") { test_declarativetreeexecutor_switch_rejects_malformed_case_indices_11(); }
+}
+
+[[maybe_unused]] static void test_declarativetreeexecutor_empty_parameters_12(int section_index) {
     WorkflowContext context;
 
-    SECTION("Node with no parameters") {
+    if (section_index == 0) {
         OrchNode shell_node;
         shell_node.type = "Shell";
         // No params
@@ -509,17 +552,24 @@ TEST_CASE("DeclarativeTreeExecutor empty parameters", "[declarative_tree_executo
         DeclarativeTreeExecutor executor;
         auto result = executor.execute(task, context);
 
-        // Should handle empty params gracefully
-        // (will fail because no cmd, but shouldn't crash)
-        REQUIRE(true);
+        // The legacy action executor treats a Shell node with no command as a successful no-op.
+        // Keep this compatibility behavior explicit until the C11 backend has a differential oracle.
+        check((result.success));
+        check((result.error_message.empty()));
+        check((result.stdout_data.empty()));
+        check((result.stderr_data.empty()));
     }
 }
 
-TEST_CASE("DeclarativeTreeExecutor parser outputs", "[declarative_tree_executor]") {
+spec("DeclarativeTreeExecutor empty parameters") {
+    it("Node with no parameters") { test_declarativetreeexecutor_empty_parameters_12(0); }
+}
+
+[[maybe_unused]] static void test_declarativetreeexecutor_parser_outputs_13(int section_index) {
     WorkflowContext context;
     DeclarativeTreeExecutor executor;
 
-    SECTION("ParseJson resolves input_key from blackboard references") {
+    if (section_index == 0) {
         OrchNode sequence_node;
         sequence_node.type = "Sequence";
 
@@ -552,14 +602,14 @@ TEST_CASE("DeclarativeTreeExecutor parser outputs", "[declarative_tree_executor]
         task.specifics = params;
 
         auto result = executor.execute(task, context);
-        REQUIRE(result.success);
+        check((result.success));
 
         auto data = context.getValueByPath("tasks.parse_via_blackboard_key.outputs.data");
-        REQUIRE(data.is_string());
-        CHECK(data.as<std::string>() == "ok");
+        check((data.is_string()));
+        check((data.as<std::string>() == "ok"));
     }
 
-    SECTION("ParseJson exports structured objects") {
+    if (section_index == 1) {
         context.setValue("raw_json", R"({"status":"ok","items":[{"id":7}]})");
 
         OrchNode node;
@@ -579,15 +629,15 @@ TEST_CASE("DeclarativeTreeExecutor parser outputs", "[declarative_tree_executor]
         context.pushTaskScope(task.name);
         auto result = executor.execute(task, context);
         context.popTaskScope();
-        REQUIRE(result.success);
+        check((result.success));
 
         auto data = context.getValueByPath("tasks.parse_json_root.outputs.data");
-        REQUIRE(data.is_object());
-        CHECK(data["status"].as<std::string>() == "ok");
-        CHECK(data["items"][0]["id"].as<int>() == 7);
+        check((data.is_object()));
+        check((data["status"].as<std::string>() == "ok"));
+        check((data["items"][0]["id"].as<int>() == 7));
     }
 
-    SECTION("ParseKeyValue exports structured maps") {
+    if (section_index == 2) {
         context.setValue("env_blob", "A=1\nB=two\n");
 
         OrchNode node;
@@ -606,11 +656,17 @@ TEST_CASE("DeclarativeTreeExecutor parser outputs", "[declarative_tree_executor]
         context.pushTaskScope(task.name);
         auto result = executor.execute(task, context);
         context.popTaskScope();
-        REQUIRE(result.success);
+        check((result.success));
 
         auto data = context.getValueByPath("tasks.parse_keyvalue.outputs.env_vars");
-        REQUIRE(data.is_object());
-        CHECK(data["A"].as<std::string>() == "1");
-        CHECK(data["B"].as<std::string>() == "two");
+        check((data.is_object()));
+        check((data["A"].as<std::string>() == "1"));
+        check((data["B"].as<std::string>() == "two"));
     }
+}
+
+spec("DeclarativeTreeExecutor parser outputs") {
+    it("ParseJson resolves input_key from blackboard references") { test_declarativetreeexecutor_parser_outputs_13(0); }
+    it("ParseJson exports structured objects") { test_declarativetreeexecutor_parser_outputs_13(1); }
+    it("ParseKeyValue exports structured maps") { test_declarativetreeexecutor_parser_outputs_13(2); }
 }
