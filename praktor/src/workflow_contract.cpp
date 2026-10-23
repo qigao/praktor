@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cctype>
 #include <sstream>
+#include <new>
 #include <string_view>
 #include <utility>
 
@@ -22,14 +23,14 @@ std::string trim(std::string value) {
 }
 
 bool enumContains(const WorkflowContractField& field, const WorkflowValue& value) {
-    if (field.enum_values.empty()) {
-        return true;
-    }
-    const std::string encoded = value.to_string();
-    return std::any_of(field.enum_values.begin(), field.enum_values.end(),
-        [&](const WorkflowValue& candidate) {
-            return candidate.to_string() == encoded;
-        });
+    if (field.enum_values.empty()) return true;
+    WorkflowValue values = WorkflowValue::array();
+    for (const auto& candidate : field.enum_values) values.push_back(candidate);
+    bool matches = false;
+    const int status = praktor_contract_value_in_enum(value.raw(), values.raw(), &matches);
+    if (status == SALTS_ENOMEM) throw std::bad_alloc();
+    if (status != SALTS_OK) throw std::runtime_error("Failed to compare workflow contract enum");
+    return matches;
 }
 
 void validateFieldValue(const std::string& name,
@@ -47,22 +48,17 @@ void validateFieldValue(const std::string& name,
 }
 
 WorkflowValue schemaForField(const WorkflowContractField& field) {
-    WorkflowValue schema = WorkflowValue::object();
-    schema["type"] = field.type;
-    if (!field.description.empty()) {
-        schema["description"] = field.description;
-    }
-    if (field.default_value.has_value()) {
-        schema["default"] = *field.default_value;
-    }
-    if (!field.enum_values.empty()) {
-        WorkflowValue values = WorkflowValue::array();
-        for (const auto& value : field.enum_values) {
-            values.push_back(value);
-        }
-        schema["enum"] = std::move(values);
-    }
-    return schema;
+    WorkflowValue values = WorkflowValue::array();
+    for (const auto& value : field.enum_values) values.push_back(value);
+    json_value_t *raw = nullptr;
+    const int status = praktor_contract_schema_field(
+        field.type.c_str(), field.description.c_str(), !field.description.empty(),
+        field.default_value ? field.default_value->raw() : nullptr,
+        field.enum_values.empty() ? nullptr : values.raw(), &raw);
+    if (status == SALTS_ENOMEM) throw std::bad_alloc();
+    if (status != SALTS_OK || raw == nullptr)
+        throw std::runtime_error("Failed to construct workflow contract schema field");
+    return WorkflowValue::adoptJson(raw);
 }
 
 WorkflowValue resolveOutputValue(const std::string& name,

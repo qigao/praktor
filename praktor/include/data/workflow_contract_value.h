@@ -13,6 +13,21 @@ extern "C" {
 bool praktor_contract_value_matches_type(const json_value_t *value,
                                          const char *type);
 
+/* Enum equality matches the former WorkflowValue::to_string() comparison:
+ * serialized JSON bytes, not coercive numeric equality. A null or empty enum
+ * array means no restriction. On error, *out is unchanged. */
+int praktor_contract_value_in_enum(const json_value_t *value,
+                                   const json_value_t *enum_values,
+                                   bool *out);
+
+/* Build a schema fragment with owned JSON children. Inputs are borrowed;
+ * output is uniquely owned. On failure, *out is NULL. */
+int praktor_contract_schema_field(const char *type, const char *description,
+                                  bool has_description,
+                                  const json_value_t *default_value,
+                                  const json_value_t *enum_values,
+                                  json_value_t **out);
+
 #ifdef __cplusplus
 }
 #endif
