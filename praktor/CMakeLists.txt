@@ -16,6 +16,7 @@ set(SOURCE_FILES
     src/data/workflow_value_legacy_bridge.cpp
     src/data/structured_document_query_legacy_bridge.cpp
     src/yml/yaml_document_legacy_bridge.cpp
+    src/yml/yaml_contract_legacy_bridge.cpp
     src/yml/task_parser.cpp
     src/yml/orch_parser.cpp
     src/yml/task_field_parser.cpp
