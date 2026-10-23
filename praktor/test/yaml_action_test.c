@@ -1,4 +1,5 @@
 #include "yml/yaml_action_params.h"
+#include "yml/orch_tree.h"
 #include "../../actions/core/output_scan.h"
 #include <cmeta_fs.h>
 #include <fmt.h>
@@ -412,5 +413,34 @@ spec("C-owned typed YAML Action parameters") {
             error_is(source, PRAKTOR_YAML_ACTION_COMMAND, "maximum bytes of 1048576");
             tstr_free(source); tstr_free(text);
         }
+    }
+}
+
+spec("Native YAML Command parameters feed the native orchestration owner") {
+    it("retains the owned Shell and KeyValue tree after destroying YAML and parameter inputs") {
+        praktor_yaml_action_params *owner = params("command: [echo, final]\nparse_keyvalue: {delimiter: ':', line_separator: ';', output_key: vars}\n", PRAKTOR_YAML_ACTION_COMMAND);
+        praktor_yaml_command_view parsed = {0};
+        praktor_orch_command input = {0};
+        praktor_orch_tree *tree = NULL;
+        const praktor_orch_node *shell = NULL, *scanner = NULL;
+        praktor_orch_param param = {0};
+        vstr commands[2] = {{0}};
+        check(praktor_yaml_action_command(owner, &parsed) == SALTS_OK && parsed.sequence && parsed.command_count == 2);
+        check(praktor_yaml_action_argument(owner, 0, &commands[0]) == SALTS_OK && praktor_yaml_action_argument(owner, 1, &commands[1]) == SALTS_OK);
+        input.sequence = parsed.sequence; input.commands = commands; input.command_count = parsed.command_count; input.output_format = parsed.output_format;
+        input.keyvalue.present = parsed.postprocessor == PRAKTOR_YAML_POST_KEYVALUE;
+        input.keyvalue.delimiter = parsed.parser.keyvalue.delimiter;
+        input.keyvalue.line_separator = parsed.parser.keyvalue.line_separator;
+        input.keyvalue.output_key = parsed.parser.keyvalue.output_key;
+        check(praktor_orch_from_command(&input, &tree, NULL, 0) == SALTS_OK);
+        praktor_yaml_action_params_destroy(owner);
+        check(praktor_orch_child_count(praktor_orch_tree_root(tree)) == 3);
+        check(praktor_orch_child_at(praktor_orch_tree_root(tree), 1, &shell) == SALTS_OK && praktor_orch_node_type(shell) == PRAKTOR_ORCH_SHELL);
+        check(praktor_orch_param_at(shell, 0, &param) == SALTS_OK && is_text(param.value, "final"));
+        check(praktor_orch_child_at(praktor_orch_tree_root(tree), 2, &scanner) == SALTS_OK && praktor_orch_node_type(scanner) == PRAKTOR_ORCH_PARSE_KEY_VALUE);
+        check(praktor_orch_param_at(scanner, 1, &param) == SALTS_OK && is_text(param.value, ":"));
+        check(praktor_orch_param_at(scanner, 2, &param) == SALTS_OK && is_text(param.value, ";"));
+        check(praktor_orch_param_at(scanner, 3, &param) == SALTS_OK && is_text(param.value, "vars"));
+        praktor_orch_tree_destroy(tree);
     }
 }

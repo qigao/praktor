@@ -311,6 +311,60 @@ spec("Native C task fields project into legacy task types") {
     }
 }
 
+spec("Native C orchestration projects into existing task consumers") {
+    it("preserves catalog metadata lookup and node classification") {
+        check(NODE_REGISTRY.size() == 31);
+        const auto* shell = findNodeSpec("__sHeLl_");
+        check(shell && shell->name == "Shell" && !shell->isControl && !shell->allowsChildren);
+        check(shell->requiredParams == StrList({"cmd"}) && shell->optionalParams.back() == "stream_output");
+        check(findNodeSpec("keep_running_until_failure")->name == "KeepRunningUntilFailure");
+        check(!findNodeSpec(std::string("Shell\0tail", 10)) && !findNodeSpec("unknown"));
+        OrchNode control; control.type = "Sequence";
+        check(control.isControlNode() && !control.isLeafNode());
+        control.type = "SubTree"; check(!control.isControlNode() && control.isLeafNode());
+    }
+    it("preserves binary parameters command order and postprocessor priority") {
+        RunCommandParams input;
+        input.command = StrList({std::string("a\0tail", 6), "", "last"});
+        input.parse_regex = ParseRegexConfig{"x", -7, "match"};
+        input.parse_json = ParseJsonConfig{"$", "ignored"};
+        const auto result = desugarCommandToorch(input);
+        check(result.root.type == "Sequence" && result.root.children.size() == 4);
+        check(result.root.children[0].params.at("cmd") == std::string("a\0tail", 6));
+        check(result.root.children[0].params.count("output_key") == 0);
+        check(result.root.children[2].params.at("output_key") == "stdout");
+        check(result.root.children[3].type == "ParseRegex" && result.root.children[3].params.at("capture_group") == "-7");
+        input.command = StrList{}; input.parse_regex.reset(); input.parse_json.reset();
+        check(desugarCommandToorch(input).root.children.empty());
+        input.output_format = CommandOutputFormat::Json;
+        check(desugarCommandToorch(input).root.children[0].params.at("output_key") == "data");
+    }
+}
+
+#ifdef PRAKTOR_ORCH_FAULT_TEST
+extern "C" void praktor_orch_test_fail(unsigned point);
+extern "C" size_t praktor_orch_test_live(void);
+spec("Native orchestration owned-allocation exception projection") {
+    it("maps every C allocation boundary to bad_alloc and releases the complete tree") {
+        RunCommandParams input;
+        input.command = StrList({"one", "two"}); input.parse_regex = ParseRegexConfig{"(x)", -7, "match"};
+        unsigned point;
+        for (point = 1; point < 200; ++point) {
+            bool allocation = false;
+            praktor_orch_test_fail(point);
+            try { (void)desugarCommandToorch(input); }
+            catch (const std::bad_alloc&) { allocation = true; }
+            catch (...) { praktor_orch_test_fail(0); throw; }
+            praktor_orch_test_fail(0);
+            check(praktor_orch_test_live() == 0);
+            check(std::get<StrList>(input.command) == StrList({"one", "two"}));
+            if (!allocation) break;
+        }
+        check(point > 1 && point < 200);
+    }
+}
+#endif
+
 #ifdef PRAKTOR_YAML_FAULT_TEST
 extern "C" void praktor_yaml_test_fail(unsigned point);
 

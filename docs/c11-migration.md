@@ -58,7 +58,8 @@ the rollback point; partial migration is not released as the completed product.
 | Structured document queries | C JSONPath/YPATH/XPath/CSVPath dispatch and owned results; explicit temporary C++ value/exception bridge | Migrate remaining `WorkflowValue` callers, then delete the bridge |
 | Workflow values | C exact numeric conversion, borrowed path reads, transactional mutations over the existing Salts JSON owner; temporary C++ container/exception facade | Migrate callers and remove the facade |
 | YAML documents, fields, structured values and system parameters | C source/document owner, node access, scalar/int conversion, bounded field readers, key whitelist validation and owned contract/HostTool value conversion, Download/Service/ManagedProcess/Command/Program parameter construction, shared string containers and Each/Triggers/DynamicTasks/Uses construction; explicit temporary C++ iterator/exception facade | Port remaining YAML task/workflow field construction, then delete the facade |
-| Contracts, effects, profiles, reviewed plans | C++ remains | One C-owned representation and unchanged SDK/YAML contracts |
+| Harness profile | Pure C reason-mask policy; temporary input/result conversion in the reviewed-plan caller | Preserve reason order and remove remaining caller conversion with the plan migration |
+| Contracts, effects, reviewed plans | C++ remains | One C-owned representation and unchanged SDK/YAML contracts |
 | DAG, contexts, triggers, scheduler, actions | C++ application layer and explicit compatibility dispatch remain | Native C execution and atomic Parallel branch state |
 | Shell/application/service adapters | C implementations exist, C++ conversions remain | C callers only; remove adapter headers/translation units |
 | SDK, CLI, script wrapper, remaining tools/examples/tests | C++ remains | Preserve the C ABI and CLI behavior, port all consumers/tests |
@@ -66,7 +67,7 @@ the rollback point; partial migration is not released as the completed product.
 
 The first cut deletes six C++ source/header/test files. It does **not** meet the
 whole-program completion gate yet. The baseline contained 186 tracked C++ files
-(excluding `.hpp.in` templates); 181 remain, including a temporary facade regression
+(excluding `.hpp.in` templates); 179 remain, including a temporary facade regression
 test added during the value port. This count is
 inventory, not a measure of runtime parity or a substitute for the final audit.
 
@@ -416,8 +417,72 @@ matched 45,102 complete local payload/exception/diagnostic outcomes, including
 unordered-map iteration, long scalars and competing invalid fields. This is
 construction parity evidence, not a claim of native DAG/trigger execution.
 
-All three projects provide release/ASan presets. On Linux,
-`bash cmake/ci/qualify-c-only-tools.sh release` configures/builds/tests all three
+Command-to-Orch lowering and the orchestration node catalog now live in the
+C-only `praktor_orch_tree` target. The catalog has one declaration source for all
+31 types, required/optional parameter names and control/child policy. C lookup
+preserves underscore-insensitive, C-locale byte case folding and length-aware
+name refusal. `orch_legacy_bridge.cpp` replaces `task_types.cpp`: it projects
+catalog entries using the original initializer-list construction and declaration
+order. Thus the existing platform-specific unordered registry iteration, including
+unknown-type diagnostics in the remaining recursive parser, stays unchanged.
+The original C++ normalization/table and Command expansion algorithms are removed.
+
+The unique C tree owns a CSTL vector of separately allocated nodes. Each node
+owns parameter text in `tstr` plus raw CSTL vectors of parameters and borrowed
+child pointers. Node-vector growth cannot invalidate those pointers; no owning
+container is byte-copied. Iterative destruction walks the unique node vector,
+never recursively destroys borrowed child pointers. Construction copies binary
+`vstr` input and publishes only after complete success. Views remain valid after
+input destruction and owner pointer transfer, expiring at owner destruction;
+independent owners can be constructed concurrently. Failure destroys all partial
+nodes, parameters and vector storage and preserves the prior caller output.
+
+The constructor bounds command lists to 4096 entries, trees to 4098 nodes,
+per-node parameters to eight and aggregate owned parameter text to 1 MiB including
+terminators, generated capture-group text and default values. Static keys/type
+names consume no text budget. Container and allocator overhead is outside that
+text bound. Capacity excess fails closed with no truncation or Legacy retry.
+These limits also apply to manual/dynamic Command lowering, which was previously
+unbounded; defaults can make tree admission stricter than YAML parameter-owner
+admission near the aggregate boundary. This is an explicit branch-local policy,
+not an installed SDK ABI change. Only the selected scalar/list form and highest
+priority parser are read. Postprocessor precedence, empty manual command/list
+behavior, binary values, last-Shell stdout assignment, regex integer rendering,
+empty Lines filter omission and the JSON `data` fallback remain unchanged.
+Working-directory/environment fields remain outside this existing lowering policy.
+
+A fourth independent `praktor/src/yml/standalone` project requires only the base
+Salts SDK, C compiler and Core/CSTL/TinyTest/Platform targets: it does not load the
+YAML/JSON, Process or application targets. Its two C executables cover catalog
+lookup, stable input-independent trees, all parser choices/precedence, malformed
+views, exact capacity boundaries, concurrent owners and rollback at public owner,
+string, vector and generated-text allocation boundaries. The same fault provider
+is linked into the existing C++ exception test, so the real conversion boundary
+is exercised through every native allocation failure. A native YAML integration
+case passes actual C-owned Command parameters into the C tree and then destroys
+both YAML/parameter owners before inspecting the tree. Existing native Process
+controller/output-scanner tests and application cancellation/timeout regressions
+remain enabled. Frozen old C++ catalog and lowering code additionally matched
+29,411 complete tree payloads, parameter/registry iteration order and all 31 type
+metadata entries.
+
+This cut establishes a reusable owned tree, not a second recursive parser or a
+new executor. The 744-line recursive Orch YAML parser still requires migration
+into this owner, and task/workflow representation and DAG execution remain C++.
+The temporary bridge copies typed views only; retaining old expansion as a hidden
+fallback was rejected. Rollback restores catalog/lowering algorithms and their
+call wiring together. Both new C executables join lifecycle ASan and complete-
+source TSan, alongside the complete application graph.
+
+The independently migrated harness-profile policy is preserved in this cut.
+Its standalone C project gains matching release/ASan presets and joins the same
+full-graph build/link qualification; the existing native profile regression joins
+lifecycle ASan and complete-source TSan filters. The policy remains the sole
+reason-mask/ordering authority; no parallel C++ policy is reintroduced. The
+reviewed-plan caller's explicit value projection still needs migration.
+
+All five independent projects provide release/ASan presets. On Linux,
+`bash cmake/ci/qualify-c-only-tools.sh release` configures/builds/tests all five
 complete graphs and rejects C++ symbols/libraries in their executable links.
 The complete-source TSan workflow invokes the same qualification with `thread`
 against instrumented Salts and SaltsUtils. Ordinary platform CI continues

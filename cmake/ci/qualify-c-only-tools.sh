@@ -11,11 +11,13 @@ case "$mode" in
   *) echo 'Expected release, address or thread' >&2; exit 2 ;;
 esac
 export LD_LIBRARY_PATH="$SALTS_ROOT/lib:$SALTS_UTILS_ROOT/lib:${LD_LIBRARY_PATH:-}"
-for unit in schema lexer query; do
+for unit in schema lexer query orch profile; do
   case "$unit" in
     schema) directory=tools/schema/standalone ;;
     lexer) directory=praktor/src/expressions/standalone ;;
     query) directory=praktor/src/data/standalone ;;
+    orch) directory=praktor/src/yml/standalone ;;
+    profile) directory=praktor/src/profile/standalone ;;
   esac
   (
     cd "$directory"
@@ -24,6 +26,6 @@ for unit in schema lexer query; do
     ctest --preset "$unit-c-release" --timeout 90
   )
 done
-for binary in build/schema-c-release/praktor-schema build/schema-c-release/schema_projection_test build/lexer-c-release/expression_lexer_test build/lexer-c-release/expression_evaluator_c_test build/query-c-release/structured_document_query_c_test build/query-c-release/workflow_value_c_test build/query-c-release/workflow_value_fault_test build/query-c-release/yaml_document_c_test build/query-c-release/yaml_document_fault_test build/query-c-release/yaml_fields_c_test build/query-c-release/yaml_fields_fault_test build/query-c-release/yaml_value_c_test build/query-c-release/yaml_value_fault_test build/query-c-release/yaml_action_c_test build/query-c-release/yaml_action_fault_test build/query-c-release/yaml_task_fields_c_test build/query-c-release/yaml_task_fields_fault_test; do
+for binary in build/schema-c-release/praktor-schema build/schema-c-release/schema_projection_test build/lexer-c-release/expression_lexer_test build/lexer-c-release/expression_evaluator_c_test build/query-c-release/structured_document_query_c_test build/query-c-release/workflow_value_c_test build/query-c-release/workflow_value_fault_test build/query-c-release/yaml_document_c_test build/query-c-release/yaml_document_fault_test build/query-c-release/yaml_fields_c_test build/query-c-release/yaml_fields_fault_test build/query-c-release/yaml_value_c_test build/query-c-release/yaml_value_fault_test build/query-c-release/yaml_action_c_test build/query-c-release/yaml_action_fault_test build/query-c-release/yaml_task_fields_c_test build/query-c-release/yaml_task_fields_fault_test build/orch-c-release/orch_tree_c_test build/orch-c-release/orch_tree_fault_test build/profile-c-release/workflow_profile_c_test; do
   python3 cmake/ci/audit-c11-runtime-link.py "$binary"
 done
