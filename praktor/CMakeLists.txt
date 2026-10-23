@@ -82,7 +82,7 @@ target_link_libraries(
            Salts::CNet
            CHttp::S3
            praktor_shell
-    PRIVATE praktor_orch_tree praktor_workflow_profile praktor_yaml_task_fields praktor_yaml_action_params praktor_yaml_value praktor_yaml_document praktor_workflow_value praktor_document_query praktor_expression_evaluator actions praktor_process_driver praktor_process_native praktor_service_control
+    PRIVATE praktor_file_hash praktor_orch_tree praktor_workflow_profile praktor_yaml_task_fields praktor_yaml_action_params praktor_yaml_value praktor_yaml_document praktor_workflow_value praktor_document_query praktor_expression_evaluator actions praktor_process_driver praktor_process_native praktor_service_control
 )
 if(ENABLE_SCRIPT_ENGINE)
     target_link_libraries(${TARGET_NAME_LIB} PUBLIC TurboScript::TurboScript)
