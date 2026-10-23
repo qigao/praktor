@@ -55,7 +55,7 @@ static void sleep_leaves(void) {
   praktor_c11_bt_host hooks = {0};
   uint64_t now = 0u;
   int owner_a = 0, owner_b = 0;
-  praktor_c11_native_host_config config = {4u, 64u, 128u, 1u, fake_now, &now};
+  praktor_c11_native_host_config config;
   praktor_c11_leaf_parameter duration = {"duration", PRAKTOR_C11_LEAF_STRING, "2s", 0.0, false};
   praktor_c11_leaf_request request = {0u, "Sleep", &duration, 1u, false, &owner_a};
   praktor_c11_leaf_request other = request;
@@ -66,6 +66,10 @@ static void sleep_leaves(void) {
       {"0.01m", UINT64_C(600000000)}, {"0.001h", UINT64_C(3600000000)},
       {" 1.9", UINT64_C(1000000)}, {"2147483647ms", UINT64_C(2147483647000000)}};
   size_t i;
+  praktor_c11_native_host_config_init(&config, 4u, 64u, 128u);
+  config.max_running_leaves = 1u;
+  config.now_ns = fake_now;
+  config.clock_user = &now;
   check(praktor_c11_native_host_init_with_config(&host, &config) == SALTS_OK);
   check(praktor_c11_native_host_bind(&host, &hooks) == SALTS_OK);
   check(hooks.halt_leaf == NULL && hooks.halt_typed_leaf != NULL);
@@ -155,18 +159,95 @@ static void parse_lines(void) {
   check(praktor_c11_value_store_set(values, "destination", "source") == PRAKTOR_C11_VALUE_OK);
   check(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_OK && status == SALTS_BT_SUCCESS);
   check(praktor_c11_value_store_get(values, "source_count", text, sizeof(text), &size) == PRAKTOR_C11_VALUE_OK && strcmp(text, "3") == 0);
+  check(praktor_c11_value_store_set(values, "destination", "lines") == PRAKTOR_C11_VALUE_OK);
+  check(praktor_c11_value_store_set(values, "source", "zero\none\ntone\none\r\none") == PRAKTOR_C11_VALUE_OK);
   check(praktor_c11_value_store_set(values, "filter", "^one$") == PRAKTOR_C11_VALUE_OK);
-  check(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_ENOTSUP);
+  check(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_OK && status == SALTS_BT_SUCCESS);
+  check(praktor_c11_value_store_get(values, "lines", text, sizeof(text), &size) == PRAKTOR_C11_VALUE_OK && strcmp(text, "one\none") == 0);
+  check(praktor_c11_value_store_get(values, "lines_count", text, sizeof(text), &size) == PRAKTOR_C11_VALUE_OK && strcmp(text, "2") == 0);
   check(praktor_c11_value_store_set(values, "filter", "[") == PRAKTOR_C11_VALUE_OK);
-  check(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_ENOTSUP);
+  check(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_OK && status == SALTS_BT_SUCCESS);
+  check(praktor_c11_value_store_get(values, "lines", text, sizeof(text), &size) == PRAKTOR_C11_VALUE_OK && strcmp(text, "zero\none\ntone\none\r\none") == 0);
+  check(praktor_c11_value_store_get(values, "lines_count", text, sizeof(text), &size) == PRAKTOR_C11_VALUE_OK && strcmp(text, "5") == 0);
   request.in_parallel_branch = true;
   check(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_ENOTSUP);
   request.in_parallel_branch = false;
   check(praktor_c11_value_store_set(values, "filter", "") == PRAKTOR_C11_VALUE_OK);
   check(praktor_c11_value_store_erase(values, "source") == PRAKTOR_C11_VALUE_OK);
   check(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_OK && status == SALTS_BT_FAILURE);
-  check(praktor_c11_value_store_get(values, "source_count", text, sizeof(text), &size) == PRAKTOR_C11_VALUE_OK && strcmp(text, "3") == 0);
+  check(praktor_c11_value_store_get(values, "lines_count", text, sizeof(text), &size) == PRAKTOR_C11_VALUE_OK && strcmp(text, "5") == 0);
   praktor_c11_native_host_destroy(&host);
+}
+
+static void parse_regex(void) {
+  praktor_c11_native_host host = {0};
+  praktor_c11_bt_host hooks = {0};
+  praktor_c11_value_store *values;
+  praktor_c11_leaf_parameter params[4] = {
+      {"input_key", PRAKTOR_C11_LEAF_STRING, "{port}", 0.0, false},
+      {"pattern", PRAKTOR_C11_LEAF_STRING, "{regex}", 0.0, false},
+      {"capture_group", PRAKTOR_C11_LEAF_NUMBER, NULL, 1.0, false},
+      {"output_key", PRAKTOR_C11_LEAF_STRING, "{destination}", 0.0, false}};
+  praktor_c11_leaf_request request = {0u, "ParseRegex", params, 4u, false, NULL};
+  salts_bt_node_status status = SALTS_BT_FAILURE;
+  char text[129];
+  size_t size = 0u;
+  check(praktor_c11_native_host_init(&host, 8u, 64u, 128u) == SALTS_OK);
+  check(praktor_c11_native_host_bind(&host, &hooks) == SALTS_OK);
+  values = praktor_c11_native_host_values(&host);
+  check(praktor_c11_value_store_set(values, "port", "source") == PRAKTOR_C11_VALUE_OK);
+  check(praktor_c11_value_store_set(values, "destination", "capture") == PRAKTOR_C11_VALUE_OK);
+  check(praktor_c11_value_store_set(values, "source", "Built target core-42") == PRAKTOR_C11_VALUE_OK);
+  check(praktor_c11_value_store_set(values, "regex", "target ([[:alnum:]_]+)(-([0-9]+))?") == PRAKTOR_C11_VALUE_OK);
+  check(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_OK && status == SALTS_BT_SUCCESS);
+  check(praktor_c11_value_store_get(values, "capture", text, sizeof(text), &size) == PRAKTOR_C11_VALUE_OK && strcmp(text, "core") == 0);
+  params[2].kind = PRAKTOR_C11_LEAF_STRING;
+  params[2].text = "2.0";
+  check(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_OK && status == SALTS_BT_SUCCESS);
+  check(praktor_c11_value_store_get(values, "capture", text, sizeof(text), &size) == PRAKTOR_C11_VALUE_OK && strcmp(text, "-42") == 0);
+  check(praktor_c11_value_store_set(values, "source", "Built target core") == PRAKTOR_C11_VALUE_OK);
+  check(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_OK && status == SALTS_BT_SUCCESS);
+  check(praktor_c11_value_store_get(values, "capture", text, sizeof(text), &size) == PRAKTOR_C11_VALUE_OK && strcmp(text, "") == 0);
+  check(praktor_c11_value_store_set(values, "source", "no match") == PRAKTOR_C11_VALUE_OK);
+  check(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_OK && status == SALTS_BT_FAILURE);
+  check(praktor_c11_value_store_get(values, "capture", text, sizeof(text), &size) == PRAKTOR_C11_VALUE_OK && strcmp(text, "") == 0);
+  check(praktor_c11_value_store_set(values, "regex", "[") == PRAKTOR_C11_VALUE_OK);
+  check(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_OK && status == SALTS_BT_FAILURE);
+  check(praktor_c11_value_store_set(values, "regex", "(a)\\1") == PRAKTOR_C11_VALUE_OK);
+  check(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_ENOTSUP);
+  check(praktor_c11_value_store_set(values, "regex", "(no)") == PRAKTOR_C11_VALUE_OK);
+  params[2].kind = PRAKTOR_C11_LEAF_NUMBER;
+  params[2].number = 0.0;
+  check(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_OK && status == SALTS_BT_FAILURE);
+  params[2].number = 1.5;
+  check(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_EINVAL);
+  praktor_c11_native_host_destroy(&host);
+}
+
+static void parse_regex_bounds(void) {
+  praktor_c11_native_host host = {0};
+  praktor_c11_native_host_config config;
+  praktor_c11_bt_host hooks = {0};
+  praktor_c11_leaf_parameter pattern = {
+      "pattern", PRAKTOR_C11_LEAF_STRING, "(a)", 0.0, false};
+  praktor_c11_leaf_request request = {
+      0u, "ParseRegex", &pattern, 1u, false, NULL};
+  salts_bt_node_status status = SALTS_BT_FAILURE;
+  praktor_c11_native_host_config_init(&config, 3u, 32u, 32u);
+  config.regex_cache_capacity = 1u;
+  config.max_regex_captures = 1u;
+  check(praktor_c11_native_host_init_with_config(&host, &config) == SALTS_OK);
+  check(praktor_c11_native_host_bind(&host, &hooks) == SALTS_OK);
+  check(praktor_c11_value_store_set(praktor_c11_native_host_values(&host),
+                                    "shell_output", "a") == PRAKTOR_C11_VALUE_OK);
+  check(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_OK &&
+        status == SALTS_BT_SUCCESS);
+  pattern.text = "(b)";
+  check(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_ENOBUFS);
+  praktor_c11_native_host_destroy(&host);
+  config.max_regex_captures = 65u;
+  check(praktor_c11_native_host_init_with_config(&host, &config) == SALTS_EINVAL);
+  check(host.impl == NULL);
 }
 
 static void parse_lines_atomic_failure(void) {
@@ -267,6 +348,8 @@ spec("C11 Native Host") {
   it("dispatches bounded typed values and fails closed") { stateless_leaves(); }
   it("owns cooperative Sleep activations per Session") { sleep_leaves(); }
   it("parses lines with Legacy newline and parameter semantics") { parse_lines(); }
+  it("extracts bounded POSIX capture groups without the C++ Executor") { parse_regex(); }
+  it("fails closed at configured regex cache and capture bounds") { parse_regex_bounds(); }
   it("publishes line content and count atomically within bounds") { parse_lines_atomic_failure(); }
   it("encodes sorted key/value JSON without allocating or partial publication") { parse_key_value(); }
 }

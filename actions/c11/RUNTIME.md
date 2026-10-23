@@ -9,7 +9,8 @@ C execution targets alone do not establish whole-workflow parity.
 | `praktor_c11_bt_core` | C11 topology/state and Salts::BehaviorTree; no C++ compiler required |
 | `praktor_c11_value_store` | Fixed-capacity C11 values and optimistic transactions |
 | `praktor_output_core` | Allocation-free C text scanner and bounded key/value JSON encoder; no SDK dependency |
-| `praktor_c11_native_host` | C11 value-store owner and preallocated parameter scratch; typed `SetVariable`, `CheckExitCode`, cooperative `Sleep`, unfiltered `ParseLines` and `ParseKeyValue` leaves |
+| `praktor_regex_tre` | Opaque bounded C regex provider over TRE; no C++ runtime or platform `regex_t` in the public API |
+| `praktor_c11_native_host` | C11 value-store owner and preallocated parameter scratch; typed `SetVariable`, `CheckExitCode`, cooperative `Sleep`, `ParseRegex`, filtered `ParseLines` and `ParseKeyValue` leaves |
 | `praktor_process_driver` | C11 Process I/O/retainer driver plus optional C11 joined worker with Salts thread, cancellation, synchronized observers and bounded admission copies; no C++ runtime |
 | `praktor_service_control` | Bounded C service state machine and numeric STATE parser; base Salts::Platform only |
 | `praktor_service_process_host` | Explicit service command binding to the joined C Process worker; no shell parser or C++ runtime |
@@ -65,8 +66,24 @@ as milliseconds; those behaviors are intentionally not copied. Differential
 validation compares supported terminal outcomes and values, while native tests
 cover cooperative RUNNING, cancellation and exact deadlines independently.
 
+Native `ParseRegex` and `ParseLines.filter` use bounded POSIX extended regular
+expressions through the private TRE provider. The Host has a fixed expression
+cache (default eight) and capture bound (default 64). A cache miss compiles once;
+cache hits and searches allocate no heap memory. Full-cache and capture-bound
+failures return `SALTS_ENOBUFS`; back references and TRE approximate matching
+return `SALTS_ENOTSUP`, avoiding their unbounded/backtracking semantics. Syntax
+errors make `ParseRegex` return leaf FAILURE and preserve its previous output.
+As in Legacy, an invalid `ParseLines` filter disables filtering.
+
+`ParseRegex` defaults `input_key`, `capture_group` and `output_key` to
+`shell_output`, `1` and `parsed_output`. Only capture groups 1..N are accepted;
+group zero and missing groups return leaf FAILURE. A matched optional group that
+did not participate publishes an empty value. Input absence and no-match are
+FAILURE without publication.
+
 Native `ParseLines` supports omitted/empty `filter`, including exact `{key}`
-substitution. It uses existing bounded scratch, with no per-tick allocation.
+substitution. It uses existing bounded scratch, with no per-tick allocation on
+a cached expression.
 `input_key` / `output_key` default to `shell_output` / `parsed_lines`, as in
 Executor (YAML still requires `input_key`). It preserves Legacy's actual
 `getline` and join behavior: CR is retained, a final LF does not add a line,
@@ -77,10 +94,10 @@ the allocation-free `praktor_c11_value_store_set_many` preflight API. Capacity,
 key/value length or invalid-key errors publish neither output; a Sequence stops
 before downstream effects. Duplicate batch keys are rejected.
 
-Legacy filters use `std::regex_search` (and ignore invalid regexes), rather than
-substring matching. Native nonempty filters return `SALTS_ENOTSUP` before any
-write. Regex support remains open; the independent Session cannot fall back to
-Executor. Parallel branch requests remain explicitly unsupported by this Host.
+TRE implements POSIX leftmost-longest matching, while Legacy uses C++ ECMAScript
+`std::regex`. The differential corpus covers their supported common subset;
+ECMAScript-only constructs are not silently delegated to Executor. Parallel
+branch requests remain explicitly unsupported by this Host.
 
 Native `ParseKeyValue` resolves typed/dynamic input, delimiter, separator and
 output ports. Defaults remain `shell_output`, `=`, LF and `parsed_output`.
@@ -114,7 +131,9 @@ Validation projects:
 
 - `actions/output-standalone`: pure C scanner/encoder with base SDK TinyTest only;
   link and archive audits reject C++/DOM and allocation dependencies.
-- `actions/c11/standalone`: pure C adapter, store and Native Host tests.
+- `actions/c11/standalone`: pure C adapter, store, TRE provider and Native Host
+  tests. Link audits reject C++ runtime, Executor and Shell symbols from both
+  regex and Host executables.
 - `shared/process/standalone`: C compiler/linker only, real duplex child I/O,
   capture limits, callback failure, saturation and zero-budget handoff after
   callback-user destruction. The joined worker suite additionally tests copied
@@ -158,7 +177,9 @@ Validation projects:
   lifecycle tests continue exercising the compatibility entry point.
   ParseLines additionally compares 1,093 exhaustive short data/LF/CR strings
   through actual YAML, dynamic ports, empty filters and unchanged source values;
-  native tests cover capacity/key-bound atomicity and cancellation before parse.
+  native tests cover valid/invalid POSIX filters, capacity/key-bound atomicity
+  and cancellation before parse. Native ParseRegex tests cover dynamic ports,
+  captures, optional groups, no-match, invalid syntax and rejected backrefs.
   ParseKeyValue compares 8,190 short data/delimiter/LF/space combinations with
   Legacy's SDK JSON serializer through YAML, including dynamic multi-byte ports,
   duplicate keys and input/output aliasing. C tests cover JSON escaping, exact

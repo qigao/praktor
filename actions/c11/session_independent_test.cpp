@@ -13,8 +13,11 @@ struct Host {
   praktor_c11_bt_host hooks{};
   static uint64_t readClock(void* user) { return *static_cast<uint64_t*>(user); }
   explicit Host(size_t max_running = 0u, uint64_t* clock = nullptr) {
-    const praktor_c11_native_host_config config{
-        8u, 64u, 4096u, max_running, clock != nullptr ? readClock : nullptr, clock};
+    praktor_c11_native_host_config config{};
+    praktor_c11_native_host_config_init(&config, 8u, 64u, 4096u);
+    config.max_running_leaves = max_running;
+    config.now_ns = clock != nullptr ? readClock : nullptr;
+    config.clock_user = clock;
     if (praktor_c11_native_host_init_with_config(&state, &config) != SALTS_OK ||
         praktor_c11_native_host_bind(&state, &hooks) != SALTS_OK) throw std::runtime_error("host init");
   }
@@ -106,15 +109,16 @@ void nativeParseLinesAfterCancellation() {
   check(session.tick(&status) == SALTS_OK && status == SALTS_BT_SUCCESS);
   check(host.get("parsed_lines") == "first\n\nsecond");
   check(host.get("parsed_lines_count") == "4" && host.get("after") == "done");
-  // A claimed but unsupported regex may not run a compatibility fallback or
-  // publish a new count. The independent binary contains no such fallback.
+  // Filtering stays entirely inside the C native host; there is no legacy
+  // parser fallback in this independent binary.
   tree.root.children[1].params["filter"] = std::string("^first$");
   tree.root.children.erase(tree.root.children.begin());
   check(praktor_c11_value_store_erase(values, "after") == PRAKTOR_C11_VALUE_OK);
-  actions::c11::TreeExecutorSession rejected(tree, {}, limits(), host.hooks);
-  check(rejected.tick(&status) == SALTS_ENOTSUP);
-  check(praktor_c11_value_store_contains(values, "after", &contains) == PRAKTOR_C11_VALUE_OK && !contains);
-  check(host.get("parsed_lines_count") == "4");
+  actions::c11::TreeExecutorSession filtered(tree, {}, limits(), host.hooks);
+  check(filtered.tick(&status) == SALTS_OK && status == SALTS_BT_SUCCESS);
+  check(host.get("after") == "done");
+  check(host.get("parsed_lines") == "first");
+  check(host.get("parsed_lines_count") == "1");
 }
 
 void nativeParseLinesCapacityFailure() {
@@ -317,7 +321,7 @@ void realProcessAndRetainer() {
 }
 }
 spec("Independent C11 Session") {
-  it("parses lines after fresh admission and rejects unsupported filters") { nativeParseLinesAfterCancellation(); }
+  it("parses and filters lines after fresh admission") { nativeParseLinesAfterCancellation(); }
   it("stops a Sequence before partial ParseLines publication") { nativeParseLinesCapacityFailure(); }
   it("executes typed leaves with bounded values") { nativeValuesAndCapacity(); }
   it("rejects root-store dispatch inside Parallel") { parallelScopeFailsClosed(); }

@@ -1,5 +1,6 @@
 #include "native_host.h"
 #include "core/output_scan.h"
+#include "regex_tre.h"
 #include <salts/clock.h>
 #include <errno.h>
 #include <limits.h>
@@ -17,6 +18,16 @@ typedef struct native_sleep_state {
   bool active;
 } native_sleep_state;
 
+typedef struct native_regex_cache_entry {
+  char *pattern;
+  praktor_regex *regex;
+  praktor_regex_status status;
+  bool occupied;
+} native_regex_cache_entry;
+
+#define PRAKTOR_NATIVE_REGEX_CACHE_DEFAULT 8u
+#define PRAKTOR_NATIVE_REGEX_CAPTURE_DEFAULT 64u
+
 typedef struct native_host_impl {
   praktor_c11_value_store values;
   size_t scratch_capacity;
@@ -25,6 +36,10 @@ typedef struct native_host_impl {
   size_t pair_capacity;
   native_sleep_state *sleep_states;
   size_t max_running_leaves;
+  native_regex_cache_entry *regex_cache;
+  char *regex_patterns;
+  size_t regex_cache_capacity;
+  praktor_regex_limits regex_limits;
   uint64_t (*now_ns)(void *user);
   void *clock_user;
 } native_host_impl;
@@ -102,6 +117,64 @@ static int parse_integer(const char *text, int *out) {
       value < INT_MIN || value > INT_MAX || fabs(value - trunc(value)) > 0.0) return SALTS_EINVAL;
   *out = (int)value;
   return SALTS_OK;
+}
+
+static int resolve_integer(native_host_impl *impl,
+                           const praktor_c11_leaf_parameter *param,
+                           int default_value, char *scratch, int *out) {
+  int result;
+  if (param == NULL) {
+    *out = default_value;
+    return SALTS_OK;
+  }
+  if (param->kind == PRAKTOR_C11_LEAF_BOOLEAN) return SALTS_EINVAL;
+  if (param->kind == PRAKTOR_C11_LEAF_NUMBER) {
+    if (!isfinite(param->number) || param->number < INT_MIN ||
+        param->number > INT_MAX ||
+        fabs(param->number - trunc(param->number)) > 0.0)
+      return SALTS_EINVAL;
+    *out = (int)param->number;
+    return SALTS_OK;
+  }
+  result = resolve(impl, param, scratch, scratch + impl->scratch_capacity);
+  if (result != SALTS_OK) return result;
+  return parse_integer(scratch, out);
+}
+
+static praktor_regex_status cached_regex(native_host_impl *impl,
+                                         const char *pattern,
+                                         praktor_regex **out_regex) {
+  native_regex_cache_entry *available = NULL;
+  size_t i, pattern_size;
+  *out_regex = NULL;
+  for (i = 0u; i < impl->regex_cache_capacity; ++i) {
+    native_regex_cache_entry *entry = &impl->regex_cache[i];
+    if (!entry->occupied) {
+      if (available == NULL) available = entry;
+    } else if (strcmp(entry->pattern, pattern) == 0) {
+      *out_regex = entry->regex;
+      return entry->status;
+    }
+  }
+  if (available == NULL) return PRAKTOR_REGEX_LIMIT;
+  pattern_size = strlen(pattern);
+  if (pattern_size >= impl->scratch_capacity) return PRAKTOR_REGEX_LIMIT;
+  memcpy(available->pattern, pattern, pattern_size + 1u);
+  available->status = praktor_regex_compile(
+      pattern, pattern_size, &impl->regex_limits, &available->regex);
+  available->occupied = true;
+  *out_regex = available->regex;
+  return available->status;
+}
+
+static int regex_error(praktor_regex_status status) {
+  switch (status) {
+    case PRAKTOR_REGEX_UNSUPPORTED: return SALTS_ENOTSUP;
+    case PRAKTOR_REGEX_LIMIT: return SALTS_ENOBUFS;
+    case PRAKTOR_REGEX_NOMEM: return SALTS_ENOMEM;
+    case PRAKTOR_REGEX_ENGINE: return SALTS_EIO;
+    default: return SALTS_EINVAL;
+  }
 }
 static native_sleep_state *find_sleep(native_host_impl *impl,
                                        const praktor_c11_leaf_request *request) {
@@ -191,6 +264,8 @@ static int tick_parse_lines(native_host_impl *impl,
   char *temporary = input + impl->scratch_capacity;
   char count_text[3u * sizeof(size_t) + 1u];
   char *cursor;
+  praktor_regex *filter = NULL;
+  praktor_regex_status regex_status = PRAKTOR_REGEX_OK;
   size_t required = 0u, key_size, written = 0u, count = 0u;
   int result, count_size;
   praktor_c11_value_write writes[2];
@@ -198,9 +273,13 @@ static int tick_parse_lines(native_host_impl *impl,
   if (param != NULL) {
     result = resolve(impl, param, input, temporary);
     if (result != SALTS_OK) return result;
-    /* Legacy uses std::regex_search, including its invalid-regex fallback.
-     * Never silently substitute a different matching language. */
-    if (*input != '\0') return SALTS_ENOTSUP;
+    if (*input != '\0') {
+      regex_status = cached_regex(impl, input, &filter);
+      /* Legacy deliberately treats an invalid filter as no filter. */
+      if (regex_status == PRAKTOR_REGEX_INVALID_PATTERN) filter = NULL;
+      else if (regex_status != PRAKTOR_REGEX_OK)
+        return regex_error(regex_status);
+    }
   }
   param = parameter(request, "input_key");
   result = param == NULL ? copy_text(key, impl->scratch_capacity, "shell_output")
@@ -230,6 +309,16 @@ static int tick_parse_lines(native_host_impl *impl,
     char *end = strchr(cursor, '\n');
     size_t length = end == NULL ? strlen(cursor) : (size_t)(end - cursor);
     char *next = end == NULL ? cursor + length : end + 1;
+    if (filter != NULL) {
+      praktor_regex_span match;
+      regex_status = praktor_regex_search_group(
+          filter, cursor, length, 0u, &match);
+      if (regex_status == PRAKTOR_REGEX_NO_MATCH) {
+        cursor = next;
+        continue;
+      }
+      if (regex_status != PRAKTOR_REGEX_OK) return regex_error(regex_status);
+    }
     ++count;
     if (written != 0u) input[written++] = '\n';
     memmove(input + written, cursor, length);
@@ -242,6 +331,76 @@ static int tick_parse_lines(native_host_impl *impl,
   writes[0].key = key; writes[0].value = input;
   writes[1].key = temporary; writes[1].value = count_text;
   result = praktor_c11_value_store_set_many(&impl->values, writes, 2u);
+  if (result != PRAKTOR_C11_VALUE_OK)
+    return result == PRAKTOR_C11_VALUE_EINVAL ? SALTS_EINVAL : SALTS_ENOBUFS;
+  *status = SALTS_BT_SUCCESS;
+  return SALTS_OK;
+}
+
+static int tick_parse_regex(native_host_impl *impl,
+                            const praktor_c11_leaf_request *request,
+                            salts_bt_node_status *status) {
+  const praktor_c11_leaf_parameter *param;
+  char *key = impl->scratch;
+  char *input = key + impl->scratch_capacity;
+  char *temporary = input + impl->scratch_capacity;
+  char *pattern = temporary + impl->scratch_capacity;
+  praktor_regex *regex = NULL;
+  praktor_regex_span match;
+  praktor_regex_status regex_status;
+  size_t required = 0u;
+  int result, capture_group = 1;
+
+  param = parameter(request, "input_key");
+  result = param == NULL ? copy_text(key, impl->scratch_capacity, "shell_output")
+                         : resolve(impl, param, key, temporary);
+  if (result != SALTS_OK) return result;
+  result = praktor_c11_value_store_get(&impl->values, key, input,
+                                       impl->scratch_capacity, &required);
+  if (result == PRAKTOR_C11_VALUE_ENOTFOUND) {
+    *status = SALTS_BT_FAILURE;
+    return SALTS_OK;
+  }
+  if (result != PRAKTOR_C11_VALUE_OK) return SALTS_EINVAL;
+
+  param = parameter(request, "pattern");
+  result = param == NULL ? copy_text(pattern, impl->scratch_capacity, "")
+                         : resolve(impl, param, pattern, temporary);
+  if (result != SALTS_OK) return result;
+  regex_status = cached_regex(impl, pattern, &regex);
+  if (regex_status == PRAKTOR_REGEX_INVALID_PATTERN) {
+    *status = SALTS_BT_FAILURE;
+    return SALTS_OK;
+  }
+  if (regex_status != PRAKTOR_REGEX_OK) return regex_error(regex_status);
+  result = resolve_integer(impl, parameter(request, "capture_group"), 1,
+                           temporary, &capture_group);
+  if (result != SALTS_OK) return result;
+  if (capture_group <= 0 ||
+      (size_t)capture_group > praktor_regex_capture_count(regex)) {
+    *status = SALTS_BT_FAILURE;
+    return SALTS_OK;
+  }
+  regex_status = praktor_regex_search_group(
+      regex, input, strlen(input), (size_t)capture_group, &match);
+  if (regex_status == PRAKTOR_REGEX_NO_MATCH) {
+    *status = SALTS_BT_FAILURE;
+    return SALTS_OK;
+  }
+  if (regex_status != PRAKTOR_REGEX_OK) return regex_error(regex_status);
+
+  param = parameter(request, "output_key");
+  result = param == NULL ? copy_text(key, impl->scratch_capacity, "parsed_output")
+                         : resolve(impl, param, key, temporary);
+  if (result != SALTS_OK) return result;
+  if (!match.participated) {
+    temporary[0] = '\0';
+  } else {
+    if (match.size >= impl->scratch_capacity) return SALTS_ENOBUFS;
+    memcpy(temporary, input + match.offset, match.size);
+    temporary[match.size] = '\0';
+  }
+  result = praktor_c11_value_store_set(&impl->values, key, temporary);
   if (result != PRAKTOR_C11_VALUE_OK)
     return result == PRAKTOR_C11_VALUE_EINVAL ? SALTS_EINVAL : SALTS_ENOBUFS;
   *status = SALTS_BT_SUCCESS;
@@ -305,6 +464,7 @@ static int tick_leaf(void *user, const praktor_c11_leaf_request *request,
   }
   if (strcmp(request->action, "Sleep") == 0) return tick_sleep(impl, request, status);
   if (find_sleep(impl, request) != NULL) return SALTS_EINVAL;
+  if (strcmp(request->action, "ParseRegex") == 0) return tick_parse_regex(impl, request, status);
   if (strcmp(request->action, "ParseLines") == 0) return tick_parse_lines(impl, request, status);
   if (strcmp(request->action, "ParseKeyValue") == 0) return tick_parse_key_value(impl, request, status);
   key = impl->scratch;
@@ -371,14 +531,21 @@ static void halt_typed_leaf(void *user, const praktor_c11_leaf_request *request)
 int praktor_c11_native_host_init_with_config(
     praktor_c11_native_host *host, const praktor_c11_native_host_config *config) {
   native_host_impl *impl;
-  size_t scratch_bytes;
+  size_t scratch_bytes, regex_capacity, regex_captures, i;
   int result;
   if (host == NULL || host->impl != NULL || config == NULL) return SALTS_EINVAL;
   scratch_bytes = config->max_key_bytes > config->max_value_bytes
       ? config->max_key_bytes : config->max_value_bytes;
+  regex_capacity = config->regex_cache_capacity == 0u
+      ? PRAKTOR_NATIVE_REGEX_CACHE_DEFAULT : config->regex_cache_capacity;
+  regex_captures = config->max_regex_captures == 0u
+      ? PRAKTOR_NATIVE_REGEX_CAPTURE_DEFAULT : config->max_regex_captures;
   if (scratch_bytes == SIZE_MAX || scratch_bytes + 1u > SIZE_MAX / 5u ||
       config->max_value_bytes / 2u + 1u > SIZE_MAX / sizeof(praktor_output_pair) ||
-      config->max_running_leaves > SIZE_MAX / sizeof(native_sleep_state)) return SALTS_EINVAL;
+      config->max_running_leaves > SIZE_MAX / sizeof(native_sleep_state) ||
+      regex_capacity > SIZE_MAX / sizeof(native_regex_cache_entry) ||
+      regex_capacity > SIZE_MAX / (scratch_bytes + 1u) ||
+      regex_captures > PRAKTOR_NATIVE_REGEX_CAPTURE_DEFAULT) return SALTS_EINVAL;
   impl = (native_host_impl *)calloc(1u, sizeof(*impl));
   if (impl == NULL) return SALTS_ENOMEM;
   result = praktor_c11_value_store_init(&impl->values, config->value_capacity,
@@ -393,12 +560,22 @@ int praktor_c11_native_host_init_with_config(
   impl->pairs = (praktor_output_pair *)calloc(impl->pair_capacity, sizeof(praktor_output_pair));
   if (config->max_running_leaves != 0u)
     impl->sleep_states = (native_sleep_state *)calloc(config->max_running_leaves, sizeof(native_sleep_state));
+  impl->regex_cache = (native_regex_cache_entry *)calloc(
+      regex_capacity, sizeof(native_regex_cache_entry));
+  impl->regex_patterns = (char *)calloc(regex_capacity, impl->scratch_capacity);
   if (impl->scratch == NULL || impl->pairs == NULL ||
-      (config->max_running_leaves != 0u && impl->sleep_states == NULL)) {
+      (config->max_running_leaves != 0u && impl->sleep_states == NULL) ||
+      impl->regex_cache == NULL || impl->regex_patterns == NULL) {
     praktor_c11_value_store_destroy(&impl->values);
-    free(impl->scratch); free(impl->pairs); free(impl->sleep_states); free(impl);
+    free(impl->scratch); free(impl->pairs); free(impl->sleep_states);
+    free(impl->regex_cache); free(impl->regex_patterns); free(impl);
     return SALTS_ENOMEM;
   }
+  for (i = 0u; i < regex_capacity; ++i)
+    impl->regex_cache[i].pattern =
+        impl->regex_patterns + i * impl->scratch_capacity;
+  impl->regex_cache_capacity = regex_capacity;
+  impl->regex_limits.max_capture_count = regex_captures;
   impl->max_running_leaves = config->max_running_leaves;
   impl->now_ns = config->now_ns == NULL ? default_now_ns : config->now_ns;
   impl->clock_user = config->clock_user;
@@ -406,10 +583,23 @@ int praktor_c11_native_host_init_with_config(
   return SALTS_OK;
 }
 
+void praktor_c11_native_host_config_init(
+    praktor_c11_native_host_config *config, size_t value_capacity,
+    size_t max_key_bytes, size_t max_value_bytes) {
+  if (config == NULL) return;
+  memset(config, 0, sizeof(*config));
+  config->value_capacity = value_capacity;
+  config->max_key_bytes = max_key_bytes;
+  config->max_value_bytes = max_value_bytes;
+  config->regex_cache_capacity = PRAKTOR_NATIVE_REGEX_CACHE_DEFAULT;
+  config->max_regex_captures = PRAKTOR_NATIVE_REGEX_CAPTURE_DEFAULT;
+}
+
 int praktor_c11_native_host_init(praktor_c11_native_host *host, size_t capacity,
                                  size_t max_key_bytes, size_t max_value_bytes) {
-  const praktor_c11_native_host_config config = {
-      capacity, max_key_bytes, max_value_bytes, 0u, NULL, NULL};
+  praktor_c11_native_host_config config;
+  praktor_c11_native_host_config_init(
+      &config, capacity, max_key_bytes, max_value_bytes);
   return praktor_c11_native_host_init_with_config(host, &config);
 }
 void praktor_c11_native_host_destroy(praktor_c11_native_host *host) {
@@ -419,6 +609,13 @@ void praktor_c11_native_host_destroy(praktor_c11_native_host *host) {
   free(impl->scratch);
   free(impl->pairs);
   free(impl->sleep_states);
+  if (impl->regex_cache != NULL) {
+    size_t i;
+    for (i = 0u; i < impl->regex_cache_capacity; ++i)
+      praktor_regex_destroy(impl->regex_cache[i].regex);
+  }
+  free(impl->regex_cache);
+  free(impl->regex_patterns);
   free(impl);
   host->impl = NULL;
 }
