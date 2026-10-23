@@ -1,7 +1,7 @@
 #include "praktor_test.hpp"
 
 #include "data/structured_document_query.hpp"
-#include "../src/yml/yaml_document.hpp"
+#include "../src/yml/task_yaml_internal.hpp"
 #include <new>
 
 using Praktor::Data::StructuredDocumentQuery;
@@ -179,6 +179,33 @@ spec("YAML C ownership through the temporary parser facade") {
     }
 }
 
+spec("YAML field grammar through the temporary exception boundary") {
+    it("retains the strict and force-terminate grammar split") {
+        TaskYamlDetail::YamlDocument document("strict: 'YeS'\ncompat: '0X__1_'\nstring: 'true'\nnumber: 7\n");
+        const auto root = document.root();
+        check(TaskYamlDetail::read_bool_or_throw(root["strict"], "silent"));
+        check(TaskYamlDetail::read_force_terminate_or_throw(root["compat"]));
+        check(TaskYamlDetail::read_system_action_string_or_throw(root["string"], "must be a string") == "true");
+        check(TaskYamlDetail::read_scalar_or_throw(root["number"], "scalar") == "7");
+        check(praktor_test::throws_containing([&] {
+            (void)TaskYamlDetail::read_bool_or_throw(root["compat"], "silent");
+        }, {"Parse error at line 2, column 1: 'silent' must be a boolean"}));
+        check(praktor_test::throws_containing([&] {
+            (void)TaskYamlDetail::read_system_action_string_or_throw(root["number"], "must be a string");
+        }, {"Parse error at line 4, column 1: must be a string"}));
+    }
+    it("retains long caller diagnostics without bounded-buffer truncation") {
+        TaskYamlDetail::YamlDocument document("value: []\n");
+        const std::string message(13000, 'x');
+        bool caught = false;
+        try { (void)TaskYamlDetail::read_scalar_or_throw(document.root()["value"], message); }
+        catch (const std::runtime_error& error) {
+            caught = std::string(error.what()) == "Parse error at line 1, column 1: " + message;
+        }
+        check(caught);
+    }
+}
+
 #ifdef PRAKTOR_YAML_FAULT_TEST
 extern "C" void praktor_yaml_test_fail(unsigned point);
 
@@ -225,6 +252,17 @@ spec("YAML typed failure origin preserves legacy allocation exceptions") {
         yaml_failure_kind(1, true, [&] { (void)value.location(); });
         value >> number;
         check(number == 7);
+    }
+    it("preserves field decoding and diagnostic-location exception categories") {
+        TaskYamlDetail::YamlDocument document("value: maybe\nshape: []\n");
+        const auto value = *document.root().begin(), shape = *++document.root().begin();
+        yaml_failure_kind(1, false, [&] { (void)TaskYamlDetail::read_scalar_or_throw(value, "scalar"); });
+        yaml_failure_kind(2, true, [&] { (void)TaskYamlDetail::read_scalar_or_throw(value, "scalar"); });
+        yaml_failure_kind(1, false, [&] { (void)TaskYamlDetail::read_bool_or_throw(value, "silent"); });
+        yaml_failure_kind(2, true, [&] { (void)TaskYamlDetail::read_bool_or_throw(value, "silent"); });
+        yaml_failure_kind(3, true, [&] { (void)TaskYamlDetail::read_bool_or_throw(value, "silent"); });
+        yaml_failure_kind(1, true, [&] { (void)TaskYamlDetail::read_scalar_or_throw(shape, "scalar"); });
+        check(TaskYamlDetail::read_scalar_or_throw(value, "scalar") == "maybe");
     }
 }
 #endif

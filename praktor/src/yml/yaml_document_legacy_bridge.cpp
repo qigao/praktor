@@ -1,4 +1,5 @@
 #include "yaml_document.hpp"
+#include "yml/yaml_fields.h"
 #include <memory>
 #include <stdexcept>
 #include <utility>
@@ -21,6 +22,7 @@ std::string text_result(int status, tstr text, const char* error,
 } // namespace
 
 YamlNodeRef::YamlNodeRef(praktor_yaml_node reference) noexcept : reference_(reference) {}
+praktor_yaml_node YamlNodeRef::native() const noexcept { return reference_; }
 bool YamlNodeRef::valid() const noexcept { return praktor_yaml_valid(reference_); }
 bool YamlNodeRef::is_map() const noexcept { return praktor_yaml_is_map(reference_); }
 bool YamlNodeRef::is_seq() const noexcept { return praktor_yaml_is_seq(reference_); }
@@ -106,4 +108,48 @@ YamlDocument& YamlDocument::operator=(YamlDocument&& other) noexcept {
     return *this;
 }
 YamlNodeRef YamlDocument::root() const noexcept { return YamlNodeRef(praktor_yaml_root(document_)); }
+
+namespace {
+struct FieldError {
+    praktor_yaml_field_error value{};
+    ~FieldError() { praktor_yaml_field_error_dispose(&value); }
+    FieldError() = default;
+    FieldError(const FieldError&) = delete;
+    FieldError& operator=(const FieldError&) = delete;
+    void check(int status) const {
+        if (status == SALTS_OK) return;
+        if (value.origin == PRAKTOR_YAML_FAILURE_ALLOCATION) throw std::bad_alloc();
+        throw std::runtime_error(std::string(value.text, tstr_len(value.text)));
+    }
+};
+using FieldTextReader = int (*)(praktor_yaml_node, vstr, tstr*, praktor_yaml_field_error*);
+std::string field_text(const YamlNodeRef& node, const std::string& message, FieldTextReader read) {
+    FieldError error;
+    tstr text = nullptr;
+    const int status = read(node.native(), vstr_from_buf(message.data(), message.size()), &text, &error.value);
+    std::unique_ptr<char, TextDeleter> owner(text);
+    error.check(status);
+    return std::string(owner.get(), tstr_len(owner.get()));
+}
+bool field_boolean(const YamlNodeRef& node, const char* name, praktor_yaml_boolean_policy policy) {
+    FieldError error;
+    bool value = false;
+    const int status = praktor_yaml_field_boolean(node.native(), vstr_from_cstr(name), policy, &value, &error.value);
+    error.check(status);
+    return value;
+}
+} // namespace
+
+std::string read_scalar_or_throw(const YamlNodeRef& node, const std::string& message) {
+    return field_text(node, message, praktor_yaml_field_scalar);
+}
+std::string read_system_action_string_or_throw(const YamlNodeRef& node, const std::string& message) {
+    return field_text(node, message, praktor_yaml_field_string);
+}
+bool read_bool_or_throw(const YamlNodeRef& node, const char* field_name) {
+    return field_boolean(node, field_name, PRAKTOR_YAML_BOOLEAN_STRICT);
+}
+bool read_force_terminate_or_throw(const YamlNodeRef& node) {
+    return field_boolean(node, "force_terminate", PRAKTOR_YAML_BOOLEAN_FORCE_TERMINATE);
+}
 } // namespace TaskYamlDetail

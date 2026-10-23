@@ -5,9 +5,6 @@
 
 #include <algorithm>
 #include <cctype>
-#include <charconv>
-#include <cstdint>
-#include <optional>
 #include <stdexcept>
 #include <string>
 #include <unordered_set>
@@ -52,122 +49,7 @@ inline std::string normalize_lookup_key(std::string value) {
     throw std::runtime_error("Parse error" + node.location() + ": " + message);
 }
 
-constexpr size_t MAX_BTDSL_PARAM_LENGTH = 10 * 1024;
 constexpr int MAX_BTDSL_NESTING_DEPTH = 100;
-
-inline std::string read_scalar_or_throw(const YamlNodeRef& node,
-                                        const std::string& message) {
-    if (!node.has_val()) {
-        throw_parse_error(node, message);
-    }
-
-    std::string value;
-    node >> value;
-    if (value.length() > MAX_BTDSL_PARAM_LENGTH) {
-        throw_parse_error(node, "Parameter value exceeds maximum length of " +
-                                std::to_string(MAX_BTDSL_PARAM_LENGTH) + " bytes");
-    }
-    return value;
-}
-
-inline std::string read_system_action_string_or_throw(
-    const YamlNodeRef& node,
-    const std::string& message) {
-    if (!node.is_string_scalar()) {
-        throw_parse_error(node, message);
-    }
-    return read_scalar_or_throw(node, message);
-}
-
-inline std::optional<bool> parse_force_terminate_integer_compat(const std::string& value) {
-    if (value.empty()) {
-        return std::nullopt;
-    }
-
-    std::size_t position = 0;
-    bool negative = false;
-    if (value[position] == '+' || value[position] == '-') {
-        negative = value[position] == '-';
-        if (++position == value.size()) {
-            return std::nullopt;
-        }
-    }
-
-    int base = 10;
-    if (position + 1 < value.size() && value[position] == '0') {
-        switch (value[position + 1]) {
-        case 'b': base = 2; break;
-        case 'o': base = 8; break;
-        case 'x': base = 16; break;
-        default: break;
-        }
-        if (base != 10) {
-            position += 2;
-        }
-    }
-    if (position == value.size() ||
-        (base == 10 && !std::isdigit(static_cast<unsigned char>(value[position])))) {
-        return std::nullopt;
-    }
-
-    std::string digits;
-    digits.reserve(value.size() - position);
-    for (; position < value.size(); ++position) {
-        if (value[position] != '_') {
-            digits.push_back(value[position]);
-        }
-    }
-    if (digits.empty()) {
-        return std::nullopt;
-    }
-
-    std::uint64_t parsed = 0;
-    const auto [end, error] = std::from_chars(
-        digits.data(), digits.data() + digits.size(), parsed, base);
-    if (error != std::errc{} || end != digits.data() + digits.size() ||
-        (negative && parsed != 0)) {
-        return std::nullopt;
-    }
-    if (parsed == 0) {
-        return false;
-    }
-    if (parsed == 1) {
-        return true;
-    }
-    return std::nullopt;
-}
-
-inline bool read_bool_or_throw(const YamlNodeRef& node, const char* field_name) {
-    const std::string message = std::string("'") + field_name + "' must be a boolean";
-    const std::string value = to_lower_copy(read_scalar_or_throw(node, message));
-    if (value == "true" || value == "yes" || value == "1") {
-        return true;
-    }
-    if (value == "false" || value == "no" || value == "0") {
-        return false;
-    }
-    throw_parse_error(node, message);
-}
-
-inline bool read_force_terminate_or_throw(const YamlNodeRef& node) {
-    constexpr const char* field_name = "force_terminate";
-    const std::string message = std::string("'") + field_name + "' must be a boolean";
-    const std::string value = to_lower_copy(read_scalar_or_throw(node, message));
-    if (value == "true" || value == "yes" || value == "on" || value == "1") {
-        return true;
-    }
-    if (value == "false" || value == "no" || value == "off" || value == "0") {
-        return false;
-    }
-    if (const auto semantic_value = node.bool_integer_value(); semantic_value.has_value()) {
-        return *semantic_value;
-    }
-    if (const auto compatible_value = parse_force_terminate_integer_compat(value);
-        compatible_value.has_value()) {
-        return *compatible_value;
-    }
-    throw_parse_error(node, message);
-}
 
 inline void check_unknown_keys(const YamlNodeRef& node,
                                const std::unordered_set<std::string>& allowed_keys) {

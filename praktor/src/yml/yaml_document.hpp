@@ -29,6 +29,7 @@ public:
     [[nodiscard]] std::string scalar() const;
     [[nodiscard]] std::string location() const;
     [[nodiscard]] std::optional<bool> bool_integer_value() const;
+    [[nodiscard]] praktor_yaml_node native() const noexcept;
 
     const YamlNodeRef& operator>>(std::string& value) const;
     const YamlNodeRef& operator>>(int& value) const;
@@ -82,5 +83,11 @@ public:
 private:
     praktor_yaml_document* document_ = nullptr;
 };
+
+// Temporary exception/string boundary; field grammar and limits live in C.
+std::string read_scalar_or_throw(const YamlNodeRef& node, const std::string& message);
+std::string read_system_action_string_or_throw(const YamlNodeRef& node, const std::string& message);
+bool read_bool_or_throw(const YamlNodeRef& node, const char* field_name);
+bool read_force_terminate_or_throw(const YamlNodeRef& node);
 
 } // namespace TaskYamlDetail

@@ -57,7 +57,7 @@ the rollback point; partial migration is not released as the completed product.
 | Expressions | C lexer, bounded parser/coercion/comparison/string methods, typed variable/regex Host; old evaluator implementation removed | C context and compatible C regex provider replace the explicit temporary C++ adapter |
 | Structured document queries | C JSONPath/YPATH/XPath/CSVPath dispatch and owned results; explicit temporary C++ value/exception bridge | Migrate remaining `WorkflowValue` callers, then delete the bridge |
 | Workflow values | C exact numeric conversion, borrowed path reads, transactional mutations over the existing Salts JSON owner; temporary C++ container/exception facade | Migrate callers and remove the facade |
-| YAML documents | C source/document owner, node access, scalar/int conversion and diagnostics; explicit temporary C++ iterator/exception facade | Port YAML task/workflow field parsers, then delete the facade |
+| YAML documents and field readers | C source/document owner, node access, scalar/int conversion, bounded scalar/string validation and separate boolean policies; explicit temporary C++ iterator/exception facade | Port remaining YAML task/workflow field construction, then delete the facade |
 | Contracts, effects, profiles, reviewed plans | C++ remains | One C-owned representation and unchanged SDK/YAML contracts |
 | DAG, contexts, triggers, scheduler, actions | C++ application layer and explicit compatibility dispatch remain | Native C execution and atomic Parallel branch state |
 | Shell/application/service adapters | C implementations exist, C++ conversions remain | C callers only; remove adapter headers/translation units |
@@ -209,8 +209,37 @@ concurrent independent documents and every module allocation/provider boundary.
 Fault tests also verify parser destruction before retained-source release and
 unchanged outputs. These inject module-boundary failures while using the actual
 provider; they do not simulate its internal allocator or replace its algorithms.
-YAML task/workflow parsing, validation and application execution still require
-migration; this document-owner cut alone does not remove that C++ application layer.
+The shared task field readers now run in the same C target: decoded scalars have
+the existing 10 KiB limit; system Action strings additionally require the real
+provider's string kind. Strict boolean fields accept case-insensitive
+true/yes/1 and false/no/0 without trimming. Only `force_terminate` accepts on/off,
+then provider semantic integer 0/1, then its original signed/base-prefixed and
+underscore compatibility rule. The latter uses checked `uint64_t` accumulation
+over a borrowed view, without building a C++ digit string. Lowercase prefixes,
+negative zero, separator placement, overflow and full consumption remain explicit
+rules; the field reader folds case before invoking this pure predicate.
+
+Field failures own complete `tstr` diagnostics, preserving arbitrary caller
+messages and key-preferred locations without fixed-buffer truncation. Callers
+initialize/dispose a unique error owner, disjoint from inputs and value outputs;
+each read clears the prior diagnostic. Diagnostic allocation failure is reported
+as owned allocation, while provider decode failure keeps its provider category.
+Successful text is independently owned; every failure leaves value outputs
+unchanged. The 10 KiB field bound does not bound the provider's document/decoding
+allocation. Replacing decoded strings with raw spans to reject earlier was
+rejected because escapes, folding and decoded-NUL behavior would change.
+
+The old inline C++ scalar, system string and boolean algorithms have been deleted.
+Their temporary wrappers in the existing document bridge perform only string,
+exception and typed policy conversion. Independent C tests consume the existing
+34-row force-terminate corpus and 24 applicable system-string rows (the missing
+executable rule remains a task-level test), exercise the exact length boundary,
+aliases, long/binary errors, unchanged failed outputs and concurrent owners.
+Provider-boundary injection covers decoding, text/message/location allocation
+and rejected-value cleanup in the actual C implementation. Application bridge
+tests also retain provider-vs-owned exception mapping and complete diagnostics.
+Remaining YAML task/workflow construction, key validation and application
+execution still require migration; these cuts do not remove that C++ layer.
 
 All three projects provide release/ASan presets. On Linux,
 `bash cmake/ci/qualify-c-only-tools.sh release` configures/builds/tests all three
