@@ -187,15 +187,23 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          "$VCPKG_ROOT/vcpkg" install \
+            --x-manifest-root="$GITHUB_WORKSPACE" \
+            --x-install-root="$GITHUB_WORKSPACE/vcpkg_installed/ci" \
+            --triplet "$TRIPLET" --host-triplet "$HOST_TRIPLET"
           flags="-fsanitize=thread -fno-omit-frame-pointer -O1 -g"
           cmake -S actions/c11/standalone -B build/p1-c11-standalone-tsan -G Ninja \
             -DCMAKE_BUILD_TYPE=Debug "-DCMAKE_C_FLAGS=$flags" \
             -DCMAKE_EXE_LINKER_FLAGS=-fsanitize=thread
           cmake --build build/p1-c11-standalone-tsan --parallel 2
+          python3 cmake/ci/audit-c11-runtime-link.py \
+            build/p1-c11-standalone-tsan/actions_c11_native_host_standalone_test
+          python3 cmake/ci/audit-c11-runtime-link.py \
+            build/p1-c11-standalone-tsan/actions_c11_regex_tre_standalone_test
           export LD_LIBRARY_PATH="$SALTS_SOURCE_TSAN_ROOT/lib:$SALTS_UTILS_SOURCE_TSAN_ROOT/lib:$CHTTP_ROOT/lib:${LD_LIBRARY_PATH:-}"
           ctest --test-dir build/p1-c11-standalone-tsan \
             --no-tests=error --output-on-failure --timeout 90 \
-            -R '^actions_c11_(tree_adapter|value_store|native_host)_standalone_test$'
+            -R '^actions_c11_(tree_adapter|value_store|native_host|regex_tre)_standalone_test$'
 
       - name: Prove C-only Process ownership under complete-source TSan
         shell: bash
