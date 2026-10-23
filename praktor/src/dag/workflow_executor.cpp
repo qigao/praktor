@@ -15,7 +15,7 @@
 #include "executors/service_executor.hpp"
 #include "expressions/expression_evaluator.hpp"
 #include "util/env_parser.hpp"
-#include "util/file_hash.hpp"
+#include "util/file_hash.h"
 #include "util/path_utils.hpp"
 #include "util/shared_thread_pool.hpp"
 #include "util/string_utils.hpp"
@@ -34,6 +34,7 @@
 #include <optional>
 #include <queue>
 #include <sstream>
+#include <stdexcept>
 #include <thread>
 #include <unordered_map>
 #include <unordered_set>
@@ -43,6 +44,27 @@ namespace {
 
 using EnvMap = std::unordered_map<std::string, std::string>;
 constexpr size_t kMaxLoggedTaskOutputBytes = 4096;
+
+std::string computeFileHashC(const std::filesystem::path& path) {
+  if (!std::filesystem::exists(path)) {
+    throw std::runtime_error("Cannot hash missing file: " + path.string());
+  }
+  char hash[PRAKTOR_FILE_HASH_HEX_SIZE] = {};
+  if (praktor_file_hash_file(path.string().c_str(), hash, sizeof(hash)) !=
+      PRAKTOR_FILE_HASH_OK) {
+    throw std::runtime_error("Failed to open file for hashing: " + path.string());
+  }
+  return std::string(hash);
+}
+
+std::string computeStringHashC(const std::string& value) {
+  char hash[PRAKTOR_FILE_HASH_HEX_SIZE] = {};
+  if (praktor_file_hash_bytes(value.data(), value.size(), hash, sizeof(hash)) !=
+      PRAKTOR_FILE_HASH_OK) {
+    throw std::runtime_error("Failed to hash task action");
+  }
+  return std::string(hash);
+}
 
 std::vector<WorkflowValue>
 generateMatrixCombinations(const std::unordered_map<std::string, StrList> &matrix) {
@@ -317,7 +339,7 @@ std::string computeTaskActionHashImpl(const Task& task) {
     appendField(stream, "specifics", "none");
   }
 
-  return Praktor::Util::computeStringHash(stream.str());
+  return computeStringHashC(stream.str());
 }
 
 void logTaskOutputs(const Task& task, const TaskResult& result) {
@@ -922,7 +944,7 @@ bool WorkflowExecutor::checkSkipTask(const Task &task, WorkflowContext &context)
   // Check if sources changed
   for (const auto &src : task.sources) {
     auto path = Praktor::util::resolveRelativePath(task.source_path, src);
-    auto current_hash = Praktor::Util::computeFileHash(path);
+    auto current_hash = computeFileHashC(path);
     auto cached_it = cached.source_hashes.find(path.string());
     if (cached_it == cached.source_hashes.end() || cached_it->second != current_hash) {
       return false;

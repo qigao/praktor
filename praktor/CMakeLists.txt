@@ -38,7 +38,6 @@ set(SOURCE_FILES
     src/expressions/expression_evaluator_legacy_bridge.cpp
     src/util/system_info.cpp
     src/util/praktor_init.cpp
-    src/util/file_hash.cpp
     src/util/mustache_substitutor.cpp
 )
 
@@ -58,11 +57,12 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/src/yml/yaml_action_targets.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/src/yml/yaml_task_targets.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/src/yml/orch_targets.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/src/profile/profile_targets.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/src/util/file_hash_targets.cmake)
 add_library(${TARGET_NAME_LIB} ${SOURCE_FILES})
 target_include_directories(
     ${TARGET_NAME_LIB}
     PUBLIC include ${CMAKE_CURRENT_BINARY_DIR}/generated/include
-    PRIVATE src/script
+    PRIVATE src src/script
 )
 
 set(folder_name "${TARGET_NAME_EXE}")
