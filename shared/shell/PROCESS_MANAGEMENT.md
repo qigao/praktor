@@ -36,8 +36,8 @@ the same owner and reported as failure. This facade is synchronous on teardown:
 a persistent cleanup fault can keep wait/destruction blocked; it never force-frees
 live leases or detaches their storage.
 
-The P1 candidate is `qigao/salts-utils@779705d76ae173d1b5d18ad1de10ee88c086452c`
-(Draft PR #689), retaining the hardened close/acknowledgement, stats and retainer
+The P1 implementation is now merged as `qigao/salts-utils@f675382f739c5691bb38029eb6e5737b8cf08e24`
+(PR #689), retaining the hardened close/acknowledgement, stats and retainer
 paths while adding the Darwin endpoint fix.
 
 The cooperative C11 Session uses the same C driver with its explicit fixed-capacity
