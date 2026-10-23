@@ -1,4 +1,5 @@
 include(${CMAKE_CURRENT_SOURCE_DIR}/../src/expressions/lexer_tests.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/../src/expressions/evaluator_tests.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/../src/data/query_tests.cmake)
 
 # Compile this public header without a transitive include of the

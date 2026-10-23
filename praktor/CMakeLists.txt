@@ -36,7 +36,7 @@ set(SOURCE_FILES
     src/system/service_control_legacy_bridge.cpp
     src/system/process_control_legacy_bridge.cpp
     src/system/process_native_legacy_bridge.cpp
-    src/expressions/expression_evaluator.cpp
+    src/expressions/expression_evaluator_legacy_bridge.cpp
     src/util/system_info.cpp
     src/util/praktor_init.cpp
     src/util/file_hash.cpp
@@ -50,6 +50,7 @@ else()
 endif()
 
 include(${CMAKE_CURRENT_SOURCE_DIR}/src/expressions/lexer_targets.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/src/expressions/evaluator_targets.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/src/data/query_targets.cmake)
 add_library(${TARGET_NAME_LIB} ${SOURCE_FILES})
 target_include_directories(
@@ -75,7 +76,7 @@ target_link_libraries(
            Salts::CNet
            CHttp::S3
            praktor_shell
-    PRIVATE praktor_document_query praktor_expression_lexer actions praktor_process_driver praktor_process_native praktor_service_control
+    PRIVATE praktor_document_query praktor_expression_evaluator actions praktor_process_driver praktor_process_native praktor_service_control
 )
 if(ENABLE_SCRIPT_ENGINE)
     target_link_libraries(${TARGET_NAME_LIB} PUBLIC TurboScript::TurboScript)

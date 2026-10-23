@@ -54,7 +54,7 @@ the rollback point; partial migration is not released as the completed product.
 | Area | Current migration state | Required next state |
 | --- | --- | --- |
 | Schema maintenance tool | C projection, CLI and TinyTest tests; no `WorkflowValue`, `praktor_lib` or C++ link | Preserve generated grammar and all existing refusal rules |
-| Expression Lexer | C iterator and decoder; removed original C++ implementation/header | Native evaluator consumes C values with bounded parse state |
+| Expressions | C lexer, bounded parser/coercion/comparison/string methods, typed variable/regex Host; old evaluator implementation removed | C context and compatible C regex provider replace the explicit temporary C++ adapter |
 | Structured document queries | C JSONPath/YPATH/XPath/CSVPath dispatch and owned results; explicit temporary C++ value/exception bridge | Migrate remaining `WorkflowValue` callers, then delete the bridge |
 | Values, YAML, contracts, effects, profiles, reviewed plans | C++ remains | One C-owned representation and unchanged SDK/YAML contracts |
 | DAG, contexts, triggers, scheduler, actions | C++ application layer and explicit compatibility dispatch remain | Native C execution and atomic Parallel branch state |
@@ -87,8 +87,36 @@ SDK. Lexer iteration allocates nothing, preserves token positions and escape
 rules, and allows a buffer-size retry without consuming input. Binary quoted
 values retain their lengths. Legacy unterminated literals and slash heuristics
 are deliberately retained until an evaluator-level syntax change is reviewed.
-The C++ evaluator temporarily converts tokens to its existing value containers;
-its remaining regex/parser/value behavior is not claimed to have moved to C.
+The same project now builds the C evaluator and a second executable without a
+C++ linker/runtime, `WorkflowContext` or Legacy Executor. It validates all tokens
+before any Host call, then parses with one-token lookahead. It preserves eager
+logical evaluation, scalar coercion, six-decimal numeric string conversion,
+binary strings and legacy numeric prefix conversion. Strings use unique `tstr`
+owners. Failure frees every intermediate value/regex handle and leaves caller
+outputs unchanged; Host reads are not a transactional side-effect mechanism.
+
+The evaluator's default limits (also used by the temporary application bridge)
+are 64 KiB input, 16384 tokens including END, nesting depth 128 and 1 MiB strings.
+Exhaustion fails closed; it does not truncate strings, produce a partial value
+or dispatch through a hidden legacy path. Internal C callers may supply explicit
+input/token/string limits and a depth up to 128. This intentionally bounds
+previously unbounded C++ parsing; unusually large/deep expressions are rejected
+with a diagnostic. The installed SDK ABI and ordinary expression syntax remain
+unchanged. Scratch/value memory limits do not bound execution inside a Host
+regex provider; that provider still owns its execution/resource policy.
+
+Variable reads and regex compile/search/destroy are explicit synchronous typed
+Host operations. The callback tuple must be complete. Every returned regex
+handle, including a partial handle on failure, has one destruction owner.
+The C core never contains or discovers a C++ context/regex implementation.
+`expression_evaluator_legacy_bridge.cpp` temporarily supplies `WorkflowContext`
+conversion, the original `std::regex` provider, public variant conversion and
+the existing warning/failure boundary. It is not a native C regex implementation
+and must be removed when its providers/callers migrate. The alternative of
+substituting a smaller incompatible regex engine was rejected. Stateless
+concurrent callers and reentrant evaluation from a Host callback have executable
+C tests; the regex protocol mock tests ownership only, while real matching is
+covered by the application suite. Original C++ evaluator algorithms are deleted.
 
 `praktor/src/data/standalone` links the real Salts JSON/YAML/XML/CSV query
 providers with a C compiler only. Query results own independent JSON trees;
