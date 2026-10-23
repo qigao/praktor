@@ -131,7 +131,10 @@ int praktor_yaml_contract_fields_create(praktor_yaml_node node, bool output,
     if(!praktor_yaml_is_map(node))
         return at_error(node,output?"'outputs' must be a map":"'inputs' must be a map",error);
     result=json_create_object();
-    if(!result)return SALTS_ENOMEM;
+    if(!result) {
+        if(error) error->origin=PRAKTOR_YAML_FAILURE_ALLOCATION;
+        return SALTS_ENOMEM;
+    }
     for(i=0;i<praktor_yaml_count(node);++i) {
         praktor_yaml_node child=praktor_yaml_at(node,i);
         tstr key=NULL;
@@ -153,5 +156,8 @@ int praktor_yaml_contract_fields_create(praktor_yaml_node node, bool output,
     }
     *out=result;return SALTS_OK;
 fail:
-    json_free(field);json_free(result);return status;
+    json_free(field);json_free(result);
+    if(status==SALTS_ENOMEM && error && error->origin==PRAKTOR_YAML_FAILURE_NONE)
+        error->origin=PRAKTOR_YAML_FAILURE_ALLOCATION;
+    return status;
 }
