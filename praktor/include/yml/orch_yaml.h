@@ -5,14 +5,15 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-/* Research-only named-form YAML to canonical CSTL-backed AST.
- * Supports named scalar, named mapping with params/child, named sequence.
- * Does not accept flat if/while/switch or task metadata. No execution.
- * The input document is borrowed; the returned tree is uniquely owned.
- * Errors leave the output untouched. */
+/* Qualification-only recursive YAML -> canonical CSTL-backed AST.
+ * Supports legacy named scalar/mapping/sequence, nested flat if/while/switch,
+ * set_variable and flat timeout/repeat/delay with child. Retired named forms
+ * are rejected. This parser does not execute nodes or replace production C++.
+ * Input YAML is borrowed; the returned tree is uniquely owned and independent
+ * of the document. Failure never publishes a provisional output. */
 int praktor_orch_from_named_yaml(praktor_yaml_node node, praktor_orch_tree **out,
     char *error, size_t error_capacity);
-/* Task-level flat control forms; supports if, while, switch, set_variable. */
+/* Task-level flat forms also support single-child decorators and run_once. */
 int praktor_orch_from_flat_yaml(praktor_yaml_node node, const char *node_type,
     praktor_orch_tree **out, char *error, size_t error_capacity);
 #ifdef __cplusplus
