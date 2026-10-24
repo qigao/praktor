@@ -94,11 +94,10 @@ done:
     return rc;
 }
 
-static int add_timeout_retry_silent(praktor_yaml_node node,json_value_t *result,
+static int add_timeout_retry(praktor_yaml_node node,json_value_t *result,
                                     praktor_yaml_field_error *error) {
-    praktor_yaml_node timeout_node={0},child_node={0},retries_node={0},count_node={0},silent_node={0};
+    praktor_yaml_node timeout_node={0},child_node={0},retries_node={0},count_node={0};
     tstr text=NULL;
-    bool silent=false;
     unsigned int retry_count=0;
     size_t i;
     int rc;
@@ -134,13 +133,22 @@ static int add_timeout_retry_silent(praktor_yaml_node node,json_value_t *result,
         tstr_free(text);text=NULL;
         rc=add_owned(result,"retry_count",json_create_number((double)retry_count));if(rc!=SALTS_OK)return rc;
     }
-    if(praktor_yaml_has(node,"silent")) {
-        rc=optional(node,"silent",&silent_node,error);if(rc!=SALTS_OK)return rc;
-        rc=praktor_yaml_field_boolean(silent_node,vstr_from_cstr("silent"),PRAKTOR_YAML_BOOLEAN_STRICT,&silent,error);
-        if(rc!=SALTS_OK)return rc;
-        rc=add_owned(result,"silent",json_create_bool(silent));if(rc!=SALTS_OK)return rc;
-    }
     return SALTS_OK;
+}
+
+static int add_silent_metadata(praktor_yaml_node node,json_value_t *result,
+                                 praktor_yaml_field_error *error) {
+    praktor_yaml_node silent_node={0};
+    bool silent=false;
+    int rc;
+    if(!praktor_yaml_has(node,"silent"))return SALTS_OK;
+    rc=optional(node,"silent",&silent_node,error);if(rc!=SALTS_OK)return rc;
+    rc=praktor_yaml_field_boolean(silent_node,vstr_from_cstr("silent"),PRAKTOR_YAML_BOOLEAN_STRICT,&silent,error);
+    if(rc!=SALTS_OK)return rc;
+    rc=add_owned(result,"silent",json_create_bool(silent));
+    if(rc==SALTS_ENOMEM&&error&&error->origin==PRAKTOR_YAML_FAILURE_NONE)
+        error->origin=PRAKTOR_YAML_FAILURE_ALLOCATION;
+    return rc;
 }
 
 int praktor_yaml_task_metadata_create(praktor_yaml_node node,json_value_t **out,praktor_yaml_field_error *error){
@@ -166,12 +174,13 @@ int praktor_yaml_task_metadata_create(praktor_yaml_node node,json_value_t **out,
  rc=optional(node,"env",&map,error);if(rc!=SALTS_OK)goto fail;if(praktor_yaml_valid(map)){rc=add_map(result,"env",map,error);if(rc!=SALTS_OK)goto fail;}
  rc=optional(node,"dotEnv",&list,error);if(rc!=SALTS_OK)goto fail;if(praktor_yaml_valid(list)){rc=add_list(result,"dot_env",list,error);if(rc!=SALTS_OK)goto fail;}
  rc=optional(node,"when",&when,error);if(rc!=SALTS_OK)goto fail;if(praktor_yaml_valid(when)){rc=add_scalar(result,"when",when,"Expected YAML scalar",error);if(rc!=SALTS_OK)goto fail;}
+ rc=add_each_metadata(node,result,error);if(rc!=SALTS_OK)goto fail;
+ rc=add_timeout_retry(node,result,error);if(rc!=SALTS_OK)goto fail;
+ rc=add_triggers_metadata(node,result,error);if(rc!=SALTS_OK)goto fail;
  rc=optional(node,"working_dir",&work,error);if(rc!=SALTS_OK)goto fail;if(praktor_yaml_valid(work)){tstr s=NULL;rc=praktor_yaml_field_scalar(work,vstr_from_cstr("Expected YAML scalar"),&s,error);if(rc!=SALTS_OK)goto fail;if(tstr_len(s))rc=add_owned(result,"working_dir",json_create_string(s));tstr_free(s);if(rc!=SALTS_OK)goto fail;}
+ rc=add_silent_metadata(node,result,error);if(rc!=SALTS_OK)goto fail;
  rc=optional(node,"sources",&list,error);if(rc!=SALTS_OK)goto fail;if(praktor_yaml_valid(list)){rc=add_list(result,"sources",list,error);if(rc!=SALTS_OK)goto fail;}
  rc=optional(node,"generates",&list,error);if(rc!=SALTS_OK)goto fail;if(praktor_yaml_valid(list)){rc=add_list(result,"generates",list,error);if(rc!=SALTS_OK)goto fail;}
- rc=add_each_metadata(node,result,error);if(rc!=SALTS_OK)goto fail;
- rc=add_triggers_metadata(node,result,error);if(rc!=SALTS_OK)goto fail;
- rc=add_timeout_retry_silent(node,result,error);if(rc!=SALTS_OK)goto fail;
  rc=optional(node,"finally",&fin,error);if(rc!=SALTS_OK)goto fail;if(praktor_yaml_valid(fin)){tstr s=NULL;rc=praktor_yaml_field_scalar(fin,vstr_from_cstr("'finally' must be a scalar"),&s,error);if(rc!=SALTS_OK)goto fail;if(!tstr_len(s)){tstr_free(s);rc=at_error(fin,"'finally' cannot be empty",error);goto fail;}rc=add_owned(result,"finally",json_create_string(s));tstr_free(s);if(rc!=SALTS_OK)goto fail;}
  *out=result;return SALTS_OK;
 fail:tstr_free(name_text);json_free(result);if(rc==SALTS_ENOMEM&&error&&error->origin==PRAKTOR_YAML_FAILURE_NONE)error->origin=PRAKTOR_YAML_FAILURE_ALLOCATION;return rc;
