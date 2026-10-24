@@ -512,9 +512,4 @@ automatic merge or publication is authorized by the migration request. The
 merged master stays on its accepted backend while this branch is incomplete.
 
 ### Named orchestration AST pilot
-The private strict-C11 praktor_orch_from_named_yaml() converts a bounded
-named-node YAML subset into the canonical Salts CSTL vector-backed tree.
-It preserves ordered children and detached parameters. Flat if/while/switch
-forms and task-level metadata are not covered. Production orch_parser.cpp
-remains unchanged until complete parity passes; no alternate runtime or
-implicit production fallback is introduced.
+The strict-C11 `praktor_orch_from_named_yaml()` converts bounded named-node YAML into the canonical Salts CSTL vector-backed tree. The private `praktor_orch_from_flat_yaml()` now also projects task-level `if`, `while`, `switch`, and `set_variable` forms, including ordered branches, scalar conditions, iteration bounds and variable source/value. Differential tests compare these projections against the existing C++ parser. Other flat decorators and production parser replacement remain gated on parity; no alternate tree runtime or implicit fallback is introduced.

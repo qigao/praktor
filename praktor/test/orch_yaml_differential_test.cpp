@@ -70,4 +70,32 @@ spec("C11 named orchestration CSTL AST parity with legacy parser") {
             check(native==nullptr);
         }
     }
+
+    it("matches legacy flat if, while, switch and set_variable projections") {
+        struct FlatCase { const char *kind; const char *source; };
+        const FlatCase cases[] = {
+            {"if","name: choose\nif: ready\nthen: {Shell: {cmd: run}}\nelse: {Shell: {cmd: skip}}\n"},
+            {"if","name: choose\nif: {FileExists: {path: marker}}\nthen: [{Shell: {cmd: run}}, {Sleep: 2}]\n"},
+            {"while","name: loop\nwhile: ready\nmax_iterations: 12\ndo: {Shell: {cmd: tick}}\n"},
+            {"while","name: loop\nwhile: {FileExists: {path: marker}}\ndo: {Shell: {cmd: tick}}\n"},
+            {"switch","name: select\nswitch: mode\ncases:\n  - Shell: {cmd: one}\n  - Shell: {cmd: two}\n"},
+            {"set_variable","name: assign\nset_variable: result\nvalue: ready\n"},
+            {"set_variable","name: assign\nset_variable: result\nfrom: source\n"}
+        };
+        for (const auto& item : cases) {
+            TaskYamlDetail::YamlDocument document(item.source);
+            const OrchParams legacy = TaskYamlDetail::parse_orch_params(document.root(), item.kind);
+            praktor_orch_tree *native = nullptr;
+            char diagnostic[160]{};
+            const int status = praktor_orch_from_flat_yaml(
+                document.root().native(), item.kind, &native, diagnostic, sizeof diagnostic);
+            check(status == SALTS_OK);
+            check(native != nullptr);
+            if (native) {
+                check(native_ast_equals_legacy(legacy.root, praktor_orch_tree_root(native)));
+                praktor_orch_tree_destroy(native);
+            }
+        }
+    }
+
 }
