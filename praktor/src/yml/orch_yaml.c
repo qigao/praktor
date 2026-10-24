@@ -157,10 +157,10 @@ static int parse(named_build *b,praktor_yaml_node map,size_t parent,unsigned dep
            (praktor_yaml_has(map,"value")||praktor_yaml_has(map,"from")))
             return flat_parse(b,map,parent,depth,"set_variable",false);
         {
-            static const char *const decorators[]={
-                "timeout","repeat","delay","keep_running_until_failure",
-                "precondition","entry_updated","consume_queue","run_once"
-            };
+            /* The recursive legacy parser recognizes only these three
+             * flat decorators; the other task-level forms are parsed through
+             * praktor_orch_from_flat_yaml(), not from a nested YAML map. */
+            static const char *const decorators[]={"timeout","repeat","delay"};
             size_t j;
             for(j=0;j<sizeof(decorators)/sizeof(decorators[0]);++j)
                 if(praktor_yaml_has(map,decorators[j])&&praktor_yaml_has(map,"child"))
