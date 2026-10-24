@@ -223,6 +223,45 @@ spec("Flat C11 orchestration AST using Salts CSTL") {
         check(praktor_orch_from_flat_nodes(decorator,1,&result,error,sizeof error)==SALTS_EINVAL&&!result);
         check(strstr(error,"child count")!=NULL);
     }
+    it("enforces condition-sensitive if/while cardinalities before publishing") {
+        praktor_orch_input_param command[]={{view("cmd"),view("run")}};
+        praktor_orch_input_param condition[]={{view("condition"),view("ready")}};
+        praktor_orch_flat_node missing_if[]={
+            {PRAKTOR_ORCH_IF_THEN_ELSE,PRAKTOR_ORCH_ROOT_PARENT,NULL,0},
+            {PRAKTOR_ORCH_SHELL,0,command,1}
+        };
+        praktor_orch_flat_node bad_while[]={
+            {PRAKTOR_ORCH_WHILE_DO,PRAKTOR_ORCH_ROOT_PARENT,condition,1},
+            {PRAKTOR_ORCH_SHELL,0,command,1},
+            {PRAKTOR_ORCH_SHELL,0,command,1}
+        };
+        praktor_orch_flat_node valid_if[]={
+            {PRAKTOR_ORCH_IF_THEN_ELSE,PRAKTOR_ORCH_ROOT_PARENT,condition,1},
+            {PRAKTOR_ORCH_SHELL,0,command,1},
+            {PRAKTOR_ORCH_SHELL,0,command,1}
+        };
+        praktor_orch_flat_node valid_while[]={
+            {PRAKTOR_ORCH_WHILE_DO,PRAKTOR_ORCH_ROOT_PARENT,NULL,0},
+            {PRAKTOR_ORCH_SHELL,0,command,1},
+            {PRAKTOR_ORCH_SHELL,0,command,1}
+        };
+        praktor_orch_tree *tree=NULL,*saved;
+        char error[160]={0};
+        check(praktor_orch_from_flat_nodes(missing_if,2,&tree,error,sizeof error)==SALTS_EINVAL);
+        check(!tree&&strstr(error,"if requires")!=NULL);
+        check(praktor_orch_from_flat_nodes(bad_while,3,&tree,error,sizeof error)==SALTS_EINVAL);
+        check(!tree&&strstr(error,"while requires")!=NULL);
+        check(praktor_orch_from_flat_nodes(valid_if,3,&tree,error,sizeof error)==SALTS_OK);
+        check(tree&&praktor_orch_child_count(praktor_orch_tree_root(tree))==2);
+        saved=tree;
+        check(praktor_orch_from_flat_nodes(missing_if,2,&tree,error,sizeof error)==SALTS_EINVAL);
+        check(tree==saved);
+        praktor_orch_tree_destroy(saved);
+        tree=NULL;
+        check(praktor_orch_from_flat_nodes(valid_while,3,&tree,error,sizeof error)==SALTS_OK);
+        check(tree&&praktor_orch_child_count(praktor_orch_tree_root(tree))==2);
+        praktor_orch_tree_destroy(tree);
+    }
     it("rejects leaf parenting and duplicate or unknown params atomically") {
         praktor_orch_input_param cmd[]={{view("cmd"),view("echo")}};
         praktor_orch_input_param duplicate[]={
