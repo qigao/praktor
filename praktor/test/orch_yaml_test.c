@@ -51,6 +51,91 @@ spec("Named C11 orchestration YAML into canonical CSTL AST"){
         praktor_orch_tree_destroy(tree);praktor_yaml_document_destroy(doc);
     }
 
+    it("retains a map-style child sequence and last canonical parameter assignment"){
+        praktor_yaml_document *doc=doc_for(
+            "Sequence:\n"
+            "  child:\n"
+            "    - Shell: {CMD: first, c_m_d: second}\n"
+            "    - Sleep: 2\n");
+        praktor_orch_tree *tree=NULL;
+        const praktor_orch_node *sequence=NULL,*shell=NULL,*sleep=NULL;
+        check(praktor_orch_from_named_yaml(praktor_yaml_root(doc),&tree,NULL,0)==SALTS_OK);
+        praktor_yaml_document_destroy(doc);
+        check(tree&&praktor_orch_tree_size(tree)==4);
+        check(praktor_orch_child_at(praktor_orch_tree_root(tree),0,&sequence)==SALTS_OK);
+        check(praktor_orch_node_type(sequence)==PRAKTOR_ORCH_SEQUENCE&&praktor_orch_child_count(sequence)==2);
+        check(praktor_orch_child_at(sequence,0,&shell)==SALTS_OK);
+        check(praktor_orch_param_count(shell)==1&&has_param(shell,"cmd","second"));
+        check(praktor_orch_child_at(sequence,1,&sleep)==SALTS_OK);
+        check(praktor_orch_node_type(sleep)==PRAKTOR_ORCH_SLEEP);
+        praktor_orch_tree_destroy(tree);
+    }
+    it("builds every flat single-child form using the canonical parameter key"){
+        struct input {const char *kind,*yaml,*param,*value;praktor_orch_type type;} cases[]={
+            {"timeout","name: x\ntimeout: 150\nchild: {Shell: {cmd: go}}\n","timeout_ms","150",PRAKTOR_ORCH_TIMEOUT},
+            {"repeat","name: x\nrepeat: 3\nchild: {Shell: {cmd: go}}\n","num_cycles","3",PRAKTOR_ORCH_REPEAT},
+            {"delay","name: x\ndelay: 25\nchild: {Shell: {cmd: go}}\n","delay_ms","25",PRAKTOR_ORCH_DELAY},
+            {"keep_running_until_failure","name: x\nkeep_running_until_failure: 5\nchild: {Shell: {cmd: go}}\n","max_iterations","5",PRAKTOR_ORCH_KEEP_RUNNING_UNTIL_FAILURE},
+            {"precondition","name: x\nprecondition: '{ready}'\nchild: {Shell: {cmd: go}}\n","condition","{ready}",PRAKTOR_ORCH_PRECONDITION},
+            {"entry_updated","name: x\nentry_updated: value\nchild: {Shell: {cmd: go}}\n","watch_key","value",PRAKTOR_ORCH_ENTRY_UPDATED},
+            {"consume_queue","name: x\nconsume_queue: queue\nchild: {Shell: {cmd: go}}\n","queue_key","queue",PRAKTOR_ORCH_CONSUME_QUEUE},
+            {"run_once","name: x\nrun_once: ignored\nchild: {Shell: {cmd: go}}\n",NULL,NULL,PRAKTOR_ORCH_RUN_ONCE}
+        };
+        size_t i;
+        for(i=0;i<sizeof(cases)/sizeof(cases[0]);++i){
+            praktor_yaml_document *doc=doc_for(cases[i].yaml);
+            praktor_orch_tree *tree=NULL;
+            const praktor_orch_node *root,*child=NULL;
+            char error[160]={0};
+            check(praktor_orch_from_flat_yaml(praktor_yaml_root(doc),cases[i].kind,&tree,error,sizeof error)==SALTS_OK);
+            praktor_yaml_document_destroy(doc);
+            check(tree&&error[0]=='\0');
+            if(!tree)continue;
+            root=praktor_orch_tree_root(tree);
+            check(praktor_orch_node_type(root)==cases[i].type);
+            check(praktor_orch_param_count(root)==(cases[i].param?1u:0u));
+            if(cases[i].param)check(has_param(root,cases[i].param,cases[i].value));
+            check(praktor_orch_child_count(root)==1);
+            check(praktor_orch_child_at(root,0,&child)==SALTS_OK);
+            check(praktor_orch_node_type(child)==PRAKTOR_ORCH_SHELL&&has_param(child,"cmd","go"));
+            praktor_orch_tree_destroy(tree);
+        }
+    }
+    it("rejects retired named controls and malformed flat decorators"){
+        const char *retired[]={
+            "IfThenElse: {condition: ready, child: {Shell: {cmd: go}}}\n",
+            "WhileDo: {condition: ready, child: {Shell: {cmd: go}}}\n",
+            "Switch: {variable: key, children: [{Shell: {cmd: go}}]}\n",
+            "SetVariable: {key: result, value: ready}\n",
+            "Timeout: {timeout_ms: 1, child: {Shell: {cmd: go}}}\n",
+            "Repeat: {num_cycles: 1, child: {Shell: {cmd: go}}}\n",
+            "Delay: {delay_ms: 1, child: {Shell: {cmd: go}}}\n"
+        };
+        const struct {const char *kind,*yaml;} invalid[]={
+            {"timeout","name: x\ntimeout: 1.5\nchild: {Shell: {cmd: go}}\n"},
+            {"repeat","name: x\nrepeat: x\nchild: {Shell: {cmd: go}}\n"},
+            {"run_once","name: x\nrun_once: yes\nchild: []\n"},
+            {"precondition","name: x\nprecondition: [bad]\nchild: {Shell: {cmd: go}}\n"}
+        };
+        size_t i;
+        for(i=0;i<sizeof(retired)/sizeof(retired[0]);++i){
+            praktor_yaml_document *doc=doc_for(retired[i]);
+            praktor_orch_tree *tree=NULL;
+            char error[160]={0};
+            check(praktor_orch_from_named_yaml(praktor_yaml_root(doc),&tree,error,sizeof error)==SALTS_EINVAL);
+            check(!tree&&strstr(error,"Legacy orchestration")!=NULL);
+            praktor_yaml_document_destroy(doc);
+        }
+        for(i=0;i<sizeof(invalid)/sizeof(invalid[0]);++i){
+            praktor_yaml_document *doc=doc_for(invalid[i].yaml);
+            praktor_orch_tree *tree=NULL;
+            char error[160]={0};
+            check(praktor_orch_from_flat_yaml(praktor_yaml_root(doc),invalid[i].kind,&tree,error,sizeof error)!=SALTS_OK);
+            check(!tree&&error[0]);
+            praktor_yaml_document_destroy(doc);
+        }
+    }
+
     it("validates integer and boolean node parameters while preserving runtime substitutions"){
         const char *bad[]={
             "ParseRegex: {input_key: input, pattern: x, capture_group: 1.5}\n",
@@ -85,7 +170,7 @@ spec("Named C11 orchestration YAML into canonical CSTL AST"){
             "Sequence: []\n",
             "Shell: {cmd: echo, child: {Sleep: 1}}\n",
             "UnknownNode: x\n",
-            "Shell: {cmd: first, CMD: second}\n",
+            "Shell: {cmd: echo, invalid: no}\n",
             "Sequence: {child: {Shell: echo}, children: []}\n",
             "Sequence: {child: {Sleep: {duration: [1]}}}\n"
         };
