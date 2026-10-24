@@ -76,19 +76,39 @@ Task parse_task(const TaskYamlDetail::YamlNodeRef& node, const std::string& sour
             task.generates.push_back(value.as<std::string>());
     }
 
-    if (node.has_child("each")) {
-        task.each = parse_each(node["each"]);
+    if (metadata.contains("each")) {
+        const auto& encoded = metadata.at("each");
+        Each each;
+        for (const auto& value : encoded.at("items").array_range())
+            each.items.push_back(value.as<std::string>());
+        for (const auto& item : encoded.at("matrix").object_range()) {
+            StrList values;
+            for (const auto& value : item.value().array_range())
+                values.push_back(value.as<std::string>());
+            each.matrix[item.key()] = std::move(values);
+        }
+        each.as = encoded.at("as").as<std::string>();
+        each.index_variable = encoded.at("index_variable").as<std::string>();
+        task.each = std::move(each);
     }
 
     if (metadata.contains("timeout")) task.timeout = metadata.at("timeout").as<std::string>();
     if (metadata.contains("retry_count"))
         task.retry_count = metadata.at("retry_count").as<std::uint32_t>();
 
-    if (node.has_child("triggers")) {
-        Triggers triggers = parse_triggers(node["triggers"]);
-        if (!triggers.empty()) {
-            task.triggers = triggers;
-        }
+    if (metadata.contains("triggers")) {
+        const auto& encoded = metadata.at("triggers");
+        Triggers triggers;
+        if (encoded.contains("on_success"))
+            for (const auto& value : encoded.at("on_success").array_range())
+                triggers.on_success.push_back(value.as<std::string>());
+        if (encoded.contains("on_failure"))
+            for (const auto& value : encoded.at("on_failure").array_range())
+                triggers.on_failure.push_back(value.as<std::string>());
+        if (encoded.contains("on_complete"))
+            for (const auto& value : encoded.at("on_complete").array_range())
+                triggers.on_complete.push_back(value.as<std::string>());
+        if (!triggers.empty()) task.triggers = std::move(triggers);
     }
 
     if (metadata.contains("finally")) {

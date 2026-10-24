@@ -4,6 +4,7 @@
 #include <string.h>
 static int at_error(praktor_yaml_node n,const char *m,praktor_yaml_field_error *e){return praktor_yaml_field_fail_at(n,vstr_from_cstr(m),e);}
 static int add_owned(json_value_t *o,const char *k,json_value_t *v){if(!v)return SALTS_ENOMEM;if(!json_object_add_n(o,k,strlen(k),v)){json_free(v);return SALTS_ENOMEM;}return SALTS_OK;}
+static int add_owned_n(json_value_t *o,const char *k,size_t n,json_value_t *v){if(!v)return SALTS_ENOMEM;if(!json_object_add_n(o,k,n,v)){json_free(v);return SALTS_ENOMEM;}return SALTS_OK;}
 static int optional(praktor_yaml_node n,const char *k,praktor_yaml_node *out,praktor_yaml_field_error *e){return praktor_yaml_field_get(n,k,out,e);}
 static int add_scalar(json_value_t *o,const char *k,praktor_yaml_node n,const char *msg,praktor_yaml_field_error *e){
  tstr s=NULL;int rc=praktor_yaml_field_scalar(n,vstr_from_cstr(msg),&s,e);if(rc!=SALTS_OK)return rc;rc=add_owned(o,k,json_create_string(s));tstr_free(s);return rc;
@@ -23,6 +24,74 @@ static int add_list(json_value_t *o,const char *k,praktor_yaml_node n,praktor_ya
  for(i=0;i<praktor_yaml_string_list_size(list);++i){vstr s={0};json_value_t *item;rc=praktor_yaml_string_list_at(list,i,&s);if(rc!=SALTS_OK)goto done;item=json_create_string_n(s.data,s.len);if(!item){rc=SALTS_ENOMEM;goto done;}if(!json_array_add_checked(v,item)){json_free(item);rc=SALTS_ENOMEM;goto done;}}
  rc=add_owned(o,k,v);v=NULL;
 done: json_free(v);praktor_yaml_task_fields_destroy(owner);if(rc==SALTS_ENOMEM&&e&&e->origin==PRAKTOR_YAML_FAILURE_NONE)e->origin=PRAKTOR_YAML_FAILURE_ALLOCATION;return rc;
+}
+
+
+static int native_list_json(const praktor_yaml_string_list *list,json_value_t **out) {
+    json_value_t *array;
+    size_t i;
+    if(!out)return SALTS_EINVAL;
+    array=json_create_array();if(!array)return SALTS_ENOMEM;
+    for(i=0;i<praktor_yaml_string_list_size(list);++i) {
+        vstr text={0};json_value_t *value;
+        int rc=praktor_yaml_string_list_at(list,i,&text);if(rc!=SALTS_OK){json_free(array);return rc;}
+        value=json_create_string_n(text.data,text.len);if(!value){json_free(array);return SALTS_ENOMEM;}
+        if(!json_array_add_checked(array,value)){json_free(value);json_free(array);return SALTS_ENOMEM;}
+    }
+    *out=array;return SALTS_OK;
+}
+static int add_each_metadata(praktor_yaml_node node,json_value_t *result,
+                             praktor_yaml_field_error *error) {
+    praktor_yaml_node field={0};
+    praktor_yaml_task_fields *owner=NULL;
+    praktor_yaml_each_view view={0};
+    json_value_t *each=NULL,*items=NULL,*matrix=NULL;
+    size_t i;int rc;
+    rc=optional(node,"each",&field,error);if(rc!=SALTS_OK)return rc;
+    if(!praktor_yaml_valid(field))return SALTS_OK;
+    rc=praktor_yaml_task_fields_create(field,PRAKTOR_YAML_EACH,&owner,error);if(rc!=SALTS_OK)return rc;
+    rc=praktor_yaml_task_each(owner,&view);if(rc!=SALTS_OK)goto done;
+    each=json_create_object();if(!each){rc=SALTS_ENOMEM;goto done;}
+    rc=native_list_json(view.items,&items);if(rc!=SALTS_OK)goto done;
+    if(!json_object_add_n(each,"items",5,items)){json_free(items);items=NULL;rc=SALTS_ENOMEM;goto done;}items=NULL;
+    matrix=json_create_object();if(!matrix){rc=SALTS_ENOMEM;goto done;}
+    for(i=0;i<praktor_yaml_list_map_size(view.matrix);++i) {
+        praktor_yaml_list_entry entry={0};json_value_t *values=NULL;
+        rc=praktor_yaml_list_map_at(view.matrix,i,&entry);if(rc!=SALTS_OK)goto done;
+        rc=native_list_json(entry.values,&values);if(rc!=SALTS_OK)goto done;
+        if(!json_object_add_n(matrix,entry.key.data,entry.key.len,values)){json_free(values);rc=SALTS_ENOMEM;goto done;}
+    }
+    if(!json_object_add_n(each,"matrix",6,matrix)){rc=SALTS_ENOMEM;goto done;}matrix=NULL;
+    rc=add_owned_n(each,"as",2,json_create_string_n(view.as.data,view.as.len));if(rc!=SALTS_OK)goto done;
+    rc=add_owned_n(each,"index_variable",14,json_create_string_n(view.index_variable.data,view.index_variable.len));if(rc!=SALTS_OK)goto done;
+    rc=add_owned(result,"each",each);each=NULL;
+done:
+    json_free(items);json_free(matrix);json_free(each);praktor_yaml_task_fields_destroy(owner);
+    if(rc==SALTS_ENOMEM&&error&&error->origin==PRAKTOR_YAML_FAILURE_NONE)error->origin=PRAKTOR_YAML_FAILURE_ALLOCATION;
+    return rc;
+}
+static int add_triggers_metadata(praktor_yaml_node node,json_value_t *result,
+                                 praktor_yaml_field_error *error) {
+    praktor_yaml_node field={0};
+    praktor_yaml_task_fields *owner=NULL;
+    praktor_yaml_triggers_view view={0};
+    json_value_t *triggers=NULL,*list=NULL;
+    int rc=optional(node,"triggers",&field,error);if(rc!=SALTS_OK)return rc;
+    if(!praktor_yaml_valid(field))return SALTS_OK;
+    rc=praktor_yaml_task_fields_create(field,PRAKTOR_YAML_TRIGGERS,&owner,error);if(rc!=SALTS_OK)return rc;
+    rc=praktor_yaml_task_triggers(owner,&view);if(rc!=SALTS_OK)goto done;
+    triggers=json_create_object();if(!triggers){rc=SALTS_ENOMEM;goto done;}
+    rc=native_list_json(view.on_success,&list);if(rc!=SALTS_OK)goto done;
+    if(!json_object_add_n(triggers,"on_success",10,list)){json_free(list);list=NULL;rc=SALTS_ENOMEM;goto done;}list=NULL;
+    rc=native_list_json(view.on_failure,&list);if(rc!=SALTS_OK)goto done;
+    if(!json_object_add_n(triggers,"on_failure",10,list)){json_free(list);list=NULL;rc=SALTS_ENOMEM;goto done;}list=NULL;
+    rc=native_list_json(view.on_complete,&list);if(rc!=SALTS_OK)goto done;
+    if(!json_object_add_n(triggers,"on_complete",11,list)){json_free(list);list=NULL;rc=SALTS_ENOMEM;goto done;}list=NULL;
+    rc=add_owned(result,"triggers",triggers);triggers=NULL;
+done:
+    json_free(list);json_free(triggers);praktor_yaml_task_fields_destroy(owner);
+    if(rc==SALTS_ENOMEM&&error&&error->origin==PRAKTOR_YAML_FAILURE_NONE)error->origin=PRAKTOR_YAML_FAILURE_ALLOCATION;
+    return rc;
 }
 
 static int add_timeout_retry_silent(praktor_yaml_node node,json_value_t *result,
@@ -100,6 +169,8 @@ int praktor_yaml_task_metadata_create(praktor_yaml_node node,json_value_t **out,
  rc=optional(node,"working_dir",&work,error);if(rc!=SALTS_OK)goto fail;if(praktor_yaml_valid(work)){tstr s=NULL;rc=praktor_yaml_field_scalar(work,vstr_from_cstr("Expected YAML scalar"),&s,error);if(rc!=SALTS_OK)goto fail;if(tstr_len(s))rc=add_owned(result,"working_dir",json_create_string(s));tstr_free(s);if(rc!=SALTS_OK)goto fail;}
  rc=optional(node,"sources",&list,error);if(rc!=SALTS_OK)goto fail;if(praktor_yaml_valid(list)){rc=add_list(result,"sources",list,error);if(rc!=SALTS_OK)goto fail;}
  rc=optional(node,"generates",&list,error);if(rc!=SALTS_OK)goto fail;if(praktor_yaml_valid(list)){rc=add_list(result,"generates",list,error);if(rc!=SALTS_OK)goto fail;}
+ rc=add_each_metadata(node,result,error);if(rc!=SALTS_OK)goto fail;
+ rc=add_triggers_metadata(node,result,error);if(rc!=SALTS_OK)goto fail;
  rc=add_timeout_retry_silent(node,result,error);if(rc!=SALTS_OK)goto fail;
  rc=optional(node,"finally",&fin,error);if(rc!=SALTS_OK)goto fail;if(praktor_yaml_valid(fin)){tstr s=NULL;rc=praktor_yaml_field_scalar(fin,vstr_from_cstr("'finally' must be a scalar"),&s,error);if(rc!=SALTS_OK)goto fail;if(!tstr_len(s)){tstr_free(s);rc=at_error(fin,"'finally' cannot be empty",error);goto fail;}rc=add_owned(result,"finally",json_create_string(s));tstr_free(s);if(rc!=SALTS_OK)goto fail;}
  *out=result;return SALTS_OK;
