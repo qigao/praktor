@@ -18,6 +18,7 @@ set(SOURCE_FILES
     src/yml/yaml_document_legacy_bridge.cpp
     src/yml/yaml_contract_legacy_bridge.cpp
     src/yml/yaml_workflow_metadata_legacy_bridge.cpp
+    src/yml/yaml_task_metadata_legacy_bridge.cpp
     src/yml/task_parser.cpp
     src/yml/orch_parser.cpp
     src/yml/task_field_parser.cpp
@@ -59,6 +60,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/src/yml/yaml_contract_targets.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/src/yml/yaml_action_targets.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/src/yml/yaml_task_targets.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/src/yml/yaml_workflow_metadata_targets.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/src/yml/yaml_task_metadata_targets.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/src/yml/orch_targets.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/src/profile/profile_targets.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/src/util/file_hash_targets.cmake)
@@ -87,7 +89,7 @@ target_link_libraries(
            Salts::CNet
            CHttp::S3
            praktor_shell
-    PRIVATE praktor_init praktor_file_hash praktor_orch_tree praktor_workflow_profile praktor_workflow_contract_value praktor_yaml_task_fields praktor_yaml_action_params praktor_yaml_contract praktor_yaml_workflow_metadata praktor_yaml_value praktor_yaml_document praktor_workflow_value praktor_document_query praktor_expression_evaluator praktor_expression_regex_salts actions praktor_process_driver praktor_process_native praktor_service_control
+    PRIVATE praktor_init praktor_file_hash praktor_orch_tree praktor_workflow_profile praktor_workflow_contract_value praktor_yaml_task_fields praktor_yaml_action_params praktor_yaml_contract praktor_yaml_workflow_metadata praktor_yaml_task_metadata praktor_yaml_value praktor_yaml_document praktor_workflow_value praktor_document_query praktor_expression_evaluator praktor_expression_regex_salts actions praktor_process_driver praktor_process_native praktor_service_control
 )
 if(ENABLE_SCRIPT_ENGINE)
     target_link_libraries(${TARGET_NAME_LIB} PUBLIC TurboScript::TurboScript)

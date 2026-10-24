@@ -88,4 +88,5 @@ namespace TaskYamlDetail {
 json_value_t* read_workflow_contract_fields_or_throw(
     const YamlNodeRef& node, bool output);
 json_value_t* read_workflow_metadata_or_throw(const YamlNodeRef& node);
+json_value_t* read_task_metadata_or_throw(const YamlNodeRef& node);
 }
