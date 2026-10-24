@@ -84,7 +84,7 @@ spec("C11 named orchestration CSTL AST parity with legacy parser") {
         };
         for (const auto& item : cases) {
             TaskYamlDetail::YamlDocument document(item.source);
-            const OrchParams legacy = TaskYamlDetail::parse_orch_params(document.root(), item.kind);
+            const OrchParams legacy = parse_orch_params(document.root(), item.kind);
             praktor_orch_tree *native = nullptr;
             char diagnostic[160]{};
             const int status = praktor_orch_from_flat_yaml(
