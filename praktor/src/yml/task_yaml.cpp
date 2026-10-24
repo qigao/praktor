@@ -121,147 +121,43 @@ Task parse_task(const TaskYamlDetail::YamlNodeRef& node, const std::string& sour
 
     if (metadata.contains("silent")) task.silent = metadata.at("silent").as<bool>();
 
-    int action_count = 0;
-    auto select_runner = [&](TaskAction action, const char* declared_runner, auto&& parser) {
-        ++action_count;
-        if (action_count != 1) {
-            return;
+    const int action_count = metadata.contains("runner_count") ? metadata.at("runner_count").as<int>() : 0;
+    const std::string selected_runner = metadata.contains("runner_kind") ? metadata.at("runner_kind").as<std::string>() : std::string{};
+    if (selected_runner == "command") {
+        task.action=TaskAction::Orch; task.declared_runner="command";
+        task.specifics=desugarCommandToorch(parse_run_command_params(node));
+        if(node.has_child("actions")&&!node["actions"].is_map())
+            TaskYamlDetail::throw_parse_error(node["actions"],"orch node must be a map");
+    } else if(selected_runner=="actions") {
+        const auto& bt_node=node["actions"];
+        if(!bt_node.is_map())TaskYamlDetail::throw_parse_error(bt_node,"orch node must be a map");
+        task.action=TaskAction::Orch;task.declared_runner="actions";
+        OrchParams params;params.root=TaskYamlDetail::parse_orch_node(bt_node);task.specifics=std::move(params);
+    } else if(selected_runner=="program") {
+        task.action=TaskAction::Program;task.declared_runner="program";task.specifics=parse_program_params(node);
+    } else if(selected_runner=="download") {
+        task.action=TaskAction::Download;task.declared_runner="download";task.specifics=parse_download_params(node);
+    } else if(selected_runner=="service") {
+        task.action=TaskAction::Service;task.declared_runner="service";task.specifics=parse_service_params(node);
+    } else if(selected_runner=="managed_process") {
+        task.action=TaskAction::ManagedProcess;task.declared_runner="managed_process";task.specifics=parse_managed_process_params(node);
+    } else if(selected_runner=="uses") {
+        task.action=TaskAction::Uses;task.declared_runner="uses";task.specifics=parse_uses_params(node["uses"]);
+    } else if(selected_runner=="dynamic_tasks") {
+        task.action=TaskAction::DynamicTasks;task.declared_runner="dynamic_tasks";task.specifics=parse_dynamic_tasks_params(node["dynamic_tasks"]);
+    } else if(selected_runner=="tool") {
+        task.action=TaskAction::HostTool;task.declared_runner="tool";
+        HostToolParams params;
+        params.tool=TaskYamlDetail::read_system_action_string_or_throw(node["tool"],"'tool' must be a string stable host-tool identity");
+        if(params.tool.empty())TaskYamlDetail::throw_parse_error(node["tool"],"'tool' identity cannot be empty");
+        if(node.has_child("with")) {
+            if(!node["with"].is_map())TaskYamlDetail::throw_parse_error(node["with"],"'with' must be a map of typed host-tool arguments");
+            params.arguments=parse_contract_value(node["with"]);
         }
-        task.action = action;
-        task.declared_runner = declared_runner;
-        task.specifics = parser();
-    };
-
-    if (node.has_child("command")) {
-        select_runner(TaskAction::Orch, "command", [&] {
-            return desugarCommandToorch(parse_run_command_params(node));
-        });
-    }
-
-    if (node.has_child("actions")) {
-        const auto& bt_node = node["actions"];
-        if (!bt_node.is_map()) {
-            TaskYamlDetail::throw_parse_error(bt_node, "orch node must be a map");
-        }
-        select_runner(TaskAction::Orch, "actions", [&] {
-            OrchParams orch_params;
-            orch_params.root = TaskYamlDetail::parse_orch_node(bt_node);
-            return orch_params;
-        });
-    }
-
-    if (node.has_child("program")) {
-        select_runner(TaskAction::Program, "program", [&] { return parse_program_params(node); });
-    }
-
-    if (node.has_child("download")) {
-        select_runner(TaskAction::Download, "download", [&] {
-            return parse_download_params(node);
-        });
-    }
-
-    if (node.has_child("service")) {
-        select_runner(TaskAction::Service, "service", [&] { return parse_service_params(node); });
-    }
-
-    if (node.has_child("managed_process")) {
-        select_runner(TaskAction::ManagedProcess, "managed_process", [&] {
-            return parse_managed_process_params(node);
-        });
-    }
-
-    if (node.has_child("uses")) {
-        select_runner(TaskAction::Uses, "uses", [&] { return parse_uses_params(node["uses"]); });
-    }
-
-    if (node.has_child("dynamic_tasks")) {
-        select_runner(TaskAction::DynamicTasks, "dynamic_tasks", [&] {
-            return parse_dynamic_tasks_params(node["dynamic_tasks"]);
-        });
-    }
-
-    if (node.has_child("tool")) {
-        select_runner(TaskAction::HostTool, "tool", [&] {
-            HostToolParams params;
-            params.tool = TaskYamlDetail::read_system_action_string_or_throw(
-                node["tool"], "'tool' must be a string stable host-tool identity");
-            if (params.tool.empty()) {
-                TaskYamlDetail::throw_parse_error(
-                    node["tool"], "'tool' identity cannot be empty");
-            }
-            if (node.has_child("with")) {
-                if (!node["with"].is_map()) {
-                    TaskYamlDetail::throw_parse_error(
-                        node["with"], "'with' must be a map of typed host-tool arguments");
-                }
-                params.arguments = parse_contract_value(node["with"]);
-            }
-            return params;
-        });
-    }
-
-    static const std::vector<std::string> orch_control_nodes = {
-        "sequence", "parallel", "reactive_sequence", "pipeline_sequence", "fallback", "selector"
-    };
-    static const std::vector<std::string> orch_leaf_nodes = {
-        "shell", "parse_json", "parse_regex", "parse_lines", "parse_keyvalue",
-        "check_exit_code", "wait_event", "file_exists", "sleep", "set_variable", "subtree"
-    };
-    static const std::unordered_set<std::string> command_parser_keys = {
-        "parse_json", "parse_regex", "parse_lines", "parse_keyvalue"
-    };
-    static const std::vector<std::string> orch_decorator_nodes = {
-        "inverter", "force_success", "force_failure", "repeat",
-        "timeout", "delay", "run_once", "keep_running_until_failure", "consume_queue",
-        "precondition", "entry_updated"
-    };
-    static const std::vector<std::string> orch_advanced_nodes = {"switch", "if", "while"};
-
-    for (const auto& bt_type : orch_control_nodes) {
-        if (node.has_child(bt_type.c_str())) {
-            select_runner(TaskAction::Orch, "actions", [&] {
-                return parse_orch_params(node, bt_type);
-            });
-        }
-    }
-
-    for (const auto& bt_type : orch_leaf_nodes) {
-        const bool is_command_parser = node.has_child("command") &&
-                                       command_parser_keys.find(bt_type) != command_parser_keys.end();
-        if (node.has_child(bt_type.c_str()) && !is_command_parser) {
-            select_runner(TaskAction::Orch, "actions", [&] {
-                return parse_orch_params(node, bt_type);
-            });
-        }
-    }
-
-    for (const auto& bt_type : orch_decorator_nodes) {
-        const bool has_flat_child_form = node.has_child(bt_type.c_str()) && node.has_child("child");
-        const bool matches_root =
-            (bt_type == "timeout" && has_flat_child_form) ||
-            ((bt_type == "repeat" || bt_type == "delay") && has_flat_child_form) ||
-            ((bt_type == "keep_running_until_failure" || bt_type == "precondition" ||
-              bt_type == "entry_updated" || bt_type == "consume_queue") && has_flat_child_form) ||
-            (bt_type == "run_once" && has_flat_child_form) ||
-            ((bt_type == "inverter" || bt_type == "force_success" || bt_type == "force_failure") &&
-             node.has_child(bt_type.c_str()));
-        if (matches_root) {
-            select_runner(TaskAction::Orch, "actions", [&] {
-                return parse_orch_params(node, bt_type);
-            });
-        }
-    }
-
-    for (const auto& bt_type : orch_advanced_nodes) {
-        const bool matches_root =
-            (bt_type == "if" && node.has_child("if") && node.has_child("then")) ||
-            (bt_type == "while" && node.has_child("while") && node.has_child("do")) ||
-            (bt_type == "switch" && node.has_child("switch") && node.has_child("cases"));
-        if (matches_root) {
-            select_runner(TaskAction::Orch, "actions", [&] {
-                return parse_orch_params(node, bt_type);
-            });
-        }
+        task.specifics=std::move(params);
+    } else if(selected_runner=="orch_root") {
+        task.action=TaskAction::Orch;task.declared_runner="actions";
+        task.specifics=parse_orch_params(node,metadata.at("orch_node_type").as<std::string>());
     }
 
     if (action_count > 1) {

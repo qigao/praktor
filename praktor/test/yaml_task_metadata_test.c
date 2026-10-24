@@ -30,5 +30,24 @@ spec("C task metadata parser"){
         praktor_yaml_field_error_dispose(&e);praktor_yaml_document_destroy(d);
     }
  }
+ it("selects the first runner and counts later runner candidates"){
+    praktor_yaml_document *d=doc_for("name: x\ncommand: echo\nprogram: tool\n");
+    json_value_t *v=NULL;praktor_yaml_field_error e={0};
+    check(praktor_yaml_task_metadata_create(praktor_yaml_root(d),&v,&e)==SALTS_OK);
+    json_eq(v,"{\"name\":\"x\",\"runner_count\":2,\"runner_kind\":\"command\"}");
+    json_free(v);praktor_yaml_field_error_dispose(&e);praktor_yaml_document_destroy(d);
+ }
+ it("does not count command postprocessors as separate runners"){
+    praktor_yaml_document *d=doc_for("name: x\ncommand: echo\nparse_json: {path: $.name}\n");
+    json_value_t *v=NULL;check(praktor_yaml_task_metadata_create(praktor_yaml_root(d),&v,NULL)==SALTS_OK);
+    json_eq(v,"{\"name\":\"x\",\"runner_count\":1,\"runner_kind\":\"command\"}");
+    json_free(v);praktor_yaml_document_destroy(d);
+ }
+ it("uses established control-node precedence for flat orchestration"){
+    praktor_yaml_document *d=doc_for("name: x\nparallel: []\nsequence: []\n");
+    json_value_t *v=NULL;check(praktor_yaml_task_metadata_create(praktor_yaml_root(d),&v,NULL)==SALTS_OK);
+    json_eq(v,"{\"name\":\"x\",\"runner_count\":2,\"runner_kind\":\"orch_root\",\"orch_node_type\":\"sequence\"}");
+    json_free(v);praktor_yaml_document_destroy(d);
+ }
  it("rejects with without tool"){praktor_yaml_document *d=doc_for("name: build\nwith: {x: 1}\n");json_value_t *v=NULL;praktor_yaml_field_error e={0};check(praktor_yaml_task_metadata_create(praktor_yaml_root(d),&v,&e)!=SALTS_OK);check(v==NULL);praktor_yaml_field_error_dispose(&e);praktor_yaml_document_destroy(d);}
 }
