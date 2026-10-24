@@ -118,11 +118,10 @@ spec("C11 named orchestration CSTL AST parity with legacy parser") {
         }
     }
     it("matches task-level named controls, decorators and leaves") {
-        /* The legacy runner selector sends only the selected value into
-         * parse_named_btdsl_node(). The native entry must not parse the
-         * metadata-bearing task mapping as if it were a one-key named node. */
+        /* The legacy runner selector parses the selected YAML value, not
+         * the metadata-bearing task map. The native parser must agree. */
         struct TaskCase { const char* type; const char* source; };
-        const TaskCase cases[] = {
+        const TaskCase cases[]={
             {"sequence","name: serial\nsequence:\n  - Shell: {cmd: one}\n  - Sleep: 1\n"},
             {"parallel","name: fork\nparallel:\n  - Shell: {cmd: a}\n  - Shell: {cmd: b}\n"},
             {"reactive_sequence","name: reactive\nreactive_sequence:\n  - FileExists: {path: ok}\n  - Shell: {cmd: go}\n"},
@@ -130,37 +129,7 @@ spec("C11 named orchestration CSTL AST parity with legacy parser") {
             {"fallback","name: fallback\nfallback:\n  - Shell: {cmd: one}\n"},
             {"selector","name: choose\nselector:\n  - Shell: {cmd: one}\n"},
             {"shell","name: command\nshell: {cmd: echo, outputKey: stdout}\n"},
-            {"parse_json","name: json\nparse_json: {input_key: stdout, path: '
-        struct FlatCase { const char *kind; const char *source; };
-        const FlatCase cases[] = {
-            {"if","name: choice\nif: ready\nthen: []\n"},
-            {"while","name: loop\nwhile: ready\ndo: []\n"},
-            {"switch","name: switch\nswitch: mode\ncases: []\n"},
-            {"set_variable","name: assign\nset_variable: x\nvalue: a\nfrom: b\n"},
-            {"timeout","name: guard\ntimeout: 1.5\nchild: {Shell: {cmd: run}}\n"},
-            {"repeat","name: retry\nrepeat: invalid\nchild: {Shell: {cmd: run}}\n"},
-            {"delay","name: sleep\ndelay: '--'\nchild: {Shell: {cmd: run}}\n"},
-            {"run_once","name: once\nrun_once: ok\nchild: []\n"},
-            {"precondition","name: guard\nprecondition: [invalid]\nchild: {Shell: {cmd: run}}\n"}
-        };
-        for (const auto& item : cases) {
-            TaskYamlDetail::YamlDocument document(item.source);
-            bool legacy_rejected = false;
-            try { (void)parse_orch_params(document.root(),item.kind); }
-            catch(const std::exception&) { legacy_rejected = true; }
-            praktor_orch_tree *native = nullptr;
-            char diagnostic[160]{};
-            const int status = praktor_orch_from_flat_yaml(
-                document.root().native(),item.kind,&native,diagnostic,sizeof diagnostic);
-            check(legacy_rejected);
-            check(status != SALTS_OK);
-            check(native == nullptr);
-            check(diagnostic[0] != '\0');
-        }
-    }
-
-}
-}\n"},
+            {"parse_json","name: json\nparse_json: {input_key: stdout, path: '$'}\n"},
             {"parse_regex","name: regex\nparse_regex: {input_key: stdout, pattern: '(x)', capture_group: 1}\n"},
             {"parse_lines","name: lines\nparse_lines: {input_key: stdout, filter: '[a-z]'}\n"},
             {"parse_keyvalue","name: kv\nparse_keyvalue: {input_key: stdout, delimiter: '='}\n"},
@@ -174,9 +143,9 @@ spec("C11 named orchestration CSTL AST parity with legacy parser") {
             {"force_failure","name: failure\nforce_failure: {child: {Shell: {cmd: run}}}\n"},
             {"run_once","name: once\nrun_once: {child: {Shell: {cmd: run}}}\n"}
         };
-        for (const auto& item : cases) {
+        for(const auto& item:cases) {
             TaskYamlDetail::YamlDocument document(item.source);
-            const OrchParams legacy = parse_orch_params(document.root(), item.type);
+            const OrchParams legacy=parse_orch_params(document.root(),item.type);
             praktor_orch_tree *native=nullptr;
             char diagnostic[256]{};
             const int status=praktor_orch_from_flat_yaml(
@@ -202,7 +171,7 @@ spec("C11 named orchestration CSTL AST parity with legacy parser") {
         for(const auto& item:cases) {
             TaskYamlDetail::YamlDocument document(item.source);
             bool legacy_rejected=false;
-            try {(void)parse_orch_params(document.root(),item.type);}
+            try { (void)parse_orch_params(document.root(),item.type); }
             catch(const std::exception&){legacy_rejected=true;}
             praktor_orch_tree *native=nullptr;
             char diagnostic[256]{};
@@ -214,11 +183,7 @@ spec("C11 named orchestration CSTL AST parity with legacy parser") {
             check(diagnostic[0]!='\0');
         }
     }
-
-    it("matches repository orchestration YAML examples without executing tasks") {
-        /* File-backed golden corpus. These are existing workflow examples, not
-         * synthetic YAML snippets; all matching task-level orchestration roots
-         * are compared against the unchanged production C++ parser. */
+    it("compares the checked-in workflow examples against the legacy parser") {
         const char *files[]={
             "examples/orch_build_pipeline.yml",
             "examples/orch_parallel_testing.yml",
@@ -226,7 +191,7 @@ spec("C11 named orchestration CSTL AST parity with legacy parser") {
             "examples/orch_shortcuts_demo.yml",
             "sdk/examples/ops-event-handler-example.yml"
         };
-        const char *runner_types[]={
+        const char *runners[]={
             "sequence","parallel","reactive_sequence","pipeline_sequence",
             "fallback","selector","if","while","switch","set_variable",
             "shell","parse_json","parse_regex","parse_lines","parse_keyvalue",
@@ -245,10 +210,9 @@ spec("C11 named orchestration CSTL AST parity with legacy parser") {
             TaskYamlDetail::YamlDocument document(yaml);
             const auto tasks=document.root()["tasks"];
             for(const auto& task:tasks) {
-                /* Command is lowered by the separate native constructor.
-                 * Its parser-like keys are postprocessors, not runner roots. */
+                /* command is handled by its own native lowering path. */
                 if(task.has_child("command"))continue;
-                for(const char *type:runner_types) {
+                for(const char *type:runners) {
                     if(!task.has_child(type))continue;
                     const OrchParams legacy=parse_orch_params(task,type);
                     praktor_orch_tree *native=nullptr;
@@ -268,6 +232,7 @@ spec("C11 named orchestration CSTL AST parity with legacy parser") {
         }
         check(compared>=7);
     }
+
     it("agrees with legacy on invalid flat forms and never publishes partial ASTs") {
         struct FlatCase { const char *kind; const char *source; };
         const FlatCase cases[] = {
