@@ -1,5 +1,6 @@
 #include "task_yaml_internal.hpp"
 #include "workflow_contract.hpp"
+#include "yml/yaml_task_metadata.h"
 
 #include <algorithm>
 #include <charconv>
@@ -71,70 +72,39 @@ std::uint32_t parse_retry_count(
 } // namespace
 
 Task parse_task(const TaskYamlDetail::YamlNodeRef& node, const std::string& source_path) {
-    if (!node.is_map()) {
-        TaskYamlDetail::throw_parse_error(node, "task must be a map");
-    }
-
-    static const std::unordered_set<std::string> allowed_task_keys = {
-        "name", "description", "depends_on", "vars", "env", "dotEnv", "when",
-        "each", "timeout", "retries", "triggers",
-        "working_dir", "silent", "sources", "generates", "finally",
-        "command", "program", "args", "stdin", "download", "uses", "dynamic_tasks", "output_format",
-        "service", "managed_process", "tool", "with",
-        "script", "actions",
-        "sequence", "parallel", "reactive_sequence", "pipeline_sequence",
-        "inverter", "force_success", "force_failure", "repeat",
-        "delay", "switch", "if", "then", "else", "while", "do", "max_iterations",
-        "child", "cases",
-        "shell", "parse_json", "parse_regex", "parse_lines", "parse_keyvalue",
-        "check_exit_code", "wait_event", "file_exists", "sleep", "set_variable", "subtree",
-        "fallback", "selector",
-        "run_once", "keep_running_until_failure", "consume_queue", "precondition", "entry_updated"
-    };
-    if (node.has_child("set_variable")) {
-        auto set_variable_keys = allowed_task_keys;
-        set_variable_keys.insert("value");
-        set_variable_keys.insert("from");
-        TaskYamlDetail::check_unknown_keys(node, set_variable_keys);
-    } else {
-        TaskYamlDetail::check_unknown_keys(node, allowed_task_keys);
-    }
-
-    if (node.has_child("with") && !node.has_child("tool")) {
-        TaskYamlDetail::throw_parse_error(
-            node["with"], "'with' is valid only with the 'tool' runner");
-    }
-
+Task parse_task(const TaskYamlDetail::YamlNodeRef& node, const std::string& source_path) {
+    WorkflowValue metadata = WorkflowValue::adoptJson(
+        TaskYamlDetail::read_task_metadata_or_throw(node));
     Task task;
+    task.name = metadata.at("name").as<std::string>();
+    if (metadata.contains("description")) task.description = metadata.at("description").as<std::string>();
+    if (metadata.contains("depends_on")) {
+        for (const auto& value : metadata.at("depends_on").array_range())
+            task.depends_on.push_back(value.as<std::string>());
+    }
+    if (metadata.contains("vars")) {
+        for (const auto& item : metadata.at("vars").object_range())
+            task.vars[item.key()] = item.value().as<std::string>();
+    }
+    if (metadata.contains("env")) {
+        for (const auto& item : metadata.at("env").object_range())
+            task.env[item.key()] = item.value().as<std::string>();
+    }
+    if (metadata.contains("dot_env")) {
+        for (const auto& value : metadata.at("dot_env").array_range())
+            task.dot_env.push_back(value.as<std::string>());
+    }
+    if (metadata.contains("when")) task.when = metadata.at("when").as<std::string>();
+    if (metadata.contains("working_dir")) task.working_dir = metadata.at("working_dir").as<std::string>();
+    if (metadata.contains("sources")) {
+        for (const auto& value : metadata.at("sources").array_range())
+            task.sources.push_back(value.as<std::string>());
+    }
+    if (metadata.contains("generates")) {
+        for (const auto& value : metadata.at("generates").array_range())
+            task.generates.push_back(value.as<std::string>());
+    }
 
-    if (!node.has_child("name")) {
-        TaskYamlDetail::throw_parse_error(node, "task requires a 'name'");
-    }
-    node["name"] >> task.name;
-    if (task.name.empty()) {
-        TaskYamlDetail::throw_parse_error(node["name"], "task name cannot be empty");
-    }
-
-    if (node.has_child("description")) {
-        node["description"] >> task.description;
-    }
-    if (node.has_child("depends_on")) {
-        task.depends_on = node_to_string_vector(node["depends_on"]);
-    }
-    if (node.has_child("vars")) {
-        task.vars = node_to_string_map(node["vars"]);
-    }
-    if (node.has_child("env")) {
-        task.env = node_to_string_map(node["env"]);
-    }
-    if (node.has_child("dotEnv")) {
-        task.dot_env = node_to_string_vector(node["dotEnv"]);
-    }
-    if (node.has_child("when")) {
-        std::string when;
-        node["when"] >> when;
-        task.when = when;
-    }
     if (node.has_child("each")) {
         task.each = parse_each(node["each"]);
     }
@@ -157,38 +127,16 @@ Task parse_task(const TaskYamlDetail::YamlNodeRef& node, const std::string& sour
         }
     }
 
-    if (node.has_child("working_dir")) {
-        std::string working_dir;
-        node["working_dir"] >> working_dir;
-        if (!working_dir.empty()) {
-            task.working_dir = working_dir;
-        }
+    if (metadata.contains("finally")) {
+        const std::string finally_task = metadata.at("finally").as<std::string>();
+        if (!task.triggers) task.triggers = Triggers{};
+        auto& on_complete = task.triggers->on_complete;
+        if (std::find(on_complete.begin(), on_complete.end(), finally_task) == on_complete.end())
+            on_complete.push_back(finally_task);
     }
 
     if (node.has_child("silent")) {
         task.silent = TaskYamlDetail::read_bool_or_throw(node["silent"], "silent");
-    }
-
-    if (node.has_child("sources")) {
-        task.sources = node_to_string_vector(node["sources"]);
-    }
-    if (node.has_child("generates")) {
-        task.generates = node_to_string_vector(node["generates"]);
-    }
-
-    if (node.has_child("finally")) {
-        std::string finally_task;
-        node["finally"] >> finally_task;
-        if (finally_task.empty()) {
-            TaskYamlDetail::throw_parse_error(node["finally"], "'finally' cannot be empty");
-        }
-        if (!task.triggers) {
-            task.triggers = Triggers{};
-        }
-        auto& on_complete = task.triggers->on_complete;
-        if (std::find(on_complete.begin(), on_complete.end(), finally_task) == on_complete.end()) {
-            on_complete.push_back(finally_task);
-        }
     }
 
     int action_count = 0;
