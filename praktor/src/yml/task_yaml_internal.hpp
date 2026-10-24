@@ -89,4 +89,5 @@ json_value_t* read_workflow_contract_fields_or_throw(
     const YamlNodeRef& node, bool output);
 json_value_t* read_workflow_metadata_or_throw(const YamlNodeRef& node);
 json_value_t* read_task_metadata_or_throw(const YamlNodeRef& node);
+std::optional<std::string> read_task_script_or_throw(const YamlNodeRef& node);
 }

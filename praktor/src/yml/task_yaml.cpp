@@ -272,13 +272,8 @@ Task parse_task(const TaskYamlDetail::YamlNodeRef& node, const std::string& sour
             node["retries"], "'retries' is currently supported only with the 'tool' runner");
     }
 
-    if (node.has_child("script")) {
-        std::string script_src = TaskYamlDetail::read_scalar_or_throw(
-            node["script"], "'script' must be a scalar");
-        if (script_src.empty()) {
-            TaskYamlDetail::throw_parse_error(node["script"], "'script' cannot be empty");
-        }
-        task.script = std::move(script_src);
+    if (const auto script_src = TaskYamlDetail::read_task_script_or_throw(node)) {
+        task.script = *script_src;
         if (action_count == 0) {
             task.declared_runner = "script";
         }

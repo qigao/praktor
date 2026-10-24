@@ -185,3 +185,28 @@ int praktor_yaml_task_metadata_create(praktor_yaml_node node,json_value_t **out,
  *out=result;return SALTS_OK;
 fail:tstr_free(name_text);json_free(result);if(rc==SALTS_ENOMEM&&error&&error->origin==PRAKTOR_YAML_FAILURE_NONE)error->origin=PRAKTOR_YAML_FAILURE_ALLOCATION;return rc;
 }
+
+int praktor_yaml_task_script_read(praktor_yaml_node task_node,bool *present,
+                                  tstr *out,praktor_yaml_field_error *error) {
+    praktor_yaml_node script_node={0};
+    tstr text=NULL;
+    int status;
+    if(!present||!out)return SALTS_EINVAL;
+    status=praktor_yaml_field_get(task_node,"script",&script_node,error);
+    if(status!=SALTS_OK)return status;
+    if(!praktor_yaml_valid(script_node)) {
+        *present=false;
+        *out=NULL;
+        return SALTS_OK;
+    }
+    status=praktor_yaml_field_scalar(script_node,
+        vstr_from_cstr("'script' must be a scalar"),&text,error);
+    if(status!=SALTS_OK)return status;
+    if(tstr_len(text)==0u) {
+        tstr_free(text);
+        return at_error(script_node,"'script' cannot be empty",error);
+    }
+    *present=true;
+    *out=text;
+    return SALTS_OK;
+}

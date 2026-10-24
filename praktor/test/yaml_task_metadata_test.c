@@ -9,5 +9,26 @@ spec("C task metadata parser"){
  it("projects each items and trigger action lists to owned JSON"){praktor_yaml_document *d=doc_for("name: loop\neach: {items: [a, b], as: item_name, index_variable: i}\ntriggers: {on_success: [done], on_complete: [cleanup]}\n");json_value_t *v=NULL;praktor_yaml_field_error e={0};check(praktor_yaml_task_metadata_create(praktor_yaml_root(d),&v,&e)==SALTS_OK);json_eq(v,"{\"name\":\"loop\",\"each\":{\"items\":[\"a\",\"b\"],\"matrix\":{},\"as\":\"item_name\",\"index_variable\":\"i\"},\"triggers\":{\"on_success\":[\"done\"],\"on_failure\":[],\"on_complete\":[\"cleanup\"]}}");json_free(v);praktor_yaml_field_error_dispose(&e);praktor_yaml_document_destroy(d);}
  it("projects each matrix with the default item name"){praktor_yaml_document *d=doc_for("name: matrix\neach: {matrix: {region: [us, eu]}}\n");json_value_t *v=NULL;check(praktor_yaml_task_metadata_create(praktor_yaml_root(d),&v,NULL)==SALTS_OK);json_eq(v,"{\"name\":\"matrix\",\"each\":{\"items\":[],\"matrix\":{\"region\":[\"us\",\"eu\"]},\"as\":\"item\",\"index_variable\":\"\"}}");json_free(v);praktor_yaml_document_destroy(d);}
  it("validates retry count shape, range and decimal syntax"){const char *bad[]={"name: x\nretries: []\n","name: x\nretries: {}\n","name: x\nretries: {count: -1}\n","name: x\nretries: {count: 1025}\n","name: x\nretries: {count: 1.5}\n","name: x\nretries: {count: 1, extra: 2}\n"};size_t i;for(i=0;i<sizeof(bad)/sizeof(bad[0]);++i){praktor_yaml_document *d=doc_for(bad[i]);json_value_t *v=NULL;praktor_yaml_field_error e={0};check(praktor_yaml_task_metadata_create(praktor_yaml_root(d),&v,&e)!=SALTS_OK);check(v==NULL);praktor_yaml_field_error_dispose(&e);praktor_yaml_document_destroy(d);}}
+ it("reads optional script through the C API"){
+    praktor_yaml_document *d=doc_for("name: script_task\\nscript: echo hello\\n");
+    bool present=false;tstr text=NULL;praktor_yaml_field_error e={0};
+    check(praktor_yaml_task_script_read(praktor_yaml_root(d),&present,&text,&e)==SALTS_OK);
+    check(present&&text&&tstr_len(text)==10&&memcmp(text,"echo hello",10)==0);
+    tstr_free(text);praktor_yaml_field_error_dispose(&e);praktor_yaml_document_destroy(d);
+    d=doc_for("name: no_script\\n");present=true;text=(tstr)1;
+    check(praktor_yaml_task_script_read(praktor_yaml_root(d),&present,&text,&e)==SALTS_OK);
+    check(!present&&text==NULL);
+    praktor_yaml_field_error_dispose(&e);praktor_yaml_document_destroy(d);
+ }
+ it("rejects malformed and empty scripts in C"){
+    const char *bad[]={"name: x\\nscript: [echo]\\n","name: x\\nscript: ''\\n"};
+    size_t i;
+    for(i=0;i<2;++i){
+        praktor_yaml_document *d=doc_for(bad[i]);bool present=false;tstr text=NULL;praktor_yaml_field_error e={0};
+        check(praktor_yaml_task_script_read(praktor_yaml_root(d),&present,&text,&e)!=SALTS_OK);
+        check(!present&&text==NULL);
+        praktor_yaml_field_error_dispose(&e);praktor_yaml_document_destroy(d);
+    }
+ }
  it("rejects with without tool"){praktor_yaml_document *d=doc_for("name: build\nwith: {x: 1}\n");json_value_t *v=NULL;praktor_yaml_field_error e={0};check(praktor_yaml_task_metadata_create(praktor_yaml_root(d),&v,&e)!=SALTS_OK);check(v==NULL);praktor_yaml_field_error_dispose(&e);praktor_yaml_document_destroy(d);}
 }
