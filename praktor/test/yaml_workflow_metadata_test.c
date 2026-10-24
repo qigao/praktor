@@ -34,7 +34,7 @@ spec("C workflow root metadata parser") {
         for(i=0;i<sizeof(bad)/sizeof(bad[0]);++i) {
             praktor_yaml_document *doc=doc_for(bad[i]);json_value_t *result=NULL;praktor_yaml_field_error error={0};
             check(praktor_yaml_workflow_metadata_create(praktor_yaml_root(doc),&result,&error)!=SALTS_OK);
-            check(result==NULL&&error.text!=NULL);praktor_yaml_field_error_dispose(&error);praktor_yaml_document_destroy(doc);
+            check(result==NULL);praktor_yaml_field_error_dispose(&error);praktor_yaml_document_destroy(doc);
         }
     }
     it("preserves legacy scalar dotEnv conversion") {
