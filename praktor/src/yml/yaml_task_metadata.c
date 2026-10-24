@@ -121,10 +121,10 @@ static int add_timeout_retry_silent(praktor_yaml_node node,json_value_t *result,
             return at_error(retries_node,"'retries' requires a non-negative integer 'count'",error);
         rc=praktor_yaml_field_scalar(count_node,vstr_from_cstr("retry count must be a non-negative integer"),&text,error);
         if(rc!=SALTS_OK)return rc;
-        if(tstr_len(text)==0u){tstr_free(text);return at_error(count_node,"retry count must be a non-negative integer",error);}
+        if(tstr_len(text)==0u){tstr_free(text);return at_error(count_node,"retry count must be between 0 and 1024",error);}
         for(i=0;i<tstr_len(text);++i) {
             unsigned char ch=(unsigned char)text[i];
-            if(ch<'0'||ch>'9'){tstr_free(text);return at_error(count_node,"retry count must be a non-negative integer",error);}
+            if(ch<'0'||ch>'9'){tstr_free(text);return at_error(count_node,"retry count must be between 0 and 1024",error);}
             if(retry_count>102u||(retry_count==102u&&(unsigned int)(ch-'0')>4u)) {
                 tstr_free(text);return at_error(count_node,"retry count must be between 0 and 1024",error);
             }
