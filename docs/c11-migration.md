@@ -510,3 +510,11 @@ building/testing the application and installed SDK during migration.
 Keep this follow-up Draft until the whole-program gates above pass. No
 automatic merge or publication is authorized by the migration request. The
 merged master stays on its accepted backend while this branch is incomplete.
+
+### Named orchestration AST pilot
+The private strict-C11 praktor_orch_from_named_yaml() converts a bounded
+named-node YAML subset into the canonical Salts CSTL vector-backed tree.
+It preserves ordered children and detached parameters. Flat if/while/switch
+forms and task-level metadata are not covered. Production orch_parser.cpp
+remains unchanged until complete parity passes; no alternate runtime or
+implicit production fallback is introduced.
