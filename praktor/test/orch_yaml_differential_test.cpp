@@ -33,7 +33,9 @@ spec("C11 named orchestration CSTL AST parity with legacy parser") {
         const char *cases[]={
             "Sequence:\n  - Shell: {cmd: echo first}\n  - Inverter:\n      child:\n        Shell: {cmd: echo second}\n",
             "Sequence:\n  children:\n    - Sleep: 25\n    - Shell: {cmd: echo, output_key: out}\n",
-            "Parallel:\n  - Shell: {cmd: left}\n  - Shell: {cmd: right}\n"
+            "Parallel:\n  - Shell: {cmd: left}\n  - Shell: {cmd: right}\n",
+            "Sequence:\n  child:\n    - Shell: {CMD: first, c_m_d: second}\n    - Sleep: 2\n",
+            "Sequence:\n  children:\n    - Shell: {cmd: first}\n    - FileExists: {path: marker, fail_if_missing: TRUE}\n"
         };
         for(const char *source:cases) {
             TaskYamlDetail::YamlDocument document(source);
@@ -54,7 +56,14 @@ spec("C11 named orchestration CSTL AST parity with legacy parser") {
         const char *invalid[]={
             "Sequence: []\n",
             "Shell: {cmd: hi, child: {Sleep: 1}}\n",
-            "Shell: {cmd: [hi]}\n"
+            "Shell: {cmd: [hi]}\n",
+            "IfThenElse: {condition: ready, child: {Shell: {cmd: hi}}}\n",
+            "WhileDo: {condition: ready, child: {Shell: {cmd: hi}}}\n",
+            "Switch: {variable: mode, children: [{Shell: {cmd: hi}}]}\n",
+            "SetVariable: {key: x, value: y}\n",
+            "Timeout: {timeout_ms: 1, child: {Shell: {cmd: hi}}}\n",
+            "Repeat: {num_cycles: 2, child: {Shell: {cmd: hi}}}\n",
+            "Delay: {delay_ms: 1, child: {Shell: {cmd: hi}}}\n"
         };
         for(const char *source:invalid) {
             TaskYamlDetail::YamlDocument document(source);
@@ -80,7 +89,15 @@ spec("C11 named orchestration CSTL AST parity with legacy parser") {
             {"while","name: loop\nwhile: {FileExists: {path: marker}}\ndo: {Shell: {cmd: tick}}\n"},
             {"switch","name: select\nswitch: mode\ncases:\n  - Shell: {cmd: one}\n  - Shell: {cmd: two}\n"},
             {"set_variable","name: assign\nset_variable: result\nvalue: ready\n"},
-            {"set_variable","name: assign\nset_variable: result\nfrom: source\n"}
+            {"set_variable","name: assign\nset_variable: result\nfrom: source\n"},
+            {"timeout","name: wait\ntimeout: 25\nchild: {Shell: {cmd: run}}\n"},
+            {"repeat","name: loop\nrepeat: 2\nchild: [{Shell: {cmd: one}}, {Sleep: 5}]\n"},
+            {"delay","name: delayed\ndelay: 15\nchild: {Shell: {cmd: run}}\n"},
+            {"keep_running_until_failure","name: loop\nkeep_running_until_failure: 7\nchild: {Shell: {cmd: run}}\n"},
+            {"precondition","name: guarded\nprecondition: '{ready}'\nchild: {Shell: {cmd: run}}\n"},
+            {"entry_updated","name: watch\nentry_updated: state\nchild: {Shell: {cmd: run}}\n"},
+            {"consume_queue","name: consume\nconsume_queue: events\nchild: {Shell: {cmd: run}}\n"},
+            {"run_once","name: once\nrun_once: ignored\nchild: {Shell: {cmd: run}}\n"}
         };
         for (const auto& item : cases) {
             TaskYamlDetail::YamlDocument document(item.source);
@@ -95,6 +112,34 @@ spec("C11 named orchestration CSTL AST parity with legacy parser") {
                 check(native_ast_equals_legacy(legacy.root, praktor_orch_tree_root(native)));
                 praktor_orch_tree_destroy(native);
             }
+        }
+    }
+    it("agrees with legacy on invalid flat forms and never publishes partial ASTs") {
+        struct FlatCase { const char *kind; const char *source; };
+        const FlatCase cases[] = {
+            {"if","name: choice\nif: ready\nthen: []\n"},
+            {"while","name: loop\nwhile: ready\ndo: []\n"},
+            {"switch","name: switch\nswitch: mode\ncases: []\n"},
+            {"set_variable","name: assign\nset_variable: x\nvalue: a\nfrom: b\n"},
+            {"timeout","name: guard\ntimeout: 1.5\nchild: {Shell: {cmd: run}}\n"},
+            {"repeat","name: retry\nrepeat: invalid\nchild: {Shell: {cmd: run}}\n"},
+            {"delay","name: sleep\ndelay: -\nchild: {Shell: {cmd: run}}\n"},
+            {"run_once","name: once\nrun_once: ok\nchild: []\n"},
+            {"precondition","name: guard\nprecondition: [invalid]\nchild: {Shell: {cmd: run}}\n"}
+        };
+        for (const auto& item : cases) {
+            TaskYamlDetail::YamlDocument document(item.source);
+            bool legacy_rejected = false;
+            try { (void)parse_orch_params(document.root(),item.kind); }
+            catch(const std::exception&) { legacy_rejected = true; }
+            praktor_orch_tree *native = nullptr;
+            char diagnostic[160]{};
+            const int status = praktor_orch_from_flat_yaml(
+                document.root().native(),item.kind,&native,diagnostic,sizeof diagnostic);
+            check(legacy_rejected);
+            check(status != SALTS_OK);
+            check(native == nullptr);
+            check(diagnostic[0] != '\0');
         }
     }
 
