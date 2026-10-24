@@ -190,6 +190,49 @@ spec("Named C11 orchestration YAML into canonical CSTL AST"){
         praktor_orch_tree_destroy(existing);
     }
 
+    it("projects task-level named runners without retaining the YAML document"){
+        const struct {const char *runner,*source;praktor_orch_type type;} cases[]={
+            {"sequence","name: task\nsequence: [{Shell: {cmd: hi}}, {Sleep: 1}]\n",PRAKTOR_ORCH_SEQUENCE},
+            {"shell","name: task\nshell: {cmd: hello, output_key: output}\n",PRAKTOR_ORCH_SHELL},
+            {"inverter","name: task\ninverter: {child: {Shell: {cmd: hi}}}\n",PRAKTOR_ORCH_INVERTER},
+            {"run_once","name: task\nrun_once: {child: {Shell: {cmd: hi}}}\n",PRAKTOR_ORCH_RUN_ONCE},
+            {"parse_regex","name: task\nparse_regex: {input_key: in, pattern: '(ok)'}\n",PRAKTOR_ORCH_PARSE_REGEX}
+        };
+        size_t i;
+        for(i=0;i<sizeof(cases)/sizeof(cases[0]);++i){
+            praktor_yaml_document *doc=doc_for(cases[i].source);
+            praktor_orch_tree *tree=NULL;
+            const praktor_orch_node *root;
+            char error[160]={0};
+            check(praktor_orch_from_flat_yaml(praktor_yaml_root(doc),cases[i].runner,
+                &tree,error,sizeof error)==SALTS_OK);
+            praktor_yaml_document_destroy(doc);
+            check(tree&&error[0]=='\0');
+            if(!tree)continue;
+            root=praktor_orch_tree_root(tree);
+            check(praktor_orch_node_type(root)==cases[i].type);
+            check(praktor_orch_tree_size(tree)>0);
+            praktor_orch_tree_destroy(tree);
+        }
+    }
+    it("refuses malformed task-level named runners without changing existing output"){
+        const char *source="name: bad\nshell: {cmd: hi, unexpected: value}\n";
+        praktor_orch_command cmd={0};
+        praktor_orch_tree *saved=NULL,*out;
+        praktor_yaml_document *doc=doc_for(source);
+        const praktor_orch_node *root;
+        char error[160]={0};
+        cmd.command=vstr_from_cstr("saved");
+        check(praktor_orch_from_command(&cmd,&saved,NULL,0)==SALTS_OK);
+        out=saved;
+        check(praktor_orch_from_flat_yaml(praktor_yaml_root(doc),"shell",
+            &out,error,sizeof error)==SALTS_EINVAL);
+        check(out==saved&&strstr(error,"unexpected")!=NULL);
+        praktor_yaml_document_destroy(doc);
+        root=praktor_orch_tree_root(saved);
+        check(praktor_orch_node_type(root)==PRAKTOR_ORCH_SEQUENCE);
+        praktor_orch_tree_destroy(saved);
+    }
     it("builds flat if with scalar condition and ordered branches while ignoring task metadata"){
         praktor_yaml_document *doc=doc_for(
             "name: choose\nif: ready\nthen: {Shell: {cmd: run}}\nelse: {Shell: {cmd: skip}}\n");
