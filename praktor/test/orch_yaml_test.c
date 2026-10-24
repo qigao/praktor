@@ -50,6 +50,36 @@ spec("Named C11 orchestration YAML into canonical CSTL AST"){
         check(praktor_orch_param_at(first,0,&p)==SALTS_OK&&vstr_eq(p.value,vstr_from_cstr("25")));
         praktor_orch_tree_destroy(tree);praktor_yaml_document_destroy(doc);
     }
+
+    it("validates integer and boolean node parameters while preserving runtime substitutions"){
+        const char *bad[]={
+            "ParseRegex: {input_key: input, pattern: x, capture_group: 1.5}\n",
+            "Shell: {cmd: echo, stream_output: yes}\n",
+            "FileExists: {path: file, fail_if_missing: 1}\n",
+            "WaitEvent: {event: ready, timeout: --2}\n"
+        };
+        const char *good[]={
+            "ParseRegex: {input_key: input, pattern: x, capture_group: -1}\n",
+            "Shell: {cmd: echo, stream_output: TRUE}\n",
+            "ParseRegex: {input_key: input, pattern: x, capture_group: '{group}' }\n"
+        };
+        size_t i;
+        for(i=0;i<sizeof(bad)/sizeof(bad[0]);++i){
+            praktor_yaml_document *doc=doc_for(bad[i]);
+            praktor_orch_tree *tree=NULL;char error[128]={0};
+            check(praktor_orch_from_named_yaml(praktor_yaml_root(doc),&tree,error,sizeof error)!=SALTS_OK);
+            check(!tree&&error[0]);
+            praktor_yaml_document_destroy(doc);
+        }
+        for(i=0;i<sizeof(good)/sizeof(good[0]);++i){
+            praktor_yaml_document *doc=doc_for(good[i]);
+            praktor_orch_tree *tree=NULL;
+            check(praktor_orch_from_named_yaml(praktor_yaml_root(doc),&tree,NULL,0)==SALTS_OK);
+            check(tree!=NULL);
+            praktor_orch_tree_destroy(tree);praktor_yaml_document_destroy(doc);
+        }
+    }
+
     it("rejects invalid syntax, duplicate params and child shapes without output changes"){
         const char *bad[]={
             "Sequence: []\n",

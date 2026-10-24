@@ -30,9 +30,62 @@ static void cleanup(named_build *b) {
         }
     free(b->rows);
 }
+static bool runtime_scalar(tstr value) {
+    size_t i;
+    for(i=0;i<tstr_len(value);++i)
+        if(value[i]=='{'||value[i]=='}')return true;
+    return false;
+}
+static bool key_is(tstr key,const char *expected) {
+    size_t i=0,j=0;
+    while(key[i]&&expected[j]) {
+        if(key[i]=='_'){++i;continue;}
+        if(expected[j]=='_'){++j;continue;}
+        if(tolower((unsigned char)key[i])!=tolower((unsigned char)expected[j]))return false;
+        ++i;++j;
+    }
+    while(key[i]=='_')++i;
+    while(expected[j]=='_')++j;
+    return key[i]=='\0'&&expected[j]=='\0';
+}
+static int validate_param(named_build *b,tstr key,tstr value) {
+    static const char *const integer_keys[]={"capture_group","expected","timeout",
+        "num_attempts","num_cycles","timeout_ms","delay_ms","max_iterations"};
+    static const char *const boolean_keys[]={"stream_output","fail_if_missing"};
+    size_t i,j,n=tstr_len(value),start=0;
+    bool integer=false,boolean=false;
+    if(runtime_scalar(value))return SALTS_OK;
+    for(i=0;i<sizeof(integer_keys)/sizeof(integer_keys[0]);++i)
+        if(key_is(key,integer_keys[i])){integer=true;break;}
+    for(i=0;i<sizeof(boolean_keys)/sizeof(boolean_keys[0]);++i)
+        if(key_is(key,boolean_keys[i])){boolean=true;break;}
+    if(integer) {
+        if(n&&(value[0]=='+'||value[0]=='-'))start=1u;
+        if(start==n) {
+            tstr_free(key);tstr_free(value);
+            return fail(b,SALTS_EINVAL,"Orchestration integer parameter must be an integer");
+        }
+        for(j=start;j<n;++j)if(value[j]<'0'||value[j]>'9') {
+            tstr_free(key);tstr_free(value);
+            return fail(b,SALTS_EINVAL,"Orchestration integer parameter must be an integer");
+        }
+    }
+    if(boolean&&!(n==4u&&tolower((unsigned char)value[0])=='t'&&
+       tolower((unsigned char)value[1])=='r'&&tolower((unsigned char)value[2])=='u'&&
+       tolower((unsigned char)value[3])=='e')&&
+       !(n==5u&&tolower((unsigned char)value[0])=='f'&&
+       tolower((unsigned char)value[1])=='a'&&tolower((unsigned char)value[2])=='l'&&
+       tolower((unsigned char)value[3])=='s'&&tolower((unsigned char)value[4])=='e')) {
+        tstr_free(key);tstr_free(value);
+        return fail(b,SALTS_EINVAL,"Orchestration boolean parameter must be true or false");
+    }
+    return SALTS_OK;
+}
 static int param(named_build *b,size_t index,tstr key,tstr value) {
     named_row *row=&b->rows[index];
     size_t p=row->node.param_count;
+    int validation=validate_param(b,key,value);
+    if(validation!=SALTS_OK)return validation;
     if(p>=PRAKTOR_ORCH_MAX_PARAMS) {
         tstr_free(key);tstr_free(value);
         return fail(b,SALTS_EINVAL,"Named orchestration parameter limit");
