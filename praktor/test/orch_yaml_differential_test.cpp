@@ -114,6 +114,104 @@ spec("C11 named orchestration CSTL AST parity with legacy parser") {
             }
         }
     }
+    it("matches task-level named controls, decorators and leaves") {
+        /* The legacy runner selector sends only the selected value into
+         * parse_named_btdsl_node(). The native entry must not parse the
+         * metadata-bearing task mapping as if it were a one-key named node. */
+        struct TaskCase { const char* type; const char* source; };
+        const TaskCase cases[] = {
+            {"sequence","name: serial\nsequence:\n  - Shell: {cmd: one}\n  - Sleep: 1\n"},
+            {"parallel","name: fork\nparallel:\n  - Shell: {cmd: a}\n  - Shell: {cmd: b}\n"},
+            {"reactive_sequence","name: reactive\nreactive_sequence:\n  - FileExists: {path: ok}\n  - Shell: {cmd: go}\n"},
+            {"pipeline_sequence","name: pipe\npipeline_sequence:\n  - Shell: {cmd: one}\n"},
+            {"fallback","name: fallback\nfallback:\n  - Shell: {cmd: one}\n"},
+            {"selector","name: choose\nselector:\n  - Shell: {cmd: one}\n"},
+            {"shell","name: command\nshell: {cmd: echo, outputKey: stdout}\n"},
+            {"parse_json","name: json\nparse_json: {input_key: stdout, path: '
+        struct FlatCase { const char *kind; const char *source; };
+        const FlatCase cases[] = {
+            {"if","name: choice\nif: ready\nthen: []\n"},
+            {"while","name: loop\nwhile: ready\ndo: []\n"},
+            {"switch","name: switch\nswitch: mode\ncases: []\n"},
+            {"set_variable","name: assign\nset_variable: x\nvalue: a\nfrom: b\n"},
+            {"timeout","name: guard\ntimeout: 1.5\nchild: {Shell: {cmd: run}}\n"},
+            {"repeat","name: retry\nrepeat: invalid\nchild: {Shell: {cmd: run}}\n"},
+            {"delay","name: sleep\ndelay: '--'\nchild: {Shell: {cmd: run}}\n"},
+            {"run_once","name: once\nrun_once: ok\nchild: []\n"},
+            {"precondition","name: guard\nprecondition: [invalid]\nchild: {Shell: {cmd: run}}\n"}
+        };
+        for (const auto& item : cases) {
+            TaskYamlDetail::YamlDocument document(item.source);
+            bool legacy_rejected = false;
+            try { (void)parse_orch_params(document.root(),item.kind); }
+            catch(const std::exception&) { legacy_rejected = true; }
+            praktor_orch_tree *native = nullptr;
+            char diagnostic[160]{};
+            const int status = praktor_orch_from_flat_yaml(
+                document.root().native(),item.kind,&native,diagnostic,sizeof diagnostic);
+            check(legacy_rejected);
+            check(status != SALTS_OK);
+            check(native == nullptr);
+            check(diagnostic[0] != '\0');
+        }
+    }
+
+}
+}\n"},
+            {"parse_regex","name: regex\nparse_regex: {input_key: stdout, pattern: '(x)', capture_group: 1}\n"},
+            {"parse_lines","name: lines\nparse_lines: {input_key: stdout, filter: '[a-z]'}\n"},
+            {"parse_keyvalue","name: kv\nparse_keyvalue: {input_key: stdout, delimiter: '='}\n"},
+            {"check_exit_code","name: status\ncheck_exit_code: {expected: 0}\n"},
+            {"wait_event","name: event\nwait_event: {event: done}\n"},
+            {"file_exists","name: file\nfile_exists: {path: ready, fail_if_missing: false}\n"},
+            {"sleep","name: snooze\nsleep: 4\n"},
+            {"subtree","name: subtree\nsubtree: {tree: worker}\n"},
+            {"inverter","name: invert\ninverter: {child: {Shell: {cmd: run}}}\n"},
+            {"force_success","name: success\nforce_success: {child: {Shell: {cmd: run}}}\n"},
+            {"force_failure","name: failure\nforce_failure: {child: {Shell: {cmd: run}}}\n"},
+            {"run_once","name: once\nrun_once: {child: {Shell: {cmd: run}}}\n"}
+        };
+        for (const auto& item : cases) {
+            TaskYamlDetail::YamlDocument document(item.source);
+            const OrchParams legacy = parse_orch_params(document.root(), item.type);
+            praktor_orch_tree *native=nullptr;
+            char diagnostic[256]{};
+            const int status=praktor_orch_from_flat_yaml(
+                document.root().native(),item.type,&native,diagnostic,sizeof diagnostic);
+            check(status==SALTS_OK);
+            check(native!=nullptr);
+            if(native) {
+                check(native_ast_equals_legacy(legacy.root,praktor_orch_tree_root(native)));
+                praktor_orch_tree_destroy(native);
+            }
+        }
+    }
+    it("rejects malformed task-level named runners without partial output") {
+        struct TaskCase { const char* type; const char* source; };
+        const TaskCase cases[]={
+            {"shell","name: bad\nshell: {cmd: hello, illegal: yes}\n"},
+            {"shell","name: bad\nshell: {cmd: [bad]}\n"},
+            {"inverter","name: bad\ninverter: {children: []}\n"},
+            {"sequence","name: bad\nsequence: []\n"},
+            {"parse_regex","name: bad\nparse_regex: {input_key: stdout, pattern: x, capture_group: two}\n"},
+            {"wait_event","name: bad\nwait_event: {event: ok, timeout: wrong}\n"}
+        };
+        for(const auto& item:cases) {
+            TaskYamlDetail::YamlDocument document(item.source);
+            bool legacy_rejected=false;
+            try {(void)parse_orch_params(document.root(),item.type);}
+            catch(const std::exception&){legacy_rejected=true;}
+            praktor_orch_tree *native=nullptr;
+            char diagnostic[256]{};
+            const int status=praktor_orch_from_flat_yaml(
+                document.root().native(),item.type,&native,diagnostic,sizeof diagnostic);
+            check(legacy_rejected);
+            check(status!=SALTS_OK);
+            check(native==nullptr);
+            check(diagnostic[0]!='\0');
+        }
+    }
+
     it("agrees with legacy on invalid flat forms and never publishes partial ASTs") {
         struct FlatCase { const char *kind; const char *source; };
         const FlatCase cases[] = {
