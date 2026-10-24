@@ -34,7 +34,7 @@ static int add_string_map(json_value_t *object, const char *key,
     result = json_create_object();
     if (!result) { status = SALTS_ENOMEM; goto done; }
     for (index = 0; index < praktor_yaml_string_map_size(map); ++index) {
-        praktor_yaml_string_entry entry = {{0}};
+        praktor_yaml_string_entry entry = {0};
         json_value_t *value;
         status = praktor_yaml_string_map_at(map, index, &entry);
         if (status != SALTS_OK) goto done;
