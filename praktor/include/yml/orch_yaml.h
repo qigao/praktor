@@ -12,6 +12,9 @@ extern "C" {
  * Errors leave the output untouched. */
 int praktor_orch_from_named_yaml(praktor_yaml_node node, praktor_orch_tree **out,
     char *error, size_t error_capacity);
+/* Task-level flat control forms; supports if, while, switch, set_variable. */
+int praktor_orch_from_flat_yaml(praktor_yaml_node node, const char *node_type,
+    praktor_orch_tree **out, char *error, size_t error_capacity);
 #ifdef __cplusplus
 }
 #endif
