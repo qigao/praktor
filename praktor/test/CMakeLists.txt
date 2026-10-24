@@ -55,6 +55,7 @@ endif()
 list(APPEND TEST_SOURCES
     workflow_value_test.cpp
     structured_document_query_test.cpp
+    orch_yaml_differential_test.cpp
     expression_evaluator_test.cpp
     service_executor_test.cpp
     managed_process_executor_test.cpp
@@ -74,7 +75,9 @@ cmake_add_test(
 
 # This test includes the internal native YAML action projection contract.
 target_link_libraries(structured_document_query_test.${TARGET_NAME_LIB}
-    PRIVATE praktor_yaml_action_params praktor_orch_yaml)
+    PRIVATE praktor_yaml_action_params)
+target_link_libraries(orch_yaml_differential_test.${TARGET_NAME_LIB}
+    PRIVATE praktor_orch_yaml)
 
 target_include_directories(download_executor_test.${TARGET_NAME_LIB}
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../src)
