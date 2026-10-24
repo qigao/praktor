@@ -123,7 +123,7 @@ spec("C11 named orchestration CSTL AST parity with legacy parser") {
             {"set_variable","name: assign\nset_variable: x\nvalue: a\nfrom: b\n"},
             {"timeout","name: guard\ntimeout: 1.5\nchild: {Shell: {cmd: run}}\n"},
             {"repeat","name: retry\nrepeat: invalid\nchild: {Shell: {cmd: run}}\n"},
-            {"delay","name: sleep\ndelay: -\nchild: {Shell: {cmd: run}}\n"},
+            {"delay","name: sleep\ndelay: '--'\nchild: {Shell: {cmd: run}}\n"},
             {"run_once","name: once\nrun_once: ok\nchild: []\n"},
             {"precondition","name: guard\nprecondition: [invalid]\nchild: {Shell: {cmd: run}}\n"}
         };
