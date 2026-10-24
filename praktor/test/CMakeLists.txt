@@ -80,6 +80,8 @@ target_link_libraries(orch_yaml_differential_test.${TARGET_NAME_LIB}
     PRIVATE praktor_orch_yaml)
 target_include_directories(orch_yaml_differential_test.${TARGET_NAME_LIB}
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../shared/process/include)
+target_compile_definitions(orch_yaml_differential_test.${TARGET_NAME_LIB} PRIVATE
+    PRAKTOR_ORCH_CORPUS_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/../..")
 
 target_include_directories(download_executor_test.${TARGET_NAME_LIB}
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../src)
