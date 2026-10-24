@@ -71,6 +71,31 @@ Vars node_to_string_map(const TaskYamlDetail::YamlNodeRef& node) {
     require_native_params(praktor_yaml_task_map(owner.get(), &map));
     return owned_map(map);
 }
+Each parse_each(const TaskYamlDetail::YamlNodeRef& node) {
+    TaskFieldsOwner owner(TaskYamlDetail::read_task_fields_or_throw(node, PRAKTOR_YAML_EACH));
+    praktor_yaml_each_view view{};
+    require_native_params(praktor_yaml_task_each(owner.get(), &view));
+    Each result;
+    result.items = owned_list(view.items);
+    for (std::size_t index = 0; index < praktor_yaml_list_map_size(view.matrix); ++index) {
+        praktor_yaml_list_entry entry{};
+        require_native_params(praktor_yaml_list_map_at(view.matrix, index, &entry));
+        result.matrix[owned_text(entry.key)] = owned_list(entry.values);
+    }
+    result.as = owned_text(view.as); result.index_variable = owned_text(view.index_variable);
+    return result;
+}
+Triggers parse_triggers(const TaskYamlDetail::YamlNodeRef& node) {
+    TaskFieldsOwner owner(TaskYamlDetail::read_task_fields_or_throw(node, PRAKTOR_YAML_TRIGGERS));
+    praktor_yaml_triggers_view view{};
+    require_native_params(praktor_yaml_task_triggers(owner.get(), &view));
+    Triggers result;
+    result.on_success = owned_list(view.on_success);
+    result.on_failure = owned_list(view.on_failure);
+    result.on_complete = owned_list(view.on_complete);
+    return result;
+}
+
 RunCommandParams parse_run_command_params(const TaskYamlDetail::YamlNodeRef& node) {
     ActionParamsOwner owner(TaskYamlDetail::read_action_params_or_throw(node, PRAKTOR_YAML_ACTION_COMMAND));
     praktor_yaml_command_view view{};

@@ -67,6 +67,8 @@ OrchNode parse_orch_node(const YamlNodeRef& node, int depth = 0);
 
 StrList node_to_string_vector(const TaskYamlDetail::YamlNodeRef& node);
 Vars node_to_string_map(const TaskYamlDetail::YamlNodeRef& node);
+Each parse_each(const TaskYamlDetail::YamlNodeRef& node);
+Triggers parse_triggers(const TaskYamlDetail::YamlNodeRef& node);
 RunCommandParams parse_run_command_params(const TaskYamlDetail::YamlNodeRef& node);
 ProgramParams parse_program_params(const TaskYamlDetail::YamlNodeRef& node);
 DownloadParams parse_download_params(const TaskYamlDetail::YamlNodeRef& node);
