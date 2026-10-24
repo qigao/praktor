@@ -82,6 +82,51 @@ static void walk_faults(praktor_orch_command input, int expected) {
     }
     check(point > 1 && point < 200);
 }
+
+static void walk_flat_faults(void) {
+    const praktor_orch_input_param cmd[]={{vstr_from_cstr("cmd"),vstr_from_cstr("echo")},
+                                          {vstr_from_cstr("output_key"),vstr_from_cstr("out")}};
+    const praktor_orch_input_param duration[]={{vstr_from_cstr("duration"),vstr_from_cstr("25")}};
+    const praktor_orch_flat_node nodes[]={
+        {PRAKTOR_ORCH_SEQUENCE,PRAKTOR_ORCH_ROOT_PARENT,NULL,0},
+        {PRAKTOR_ORCH_INVERTER,0,NULL,0},
+        {PRAKTOR_ORCH_SHELL,1,cmd,2},
+        {PRAKTOR_ORCH_SEQUENCE,0,NULL,0},
+        {PRAKTOR_ORCH_SLEEP,3,duration,1},
+        {PRAKTOR_ORCH_SHELL,3,cmd,2}
+    };
+    praktor_orch_command saved={0};
+    unsigned point;
+    saved.command=vstr_from_cstr("retained");
+    for(point=1;point<200;++point) {
+        praktor_orch_tree *previous=NULL,*out;
+        const praktor_orch_node *shell=NULL;
+        praktor_orch_param param={0};
+        char error[256]={0};
+        int status;
+        bool failed;
+        check(praktor_orch_from_command(&saved,&previous,NULL,0)==SALTS_OK);
+        out=previous;
+        praktor_orch_test_fail(point);
+        status=praktor_orch_from_flat_nodes(nodes,6,&out,error,sizeof error);
+        failed=injected;
+        praktor_orch_test_fail(0);
+        if(failed) {
+            check(status==SALTS_ENOMEM&&out==previous&&error[0]);
+        } else {
+            check(status==SALTS_OK&&out!=previous);
+            if(status==SALTS_OK)praktor_orch_tree_destroy(out);
+        }
+        check(praktor_orch_child_at(praktor_orch_tree_root(previous),0,&shell)==SALTS_OK);
+        check(praktor_orch_param_at(shell,0,&param)==SALTS_OK);
+        check(vstr_eq(param.value,saved.command));
+        praktor_orch_tree_destroy(previous);
+        check(praktor_orch_test_live()==0);
+        if(!failed)break;
+    }
+    check(point>1&&point<200);
+}
+
 spec("Native orchestration construction rollback") {
     it("releases scalar and sequence nodes strings and both vectors at every boundary") {
         praktor_orch_command input = {0}; vstr commands[] = {{"one", 3}, {"", 0}, {"last", 4}};
@@ -108,5 +153,10 @@ spec("Native orchestration construction rollback") {
             walk_faults(input, SALTS_EINVAL); tstr_free(text);
         }
     }
+
+    it("rolls back arbitrary nested C11 AST owner at every injected allocation fault") {
+        walk_flat_faults();
+    }
+
 }
 #endif
