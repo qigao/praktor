@@ -40,34 +40,6 @@ WorkflowContractFields parse_contract_fields(
     return fields;
 }
 
-std::uint32_t parse_retry_count(
-    const TaskYamlDetail::YamlNodeRef& node) {
-    if (!node.is_map()) {
-        TaskYamlDetail::throw_parse_error(
-            node, "'retries' must be a map with a finite count");
-    }
-    static const std::unordered_set<std::string> allowed = {"count"};
-    TaskYamlDetail::check_unknown_keys(node, allowed);
-    if (!node.has_child("count")) {
-        TaskYamlDetail::throw_parse_error(
-            node, "'retries' requires a non-negative integer 'count'");
-    }
-    const auto& count_node = node["count"];
-    const std::string text = TaskYamlDetail::read_scalar_or_throw(
-        count_node, "retry count must be a non-negative integer");
-    std::uint64_t value = 0;
-    const auto parsed =
-        std::from_chars(text.data(), text.data() + text.size(), value);
-    if (parsed.ec != std::errc{} ||
-        parsed.ptr != text.data() + text.size() ||
-        value > static_cast<std::uint64_t>(kPraktorHostToolMaxRetries)) {
-        TaskYamlDetail::throw_parse_error(
-            count_node,
-            "retry count must be between 0 and " +
-                std::to_string(kPraktorHostToolMaxRetries));
-    }
-    return static_cast<std::uint32_t>(value);
-}
 
 } // namespace
 
@@ -108,16 +80,9 @@ Task parse_task(const TaskYamlDetail::YamlNodeRef& node, const std::string& sour
         task.each = parse_each(node["each"]);
     }
 
-    const bool is_flat_timeout_bt_root = node.has_child("timeout") && node.has_child("child");
-    if (node.has_child("timeout") && node["timeout"].has_val() && !is_flat_timeout_bt_root) {
-        std::string timeout;
-        node["timeout"] >> timeout;
-        task.timeout = timeout;
-    }
-
-    if (node.has_child("retries")) {
-        task.retry_count = parse_retry_count(node["retries"]);
-    }
+    if (metadata.contains("timeout")) task.timeout = metadata.at("timeout").as<std::string>();
+    if (metadata.contains("retry_count"))
+        task.retry_count = metadata.at("retry_count").as<std::uint32_t>();
 
     if (node.has_child("triggers")) {
         Triggers triggers = parse_triggers(node["triggers"]);
@@ -134,9 +99,7 @@ Task parse_task(const TaskYamlDetail::YamlNodeRef& node, const std::string& sour
             on_complete.push_back(finally_task);
     }
 
-    if (node.has_child("silent")) {
-        task.silent = TaskYamlDetail::read_bool_or_throw(node["silent"], "silent");
-    }
+    if (metadata.contains("silent")) task.silent = metadata.at("silent").as<bool>();
 
     int action_count = 0;
     auto select_runner = [&](TaskAction action, const char* declared_runner, auto&& parser) {
