@@ -4,7 +4,9 @@
 #include "core/executor.hpp"
 #include "yml/task_parser.hpp"
 #include <cstdio>
+#include <initializer_list>
 #include <string>
+#include <utility>
 namespace {
 /* These fixtures deliberately use text ports, including numeric text;
  * the shared YAML parser supplies the actual canonical node names/topology. */
@@ -83,7 +85,11 @@ tasks:
   actions::Executor legacy; actions::Blackboard blackboard; actions::ExecutionContext context;
   check(legacy.execute(tree, blackboard, context) == actions::NodeStatus::SUCCESS);
   uint64_t now = 0u;
-  const praktor_c11_native_host_config host_config{8u, 64u, 4096u, 1u, yamlClock, &now};
+  praktor_c11_native_host_config host_config{};
+  praktor_c11_native_host_config_init(&host_config, 8u, 64u, 4096u);
+  host_config.max_running_leaves = 1u;
+  host_config.now_ns = yamlClock;
+  host_config.clock_user = &now;
   praktor_c11_native_host host{}; praktor_c11_bt_host hooks{};
   check(praktor_c11_native_host_init_with_config(&host, &host_config) == SALTS_OK);
   check(praktor_c11_native_host_bind(&host, &hooks) == SALTS_OK);
@@ -165,6 +171,35 @@ tasks:
       praktor_c11_native_host_destroy(&host);
     }
   }
+  /* Exercise the shared std::regex/TRE subset and Legacy's invalid-filter
+   * fallback through the same YAML-derived ports. */
+  for (const auto& filter_case : std::initializer_list<std::pair<const char*, const char*>>{
+           {"^one$", "zero\none\ntone\none"}, {"[", "zero\none"}}) {
+    actions::Blackboard filtered_blackboard; actions::ExecutionContext filtered_context;
+    filtered_blackboard.set("input_port", "source");
+    filtered_blackboard.set("output_port", "lines");
+    filtered_blackboard.set("empty_filter", filter_case.first);
+    filtered_blackboard.set("source", filter_case.second);
+    check(legacy.execute(tree, filtered_blackboard, filtered_context) == actions::NodeStatus::SUCCESS);
+    praktor_c11_native_host filtered_host{}; praktor_c11_bt_host filtered_hooks{};
+    check(praktor_c11_native_host_init(&filtered_host, 8u, 64u, 128u) == SALTS_OK);
+    check(praktor_c11_native_host_bind(&filtered_host, &filtered_hooks) == SALTS_OK);
+    auto* filtered_values = praktor_c11_native_host_values(&filtered_host);
+    for (const char* key : {"input_port", "output_port", "empty_filter", "source"})
+      check(praktor_c11_value_store_set(filtered_values, key, filtered_blackboard.get(key).c_str()) == PRAKTOR_C11_VALUE_OK);
+    {
+      salts_bt_tree_config config{}; salts_bt_tree_config_init(&config);
+      actions::c11::TreeExecutorSession session(tree, {}, config, filtered_hooks);
+      salts_bt_node_status status = SALTS_BT_FAILURE;
+      check(session.tick(&status) == SALTS_OK && status == SALTS_BT_SUCCESS);
+      for (const char* key : {"lines", "lines_count", "after_lines"}) {
+        char text[129]; size_t size = 0u;
+        check(praktor_c11_value_store_get(filtered_values, key, text, sizeof(text), &size) == PRAKTOR_C11_VALUE_OK);
+        check(filtered_blackboard.get(key) == text);
+      }
+    }
+    praktor_c11_native_host_destroy(&filtered_host);
+  }
   // Missing input is an ordinary FAILURE on both paths; existing outputs and
   // downstream effects stay untouched. This also covers direct AST defaults.
   tree.root.children.front().params.clear();
@@ -192,6 +227,63 @@ tasks:
     check(praktor_c11_value_store_contains(values, "after_lines", &contains) == PRAKTOR_C11_VALUE_OK && !contains);
   }
   praktor_c11_native_host_destroy(&host);
+}
+
+void parseRegexDifferential() {
+  const auto workflow = TaskParser::parseText(R"(
+tasks:
+  - name: native_regex_contract
+    sequence:
+      - parse_regex:
+          input_key: "{input_port}"
+          pattern: "{pattern_port}"
+          capture_group: 1
+          output_key: "{output_port}"
+      - set_variable: after_regex
+        value: completed
+)", "native-regex-differential.yml");
+  check(workflow.tasks.size() == 1u);
+  actions::Tree tree;
+  tree.root = textNode(std::get<OrchParams>(workflow.tasks.front().specifics).root);
+  const struct {
+    const char* input;
+    const char* pattern;
+  } cases[] = {
+      {"Built target core-42", "([A-Za-z_]+)-[0-9]+"},
+      {"code 123 done", "([0-9]+)"},
+      {"x", "x(y)?"},
+      {"no digits", "([0-9]+)"},
+      {"invalid expression", "["}};
+  for (const auto& item : cases) {
+    actions::Executor legacy; actions::Blackboard blackboard; actions::ExecutionContext context;
+    blackboard.set("input_port", "source"); blackboard.set("pattern_port", item.pattern);
+    blackboard.set("output_port", "capture"); blackboard.set("source", item.input);
+    blackboard.set("capture", "old");
+    const actions::NodeStatus expected = legacy.execute(tree, blackboard, context);
+    praktor_c11_native_host host{}; praktor_c11_bt_host hooks{};
+    check(praktor_c11_native_host_init(&host, 8u, 64u, 128u) == SALTS_OK);
+    check(praktor_c11_native_host_bind(&host, &hooks) == SALTS_OK);
+    auto* values = praktor_c11_native_host_values(&host);
+    for (const char* key : {"input_port", "pattern_port", "output_port", "source", "capture"})
+      check(praktor_c11_value_store_set(values, key, blackboard.get(key).c_str()) == PRAKTOR_C11_VALUE_OK);
+    {
+      salts_bt_tree_config config{}; salts_bt_tree_config_init(&config);
+      actions::c11::TreeExecutorSession session(tree, {}, config, hooks);
+      salts_bt_node_status actual = SALTS_BT_FAILURE;
+      check(session.tick(&actual) == SALTS_OK);
+      check((actual == SALTS_BT_SUCCESS) == (expected == actions::NodeStatus::SUCCESS));
+      for (const char* key : {"capture", "after_regex"}) {
+        int contains = 0; char text[129]; size_t size = 0u;
+        check(praktor_c11_value_store_contains(values, key, &contains) == PRAKTOR_C11_VALUE_OK);
+        check((contains != 0) == blackboard.has(key));
+        if (contains) {
+          check(praktor_c11_value_store_get(values, key, text, sizeof(text), &size) == PRAKTOR_C11_VALUE_OK);
+          check(blackboard.get(key) == text);
+        }
+      }
+    }
+    praktor_c11_native_host_destroy(&host);
+  }
 }
 
 void parseKeyValueDifferential() {
@@ -252,6 +344,7 @@ tasks:
 spec("C11 and Legacy YAML differential") {
   it("preserves ParseKeyValue YAML ports, sorted JSON and duplicate semantics") { parseKeyValueDifferential(); }
   it("preserves ParseLines YAML ports and every short newline combination") { parseLinesDifferential(); }
+  it("preserves ParseRegex captures and failure closure on the common syntax subset") { parseRegexDifferential(); }
   it("preserves YAML value, copy and exit-code behavior") { differential(); }
   it("preserves terminal Sleep effects and cooperatively cancels") { sleepDifferential(); }
 }

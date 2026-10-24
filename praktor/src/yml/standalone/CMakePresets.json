@@ -1,0 +1,15 @@
+{
+  "version": 6,
+  "configurePresets": [
+    {"name": "orch-c-release", "generator": "Ninja", "binaryDir": "${sourceDir}/../../../../build/orch-c-release", "cacheVariables": {"CMAKE_BUILD_TYPE": "Release", "CMAKE_EXPORT_COMPILE_COMMANDS": true}},
+    {"name": "orch-c-asan", "inherits": "orch-c-release", "binaryDir": "${sourceDir}/../../../../build/orch-c-asan", "condition": {"type": "equals", "lhs": "${hostSystemName}", "rhs": "Linux"}, "cacheVariables": {"CMAKE_BUILD_TYPE": "Debug", "CMAKE_C_FLAGS": "-fsanitize=address,undefined,float-cast-overflow -fno-omit-frame-pointer -g", "CMAKE_EXE_LINKER_FLAGS": "-fsanitize=address,undefined,float-cast-overflow"}}
+  ],
+  "buildPresets": [
+    {"name": "orch-c-release", "configurePreset": "orch-c-release", "jobs": 2},
+    {"name": "orch-c-asan", "configurePreset": "orch-c-asan", "jobs": 2}
+  ],
+  "testPresets": [
+    {"name": "orch-c-release", "configurePreset": "orch-c-release", "output": {"outputOnFailure": true}, "execution": {"noTestsAction": "error"}},
+    {"name": "orch-c-asan", "configurePreset": "orch-c-asan", "output": {"outputOnFailure": true}, "execution": {"noTestsAction": "error"}}
+  ]
+}

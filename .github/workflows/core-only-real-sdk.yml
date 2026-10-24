@@ -205,6 +205,11 @@ jobs:
             build/ci-sdk/shared/process/libpraktor_process_native.a \
             build/ci-sdk/shared/process/libpraktor_service_control.a build/ci-sdk/shared/process/libpraktor_service_process_host.a
 
+      - name: C-only Schema tool, expressions and structured queries
+        if: matrix.platform == 'linux' && matrix.sdk == 'behavior-tree'
+        shell: bash
+        run: bash cmake/ci/qualify-c-only-tools.sh release
+
       - name: Independent C output parser with only the base SDK
         if: matrix.platform == 'linux' && matrix.sdk == 'behavior-tree'
         shell: bash
@@ -225,9 +230,13 @@ jobs:
           cmake -S actions/c11/standalone -B build/ci-c11-standalone -G Ninja \
             -DCMAKE_BUILD_TYPE=Release
           cmake --build build/ci-c11-standalone --parallel 2
+          python3 cmake/ci/audit-c11-runtime-link.py \
+            build/ci-c11-standalone/actions_c11_native_host_standalone_test
+          python3 cmake/ci/audit-c11-runtime-link.py \
+            build/ci-c11-standalone/actions_c11_regex_tre_standalone_test
           ctest --test-dir build/ci-c11-standalone \
             --no-tests=error --output-on-failure \
-            -R '^actions_c11_(tree_adapter|value_store|native_host)_standalone_test$'
+            -R '^actions_c11_(tree_adapter|value_store|native_host|regex_tre)_standalone_test$'
 
       - name: C11 Process standalone without a C++ runtime
         if: matrix.platform == 'linux' && matrix.sdk == 'behavior-tree'

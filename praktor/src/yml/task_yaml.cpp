@@ -1,5 +1,6 @@
 #include "task_yaml_internal.hpp"
 #include "workflow_contract.hpp"
+#include "yml/yaml_task_metadata.h"
 
 #include <algorithm>
 #include <charconv>
@@ -13,454 +14,150 @@
 namespace {
 
 WorkflowValue parse_contract_value(const TaskYamlDetail::YamlNodeRef& node) {
-    if (node.is_map()) {
-        WorkflowValue object = WorkflowValue::object();
-        for (const auto& child : node) {
-            object[child.key()] = parse_contract_value(child);
-        }
-        return object;
-    }
-    if (node.is_seq()) {
-        WorkflowValue array = WorkflowValue::array();
-        for (const auto& child : node) {
-            array.push_back(parse_contract_value(child));
-        }
-        return array;
-    }
-    if (!node.has_val()) {
-        TaskYamlDetail::throw_parse_error(node, "contract value must be a scalar, sequence, or map");
-    }
-    if (node.is_string_scalar()) {
-        return WorkflowValue(node.scalar());
-    }
-
-    const std::string text = node.scalar();
-    const std::string lower = TaskYamlDetail::to_lower_copy(text);
-    if (lower == "null" || lower == "~") {
-        return WorkflowValue::null();
-    }
-    if (lower == "true" || lower == "yes" || lower == "on") {
-        return WorkflowValue(true);
-    }
-    if (lower == "false" || lower == "no" || lower == "off") {
-        return WorkflowValue(false);
-    }
-
-    std::int64_t integer = 0;
-    const auto parsed_integer =
-        std::from_chars(text.data(), text.data() + text.size(), integer);
-    if (parsed_integer.ec == std::errc{} &&
-        parsed_integer.ptr == text.data() + text.size()) {
-        return WorkflowValue(integer);
-    }
-
-    char* end = nullptr;
-    const double number = std::strtod(text.c_str(), &end);
-    if (end && end == text.c_str() + text.size()) {
-        return WorkflowValue(number);
-    }
-    return WorkflowValue(text);
-}
-
-WorkflowContractField parse_contract_field(
-    const TaskYamlDetail::YamlNodeRef& node,
-    const std::string& name,
-    bool output) {
-    if (!node.is_map()) {
-        TaskYamlDetail::throw_parse_error(
-            node, "workflow contract field '" + name + "' must be a map");
-    }
-
-    std::unordered_set<std::string> allowed = {
-        "type", "required", "default", "enum", "description"
-    };
-    if (output) {
-        allowed.insert("value");
-    }
-    TaskYamlDetail::check_unknown_keys(node, allowed);
-
-    if (!node.has_child("type")) {
-        TaskYamlDetail::throw_parse_error(
-            node, "workflow contract field '" + name + "' requires 'type'");
-    }
-
-    WorkflowContractField field;
-    field.type = TaskYamlDetail::read_scalar_or_throw(
-        node["type"], "workflow contract type must be a scalar");
-    static const std::unordered_set<std::string> valid_types = {
-        "string", "boolean", "integer", "number", "array", "object"
-    };
-    if (valid_types.find(field.type) == valid_types.end()) {
-        TaskYamlDetail::throw_parse_error(
-            node["type"], "unsupported workflow contract type '" + field.type + "'");
-    }
-
-    if (node.has_child("required")) {
-        field.required =
-            TaskYamlDetail::read_bool_or_throw(node["required"], "required");
-    }
-    if (node.has_child("description")) {
-        field.description = TaskYamlDetail::read_scalar_or_throw(
-            node["description"], "description must be a scalar");
-    }
-    if (node.has_child("value")) {
-        field.value = TaskYamlDetail::read_scalar_or_throw(
-            node["value"], "output value must be a scalar");
-    }
-    if (node.has_child("default")) {
-        field.default_value = parse_contract_value(node["default"]);
-        if (!Praktor::Contract::valueMatchesType(*field.default_value, field.type)) {
-            TaskYamlDetail::throw_parse_error(
-                node["default"], "default does not match declared type '" + field.type + "'");
-        }
-    }
-    if (node.has_child("enum")) {
-        const auto& values = node["enum"];
-        if (!values.is_seq() || values.num_children() == 0) {
-            TaskYamlDetail::throw_parse_error(
-                values, "enum must be a non-empty sequence");
-        }
-        for (const auto& enum_node : values) {
-            WorkflowValue value = parse_contract_value(enum_node);
-            if (!Praktor::Contract::valueMatchesType(value, field.type)) {
-                TaskYamlDetail::throw_parse_error(
-                    enum_node, "enum value does not match declared type '" + field.type + "'");
-            }
-            field.enum_values.push_back(std::move(value));
-        }
-    }
-    return field;
-}
-
-std::uint32_t parse_retry_count(
-    const TaskYamlDetail::YamlNodeRef& node) {
-    if (!node.is_map()) {
-        TaskYamlDetail::throw_parse_error(
-            node, "'retries' must be a map with a finite count");
-    }
-    static const std::unordered_set<std::string> allowed = {"count"};
-    TaskYamlDetail::check_unknown_keys(node, allowed);
-    if (!node.has_child("count")) {
-        TaskYamlDetail::throw_parse_error(
-            node, "'retries' requires a non-negative integer 'count'");
-    }
-    const auto& count_node = node["count"];
-    const std::string text = TaskYamlDetail::read_scalar_or_throw(
-        count_node, "retry count must be a non-negative integer");
-    std::uint64_t value = 0;
-    const auto parsed =
-        std::from_chars(text.data(), text.data() + text.size(), value);
-    if (parsed.ec != std::errc{} ||
-        parsed.ptr != text.data() + text.size() ||
-        value > static_cast<std::uint64_t>(kPraktorHostToolMaxRetries)) {
-        TaskYamlDetail::throw_parse_error(
-            count_node,
-            "retry count must be between 0 and " +
-                std::to_string(kPraktorHostToolMaxRetries));
-    }
-    return static_cast<std::uint32_t>(value);
+    return WorkflowValue::adoptJson(TaskYamlDetail::read_contract_json_or_throw(node));
 }
 
 WorkflowContractFields parse_contract_fields(
     const TaskYamlDetail::YamlNodeRef& node,
     bool output) {
-    if (!node.is_map()) {
-        TaskYamlDetail::throw_parse_error(
-            node, output ? "'outputs' must be a map" : "'inputs' must be a map");
-    }
-
+    WorkflowValue model = WorkflowValue::adoptJson(
+        TaskYamlDetail::read_workflow_contract_fields_or_throw(node, output));
     WorkflowContractFields fields;
-    for (const auto& child : node) {
-        const std::string name = child.key();
-        if (name.empty()) {
-            TaskYamlDetail::throw_parse_error(child, "workflow contract field name cannot be empty");
+    for (const auto& item : model.object_range()) {
+        const WorkflowValue& encoded = item.value();
+        WorkflowContractField field;
+        field.type = encoded.at("type").as<std::string>();
+        if (encoded.contains("required")) field.required = encoded.at("required").as<bool>();
+        if (encoded.contains("description")) field.description = encoded.at("description").as<std::string>();
+        if (encoded.contains("value")) field.value = encoded.at("value").as<std::string>();
+        if (encoded.contains("default")) field.default_value = encoded.at("default");
+        if (encoded.contains("enum")) {
+            for (const auto& value : encoded.at("enum").array_range())
+                field.enum_values.push_back(value);
         }
-        fields.emplace(name, parse_contract_field(child, name, output));
+        fields.emplace(item.key(), std::move(field));
     }
     return fields;
 }
 
+
 } // namespace
 
-TaskDefaults parse_defaults(const TaskYamlDetail::YamlNodeRef& node) {
-    if (!node.is_map()) {
-        TaskYamlDetail::throw_parse_error(node, "defaults must be a map");
-    }
-
-    static const std::unordered_set<std::string> allowed_default_keys = {"timeout"};
-    TaskYamlDetail::check_unknown_keys(node, allowed_default_keys);
-
-    TaskDefaults defaults;
-    if (node.has_child("timeout")) {
-        std::string timeout;
-        node["timeout"] >> timeout;
-        defaults.timeout = timeout;
-    }
-    return defaults;
-}
-
 Task parse_task(const TaskYamlDetail::YamlNodeRef& node, const std::string& source_path) {
-    if (!node.is_map()) {
-        TaskYamlDetail::throw_parse_error(node, "task must be a map");
-    }
-
-    static const std::unordered_set<std::string> allowed_task_keys = {
-        "name", "description", "depends_on", "vars", "env", "dotEnv", "when",
-        "each", "timeout", "retries", "triggers",
-        "working_dir", "silent", "sources", "generates", "finally",
-        "command", "program", "args", "stdin", "download", "uses", "dynamic_tasks", "output_format",
-        "service", "managed_process", "tool", "with",
-        "script", "actions",
-        "sequence", "parallel", "reactive_sequence", "pipeline_sequence",
-        "inverter", "force_success", "force_failure", "repeat",
-        "delay", "switch", "if", "then", "else", "while", "do", "max_iterations",
-        "child", "cases",
-        "shell", "parse_json", "parse_regex", "parse_lines", "parse_keyvalue",
-        "check_exit_code", "wait_event", "file_exists", "sleep", "set_variable", "subtree",
-        "fallback", "selector",
-        "run_once", "keep_running_until_failure", "consume_queue", "precondition", "entry_updated"
-    };
-    if (node.has_child("set_variable")) {
-        auto set_variable_keys = allowed_task_keys;
-        set_variable_keys.insert("value");
-        set_variable_keys.insert("from");
-        TaskYamlDetail::check_unknown_keys(node, set_variable_keys);
-    } else {
-        TaskYamlDetail::check_unknown_keys(node, allowed_task_keys);
-    }
-
-    if (node.has_child("with") && !node.has_child("tool")) {
-        TaskYamlDetail::throw_parse_error(
-            node["with"], "'with' is valid only with the 'tool' runner");
-    }
-
+    WorkflowValue metadata = WorkflowValue::adoptJson(
+        TaskYamlDetail::read_task_metadata_or_throw(node));
     Task task;
-
-    if (!node.has_child("name")) {
-        TaskYamlDetail::throw_parse_error(node, "task requires a 'name'");
+    task.name = metadata.at("name").as<std::string>();
+    if (metadata.contains("description")) task.description = metadata.at("description").as<std::string>();
+    if (metadata.contains("depends_on")) {
+        for (const auto& value : metadata.at("depends_on").array_range())
+            task.depends_on.push_back(value.as<std::string>());
     }
-    node["name"] >> task.name;
-    if (task.name.empty()) {
-        TaskYamlDetail::throw_parse_error(node["name"], "task name cannot be empty");
+    if (metadata.contains("vars")) {
+        for (const auto& item : metadata.at("vars").object_range())
+            task.vars[item.key()] = item.value().as<std::string>();
     }
-
-    if (node.has_child("description")) {
-        node["description"] >> task.description;
+    if (metadata.contains("env")) {
+        for (const auto& item : metadata.at("env").object_range())
+            task.env[item.key()] = item.value().as<std::string>();
     }
-    if (node.has_child("depends_on")) {
-        task.depends_on = node_to_string_vector(node["depends_on"]);
+    if (metadata.contains("dot_env")) {
+        for (const auto& value : metadata.at("dot_env").array_range())
+            task.dot_env.push_back(value.as<std::string>());
     }
-    if (node.has_child("vars")) {
-        task.vars = node_to_string_map(node["vars"]);
+    if (metadata.contains("when")) task.when = metadata.at("when").as<std::string>();
+    if (metadata.contains("working_dir")) task.working_dir = metadata.at("working_dir").as<std::string>();
+    if (metadata.contains("sources")) {
+        for (const auto& value : metadata.at("sources").array_range())
+            task.sources.push_back(value.as<std::string>());
     }
-    if (node.has_child("env")) {
-        task.env = node_to_string_map(node["env"]);
-    }
-    if (node.has_child("dotEnv")) {
-        task.dot_env = node_to_string_vector(node["dotEnv"]);
-    }
-    if (node.has_child("when")) {
-        std::string when;
-        node["when"] >> when;
-        task.when = when;
-    }
-    if (node.has_child("each")) {
-        task.each = parse_each(node["each"]);
+    if (metadata.contains("generates")) {
+        for (const auto& value : metadata.at("generates").array_range())
+            task.generates.push_back(value.as<std::string>());
     }
 
-    const bool is_flat_timeout_bt_root = node.has_child("timeout") && node.has_child("child");
-    if (node.has_child("timeout") && node["timeout"].has_val() && !is_flat_timeout_bt_root) {
-        std::string timeout;
-        node["timeout"] >> timeout;
-        task.timeout = timeout;
-    }
-
-    if (node.has_child("retries")) {
-        task.retry_count = parse_retry_count(node["retries"]);
-    }
-
-    if (node.has_child("triggers")) {
-        Triggers triggers = parse_triggers(node["triggers"]);
-        if (!triggers.empty()) {
-            task.triggers = triggers;
+    if (metadata.contains("each")) {
+        const auto& encoded = metadata.at("each");
+        Each each;
+        for (const auto& value : encoded.at("items").array_range())
+            each.items.push_back(value.as<std::string>());
+        for (const auto& item : encoded.at("matrix").object_range()) {
+            StrList values;
+            for (const auto& value : item.value().array_range())
+                values.push_back(value.as<std::string>());
+            each.matrix[item.key()] = std::move(values);
         }
+        each.as = encoded.at("as").as<std::string>();
+        each.index_variable = encoded.at("index_variable").as<std::string>();
+        task.each = std::move(each);
     }
 
-    if (node.has_child("working_dir")) {
-        std::string working_dir;
-        node["working_dir"] >> working_dir;
-        if (!working_dir.empty()) {
-            task.working_dir = working_dir;
-        }
+    if (metadata.contains("timeout")) task.timeout = metadata.at("timeout").as<std::string>();
+    if (metadata.contains("retry_count"))
+        task.retry_count = metadata.at("retry_count").as<std::uint32_t>();
+
+    if (metadata.contains("triggers")) {
+        const auto& encoded = metadata.at("triggers");
+        Triggers triggers;
+        if (encoded.contains("on_success"))
+            for (const auto& value : encoded.at("on_success").array_range())
+                triggers.on_success.push_back(value.as<std::string>());
+        if (encoded.contains("on_failure"))
+            for (const auto& value : encoded.at("on_failure").array_range())
+                triggers.on_failure.push_back(value.as<std::string>());
+        if (encoded.contains("on_complete"))
+            for (const auto& value : encoded.at("on_complete").array_range())
+                triggers.on_complete.push_back(value.as<std::string>());
+        if (!triggers.empty()) task.triggers = std::move(triggers);
     }
 
-    if (node.has_child("silent")) {
-        task.silent = TaskYamlDetail::read_bool_or_throw(node["silent"], "silent");
-    }
-
-    if (node.has_child("sources")) {
-        task.sources = node_to_string_vector(node["sources"]);
-    }
-    if (node.has_child("generates")) {
-        task.generates = node_to_string_vector(node["generates"]);
-    }
-
-    if (node.has_child("finally")) {
-        std::string finally_task;
-        node["finally"] >> finally_task;
-        if (finally_task.empty()) {
-            TaskYamlDetail::throw_parse_error(node["finally"], "'finally' cannot be empty");
-        }
-        if (!task.triggers) {
-            task.triggers = Triggers{};
-        }
+    if (metadata.contains("finally")) {
+        const std::string finally_task = metadata.at("finally").as<std::string>();
+        if (!task.triggers) task.triggers = Triggers{};
         auto& on_complete = task.triggers->on_complete;
-        if (std::find(on_complete.begin(), on_complete.end(), finally_task) == on_complete.end()) {
+        if (std::find(on_complete.begin(), on_complete.end(), finally_task) == on_complete.end())
             on_complete.push_back(finally_task);
+    }
+
+    if (metadata.contains("silent")) task.silent = metadata.at("silent").as<bool>();
+
+    const int action_count = metadata.contains("runner_count") ? metadata.at("runner_count").as<int>() : 0;
+    const std::string selected_runner = metadata.contains("runner_kind") ? metadata.at("runner_kind").as<std::string>() : std::string{};
+    if (selected_runner == "command") {
+        task.action=TaskAction::Orch; task.declared_runner="command";
+        task.specifics=desugarCommandToorch(parse_run_command_params(node));
+        if(node.has_child("actions")&&!node["actions"].is_map())
+            TaskYamlDetail::throw_parse_error(node["actions"],"orch node must be a map");
+    } else if(selected_runner=="actions") {
+        const auto& bt_node=node["actions"];
+        if(!bt_node.is_map())TaskYamlDetail::throw_parse_error(bt_node,"orch node must be a map");
+        task.action=TaskAction::Orch;task.declared_runner="actions";
+        OrchParams params;params.root=TaskYamlDetail::parse_orch_node(bt_node);task.specifics=std::move(params);
+    } else if(selected_runner=="program") {
+        task.action=TaskAction::Program;task.declared_runner="program";task.specifics=parse_program_params(node);
+    } else if(selected_runner=="download") {
+        task.action=TaskAction::Download;task.declared_runner="download";task.specifics=parse_download_params(node);
+    } else if(selected_runner=="service") {
+        task.action=TaskAction::Service;task.declared_runner="service";task.specifics=parse_service_params(node);
+    } else if(selected_runner=="managed_process") {
+        task.action=TaskAction::ManagedProcess;task.declared_runner="managed_process";task.specifics=parse_managed_process_params(node);
+    } else if(selected_runner=="uses") {
+        task.action=TaskAction::Uses;task.declared_runner="uses";task.specifics=parse_uses_params(node["uses"]);
+    } else if(selected_runner=="dynamic_tasks") {
+        task.action=TaskAction::DynamicTasks;task.declared_runner="dynamic_tasks";task.specifics=parse_dynamic_tasks_params(node["dynamic_tasks"]);
+    } else if(selected_runner=="tool") {
+        task.action=TaskAction::HostTool;task.declared_runner="tool";
+        HostToolParams params;
+        params.tool=TaskYamlDetail::read_system_action_string_or_throw(node["tool"],"'tool' must be a string stable host-tool identity");
+        if(params.tool.empty())TaskYamlDetail::throw_parse_error(node["tool"],"'tool' identity cannot be empty");
+        if(node.has_child("with")) {
+            if(!node["with"].is_map())TaskYamlDetail::throw_parse_error(node["with"],"'with' must be a map of typed host-tool arguments");
+            params.arguments=parse_contract_value(node["with"]);
         }
-    }
-
-    int action_count = 0;
-    auto select_runner = [&](TaskAction action, const char* declared_runner, auto&& parser) {
-        ++action_count;
-        if (action_count != 1) {
-            return;
-        }
-        task.action = action;
-        task.declared_runner = declared_runner;
-        task.specifics = parser();
-    };
-
-    if (node.has_child("command")) {
-        select_runner(TaskAction::Orch, "command", [&] {
-            return desugarCommandToorch(parse_run_command_params(node));
-        });
-    }
-
-    if (node.has_child("actions")) {
-        const auto& bt_node = node["actions"];
-        if (!bt_node.is_map()) {
-            TaskYamlDetail::throw_parse_error(bt_node, "orch node must be a map");
-        }
-        select_runner(TaskAction::Orch, "actions", [&] {
-            OrchParams orch_params;
-            orch_params.root = TaskYamlDetail::parse_orch_node(bt_node);
-            return orch_params;
-        });
-    }
-
-    if (node.has_child("program")) {
-        select_runner(TaskAction::Program, "program", [&] { return parse_program_params(node); });
-    }
-
-    if (node.has_child("download")) {
-        select_runner(TaskAction::Download, "download", [&] {
-            return parse_download_params(node);
-        });
-    }
-
-    if (node.has_child("service")) {
-        select_runner(TaskAction::Service, "service", [&] { return parse_service_params(node); });
-    }
-
-    if (node.has_child("managed_process")) {
-        select_runner(TaskAction::ManagedProcess, "managed_process", [&] {
-            return parse_managed_process_params(node);
-        });
-    }
-
-    if (node.has_child("uses")) {
-        select_runner(TaskAction::Uses, "uses", [&] { return parse_uses_params(node["uses"]); });
-    }
-
-    if (node.has_child("dynamic_tasks")) {
-        select_runner(TaskAction::DynamicTasks, "dynamic_tasks", [&] {
-            return parse_dynamic_tasks_params(node["dynamic_tasks"]);
-        });
-    }
-
-    if (node.has_child("tool")) {
-        select_runner(TaskAction::HostTool, "tool", [&] {
-            HostToolParams params;
-            params.tool = TaskYamlDetail::read_system_action_string_or_throw(
-                node["tool"], "'tool' must be a string stable host-tool identity");
-            if (params.tool.empty()) {
-                TaskYamlDetail::throw_parse_error(
-                    node["tool"], "'tool' identity cannot be empty");
-            }
-            if (node.has_child("with")) {
-                if (!node["with"].is_map()) {
-                    TaskYamlDetail::throw_parse_error(
-                        node["with"], "'with' must be a map of typed host-tool arguments");
-                }
-                params.arguments = parse_contract_value(node["with"]);
-            }
-            return params;
-        });
-    }
-
-    static const std::vector<std::string> orch_control_nodes = {
-        "sequence", "parallel", "reactive_sequence", "pipeline_sequence", "fallback", "selector"
-    };
-    static const std::vector<std::string> orch_leaf_nodes = {
-        "shell", "parse_json", "parse_regex", "parse_lines", "parse_keyvalue",
-        "check_exit_code", "wait_event", "file_exists", "sleep", "set_variable", "subtree"
-    };
-    static const std::unordered_set<std::string> command_parser_keys = {
-        "parse_json", "parse_regex", "parse_lines", "parse_keyvalue"
-    };
-    static const std::vector<std::string> orch_decorator_nodes = {
-        "inverter", "force_success", "force_failure", "repeat",
-        "timeout", "delay", "run_once", "keep_running_until_failure", "consume_queue",
-        "precondition", "entry_updated"
-    };
-    static const std::vector<std::string> orch_advanced_nodes = {"switch", "if", "while"};
-
-    for (const auto& bt_type : orch_control_nodes) {
-        if (node.has_child(bt_type.c_str())) {
-            select_runner(TaskAction::Orch, "actions", [&] {
-                return parse_orch_params(node, bt_type);
-            });
-        }
-    }
-
-    for (const auto& bt_type : orch_leaf_nodes) {
-        const bool is_command_parser = node.has_child("command") &&
-                                       command_parser_keys.find(bt_type) != command_parser_keys.end();
-        if (node.has_child(bt_type.c_str()) && !is_command_parser) {
-            select_runner(TaskAction::Orch, "actions", [&] {
-                return parse_orch_params(node, bt_type);
-            });
-        }
-    }
-
-    for (const auto& bt_type : orch_decorator_nodes) {
-        const bool has_flat_child_form = node.has_child(bt_type.c_str()) && node.has_child("child");
-        const bool matches_root =
-            (bt_type == "timeout" && has_flat_child_form) ||
-            ((bt_type == "repeat" || bt_type == "delay") && has_flat_child_form) ||
-            ((bt_type == "keep_running_until_failure" || bt_type == "precondition" ||
-              bt_type == "entry_updated" || bt_type == "consume_queue") && has_flat_child_form) ||
-            (bt_type == "run_once" && has_flat_child_form) ||
-            ((bt_type == "inverter" || bt_type == "force_success" || bt_type == "force_failure") &&
-             node.has_child(bt_type.c_str()));
-        if (matches_root) {
-            select_runner(TaskAction::Orch, "actions", [&] {
-                return parse_orch_params(node, bt_type);
-            });
-        }
-    }
-
-    for (const auto& bt_type : orch_advanced_nodes) {
-        const bool matches_root =
-            (bt_type == "if" && node.has_child("if") && node.has_child("then")) ||
-            (bt_type == "while" && node.has_child("while") && node.has_child("do")) ||
-            (bt_type == "switch" && node.has_child("switch") && node.has_child("cases"));
-        if (matches_root) {
-            select_runner(TaskAction::Orch, "actions", [&] {
-                return parse_orch_params(node, bt_type);
-            });
-        }
+        task.specifics=std::move(params);
+    } else if(selected_runner=="orch_root") {
+        task.action=TaskAction::Orch;task.declared_runner="actions";
+        task.specifics=parse_orch_params(node,metadata.at("orch_node_type").as<std::string>());
     }
 
     if (action_count > 1) {
@@ -471,13 +168,8 @@ Task parse_task(const TaskYamlDetail::YamlNodeRef& node, const std::string& sour
             node["retries"], "'retries' is currently supported only with the 'tool' runner");
     }
 
-    if (node.has_child("script")) {
-        std::string script_src = TaskYamlDetail::read_scalar_or_throw(
-            node["script"], "'script' must be a scalar");
-        if (script_src.empty()) {
-            TaskYamlDetail::throw_parse_error(node["script"], "'script' cannot be empty");
-        }
-        task.script = std::move(script_src);
+    if (const auto script_src = TaskYamlDetail::read_task_script_or_throw(node)) {
+        task.script = *script_src;
         if (action_count == 0) {
             task.declared_runner = "script";
         }
@@ -498,51 +190,31 @@ Workflow parse_workflow(const TaskYamlDetail::YamlNodeRef& node, const std::stri
         TaskYamlDetail::throw_parse_error(node, "workflow must be a map");
     }
 
-    static const std::unordered_set<std::string> allowed_workflow_keys = {
-        "name", "description", "inputs", "outputs", "input_policy",
-        "variables", "env", "dotEnv", "defaults", "includes", "tasks"
-    };
-    TaskYamlDetail::check_unknown_keys(node, allowed_workflow_keys);
-
+    WorkflowValue metadata = WorkflowValue::adoptJson(
+        TaskYamlDetail::read_workflow_metadata_or_throw(node));
     Workflow workflow;
-
-    if (node.has_child("name")) {
-        node["name"] >> workflow.name;
-    }
-    if (node.has_child("description")) {
-        node["description"] >> workflow.description;
-    }
+    if (metadata.contains("name")) workflow.name = metadata.at("name").as<std::string>();
+    if (metadata.contains("description")) workflow.description = metadata.at("description").as<std::string>();
+    if (metadata.contains("strict_inputs")) workflow.strict_inputs = metadata.at("strict_inputs").as<bool>();
+    if (metadata.contains("defaults") && metadata.at("defaults").contains("timeout"))
+        workflow.defaults.timeout = metadata.at("defaults").at("timeout").as<std::string>();
     if (node.has_child("inputs")) {
         workflow.inputs = parse_contract_fields(node["inputs"], false);
     }
     if (node.has_child("outputs")) {
         workflow.outputs = parse_contract_fields(node["outputs"], true);
     }
-    if (node.has_child("input_policy")) {
-        const std::string policy = TaskYamlDetail::read_scalar_or_throw(
-            node["input_policy"], "input_policy must be a scalar");
-        if (policy == "strict") {
-            workflow.strict_inputs = true;
-        } else if (policy == "allow_extra") {
-            workflow.strict_inputs = false;
-        } else {
-            TaskYamlDetail::throw_parse_error(
-                node["input_policy"],
-                "input_policy must be 'strict' or 'allow_extra'");
-        }
+    if (metadata.contains("variables")) {
+        for (const auto& item : metadata.at("variables").object_range())
+            workflow.variables[item.key()] = item.value().as<std::string>();
     }
-    if (node.has_child("variables")) {
-        workflow.variables = node_to_string_map(node["variables"]);
+    if (metadata.contains("env")) {
+        for (const auto& item : metadata.at("env").object_range())
+            workflow.env[item.key()] = item.value().as<std::string>();
     }
-    if (node.has_child("env")) {
-        workflow.env = node_to_string_map(node["env"]);
-    }
-    if (node.has_child("dotEnv")) {
-        workflow.dot_env = node_to_string_vector(node["dotEnv"]);
-    }
-
-    if (node.has_child("defaults")) {
-        workflow.defaults = parse_defaults(node["defaults"]);
+    if (metadata.contains("dot_env")) {
+        for (const auto& item : metadata.at("dot_env").array_range())
+            workflow.dot_env.push_back(item.as<std::string>());
     }
 
     if (!node.has_child("tasks")) {

@@ -152,3 +152,37 @@ spec("ExpressionEvaluator Tests") {
     it("Whitespace Handling") { test_expressionevaluator_tests_1(16); }
     it("Dotted Path Variables") { test_expressionevaluator_tests_1(17); }
 }
+
+spec("ExpressionEvaluator native C integration") {
+    it("retains the real regex provider and regex-result truthiness") {
+        ExpressionEvaluator evaluator;
+        WorkflowContext context;
+        check(evaluator.evaluateAsBool("/^(ab)+$/.test('abab')", context));
+        check(!evaluator.evaluateAsBool("/^(ab)+$/.test('xabab')", context));
+        check(evaluator.evaluateAsBool("/a(?=b)/.test('ab')", context));
+        check(evaluator.evaluateAsBool("'a+'.test('caaa')", context));
+        check(evaluator.evaluateAsBool("/abc/", context));
+        check(std::holds_alternative<std::monostate>(evaluator.evaluate("/abc/", context)));
+        check(!evaluator.evaluateAsBool("/[/", context));
+    }
+    it("preserves typed values and binary strings across the compatibility bridge") {
+        ExpressionEvaluator evaluator;
+        WorkflowContext context;
+        context.setValue("binary", std::string("a\0b", 3));
+        context.setValue("nested", WorkflowValue::object({{"value", 7}}));
+        const auto value = evaluator.evaluate("$binary", context);
+        check(std::get<std::string>(value) == std::string("a\0b", 3));
+        check(evaluator.evaluateAsBool("($binary).endsWith('b')", context));
+        check(evaluator.evaluateAsBool("$nested.value == 7", context));
+        check(evaluator.evaluateAsBool("(12).startsWith('12.000000')", context));
+    }
+    it("fails closed when the bounded C evaluator exhausts a limit") {
+        ExpressionEvaluator evaluator;
+        WorkflowContext context;
+        const std::string nested = std::string(129, '(') + "true" + std::string(129, ')');
+        check(!evaluator.evaluateAsBool(nested, context));
+        check(std::holds_alternative<std::monostate>(evaluator.evaluate(nested, context)));
+        check(!evaluator.evaluateAsBool("true || /[/", context));
+        check(evaluator.evaluateAsBool("true", context));
+    }
+}

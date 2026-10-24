@@ -1,13 +1,17 @@
 #pragma once
 
-#include <cyaml.h>
+#include "yml/yaml_document.h"
+#include "yml/yaml_action_params.h"
+#include "yml/yaml_task_fields.h"
 
 #include <cstddef>
 #include <iterator>
-#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_set>
+
+struct json_value_s;
 
 namespace TaskYamlDetail {
 
@@ -30,6 +34,7 @@ public:
     [[nodiscard]] std::string scalar() const;
     [[nodiscard]] std::string location() const;
     [[nodiscard]] std::optional<bool> bool_integer_value() const;
+    [[nodiscard]] praktor_yaml_node native() const noexcept;
 
     const YamlNodeRef& operator>>(std::string& value) const;
     const YamlNodeRef& operator>>(int& value) const;
@@ -41,14 +46,10 @@ private:
     friend class YamlDocument;
     friend class Iterator;
 
-    YamlNodeRef(const cyaml_doc_t* document, cyaml_node_t* node,
-                cyaml_node_t* key_node = nullptr) noexcept;
-    [[nodiscard]] cyaml_node_t* resolved_node() const noexcept;
+    explicit YamlNodeRef(praktor_yaml_node reference) noexcept;
     [[nodiscard]] YamlNodeRef child_at(std::size_t index) const noexcept;
 
-    const cyaml_doc_t* document_ = nullptr;
-    cyaml_node_t* node_ = nullptr;
-    cyaml_node_t* key_node_ = nullptr;
+    praktor_yaml_node reference_{};
 };
 
 class YamlNodeRef::Iterator {
@@ -85,8 +86,20 @@ public:
     [[nodiscard]] YamlNodeRef root() const noexcept;
 
 private:
-    std::unique_ptr<std::string> source_;
-    cyaml_doc_t* document_ = nullptr;
+    praktor_yaml_document* document_ = nullptr;
 };
+
+// Temporary exception/string boundary; field grammar and limits live in C.
+std::string read_scalar_or_throw(const YamlNodeRef& node, const std::string& message);
+std::string read_system_action_string_or_throw(const YamlNodeRef& node, const std::string& message);
+bool read_bool_or_throw(const YamlNodeRef& node, const char* field_name);
+bool read_force_terminate_or_throw(const YamlNodeRef& node);
+
+void check_unknown_keys(const YamlNodeRef& node, const std::unordered_set<std::string>& allowed_keys);
+// Transfers one unique JSON owner to the value facade after successful conversion.
+json_value_s* read_contract_json_or_throw(const YamlNodeRef& node);
+
+praktor_yaml_task_fields* read_task_fields_or_throw(const YamlNodeRef& node, praktor_yaml_task_field_kind kind);
+praktor_yaml_action_params* read_action_params_or_throw(const YamlNodeRef& node, praktor_yaml_action_kind kind);
 
 } // namespace TaskYamlDetail

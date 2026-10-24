@@ -170,27 +170,40 @@ jobs:
           set -euo pipefail
           cmake -S build/p1-salts-utils-source -B build/p1-salts-utils-tsan \
             -DBUILD_TESTS=ON -DBUILD_BENCHMARKS=OFF -DBUILD_EXAMPLES=OFF
-          cmake --build build/p1-salts-utils-tsan \
-            --target cflow_process_fault_test cflow_process_test --parallel 2
+          cmake --build build/p1-salts-utils-tsan --parallel 2
           export LD_LIBRARY_PATH="$SALTS_SOURCE_TSAN_ROOT/lib:$SALTS_UTILS_SOURCE_TSAN_ROOT/lib:$CHTTP_ROOT/lib:${LD_LIBRARY_PATH:-}"
           ctest --test-dir build/p1-salts-utils-tsan \
             -R '^(cflow_process_fault_test|cflow_process_test)$' \
             --no-tests=error --output-on-failure --parallel 1 \
             --repeat until-fail:3 --timeout 90
 
+      - name: Qualify C-only tools and queries against the instrumented SDKs
+        shell: bash
+        env:
+          TSAN_OPTIONS: halt_on_error=1:exitcode=66
+        run: bash cmake/ci/qualify-c-only-tools.sh thread
+
       - name: Prove pure-C11 adapter under full-source TSan
         shell: bash
         run: |
           set -euo pipefail
+          "$VCPKG_ROOT/vcpkg" install \
+            --x-manifest-root="$GITHUB_WORKSPACE" \
+            --x-install-root="$GITHUB_WORKSPACE/vcpkg_installed/ci" \
+            --triplet "$TRIPLET" --host-triplet "$HOST_TRIPLET"
           flags="-fsanitize=thread -fno-omit-frame-pointer -O1 -g"
           cmake -S actions/c11/standalone -B build/p1-c11-standalone-tsan -G Ninja \
             -DCMAKE_BUILD_TYPE=Debug "-DCMAKE_C_FLAGS=$flags" \
             -DCMAKE_EXE_LINKER_FLAGS=-fsanitize=thread
           cmake --build build/p1-c11-standalone-tsan --parallel 2
+          python3 cmake/ci/audit-c11-runtime-link.py \
+            build/p1-c11-standalone-tsan/actions_c11_native_host_standalone_test
+          python3 cmake/ci/audit-c11-runtime-link.py \
+            build/p1-c11-standalone-tsan/actions_c11_regex_tre_standalone_test
           export LD_LIBRARY_PATH="$SALTS_SOURCE_TSAN_ROOT/lib:$SALTS_UTILS_SOURCE_TSAN_ROOT/lib:$CHTTP_ROOT/lib:${LD_LIBRARY_PATH:-}"
           ctest --test-dir build/p1-c11-standalone-tsan \
             --no-tests=error --output-on-failure --timeout 90 \
-            -R '^actions_c11_(tree_adapter|value_store|native_host)_standalone_test$'
+            -R '^actions_c11_(tree_adapter|value_store|native_host|regex_tre)_standalone_test$'
 
       - name: Prove C-only Process ownership under complete-source TSan
         shell: bash
@@ -264,7 +277,6 @@ jobs:
             "-DCMAKE_EXE_LINKER_FLAGS=-fsanitize=thread" \
             "-DCMAKE_SHARED_LINKER_FLAGS=-fsanitize=thread"
           cmake --build build/p1-praktor-tsan \
-            --target actions_output_core_test test_output_parser shell_executor_test praktor_process_driver_test praktor_process_worker_test praktor_process_control_test praktor_process_native_test praktor_service_control_test praktor_service_process_test service_executor_test.praktor_lib managed_process_executor_test.praktor_lib core_only_workflow_test.praktor_lib actions_c11_tree_executor_session_test actions_c11_session_yaml_differential_test \
             --parallel 2
 
       - name: Audit Shell ownership and application control bridge
@@ -300,7 +312,7 @@ jobs:
           export LD_LIBRARY_PATH="$SALTS_SOURCE_TSAN_ROOT/lib:$SALTS_UTILS_SOURCE_TSAN_ROOT/lib:$CHTTP_ROOT/lib:${LD_LIBRARY_PATH:-}"
           ctest --test-dir build/p1-praktor-tsan \
             --no-tests=error --output-on-failure --parallel 1 --timeout 90 \
-            -R '^(actions_output_core_test|test_output_parser|shell_executor_test|praktor_process_driver_test|praktor_process_worker_test|praktor_process_control_test|praktor_process_native_test|praktor_service_control_test|praktor_service_process_test|service_executor_test\.praktor_lib|managed_process_executor_test\.praktor_lib|core_only_workflow_test\.praktor_lib|actions_c11_tree_executor_session_test|actions_c11_session_yaml_differential_test)$'
+            -R '^(schema_projection_cli|schema_projection_test|schema_projection_cli_usage|expression_lexer_test|expression_evaluator_c_test|yaml_document_c_test|yaml_document_fault_test|yaml_document_legacy_fault_test|yaml_fields_c_test|yaml_fields_fault_test|yaml_value_c_test|yaml_value_fault_test|yaml_action_c_test|yaml_action_fault_test|yaml_task_fields_c_test|yaml_task_fields_fault_test|orch_tree_c_test|orch_tree_fault_test|workflow_profile_c_test|praktor_file_hash_c_test|praktor_init_c_test|workflow_contract_api_test\.Praktor|host_tool_api_test\.Praktor|workflow_value_c_test|workflow_value_fault_test|workflow_value_test\.praktor_lib|structured_document_query_c_test|structured_document_query_test\.praktor_lib|expression_evaluator_test\.praktor_lib|actions_output_core_test|test_output_parser|shell_executor_test|praktor_process_driver_test|praktor_process_worker_test|praktor_process_control_test|praktor_process_native_test|praktor_service_control_test|praktor_service_process_test|service_executor_test\.praktor_lib|managed_process_executor_test\.praktor_lib|core_only_workflow_test\.praktor_lib|actions_c11_tree_executor_session_test|actions_c11_session_yaml_differential_test)$'
 
       - uses: actions/upload-artifact@v4
         if: always()

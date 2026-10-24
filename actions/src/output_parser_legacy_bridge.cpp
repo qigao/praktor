@@ -164,18 +164,4 @@ bool OutputParser::contains(
                                   {search.data(), search.size()}) != 0;
 }
 
-int OutputParser::countMatches(
-    const std::string& input,
-    const std::string& pattern
-) {
-    try {
-        std::regex re(pattern);
-        auto begin = std::sregex_iterator(input.begin(), input.end(), re);
-        auto end = std::sregex_iterator();
-        return static_cast<int>(std::distance(begin, end));
-    } catch (const std::regex_error&) {
-        return 0;
-    }
-}
-
 } // namespace actions

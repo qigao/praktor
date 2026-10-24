@@ -1,0 +1,6 @@
+add_library(praktor_yaml_workflow_metadata STATIC ${CMAKE_CURRENT_LIST_DIR}/yaml_workflow_metadata.c)
+target_include_directories(praktor_yaml_workflow_metadata PUBLIC ${CMAKE_CURRENT_LIST_DIR}/../../include)
+target_link_libraries(praktor_yaml_workflow_metadata PUBLIC praktor_yaml_document praktor_yaml_task_fields Salts::JsonParser)
+target_compile_features(praktor_yaml_workflow_metadata PUBLIC c_std_11)
+set_target_properties(praktor_yaml_workflow_metadata PROPERTIES C_STANDARD 11
+    C_STANDARD_REQUIRED ON C_EXTENSIONS OFF POSITION_INDEPENDENT_CODE ON)

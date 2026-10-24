@@ -18,7 +18,6 @@ public:
     using std::runtime_error::runtime_error;
 };
 
-bool valueMatchesType(const WorkflowValue& value, const std::string& type);
 InputValues validateAndApplyInputs(const Workflow& workflow,
                                    const InputValues& inputs);
 WorkflowValue inputSchema(const Workflow& workflow);

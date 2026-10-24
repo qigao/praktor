@@ -83,9 +83,10 @@ jobs:
       HOST_TRIPLET: ${{ matrix.host }}
       CMAKE_PRESET: ${{ matrix.preset }}
       SDK_VERSION: ${{ needs.metadata.outputs.version }}
-      # The adapter draft must validate against the exact 3.0.11 producer artifact.
+      # C11 migration PRs validate against the latest successful current-master TurboScript producer artifacts.
+      # This run is exact source de572835c0bd4c71df777abcbc02409895e359f2; package publish is skipped.
       # Keep the override branch-scoped; unrelated PRs continue using released packages.
-      TURBOSCRIPT_CI_RUN: ${{ inputs.turboscript_ci_run || (github.event_name == 'pull_request' && github.head_ref == 'feat/praktor-c11-behavior-tree-adapter' && '38529473245') || '' }}
+      TURBOSCRIPT_CI_RUN: ${{ inputs.turboscript_ci_run || (github.event_name == 'pull_request' && (github.head_ref == 'feat/praktor-c11-behavior-tree-adapter' || github.head_ref == 'refactor/praktor-c-only') && '39923896646') || '' }}
       CCACHE_DIR: ${{ github.workspace }}/.cache/ccache
       CCACHE_BASEDIR: ${{ github.workspace }}
       CCACHE_COMPILERCHECK: content
@@ -177,6 +178,63 @@ jobs:
           echo "TURBOSCRIPT_ROOT=$root/$RID" >> "$GITHUB_ENV"
           echo "TURBOSCRIPT_NATIVE_VERSION=ci-run-$CANDIDATE_RUN" >> "$GITHUB_ENV"
           cat "$root/$RID/turboscript-sdk-manifest.txt"
+
+      - name: Verify candidate SDK manifest identity
+        if: env.TURBOSCRIPT_CI_RUN != ''
+        env:
+          CANDIDATE_RUN: ${{ env.TURBOSCRIPT_CI_RUN }}
+          RID: ${{ matrix.rid }}
+          SALTS_NATIVE_VERSION: ${{ env.SALTS_NATIVE_VERSION }}
+          SALTS_UTILS_NATIVE_VERSION: ${{ env.SALTS_UTILS_NATIVE_VERSION }}
+          CHTTP_NATIVE_VERSION: ${{ env.CHTTP_NATIVE_VERSION }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path("build/turboscript-candidate")
+          manifest_path = root / os.environ["RID"] / "turboscript-sdk-manifest.txt"
+          manifest = {}
+          for line in manifest_path.read_text(encoding="utf-8").splitlines():
+              if not line or "=" not in line:
+                  continue
+              key, value = line.split("=", 1)
+              if key in manifest:
+                  raise SystemExit(f"duplicate candidate manifest key: {key}")
+              manifest[key] = value
+
+          run_path = Path(os.environ["RUNNER_TEMP"]) / "turboscript-run.json"
+          run = json.loads(run_path.read_text(encoding="utf-8"))
+          expected = {
+              "commit": run["head_sha"],
+              "rid": os.environ["RID"],
+              "profile": "Release",
+              "interpreter": "MIR",
+              "jit": "MIR",
+              "modules": "ON",
+              "cli": "OFF",
+              "salts_release": os.environ["SALTS_NATIVE_VERSION"],
+              "salts_utils_release": os.environ["SALTS_UTILS_NATIVE_VERSION"],
+              "chttp_release": os.environ["CHTTP_NATIVE_VERSION"],
+          }
+          if not manifest.get("version"):
+              raise SystemExit("candidate manifest has no version")
+          for key, value in expected.items():
+              actual = manifest.get(key)
+              if actual != value:
+                  raise SystemExit(
+                      f"candidate manifest mismatch for {key}: "
+                      f"actual={actual!r}, expected={value!r}"
+                  )
+          print(
+              "Candidate manifest verified: "
+              f"run={os.environ['CANDIDATE_RUN']} commit={manifest['commit']} "
+              f"rid={manifest['rid']} version={manifest['version']}"
+          )
+          PY
 
       - name: Build script-enabled Praktor SDK
         shell: bash

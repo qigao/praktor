@@ -1,7 +1,7 @@
 #include "praktor_test.hpp"
 #include "workflow_runner.hpp"
 #include "dag/workflow_executor_internal.hpp"
-#include "util/file_hash.hpp"
+#include "util/file_hash.h"
 #include "util/shared_thread_pool.hpp"
 #include "util/variable_substitution.hpp"
 
@@ -11,6 +11,8 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
+#include <vector>
 #include <future>
 #include <latch>
 #include <sstream>
@@ -513,7 +515,14 @@ spec("nested workflows retain parallelism when workers are available") {
     writeFile(path, source.str());
     const auto workflow = TaskParser::parseFile(path.string());
     const auto source_path = directory.path / "source.txt";
-    const auto source_hash = Praktor::Util::computeFileHash(source_path);
+    std::ifstream source_file(source_path, std::ios::binary);
+    check(source_file.is_open());
+    const std::vector<char> source_bytes((std::istreambuf_iterator<char>(source_file)),
+                                         std::istreambuf_iterator<char>());
+    char source_hash_buffer[PRAKTOR_FILE_HASH_HEX_SIZE] = {};
+    check(praktor_file_hash_bytes(source_bytes.data(), source_bytes.size(),
+                                  source_hash_buffer, sizeof(source_hash_buffer)) == PRAKTOR_FILE_HASH_OK);
+    const std::string source_hash(source_hash_buffer);
     WorkflowValue cache = WorkflowValue::array();
     for (std::size_t index = 0; index < task_count / 2; ++index) {
         WorkflowValue entry = WorkflowValue::object();

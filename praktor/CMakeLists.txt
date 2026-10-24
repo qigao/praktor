@@ -13,15 +13,17 @@ set(SOURCE_FILES
     src/workflow_plan.cpp
     src/workflow_contract.cpp
     src/workflow_effects.cpp
-    src/workflow_profile.cpp
-    src/data/workflow_value.cpp
-    src/data/structured_document_query.cpp
-    src/yml/yaml_document.cpp
+    src/data/workflow_value_legacy_bridge.cpp
+    src/data/structured_document_query_legacy_bridge.cpp
+    src/yml/yaml_document_legacy_bridge.cpp
+    src/yml/yaml_contract_legacy_bridge.cpp
+    src/yml/yaml_workflow_metadata_legacy_bridge.cpp
+    src/yml/yaml_task_metadata_legacy_bridge.cpp
     src/yml/task_parser.cpp
     src/yml/orch_parser.cpp
     src/yml/task_field_parser.cpp
     src/yml/task_yaml.cpp
-    src/yml/task_types.cpp
+    src/yml/orch_legacy_bridge.cpp
     src/dag/workflow_executor.cpp
     src/dag/trigger_executor.cpp
     src/dag/task_executor_pool.cpp
@@ -36,11 +38,8 @@ set(SOURCE_FILES
     src/system/service_control_legacy_bridge.cpp
     src/system/process_control_legacy_bridge.cpp
     src/system/process_native_legacy_bridge.cpp
-    src/expressions/expression_evaluator.cpp
-    src/expressions/expression_lexer.cpp
+    src/expressions/expression_evaluator_legacy_bridge.cpp
     src/util/system_info.cpp
-    src/util/praktor_init.cpp
-    src/util/file_hash.cpp
     src/util/mustache_substitutor.cpp
 )
 
@@ -50,11 +49,28 @@ else()
     list(APPEND SOURCE_FILES src/script/script_engine_disabled.cpp)
 endif()
 
+include(${CMAKE_CURRENT_SOURCE_DIR}/src/expressions/lexer_targets.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/src/expressions/evaluator_targets.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/src/data/query_targets.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/src/data/value_targets.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/src/data/workflow_contract_value_targets.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/src/yml/yaml_targets.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/src/yml/yaml_value_targets.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/src/yml/yaml_contract_targets.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/src/yml/yaml_action_targets.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/src/yml/yaml_task_targets.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/src/yml/yaml_workflow_metadata_targets.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/src/yml/yaml_task_metadata_targets.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/src/yml/orch_targets.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/src/yml/orch_yaml_targets.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/src/profile/profile_targets.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/src/util/file_hash_targets.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/src/util/praktor_init_targets.cmake)
 add_library(${TARGET_NAME_LIB} ${SOURCE_FILES})
 target_include_directories(
     ${TARGET_NAME_LIB}
     PUBLIC include ${CMAKE_CURRENT_BINARY_DIR}/generated/include
-    PRIVATE src/script
+    PRIVATE src src/script
 )
 
 set(folder_name "${TARGET_NAME_EXE}")
@@ -74,7 +90,7 @@ target_link_libraries(
            Salts::CNet
            CHttp::S3
            praktor_shell
-    PRIVATE actions praktor_process_driver praktor_process_native praktor_service_control
+    PRIVATE praktor_init praktor_file_hash praktor_orch_tree praktor_workflow_profile praktor_workflow_contract_value praktor_yaml_task_fields praktor_yaml_action_params praktor_yaml_contract praktor_yaml_workflow_metadata praktor_yaml_task_metadata praktor_yaml_value praktor_yaml_document praktor_workflow_value praktor_document_query praktor_expression_evaluator praktor_expression_regex_salts actions praktor_process_driver praktor_process_native praktor_service_control
 )
 if(ENABLE_SCRIPT_ENGINE)
     target_link_libraries(${TARGET_NAME_LIB} PUBLIC TurboScript::TurboScript)

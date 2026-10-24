@@ -48,6 +48,9 @@ and exercises IDL aliases, constraints, defaults, presence and rejection paths.
 CI runs this test through its ordinary native build/test graph. Cross builds
 consume the committed artifact and do not build or execute the maintenance tool.
 The tool and its dependencies are not added to the installed Praktor API.
+Projection, the CLI and their tests now use C only, without linking WorkflowValue
+or the workflow runtime. `tools/schema/standalone` provides a C-only preset and
+CTest fixture that runs the real CLI before checking its generated result.
 
 The `core-only-real-sdk.yml` workflow runs the full Release/core-only build,
 CTest suite and installation on Linux x64, Windows x64 and macOS arm64. Each

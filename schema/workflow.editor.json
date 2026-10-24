@@ -2352,7 +2352,7 @@
               "type": "number"
             }
           ],
-          "description": "Capture group to extract (default: 0)"
+          "description": "Capture group to extract (default: 1)"
         },
         "output_key": {
           "description": "Blackboard key to store extracted data"

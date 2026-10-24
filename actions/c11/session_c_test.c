@@ -64,8 +64,12 @@ static int empty_contains(void *user, const char *key, int *contains) {
   return f->native_hooks.value_contains(f->native_hooks.value_user,*key ? key : "empty_control",contains);
 }
 static void init(fixture *f) {
-  praktor_c11_native_host_config host = {32,128,4096,2,now_ns,f};
+  praktor_c11_native_host_config host;
   memset(f,0,sizeof(*f));
+  praktor_c11_native_host_config_init(&host,32,128,4096);
+  host.max_running_leaves = 2;
+  host.now_ns = now_ns;
+  host.clock_user = f;
   check(praktor_c11_native_host_init_with_config(&f->native,&host) == SALTS_OK);
   check(praktor_c11_native_host_bind(&f->native,&f->native_hooks) == SALTS_OK);
   praktor_c11_session_config_init(&f->config);

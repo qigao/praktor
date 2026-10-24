@@ -2,13 +2,14 @@
 #define PRAKTOR_EXPRESSIONS_EXPRESSION_EVALUATOR_HPP
 
 #include <functional>
-#include <memory>
 #include <string>
 #include <unordered_map>
 #include <variant>
 #include <vector>
 
-#include "dag/workflow_context.hpp"
+class WorkflowContext;
+
+// Temporary C++ facade over the C evaluator/Salts regex provider and WorkflowContext.
 
 namespace Praktor::Expressions {
 

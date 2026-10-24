@@ -1,3 +1,21 @@
+include(${CMAKE_CURRENT_SOURCE_DIR}/../src/expressions/lexer_tests.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/../src/expressions/evaluator_tests.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/../src/data/query_tests.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/../src/data/value_tests.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/../src/data/workflow_contract_value_tests.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/../src/yml/yaml_tests.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/../src/yml/yaml_value_tests.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/../src/yml/yaml_contract_tests.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/../src/yml/yaml_workflow_metadata_tests.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/../src/yml/yaml_task_metadata_tests.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/../src/yml/yaml_action_tests.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/../src/yml/yaml_task_tests.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/../src/yml/orch_tests.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/../src/yml/orch_yaml_tests.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/../src/profile/profile_tests.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/../src/util/file_hash_tests.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/../src/util/praktor_init_tests.cmake)
+
 # Compile this public header without a transitive include of the
 # legacy actions Executor. The main target links actions privately, so this
 # isolated consumer has only Praktor's declared public include interface.
@@ -17,7 +35,6 @@ if(ENABLE_SCRIPT_ENGINE)
 
     set(TEST_SOURCES
         dynamic_tasks_executor_test.cpp
-        expression_evaluator_test.cpp
         graph_test.cpp
         task_parser_test.cpp
         task_registry_test.cpp
@@ -30,13 +47,16 @@ if(ENABLE_SCRIPT_ENGINE)
         matrix_test.cpp
         script_engine_test.cpp
         declarative_tree_executor_test.cpp
-        structured_document_query_test.cpp
     )
 else()
     set(TEST_SOURCES core_only_workflow_test.cpp)
 endif()
 
 list(APPEND TEST_SOURCES
+    workflow_value_test.cpp
+    structured_document_query_test.cpp
+    orch_yaml_differential_test.cpp
+    expression_evaluator_test.cpp
     service_executor_test.cpp
     managed_process_executor_test.cpp
     download_executor_test.cpp
@@ -52,6 +72,14 @@ cmake_add_test(
     FOLDER "${folder_name}/test"
     OUT_TARGETS PRAKTOR_TEST_TARGETS
 )
+
+# This test includes the internal native YAML action projection contract.
+target_link_libraries(structured_document_query_test.${TARGET_NAME_LIB}
+    PRIVATE praktor_yaml_action_params)
+target_link_libraries(orch_yaml_differential_test.${TARGET_NAME_LIB}
+    PRIVATE praktor_orch_yaml)
+target_include_directories(orch_yaml_differential_test.${TARGET_NAME_LIB}
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../shared/process/include)
 
 target_include_directories(download_executor_test.${TARGET_NAME_LIB}
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../src)

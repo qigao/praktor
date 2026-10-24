@@ -42,11 +42,6 @@ public:
     const std::string& search
   );
 
-  // Count occurrences of a pattern
-  static int countMatches(
-    const std::string& input,
-    const std::string& pattern
-  );
 };
 
 } // namespace actions
