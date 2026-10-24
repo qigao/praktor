@@ -243,9 +243,22 @@ int praktor_orch_from_flat_nodes(const praktor_orch_flat_node *inputs,size_t cou
                 status=orch_fail(&build,SALTS_EINVAL,"Missing required orchestration parameter");break;
             }
         if(status!=SALTS_OK)break;
-        if((spec->control&&!children)||(orch_single_child(node->type)&&children!=1u)) {
-            status=orch_fail(&build,SALTS_EINVAL,"Invalid orchestration control child count");break;
-        }
+        /* Condition is either a scalar parameter or a leading child.  These
+         * cardinalities are part of the legacy parser's AST contract, not
+         * optional execution-time validation. */
+        if(node->type==PRAKTOR_ORCH_IF_THEN_ELSE) {
+            const bool scalar_condition=orch_has_param(node,"condition");
+            const size_t minimum=scalar_condition?1u:2u;
+            const size_t maximum=scalar_condition?2u:3u;
+            if(children<minimum||children>maximum)
+                status=orch_fail(&build,SALTS_EINVAL,"if requires a condition plus then/else branches");
+        } else if(node->type==PRAKTOR_ORCH_WHILE_DO) {
+            const bool scalar_condition=orch_has_param(node,"condition");
+            if(children!=(scalar_condition?1u:2u))
+                status=orch_fail(&build,SALTS_EINVAL,"while requires a condition and a do branch");
+        } else if((spec->control&&!children)||(orch_single_child(node->type)&&children!=1u))
+            status=orch_fail(&build,SALTS_EINVAL,"Invalid orchestration control child count");
+        if(status!=SALTS_OK)break;
     }
     if(status!=SALTS_OK) {praktor_orch_tree_destroy(build.tree);return status;}
     *out=build.tree;
