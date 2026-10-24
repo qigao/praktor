@@ -24,6 +24,56 @@ static int add_list(json_value_t *o,const char *k,praktor_yaml_node n,praktor_ya
  rc=add_owned(o,k,v);v=NULL;
 done: json_free(v);praktor_yaml_task_fields_destroy(owner);if(rc==SALTS_ENOMEM&&e&&e->origin==PRAKTOR_YAML_FAILURE_NONE)e->origin=PRAKTOR_YAML_FAILURE_ALLOCATION;return rc;
 }
+
+static int add_timeout_retry_silent(praktor_yaml_node node,json_value_t *result,
+                                    praktor_yaml_field_error *error) {
+    praktor_yaml_node timeout_node={0},child_node={0},retries_node={0},count_node={0},silent_node={0};
+    tstr text=NULL;
+    bool silent=false;
+    unsigned int retry_count=0;
+    size_t i;
+    int rc;
+    rc=optional(node,"timeout",&timeout_node,error);if(rc!=SALTS_OK)return rc;
+    rc=optional(node,"child",&child_node,error);if(rc!=SALTS_OK)return rc;
+    if(praktor_yaml_valid(timeout_node)&&praktor_yaml_has_val(timeout_node)&&!praktor_yaml_valid(child_node)) {
+        rc=praktor_yaml_field_scalar(timeout_node,vstr_from_cstr("Expected YAML scalar"),&text,error);
+        if(rc!=SALTS_OK)return rc;
+        rc=add_owned(result,"timeout",json_create_string(text));tstr_free(text);text=NULL;
+        if(rc!=SALTS_OK)return rc;
+    }
+    rc=optional(node,"retries",&retries_node,error);if(rc!=SALTS_OK)return rc;
+    if(praktor_yaml_valid(retries_node)) {
+        static const vstr allowed[]={{"count",5}};
+        if(!praktor_yaml_is_map(retries_node))
+            return at_error(retries_node,"'retries' must be a map with a finite count",error);
+        rc=praktor_yaml_check_keys(retries_node,allowed,1u,error);if(rc!=SALTS_OK)return rc;
+        rc=optional(retries_node,"count",&count_node,error);if(rc!=SALTS_OK)return rc;
+        if(!praktor_yaml_valid(count_node))
+            return at_error(retries_node,"'retries' requires a non-negative integer 'count'",error);
+        rc=praktor_yaml_field_scalar(count_node,vstr_from_cstr("retry count must be a non-negative integer"),&text,error);
+        if(rc!=SALTS_OK)return rc;
+        if(tstr_len(text)==0u){tstr_free(text);return at_error(count_node,"retry count must be a non-negative integer",error);}
+        for(i=0;i<tstr_len(text);++i) {
+            unsigned char ch=(unsigned char)text[i];
+            if(ch<'0'||ch>'9'){tstr_free(text);return at_error(count_node,"retry count must be a non-negative integer",error);}
+            if(retry_count>102u||(retry_count==102u&&(unsigned int)(ch-'0')>4u)) {
+                tstr_free(text);return at_error(count_node,"retry count must be between 0 and 1024",error);
+            }
+            retry_count=retry_count*10u+(unsigned int)(ch-'0');
+            if(retry_count>1024u){tstr_free(text);return at_error(count_node,"retry count must be between 0 and 1024",error);}
+        }
+        tstr_free(text);text=NULL;
+        rc=add_owned(result,"retry_count",json_create_number((double)retry_count));if(rc!=SALTS_OK)return rc;
+    }
+    if(praktor_yaml_has(node,"silent")) {
+        rc=optional(node,"silent",&silent_node,error);if(rc!=SALTS_OK)return rc;
+        rc=praktor_yaml_field_boolean(silent_node,vstr_from_cstr("silent"),PRAKTOR_YAML_BOOLEAN_STRICT,&silent,error);
+        if(rc!=SALTS_OK)return rc;
+        rc=add_owned(result,"silent",json_create_bool(silent));if(rc!=SALTS_OK)return rc;
+    }
+    return SALTS_OK;
+}
+
 int praktor_yaml_task_metadata_create(praktor_yaml_node node,json_value_t **out,praktor_yaml_field_error *error){
  static const vstr keys[]={
  {"name",4},{"description",11},{"depends_on",10},{"vars",4},{"env",3},{"dotEnv",6},{"when",4},{"each",4},{"timeout",7},{"retries",7},{"triggers",8},{"working_dir",11},{"silent",6},{"sources",7},{"generates",9},{"finally",7},{"command",7},{"program",7},{"args",4},{"stdin",5},{"download",8},{"uses",4},{"dynamic_tasks",13},{"output_format",13},{"service",7},{"managed_process",15},{"tool",4},{"with",4},{"script",6},{"actions",7},{"sequence",8},{"parallel",8},{"reactive_sequence",17},{"pipeline_sequence",17},{"inverter",8},{"force_success",13},{"force_failure",13},{"repeat",6},{"delay",5},{"switch",6},{"if",2},{"then",4},{"else",4},{"while",5},{"do",2},{"max_iterations",14},{"child",5},{"cases",5},{"shell",5},{"parse_json",10},{"parse_regex",11},{"parse_lines",11},{"parse_keyvalue",14},{"check_exit_code",15},{"wait_event",10},{"file_exists",11},{"sleep",5},{"set_variable",12},{"subtree",7},{"fallback",8},{"selector",8},{"run_once",8},{"keep_running_until_failure",26},{"consume_queue",13},{"precondition",12},{"entry_updated",13}};
@@ -50,6 +100,7 @@ int praktor_yaml_task_metadata_create(praktor_yaml_node node,json_value_t **out,
  rc=optional(node,"working_dir",&work,error);if(rc!=SALTS_OK)goto fail;if(praktor_yaml_valid(work)){tstr s=NULL;rc=praktor_yaml_field_scalar(work,vstr_from_cstr("Expected YAML scalar"),&s,error);if(rc!=SALTS_OK)goto fail;if(tstr_len(s))rc=add_owned(result,"working_dir",json_create_string(s));tstr_free(s);if(rc!=SALTS_OK)goto fail;}
  rc=optional(node,"sources",&list,error);if(rc!=SALTS_OK)goto fail;if(praktor_yaml_valid(list)){rc=add_list(result,"sources",list,error);if(rc!=SALTS_OK)goto fail;}
  rc=optional(node,"generates",&list,error);if(rc!=SALTS_OK)goto fail;if(praktor_yaml_valid(list)){rc=add_list(result,"generates",list,error);if(rc!=SALTS_OK)goto fail;}
+ rc=add_timeout_retry_silent(node,result,error);if(rc!=SALTS_OK)goto fail;
  rc=optional(node,"finally",&fin,error);if(rc!=SALTS_OK)goto fail;if(praktor_yaml_valid(fin)){tstr s=NULL;rc=praktor_yaml_field_scalar(fin,vstr_from_cstr("'finally' must be a scalar"),&s,error);if(rc!=SALTS_OK)goto fail;if(!tstr_len(s)){tstr_free(s);rc=at_error(fin,"'finally' cannot be empty",error);goto fail;}rc=add_owned(result,"finally",json_create_string(s));tstr_free(s);if(rc!=SALTS_OK)goto fail;}
  *out=result;return SALTS_OK;
 fail:tstr_free(name_text);json_free(result);if(rc==SALTS_ENOMEM&&error&&error->origin==PRAKTOR_YAML_FAILURE_NONE)error->origin=PRAKTOR_YAML_FAILURE_ALLOCATION;return rc;
