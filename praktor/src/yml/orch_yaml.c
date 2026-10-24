@@ -30,6 +30,18 @@ static void cleanup(named_build *b) {
         }
     free(b->rows);
 }
+/* Match the legacy parse-error location convention for syntax and validation.
+ * Diagnostics are best-effort and never acquire ownership of the YAML DOM. */
+static int fail_at(named_build *b,int status,praktor_yaml_node node,const char *message) {
+    tstr location=NULL;
+    if(b->error&&b->capacity) {
+        if(praktor_yaml_location(node,&location)==SALTS_OK)
+            (void)snprintf(b->error,b->capacity,"Parse error%s: %s",location,message);
+        else (void)snprintf(b->error,b->capacity,"Parse error: %s",message);
+    }
+    tstr_free(location);
+    return status;
+}
 static bool runtime_scalar(tstr value) {
     size_t i;
     for(i=0;i<tstr_len(value);++i)
@@ -47,6 +59,15 @@ static bool key_is(tstr key,const char *expected) {
     while(key[i]=='_')++i;
     while(expected[j]=='_')++j;
     return key[i]=='\0'&&expected[j]=='\0';
+}
+static const char *canonical_param(const praktor_orch_spec *spec,const char *key) {
+    size_t i;
+    if(!spec||!key)return NULL;
+    for(i=0;i<sizeof(spec->required)/sizeof(spec->required[0]);++i)
+        if(spec->required[i]&&key_is((tstr)key,spec->required[i]))return spec->required[i];
+    for(i=0;i<sizeof(spec->optional)/sizeof(spec->optional[0]);++i)
+        if(spec->optional[i]&&key_is((tstr)key,spec->optional[i]))return spec->optional[i];
+    return NULL;
 }
 static int validate_param(named_build *b,tstr key,tstr value) {
     static const char *const integer_keys[]={"capture_group","expected","timeout",
@@ -83,9 +104,18 @@ static int validate_param(named_build *b,tstr key,tstr value) {
 }
 static int param(named_build *b,size_t index,tstr key,tstr value) {
     named_row *row=&b->rows[index];
-    size_t p=row->node.param_count;
+    size_t p=row->node.param_count,j;
     int validation=validate_param(b,key,value);
     if(validation!=SALTS_OK)return validation;
+    /* The legacy map uses assignment into a canonical-key map: the last
+     * spelling wins without creating a second parameter entry. Keep the
+     * lower-level flat-node constructor's separate strict-duplicate contract. */
+    for(j=0;j<p;++j)if(key_is(row->keys[j],key)) {
+        tstr_free(row->keys[j]);tstr_free(row->values[j]);
+        row->keys[j]=key;row->values[j]=value;
+        row->params[j]=(praktor_orch_input_param){tstr_to_v(key),tstr_to_v(value)};
+        return SALTS_OK;
+    }
     if(p>=PRAKTOR_ORCH_MAX_PARAMS) {
         tstr_free(key);tstr_free(value);
         return fail(b,SALTS_EINVAL,"Named orchestration parameter limit");
@@ -96,6 +126,7 @@ static int param(named_build *b,size_t index,tstr key,tstr value) {
     return SALTS_OK;
 }
 static int parse(named_build *b,praktor_yaml_node map,size_t parent,unsigned depth);
+static int flat_branch(named_build *b,praktor_yaml_node branch,size_t parent,unsigned depth);
 static int flat_parse(named_build *b,praktor_yaml_node map,size_t parent,unsigned depth,const char *kind,bool allow_metadata);
 static int children(named_build *b,praktor_yaml_node seq,size_t parent,unsigned depth) {
     size_t i;
@@ -116,10 +147,25 @@ static int parse(named_build *b,praktor_yaml_node map,size_t parent,unsigned dep
     bool saw_child=false;
     int status;
     if(praktor_yaml_is_map(map)) {
-        if(praktor_yaml_has(map,"if"))return flat_parse(b,map,parent,depth,"if",false);
-        if(praktor_yaml_has(map,"while"))return flat_parse(b,map,parent,depth,"while",false);
-        if(praktor_yaml_has(map,"switch"))return flat_parse(b,map,parent,depth,"switch",false);
-        if(praktor_yaml_has(map,"set_variable"))return flat_parse(b,map,parent,depth,"set_variable",false);
+        if(praktor_yaml_has(map,"if")&&praktor_yaml_has(map,"then"))
+            return flat_parse(b,map,parent,depth,"if",false);
+        if(praktor_yaml_has(map,"while")&&praktor_yaml_has(map,"do"))
+            return flat_parse(b,map,parent,depth,"while",false);
+        if(praktor_yaml_has(map,"switch")&&praktor_yaml_has(map,"cases"))
+            return flat_parse(b,map,parent,depth,"switch",false);
+        if(praktor_yaml_has(map,"set_variable")&&
+           (praktor_yaml_has(map,"value")||praktor_yaml_has(map,"from")))
+            return flat_parse(b,map,parent,depth,"set_variable",false);
+        {
+            static const char *const decorators[]={
+                "timeout","repeat","delay","keep_running_until_failure",
+                "precondition","entry_updated","consume_queue","run_once"
+            };
+            size_t j;
+            for(j=0;j<sizeof(decorators)/sizeof(decorators[0]);++j)
+                if(praktor_yaml_has(map,decorators[j])&&praktor_yaml_has(map,"child"))
+                    return flat_parse(b,map,parent,depth,decorators[j],false);
+        }
     }
     if(depth>NAMED_YAML_MAX_DEPTH)return fail(b,SALTS_EINVAL,"Named orchestration nesting limit");
     if(!praktor_yaml_is_map(map)||praktor_yaml_count(map)!=1u)
@@ -129,9 +175,19 @@ static int parse(named_build *b,praktor_yaml_node map,size_t parent,unsigned dep
     value=praktor_yaml_at(map,0);
     status=praktor_yaml_key(value,&type_name,NULL);
     if(status!=SALTS_OK)return fail(b,status,"Cannot decode orchestration type key");
+    /* Legacy named spellings were explicitly retired. The flat forms must
+     * remain the sole accepted syntax for these control/decorator nodes. */
+    if(key_is(type_name,"IfThenElse")||key_is(type_name,"WhileDo")||
+       key_is(type_name,"Switch")||key_is(type_name,"SetVariable")||
+       key_is(type_name,"Timeout")||key_is(type_name,"Repeat")||
+       key_is(type_name,"Delay")) {
+        tstr_free(type_name);
+        return fail_at(b,SALTS_EINVAL,value,
+            "Legacy orchestration node type has been removed; use flat syntax");
+    }
     status=praktor_orch_find_type(tstr_to_v(type_name),&type);
     tstr_free(type_name);
-    if(status!=SALTS_OK)return fail(b,SALTS_EINVAL,"Unknown named orchestration type");
+    if(status!=SALTS_OK)return fail_at(b,SALTS_EINVAL,value,"Unknown named orchestration type");
     spec=praktor_orch_spec_for(type);
     index=b->count++;
     b->rows[index].node.type=type;
@@ -153,14 +209,22 @@ static int parse(named_build *b,praktor_yaml_node map,size_t parent,unsigned dep
                 saw_child=true;
                 if(!spec->allows_children)return fail(b,SALTS_EINVAL,"Leaf cannot have children");
                 status=multiple?children(b,field,index,depth):
-                    parse(b,field,index,depth+1u);
+                    flat_branch(b,field,index,depth);
                 if(status!=SALTS_OK)return status;
             } else {
                 tstr text=NULL;
+                if(!canonical_param(spec,key)) {
+                    char message[256];
+                    (void)snprintf(message,sizeof message,
+                        "Unknown orchestration parameter '%s' for node type '%s'",
+                        key,spec->name);
+                    tstr_free(key);
+                    return fail_at(b,SALTS_EINVAL,field,message);
+                }
                 status=praktor_yaml_scalar(field,&text,NULL);
                 if(status!=SALTS_OK) {
                     tstr_free(key);
-                    return fail(b,status,"Orchestration parameter must be scalar");
+                    return fail_at(b,status,field,"Orchestration parameter must be scalar");
                 }
                 status=param(b,index,key,text);
                 if(status!=SALTS_OK)return status;
@@ -194,19 +258,11 @@ static bool flat_key_matches(const char *actual,const char *expected) {
         ++a;++e;
     }
 }
+/* Flat sibling lookups intentionally use the provider's exact raw key
+ * semantics, matching legacy node.has_child()/operator[]; normalized aliases
+ * are allowed by the whitelist but do not silently become actual siblings. */
 static bool flat_find_field(praktor_yaml_node map,const char *name,praktor_yaml_node *out) {
-    size_t i;
-    if(!praktor_yaml_is_map(map)||!out)return false;
-    for(i=0;i<praktor_yaml_count(map);++i) {
-        praktor_yaml_node item=praktor_yaml_at(map,i);
-        tstr key=NULL;
-        bool match;
-        if(praktor_yaml_key(item,&key,NULL)!=SALTS_OK)continue;
-        match=flat_key_matches(key,name);
-        tstr_free(key);
-        if(match){*out=item;return true;}
-    }
-    return false;
+    return out&&praktor_yaml_get(map,name,out,NULL)==SALTS_OK;
 }
 static bool flat_task_metadata_key(const char *key) {
     static const char *const keys[]={
@@ -251,7 +307,33 @@ static int flat_branch(named_build *b,praktor_yaml_node branch,size_t parent,uns
     }
     return parse(b,branch,parent,depth+1u);
 }
+static bool flat_single_child_kind(const char *kind,praktor_orch_type *type,const char **param_key) {
+    static const struct {
+        const char *name;
+        praktor_orch_type type;
+        const char *param_key;
+    } entries[]={
+        {"timeout",PRAKTOR_ORCH_TIMEOUT,"timeout_ms"},
+        {"repeat",PRAKTOR_ORCH_REPEAT,"num_cycles"},
+        {"delay",PRAKTOR_ORCH_DELAY,"delay_ms"},
+        {"keep_running_until_failure",PRAKTOR_ORCH_KEEP_RUNNING_UNTIL_FAILURE,"max_iterations"},
+        {"precondition",PRAKTOR_ORCH_PRECONDITION,"condition"},
+        {"entry_updated",PRAKTOR_ORCH_ENTRY_UPDATED,"watch_key"},
+        {"consume_queue",PRAKTOR_ORCH_CONSUME_QUEUE,"queue_key"},
+        {"run_once",PRAKTOR_ORCH_RUN_ONCE,NULL}
+    };
+    size_t i;
+    for(i=0;i<sizeof(entries)/sizeof(entries[0]);++i)
+        if(flat_key_matches(kind,entries[i].name)) {
+            if(type)*type=entries[i].type;
+            if(param_key)*param_key=entries[i].param_key;
+            return true;
+        }
+    return false;
+}
 static bool flat_key_allowed(const char *key,const char *kind) {
+    if(flat_single_child_kind(kind,NULL,NULL))
+        return flat_key_matches(key,kind)||flat_key_matches(key,"child");
     if(flat_key_matches(key,"if"))return flat_key_matches(kind,"if");
     if(flat_key_matches(key,"then")||flat_key_matches(key,"else"))return flat_key_matches(kind,"if");
     if(flat_key_matches(key,"while")||flat_key_matches(key,"do")||
@@ -295,18 +377,35 @@ static int flat_parse(named_build *b,praktor_yaml_node map,size_t parent,unsigne
                       const char *kind,bool allow_metadata) {
     praktor_orch_type type;
     praktor_yaml_node field={0},branch={0};
+    const char *single_param=NULL;
+    bool single_child=flat_single_child_kind(kind,&type,&single_param);
     size_t index,i;
     int status;
     if(!praktor_yaml_is_map(map))return fail(b,SALTS_EINVAL,"Flat orchestration form must be a mapping");
     status=flat_validate_keys(b,map,kind,allow_metadata);
     if(status!=SALTS_OK)return status;
-    if(flat_key_matches(kind,"if"))type=PRAKTOR_ORCH_IF_THEN_ELSE;
-    else if(flat_key_matches(kind,"while"))type=PRAKTOR_ORCH_WHILE_DO;
-    else if(flat_key_matches(kind,"switch"))type=PRAKTOR_ORCH_SWITCH;
-    else if(flat_key_matches(kind,"set_variable"))type=PRAKTOR_ORCH_SET_VARIABLE;
-    else return fail(b,SALTS_EINVAL,"Unsupported flat orchestration form");
+    if(!single_child) {
+        if(flat_key_matches(kind,"if"))type=PRAKTOR_ORCH_IF_THEN_ELSE;
+        else if(flat_key_matches(kind,"while"))type=PRAKTOR_ORCH_WHILE_DO;
+        else if(flat_key_matches(kind,"switch"))type=PRAKTOR_ORCH_SWITCH;
+        else if(flat_key_matches(kind,"set_variable"))type=PRAKTOR_ORCH_SET_VARIABLE;
+        else return fail(b,SALTS_EINVAL,"Unsupported flat orchestration form");
+    }
     status=flat_append_node(b,type,parent,depth,&index);
     if(status!=SALTS_OK)return status;
+    if(single_child) {
+        tstr value=NULL;
+        if(!flat_find_field(map,kind,&field)||!flat_find_field(map,"child",&branch))
+            return fail_at(b,SALTS_EINVAL,map,"Flat decorator requires a scalar and child branch");
+        status=praktor_yaml_scalar(field,&value,NULL);
+        if(status!=SALTS_OK)
+            return fail_at(b,status,field,"Flat decorator value must be a scalar");
+        if(single_param) {
+            status=flat_add_param(b,index,single_param,value);
+            if(status!=SALTS_OK)return status;
+        } else tstr_free(value); /* run_once token is deliberately ignored */
+        return flat_branch(b,branch,index,depth);
+    }
     if(type==PRAKTOR_ORCH_IF_THEN_ELSE) {
         if(!flat_find_field(map,"if",&field))return fail(b,SALTS_EINVAL,"if requires an 'if' condition");
         if(praktor_yaml_has_val(field)) {
