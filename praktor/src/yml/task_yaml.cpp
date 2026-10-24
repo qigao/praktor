@@ -72,7 +72,6 @@ std::uint32_t parse_retry_count(
 } // namespace
 
 Task parse_task(const TaskYamlDetail::YamlNodeRef& node, const std::string& source_path) {
-Task parse_task(const TaskYamlDetail::YamlNodeRef& node, const std::string& source_path) {
     WorkflowValue metadata = WorkflowValue::adoptJson(
         TaskYamlDetail::read_task_metadata_or_throw(node));
     Task task;
