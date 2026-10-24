@@ -74,7 +74,7 @@ cmake_add_test(
 
 # This test includes the internal native YAML action projection contract.
 target_link_libraries(structured_document_query_test.${TARGET_NAME_LIB}
-    PRIVATE praktor_yaml_action_params)
+    PRIVATE praktor_yaml_action_params praktor_orch_yaml)
 
 target_include_directories(download_executor_test.${TARGET_NAME_LIB}
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../src)
