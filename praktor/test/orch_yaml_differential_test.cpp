@@ -2,6 +2,9 @@
 #include "../src/yml/task_yaml_internal.hpp"
 #include "yml/orch_yaml.h"
 #include <exception>
+#include <fstream>
+#include <iterator>
+#include <stdexcept>
 #include <string>
 
 /* Differential guard while the production parser still uses C++ OrchNode.
@@ -212,6 +215,59 @@ spec("C11 named orchestration CSTL AST parity with legacy parser") {
         }
     }
 
+    it("matches repository orchestration YAML examples without executing tasks") {
+        /* File-backed golden corpus. These are existing workflow examples, not
+         * synthetic YAML snippets; all matching task-level orchestration roots
+         * are compared against the unchanged production C++ parser. */
+        const char *files[]={
+            "examples/orch_build_pipeline.yml",
+            "examples/orch_parallel_testing.yml",
+            "examples/simplified_parser_syntax.yml",
+            "examples/orch_shortcuts_demo.yml",
+            "sdk/examples/ops-event-handler-example.yml"
+        };
+        const char *runner_types[]={
+            "sequence","parallel","reactive_sequence","pipeline_sequence",
+            "fallback","selector","if","while","switch","set_variable",
+            "shell","parse_json","parse_regex","parse_lines","parse_keyvalue",
+            "check_exit_code","wait_event","file_exists","sleep","subtree",
+            "inverter","force_success","force_failure","timeout","repeat",
+            "delay","keep_running_until_failure","precondition","entry_updated",
+            "consume_queue","run_once"
+        };
+        std::size_t compared=0;
+        for(const char *name:files) {
+            const std::string path=std::string(PRAKTOR_ORCH_CORPUS_ROOT)+"/"+name;
+            std::ifstream stream(path,std::ios::binary);
+            if(!stream)throw std::runtime_error("Cannot read orchestration corpus: "+path);
+            const std::string yaml{
+                std::istreambuf_iterator<char>(stream),std::istreambuf_iterator<char>()};
+            TaskYamlDetail::YamlDocument document(yaml);
+            const auto tasks=document.root()["tasks"];
+            for(const auto& task:tasks) {
+                /* Command is lowered by the separate native constructor.
+                 * Its parser-like keys are postprocessors, not runner roots. */
+                if(task.has_child("command"))continue;
+                for(const char *type:runner_types) {
+                    if(!task.has_child(type))continue;
+                    const OrchParams legacy=parse_orch_params(task,type);
+                    praktor_orch_tree *native=nullptr;
+                    char diagnostic[256]{};
+                    const int status=praktor_orch_from_flat_yaml(
+                        task.native(),type,&native,diagnostic,sizeof diagnostic);
+                    check(status==SALTS_OK);
+                    check(native!=nullptr);
+                    if(native) {
+                        check(native_ast_equals_legacy(legacy.root,praktor_orch_tree_root(native)));
+                        praktor_orch_tree_destroy(native);
+                    }
+                    ++compared;
+                    break;
+                }
+            }
+        }
+        check(compared>=7);
+    }
     it("agrees with legacy on invalid flat forms and never publishes partial ASTs") {
         struct FlatCase { const char *kind; const char *source; };
         const FlatCase cases[] = {
