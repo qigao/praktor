@@ -138,41 +138,19 @@ static int children(named_build *b,praktor_yaml_node seq,size_t parent,unsigned 
     }
     return SALTS_OK;
 }
-static int parse(named_build *b,praktor_yaml_node map,size_t parent,unsigned depth) {
-    praktor_yaml_node value;
+/* Shared named-node admission for recursive YAML and task-level runner values.
+ * The task-level caller selects one exact field, not the metadata-bearing map.
+ * Never retain the borrowed YAML value/key handle beyond this construction. */
+static int parse_named_entry(named_build *b,praktor_yaml_node value,size_t parent,unsigned depth) {
     praktor_orch_type type=PRAKTOR_ORCH_TYPE_COUNT;
     const praktor_orch_spec *spec;
     tstr type_name=NULL;
     size_t index,i;
     bool saw_child=false;
     int status;
-    if(praktor_yaml_is_map(map)) {
-        if(praktor_yaml_has(map,"if")&&praktor_yaml_has(map,"then"))
-            return flat_parse(b,map,parent,depth,"if",false);
-        if(praktor_yaml_has(map,"while")&&praktor_yaml_has(map,"do"))
-            return flat_parse(b,map,parent,depth,"while",false);
-        if(praktor_yaml_has(map,"switch")&&praktor_yaml_has(map,"cases"))
-            return flat_parse(b,map,parent,depth,"switch",false);
-        if(praktor_yaml_has(map,"set_variable")&&
-           (praktor_yaml_has(map,"value")||praktor_yaml_has(map,"from")))
-            return flat_parse(b,map,parent,depth,"set_variable",false);
-        {
-            /* The recursive legacy parser recognizes only these three
-             * flat decorators; the other task-level forms are parsed through
-             * praktor_orch_from_flat_yaml(), not from a nested YAML map. */
-            static const char *const decorators[]={"timeout","repeat","delay"};
-            size_t j;
-            for(j=0;j<sizeof(decorators)/sizeof(decorators[0]);++j)
-                if(praktor_yaml_has(map,decorators[j])&&praktor_yaml_has(map,"child"))
-                    return flat_parse(b,map,parent,depth,decorators[j],false);
-        }
-    }
     if(depth>NAMED_YAML_MAX_DEPTH)return fail(b,SALTS_EINVAL,"Named orchestration nesting limit");
-    if(!praktor_yaml_is_map(map)||praktor_yaml_count(map)!=1u)
-        return fail(b,SALTS_EINVAL,"Named node requires exactly one type key");
     if(b->count>=PRAKTOR_ORCH_MAX_NODES)
         return fail(b,SALTS_EINVAL,"Named orchestration node limit");
-    value=praktor_yaml_at(map,0);
     status=praktor_yaml_key(value,&type_name,NULL);
     if(status!=SALTS_OK)return fail(b,status,"Cannot decode orchestration type key");
     /* Legacy named spellings were explicitly retired. The flat forms must
@@ -245,6 +223,34 @@ static int parse(named_build *b,praktor_yaml_node map,size_t parent,unsigned dep
         if(!key) {tstr_free(text);return fail(b,SALTS_ENOMEM,"Cannot allocate param key");}
         return param(b,index,key,text);
     }
+}
+
+/* Recursive actions: a map with one named type, or an established flat
+ * sibling form. Task metadata is intentionally *not* admitted in this path. */
+static int parse(named_build *b,praktor_yaml_node map,size_t parent,unsigned depth) {
+    if(praktor_yaml_is_map(map)) {
+        if(praktor_yaml_has(map,"if")&&praktor_yaml_has(map,"then"))
+            return flat_parse(b,map,parent,depth,"if",false);
+        if(praktor_yaml_has(map,"while")&&praktor_yaml_has(map,"do"))
+            return flat_parse(b,map,parent,depth,"while",false);
+        if(praktor_yaml_has(map,"switch")&&praktor_yaml_has(map,"cases"))
+            return flat_parse(b,map,parent,depth,"switch",false);
+        if(praktor_yaml_has(map,"set_variable")&&
+           (praktor_yaml_has(map,"value")||praktor_yaml_has(map,"from")))
+            return flat_parse(b,map,parent,depth,"set_variable",false);
+        {
+            static const char *const decorators[]={"timeout","repeat","delay"};
+            size_t j;
+            for(j=0;j<sizeof(decorators)/sizeof(decorators[0]);++j)
+                if(praktor_yaml_has(map,decorators[j])&&praktor_yaml_has(map,"child"))
+                    return flat_parse(b,map,parent,depth,decorators[j],false);
+        }
+    }
+    if(depth>NAMED_YAML_MAX_DEPTH)
+        return fail(b,SALTS_EINVAL,"Named orchestration nesting limit");
+    if(!praktor_yaml_is_map(map)||praktor_yaml_count(map)!=1u)
+        return fail(b,SALTS_EINVAL,"Named node requires exactly one type key");
+    return parse_named_entry(b,praktor_yaml_at(map,0),parent,depth);
 }
 
 static bool flat_key_matches(const char *actual,const char *expected) {
@@ -541,7 +547,28 @@ int praktor_orch_from_flat_yaml(praktor_yaml_node node,const char *node_type,
         return fail(&b,SALTS_EINVAL,"Invalid flat orchestration input or output");
     b.rows=(named_row *)calloc(PRAKTOR_ORCH_MAX_NODES,sizeof(named_row));
     if(!b.rows)return fail(&b,SALTS_ENOMEM,"Cannot allocate orchestration scratch");
-    status=flat_parse(&b,node,PRAKTOR_ORCH_ROOT_PARENT,0u,node_type,true);
+    /* Exactly mirror the temporary C++ parse_orch_params() selector:
+     * special flat syntaxes own the full task map; all other catalog names
+     * consume just their selected YAML value (ignoring sibling metadata).
+     * run_once uses the flat form only with a sibling child. */
+    if(strcmp(node_type,"if")==0||strcmp(node_type,"while")==0||
+       strcmp(node_type,"switch")==0||strcmp(node_type,"set_variable")==0||
+       strcmp(node_type,"timeout")==0||strcmp(node_type,"repeat")==0||
+       strcmp(node_type,"delay")==0||
+       strcmp(node_type,"keep_running_until_failure")==0||
+       strcmp(node_type,"precondition")==0||
+       strcmp(node_type,"entry_updated")==0||
+       strcmp(node_type,"consume_queue")==0||
+       (strcmp(node_type,"run_once")==0&&praktor_yaml_has(node,"child"))) {
+        status=flat_parse(&b,node,PRAKTOR_ORCH_ROOT_PARENT,0u,node_type,true);
+    } else {
+        praktor_yaml_node value={0};
+        status=praktor_yaml_get(node,node_type,&value,NULL);
+        if(status==SALTS_OK)
+            status=parse_named_entry(&b,value,PRAKTOR_ORCH_ROOT_PARENT,0u);
+        else status=fail_at(&b,SALTS_EINVAL,node,
+                           "Missing named orchestration runner field");
+    }
     if(status==SALTS_OK)status=flat_publish(&b,out);
     cleanup(&b);
     return status;
