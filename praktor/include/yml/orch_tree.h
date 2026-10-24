@@ -67,6 +67,23 @@ typedef struct praktor_orch_node praktor_orch_node;
  * parameter views, then destroy(tree). This constructs a tree, not an executor. */
 int praktor_orch_from_command(const praktor_orch_command *input,
     praktor_orch_tree **out, char *error, size_t error_capacity);
+/* Ordered n-ary AST from a flat parent-before-child sequence. This uses the
+ * existing Salts CSTL vector-backed Praktor owner, not the indexed BTree.
+ * First node is root with parent_index=SIZE_MAX; all later parents have a
+ * smaller index. Input keys and values are borrowed, output is uniquely owned.
+ * Keys are canonicalized against static catalog literals; all values copied.
+ * Required params, structural child counts and admission budgets are checked.
+ * Failure destroys provisional nodes and leaves *out unchanged. */
+#define PRAKTOR_ORCH_ROOT_PARENT SIZE_MAX
+typedef struct praktor_orch_input_param { vstr key, value; } praktor_orch_input_param;
+typedef struct praktor_orch_flat_node {
+    praktor_orch_type type;
+    size_t parent_index;
+    const praktor_orch_input_param *params;
+    size_t param_count;
+} praktor_orch_flat_node;
+int praktor_orch_from_flat_nodes(const praktor_orch_flat_node *nodes, size_t count,
+    praktor_orch_tree **out, char *error, size_t error_capacity);
 void praktor_orch_tree_destroy(praktor_orch_tree *tree);
 const praktor_orch_node *praktor_orch_tree_root(const praktor_orch_tree *tree);
 size_t praktor_orch_tree_size(const praktor_orch_tree *tree);

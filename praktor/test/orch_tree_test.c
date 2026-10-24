@@ -177,3 +177,84 @@ spec("Native orchestration catalog and command lowering") {
         for (index = 0; index < 4; ++index) check(cmeta_thread_join(&threads[index]) == SALTS_OK && passed[index]);
     }
 }
+
+
+spec("Flat C11 orchestration AST using Salts CSTL") {
+    it("retains ordered nested children and owns canonical param text") {
+        tstr text=tstr_dup("echo hi");
+        praktor_orch_input_param shell[]={{view("CMD"),tstr_to_v(text)}};
+        praktor_orch_input_param sleep[]={{view("duration"),view("25")}};
+        praktor_orch_flat_node desc[]={
+            {PRAKTOR_ORCH_SEQUENCE,PRAKTOR_ORCH_ROOT_PARENT,NULL,0},
+            {PRAKTOR_ORCH_INVERTER,0,NULL,0},
+            {PRAKTOR_ORCH_SHELL,1,shell,1},
+            {PRAKTOR_ORCH_SEQUENCE,0,NULL,0},
+            {PRAKTOR_ORCH_SLEEP,3,sleep,1},
+            {PRAKTOR_ORCH_SHELL,3,shell,1}
+        };
+        praktor_orch_tree *tree=NULL;
+        const praktor_orch_node *root,*nested;
+        char error[128]={0};
+        check(text!=NULL);
+        check(praktor_orch_from_flat_nodes(desc,6,&tree,error,sizeof error)==SALTS_OK);
+        check(tree&&praktor_orch_tree_size(tree)==6&&!error[0]);
+        tstr_free(text);
+        root=praktor_orch_tree_root(tree);
+        check(praktor_orch_child_count(root)==2);
+        param_is(child(child(root,0,PRAKTOR_ORCH_INVERTER),0,PRAKTOR_ORCH_SHELL),0,"cmd","echo hi");
+        nested=child(root,1,PRAKTOR_ORCH_SEQUENCE);
+        param_is(child(nested,0,PRAKTOR_ORCH_SLEEP),0,"duration","25");
+        param_is(child(nested,1,PRAKTOR_ORCH_SHELL),0,"cmd","echo hi");
+        praktor_orch_tree_destroy(tree);
+    }
+    it("rejects invalid indices, missing required fields and child cardinality") {
+        praktor_orch_tree *result=NULL;
+        char error[128]={0};
+        praktor_orch_flat_node bad_parent[]={
+            {PRAKTOR_ORCH_SEQUENCE,PRAKTOR_ORCH_ROOT_PARENT,NULL,0},
+            {PRAKTOR_ORCH_SHELL,1,NULL,0}
+        };
+        praktor_orch_flat_node missing[]={{PRAKTOR_ORCH_SHELL,PRAKTOR_ORCH_ROOT_PARENT,NULL,0}};
+        praktor_orch_flat_node decorator[]={{PRAKTOR_ORCH_INVERTER,PRAKTOR_ORCH_ROOT_PARENT,NULL,0}};
+        check(praktor_orch_from_flat_nodes(bad_parent,2,&result,error,sizeof error)==SALTS_EINVAL&&!result);
+        check(strstr(error,"parent")!=NULL);
+        check(praktor_orch_from_flat_nodes(missing,1,&result,error,sizeof error)==SALTS_EINVAL&&!result);
+        check(strstr(error,"required")!=NULL);
+        check(praktor_orch_from_flat_nodes(decorator,1,&result,error,sizeof error)==SALTS_EINVAL&&!result);
+        check(strstr(error,"child count")!=NULL);
+    }
+    it("rejects leaf parenting and duplicate or unknown params atomically") {
+        praktor_orch_input_param cmd[]={{view("cmd"),view("echo")}};
+        praktor_orch_input_param duplicate[]={
+            {view("output_key"),view("first")},{view("outputKey"),view("second")},{view("cmd"),view("echo")}
+        };
+        praktor_orch_input_param wrong[]={{view("unknown"),view("x")}};
+        praktor_orch_flat_node leaf_parent[]={{PRAKTOR_ORCH_SHELL,PRAKTOR_ORCH_ROOT_PARENT,cmd,1},
+            {PRAKTOR_ORCH_SHELL,0,cmd,1}};
+        praktor_orch_flat_node dup[]={{PRAKTOR_ORCH_SHELL,PRAKTOR_ORCH_ROOT_PARENT,duplicate,3}};
+        praktor_orch_flat_node unk[]={{PRAKTOR_ORCH_SHELL,PRAKTOR_ORCH_ROOT_PARENT,wrong,1}};
+        praktor_orch_tree *tree=NULL;
+        char error[128]={0};
+        check(praktor_orch_from_flat_nodes(leaf_parent,2,&tree,error,sizeof error)==SALTS_EINVAL&&!tree);
+        check(strstr(error,"Leaf")!=NULL);
+        check(praktor_orch_from_flat_nodes(dup,1,&tree,error,sizeof error)==SALTS_EINVAL&&!tree);
+        check(strstr(error,"Duplicate")!=NULL);
+        check(praktor_orch_from_flat_nodes(unk,1,&tree,error,sizeof error)==SALTS_EINVAL&&!tree);
+        check(strstr(error,"Unknown")!=NULL);
+    }
+    it("owns binary values and preserves existing output on invalid input") {
+        praktor_orch_input_param params[]={{view("cmd"),vstr_from_buf("a\0b",3)}};
+        praktor_orch_flat_node desc[]={{PRAKTOR_ORCH_SHELL,PRAKTOR_ORCH_ROOT_PARENT,params,1}};
+        praktor_orch_tree *tree=NULL,*out;
+        praktor_orch_param param={0};
+        char error[8]={'x'};
+        check(praktor_orch_from_flat_nodes(desc,1,&tree,error,sizeof error)==SALTS_OK&&tree&&!error[0]);
+        check(praktor_orch_param_at(praktor_orch_tree_root(tree),0,&param)==SALTS_OK);
+        check(param.value.len==3&&memcmp(param.value.data,"a\0b",3)==0);
+        out=tree;
+        check(praktor_orch_from_flat_nodes(NULL,1,&out,error,sizeof error)==SALTS_EINVAL&&out==tree);
+        check(praktor_orch_from_flat_nodes(desc,0,&out,error,sizeof error)==SALTS_EINVAL&&out==tree);
+        check(praktor_orch_from_flat_nodes(desc,1,&out,NULL,1)==SALTS_EINVAL&&out==tree);
+        praktor_orch_tree_destroy(tree);
+    }
+}

@@ -158,6 +158,100 @@ int praktor_orch_from_command(const praktor_orch_command *input, praktor_orch_tr
     if (status != SALTS_OK) { praktor_orch_tree_destroy(build.tree); return status; }
     *out = build.tree; return SALTS_OK;
 }
+
+static const char *orch_param_key(const praktor_orch_spec *spec, vstr key) {
+    size_t i;
+    for(i=0;i<sizeof(spec->required)/sizeof(spec->required[0]);++i)
+        if(spec->required[i]&&orch_name_is(key,spec->required[i])) return spec->required[i];
+    for(i=0;i<sizeof(spec->optional)/sizeof(spec->optional[0]);++i)
+        if(spec->optional[i]&&orch_name_is(key,spec->optional[i])) return spec->optional[i];
+    return NULL;
+}
+static bool orch_has_param(const praktor_orch_node *node,const char *key) {
+    size_t i;
+    for(i=0;i<vec_size(&node->params);++i) {
+        const orch_owned_param *param=(const orch_owned_param *)vec_at_const(&node->params,i);
+        if(strcmp(param->key,key)==0) return true;
+    }
+    return false;
+}
+static bool orch_single_child(praktor_orch_type type) {
+    switch(type) {
+        case PRAKTOR_ORCH_INVERTER: case PRAKTOR_ORCH_FORCE_SUCCESS:
+        case PRAKTOR_ORCH_FORCE_FAILURE: case PRAKTOR_ORCH_REPEAT:
+        case PRAKTOR_ORCH_TIMEOUT: case PRAKTOR_ORCH_DELAY:
+        case PRAKTOR_ORCH_KEEP_RUNNING_UNTIL_FAILURE: case PRAKTOR_ORCH_RUN_ONCE:
+        case PRAKTOR_ORCH_CONSUME_QUEUE: case PRAKTOR_ORCH_PRECONDITION:
+        case PRAKTOR_ORCH_ENTRY_UPDATED: return true;
+        default: return false;
+    }
+}
+int praktor_orch_from_flat_nodes(const praktor_orch_flat_node *inputs,size_t count,
+    praktor_orch_tree **out,char *error,size_t error_capacity) {
+    orch_build build={NULL,error,error_capacity};
+    size_t i,j;
+    int status=SALTS_OK;
+    if(error&&error_capacity) error[0]='\0';
+    if(!inputs||!count||!out||(!error&&error_capacity)||count>PRAKTOR_ORCH_MAX_NODES)
+        return orch_fail(&build,SALTS_EINVAL,"Invalid orchestration flat-node input or node limit");
+    build.tree=(praktor_orch_tree *)calloc(1,sizeof(*build.tree));
+    if(!build.tree) return orch_oom(&build);
+    vec_init_bytes(&build.tree->nodes,sizeof(praktor_orch_node *),
+        _Alignof(praktor_orch_node *),PRAKTOR_ORCH_MAX_NODES);
+    for(i=0;i<count;++i) {
+        const praktor_orch_flat_node *input=&inputs[i];
+        const praktor_orch_spec *spec=praktor_orch_spec_for(input->type);
+        praktor_orch_node *node=NULL;
+        if(!spec||(i==0?input->parent_index!=PRAKTOR_ORCH_ROOT_PARENT:
+            input->parent_index>=i)||input->param_count>PRAKTOR_ORCH_MAX_PARAMS||
+            (input->param_count&&!input->params)) {
+            status=orch_fail(&build,SALTS_EINVAL,"Invalid orchestration node type, parent or params");
+            break;
+        }
+        status=orch_add_node(&build,input->type,&node);
+        if(status!=SALTS_OK) break;
+        for(j=0;j<input->param_count;++j) {
+            const praktor_orch_input_param *param=&input->params[j];
+            const char *key;
+            if(!vstr_is_valid(param->key)||!vstr_is_valid(param->value)) {
+                status=orch_fail(&build,SALTS_EINVAL,"Invalid orchestration parameter view");break;
+            }
+            key=orch_param_key(spec,param->key);
+            if(!key) {status=orch_fail(&build,SALTS_EINVAL,"Unknown orchestration parameter");break;}
+            if(orch_has_param(node,key)) {
+                status=orch_fail(&build,SALTS_EINVAL,"Duplicate orchestration parameter");break;
+            }
+            status=orch_add_param(&build,node,key,param->value);
+            if(status!=SALTS_OK) break;
+        }
+        if(status!=SALTS_OK) break;
+        if(i>0) {
+            praktor_orch_node *parent=*(praktor_orch_node **)vec_at(&build.tree->nodes,input->parent_index);
+            if(!praktor_orch_spec_for(parent->type)->allows_children) {
+                status=orch_fail(&build,SALTS_EINVAL,"Leaf orchestration node cannot have children");break;
+            }
+            status=orch_append(&build,parent,node);
+            if(status!=SALTS_OK) break;
+        }
+    }
+    for(i=0;status==SALTS_OK&&i<count;++i) {
+        const praktor_orch_node *node=*(praktor_orch_node * const *)vec_at_const(&build.tree->nodes,i);
+        const praktor_orch_spec *spec=praktor_orch_spec_for(node->type);
+        size_t children=vec_size(&node->children);
+        for(j=0;j<sizeof(spec->required)/sizeof(spec->required[0]);++j)
+            if(spec->required[j]&&!orch_has_param(node,spec->required[j])) {
+                status=orch_fail(&build,SALTS_EINVAL,"Missing required orchestration parameter");break;
+            }
+        if(status!=SALTS_OK)break;
+        if((spec->control&&!children)||(orch_single_child(node->type)&&children!=1u)) {
+            status=orch_fail(&build,SALTS_EINVAL,"Invalid orchestration control child count");break;
+        }
+    }
+    if(status!=SALTS_OK) {praktor_orch_tree_destroy(build.tree);return status;}
+    *out=build.tree;
+    return SALTS_OK;
+}
+
 const praktor_orch_node *praktor_orch_tree_root(const praktor_orch_tree *tree) {
     return tree && vec_size(&tree->nodes) ? *(praktor_orch_node * const *)vec_at_const(&tree->nodes, 0) : NULL;
 }
