@@ -340,7 +340,11 @@ spec("C11 named orchestration CSTL AST parity with legacy parser") {
             {"switch","name: test\nswitch: mode\ncases: {}\n"},
             {"run_once","name: test\nrun_once: ignored\nchild: []\n"},
             {"timeout","name: test\ntimeout: [invalid]\nchild: {Shell: {cmd: run}}\n"},
-            {"while","name: test\nwhile: ready\nmax_iterations: [invalid]\ndo: {Shell: {cmd: run}}\n"}
+            {"while","name: test\nwhile: ready\nmax_iterations: [invalid]\ndo: {Shell: {cmd: run}}\n"},
+            {"switch","name: test\nswitch: [bad]\n"},
+            {"set_variable","name: test\nset_variable: [bad]\nvalue: okay\nfrom: source\n"},
+            {"set_variable","name: test\nset_variable: key\nvalue: [invalid]\n"},
+            {"set_variable","name: test\nset_variable: key\nfrom: [invalid]\n"}
         };
         for(const auto& item:cases) {
             TaskYamlDetail::YamlDocument document(item.source);
