@@ -196,4 +196,32 @@ CheckExitCode task can run only after root visibility and DAG admission.
 streaming, Mustache and general command postprocessors have **not** been
 admitted by this narrow command-JSON profile.
 
+## Canonical command + ParseKeyValue — narrowly admitted native path
+
+A new source-only, opt-in
+`praktor_c11_orch_session_plan_create_native_command_keyvalue()`
+admits **exactly** the canonical `Sequence → Shell → ParseKeyValue` shape
+(one command, one parser, no extra nodes), and explicitly requires the
+original `stdout` output/input binding. The existing C11 NativeHost
+`ParseKeyValue` invokes the canonical C11 output scanner and bounded
+JSON encoder; no additional parser, worker pool, Process owner, or
+automatic Legacy fallback has been introduced.
+
+The real-process DAG integration test executes
+`command: echo KEY=42` with
+`parse_keyvalue: {output_key: parsed}`, checks that the private task scope
+contains `parsed={"KEY":"42"}`, and commits only the selected `parsed`
+value after the CFlow callback, native Process cleanup, and existing
+TaskRegistry/Process-retainer barrier. Only then is a dependent
+`set_variable` leaf allowed to inherit it. Another test rejects a
+noncanonical Shell `output_key` binding and verifies that admission
+failure does not corrupt a previously accepted plan.
+
+The default Orch plan converter still refuses all Shell access. The
+existing opt-in Shell, plain-command and JSON-command entry points keep
+their previous strict behavior; this new API does not admit regex/lines
+postprocessors or arbitrary command sequences. This is a single-owner
+test qualification, not a general production WorkflowContext/WorkflowPlan
+or crash-atomic execution guarantee.
+
 PR #79 stays **Draft / do not merge** until full cutover gates pass.

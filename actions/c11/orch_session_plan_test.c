@@ -212,6 +212,44 @@ spec("C11 Orch AST to owned Session Plan and native leaf execution") {
         check(strstr(error,"Legacy orchestration node type")!=NULL);
     }
 
+    it("rejects noncanonical stdout bindings for command KeyValue without losing prior plan") {
+        praktor_workflow_snapshot *input=snapshot(native_workflow);
+        praktor_c11_orch_session_plan *saved=NULL,*out;
+        praktor_c11_session_config config={0};
+        char error[256]={0};
+        const praktor_orch_input_param shell_ports[]={
+            {vstr_from_cstr("cmd"),vstr_from_cstr("echo KEY=42")},
+            {vstr_from_cstr("output_key"),vstr_from_cstr("not_stdout")}
+        };
+        const praktor_orch_input_param parse_ports[]={
+            {vstr_from_cstr("input_key"),vstr_from_cstr("stdout")},
+            {vstr_from_cstr("output_key"),vstr_from_cstr("parsed")}
+        };
+        const praktor_orch_flat_node nodes[]={
+            {PRAKTOR_ORCH_SEQUENCE,PRAKTOR_ORCH_ROOT_PARENT,NULL,0u},
+            {PRAKTOR_ORCH_SHELL,0u,shell_ports,2u},
+            {PRAKTOR_ORCH_PARSE_KEY_VALUE,0u,parse_ports,2u}
+        };
+        praktor_orch_tree *tree=NULL;
+        if(!input)return;
+        praktor_c11_session_config_init(&config);
+        check(praktor_c11_orch_session_plan_create(
+            praktor_workflow_snapshot_task_tree(input,0u),&config.tree,
+            &saved,error,sizeof error)==SALTS_OK);
+        if(!saved){praktor_workflow_snapshot_destroy(input);return;}
+        check(praktor_orch_from_flat_nodes(
+            nodes,3u,&tree,NULL,0u)==SALTS_OK);
+        out=saved;
+        check(praktor_c11_orch_session_plan_create_native_command_keyvalue(
+            tree,&config.tree,&out,error,sizeof error)==SALTS_ENOTSUP);
+        check(out==saved);
+        check(strstr(error,"canonical stdout port binding")!=NULL);
+        praktor_orch_tree_destroy(tree);
+        check(praktor_c11_orch_session_plan_node_count(saved)==3u);
+        praktor_c11_orch_session_plan_destroy(saved);
+        praktor_workflow_snapshot_destroy(input);
+    }
+
     it("refuses too-small tree limits with no partial output owner") {
         praktor_workflow_snapshot *input=snapshot(native_workflow);
         praktor_c11_session_config config={0};

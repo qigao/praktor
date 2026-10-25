@@ -62,6 +62,15 @@ int praktor_c11_orch_session_plan_create_native_command_json(
     const praktor_orch_tree *tree,const salts_bt_tree_config *limits,
     praktor_c11_orch_session_plan **out,
     char *error,size_t error_capacity);
+/* Explicit opt-in for one canonical command followed by ParseKeyValue.
+ * Admits precisely Sequence -> Shell -> ParseKeyValue with the same canonical
+ * stdout binding used by command lowering. Native key/value parsing reuses
+ * the existing C11 output scanner; no fallback, extra Shell or multi-command.
+ * Requires a real initialized Process retainer. Not installed in the SDK. */
+int praktor_c11_orch_session_plan_create_native_command_keyvalue(
+    const praktor_orch_tree *tree,const salts_bt_tree_config *limits,
+    praktor_c11_orch_session_plan **out,
+    char *error,size_t error_capacity);
 void praktor_c11_orch_session_plan_destroy(
     praktor_c11_orch_session_plan *plan);
 size_t praktor_c11_orch_session_plan_node_count(
