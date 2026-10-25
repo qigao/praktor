@@ -943,5 +943,26 @@ spec("Owned C11 inline workflow snapshot versus production TaskParser") {
         };
         for(const auto *path:files)
             compare_owned_inline_workflow(workflow_corpus_read(path),path);
+    }    it("matches command output, nested conditions and repeated dependencies") {
+        const char *yaml=
+            "name: One-owner parity\n"
+            "tasks:\n"
+            "  - name: prepare\n"
+            "    command: echo ready\n"
+            "    parse_lines: {filter: ERROR, output_key: errors}\n"
+            "  - name: choose\n"
+            "    depends_on: [prepare]\n"
+            "    dotEnv: .env\n"
+            "    sequence:\n"
+            "      - if: ready\n"
+            "        then: [{Shell: {cmd: pass}}, {Sleep: 1}]\n"
+            "        else: {Shell: {cmd: fail}}\n"
+            "  - name: deliver\n"
+            "    depends_on: [prepare, choose, prepare]\n"
+            "    parallel:\n"
+            "      - Shell: {cmd: left}\n"
+            "      - Shell: {cmd: right}\n";
+        compare_owned_inline_workflow(yaml,"inline-owner-parity");
     }
+
 }
