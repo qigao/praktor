@@ -67,6 +67,11 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Check sanitizer script Bash syntax before building SDKs
+        if: runner.os == 'Linux'
+        shell: bash
+        run: bash -n cmake/ci/qualify-c11-lifetime-sanitizers.sh
+
       - uses: ./.github/actions/setup-native-ci
 
       - uses: actions/cache/restore@v4

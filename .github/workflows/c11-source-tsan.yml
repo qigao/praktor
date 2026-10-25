@@ -48,6 +48,10 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Check sanitizer script Bash syntax before source builds
+        shell: bash
+        run: bash -n cmake/ci/qualify-c11-lifetime-sanitizers.sh
+
       - name: Checkout immutable Salts rc17
         uses: actions/checkout@v4
         with:
