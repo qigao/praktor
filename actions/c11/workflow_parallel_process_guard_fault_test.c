@@ -150,6 +150,7 @@ spec("NativeIO recovery poisoning survives a clean later Process drain") {
         check(registry!=NULL&&json!=NULL);
         check(praktor_c11_process_cohort_recovery_init(&recovery)==
               PRAKTOR_C11_PARALLEL_OK);
+        check(recovery.last_pending==SIZE_MAX); /* not yet observed */
         check(cflow_process_retainer_init(&retainer,1u)==SALTS_OK);
         check(praktor_c11_value_store_init(&root,2u,32u,32u)==PRAKTOR_C11_VALUE_OK);
         check(praktor_c11_value_txn_begin(&branch,&root)==PRAKTOR_C11_VALUE_OK);
@@ -170,6 +171,15 @@ spec("NativeIO recovery poisoning survives a clean later Process drain") {
             owners,1u,8u,&pending)==PRAKTOR_C11_PARALLEL_RECOVERY);
         check(pending==1u&&calls==1u);
         check(recovery.first_native_error==SALTS_EIO&&branch.impl!=NULL);
+        check(recovery.last_pending==1u);
+        /* Retainer remains unquieted: a rejected commit must not report
+         * zero just because it deliberately skipped the native poll. */
+        prior_calls=calls;
+        pending=SIZE_MAX;
+        check(praktor_c11_workflow_parallel_commit_after_cflow_and_process_drains(
+            registry,&update,&branch,1u,succeeded,&recovery,&control,
+            owners,1u,8u,&pending)==PRAKTOR_C11_PARALLEL_RECOVERY);
+        check(pending==1u&&calls==prior_calls);
         check(praktor_c11_value_store_size(&root)==0u);
         check(praktor_workflow_task_registry_state(registry,0u,&state)==SALTS_OK);
         check(state==PRAKTOR_WORKFLOW_TASK_PENDING);
@@ -180,6 +190,7 @@ spec("NativeIO recovery poisoning survives a clean later Process drain") {
         check(praktor_c11_workflow_parallel_drain_process_retainers(
             &recovery,owners,1u,8u,&pending,&reaped)==PRAKTOR_C11_PARALLEL_RECOVERY);
         check(pending==0u&&reaped==0u&&recovery.first_native_error==SALTS_EIO);
+        check(recovery.last_pending==0u); /* explicit cleanup did observe zero */
         prior_calls=calls;
         check(praktor_c11_workflow_parallel_commit_after_cflow_and_process_drains(
             registry,&update,&branch,1u,succeeded,&recovery,&control,

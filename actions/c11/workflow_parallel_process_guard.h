@@ -77,6 +77,9 @@ int praktor_c11_workflow_parallel_commit_after_cflow_and_process_drain(
 typedef struct praktor_c11_process_cohort_recovery {
     uint32_t marker;
     int first_native_error;
+    /* Latest observed pending count. SIZE_MAX means not yet observed; zero
+     * is authoritative only after a completed retainer sweep. */
+    size_t last_pending;
 } praktor_c11_process_cohort_recovery;
 
 int praktor_c11_process_cohort_recovery_init(

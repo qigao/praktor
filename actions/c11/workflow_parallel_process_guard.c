@@ -83,6 +83,7 @@ int praktor_c11_process_cohort_recovery_init(
     if(!gate||gate->marker!=0u||gate->first_native_error!=SALTS_OK)
         return PRAKTOR_C11_PARALLEL_INVALID;
     gate->marker=PRAKTOR_C11_COHORT_GATE_MARKER;
+    gate->last_pending=SIZE_MAX; /* not a synthetic zero-pending ACK */
     return PRAKTOR_C11_PARALLEL_OK;
 }
 
@@ -136,6 +137,7 @@ int praktor_c11_workflow_parallel_drain_process_retainers(
                 (status==SALTS_EBUSY||pending!=0u))
             result=PRAKTOR_C11_PARALLEL_BUSY;
     }
+    gate->last_pending=pending_total; /* one full bounded sweep completed */
     if(out_pending)*out_pending=pending_total;
     if(out_reaped)*out_reaped=reaped_total;
     /* A later successful cleanup cannot revive an aborted cohort. */
@@ -179,8 +181,12 @@ int praktor_c11_workflow_parallel_commit_after_cflow_and_process_drains(
         return PRAKTOR_C11_PARALLEL_BUSY;
     if(waited!=CFLOW_EXECUTOR_WAIT_IDLE)
         return PRAKTOR_C11_PARALLEL_INVALID;
-    if(gate->first_native_error!=SALTS_OK)
+    if(gate->first_native_error!=SALTS_OK) {
+        /* No new Process poll occurs here. Reuse only the LAST actually
+         * observed pending count; never invent a terminal zero. */
+        if(out_pending)*out_pending=gate->last_pending;
         return PRAKTOR_C11_PARALLEL_RECOVERY;
+    }
     /* CFlow callback completion is NOT a guarantee of successful Process.
      * Read semantic results only after all finalizers and idle have settled. */
     for(size_t i=0u;i<branch_count;++i)

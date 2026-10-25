@@ -217,3 +217,14 @@ replacement. The old compatibility single-retainer API is unchanged;
 new multi-worker code must use the latched cohort entry points. Only the
 source-only qualification profile exercises this behavior. PR #79 stays
 Draft, and the unrelated macOS Legacy Shell cancellation #81 stays Open.
+
+### No invented pending-zero observation after a latched error
+
+The per-cohort recovery record retains `last_pending` from its last
+completed, bounded Owner retainer sweep. It is `SIZE_MAX` before the first
+observation. If a later commit refuses publication immediately because a
+prior NativeIO failure was latched, it exposes that *last observed* count
+without polling the retainer again. A previous pending=1 cannot be reported
+as zero merely because the commit took a fail-closed early return.
+An explicit later cleanup pass may observe actual pending=0, but the
+recovery error remains sticky and the typed/text group is never published.
