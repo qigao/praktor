@@ -183,12 +183,21 @@ spec("Salts CFlow WorkerExecutor C11 Parallel owner-turn qualification") {
         cflow_executor executor={0};cflow_executor_control control={0};
         praktor_workflow_task_registry *registry=test_registry();
         praktor_c11_value_store root={0};
+        cflow_process_retainer retainer={0};
+        size_t process_pending=SIZE_MAX;
         praktor_c11_value_txn txns[2]={{0},{0}};
+        const char *left_text="{\"output\":1}";
+        const char *right_text="{\"output\":2}";
+        json_value_t *left=json_parse(left_text,strlen(left_text));
+        json_value_t *right=json_parse(right_text,strlen(right_text));
+        praktor_workflow_task_output_update updates[2]={{0u,left},{1u,right}};
         worker_gate gate;worker_branch branches[2];
         cflow_executor_protocol_stats stats={0};
         praktor_workflow_task_state state=PRAKTOR_WORKFLOW_TASK_RUNNING;
         gate_init(&gate);
+        check(left&&right);
         check(praktor_c11_value_store_init(&root,3u,32u,32u)==PRAKTOR_C11_VALUE_OK);
+        check(cflow_process_retainer_init(&retainer,1u)==SALTS_OK);
         check(cflow_executor_worker_init_with_capacity(&executor,1u,2u));
         check(cflow_executor_as_control(&executor,&control));
         check(praktor_c11_value_txn_begin(&txns[0],&root)==PRAKTOR_C11_VALUE_OK);
@@ -213,6 +222,10 @@ spec("Salts CFlow WorkerExecutor C11 Parallel owner-turn qualification") {
         check(atomic_load(&branches[0].ran)==1u);
         check(atomic_load(&branches[1].ran)==0u);
         check(atomic_load(&branches[1].cancelled)==1u);
+        check(praktor_c11_workflow_parallel_commit_after_cflow_and_process_drain(
+            registry,updates,txns,2u,&control,&retainer,8u,&process_pending)==
+            PRAKTOR_C11_PARALLEL_CANCELLED);
+        check(process_pending==0u);
         /* Caller aborts even the completed branch: all-or-none. */
         praktor_c11_value_txn_abort(&txns[0]);
         praktor_c11_value_txn_abort(&txns[1]);
@@ -222,6 +235,8 @@ spec("Salts CFlow WorkerExecutor C11 Parallel owner-turn qualification") {
             check(state==PRAKTOR_WORKFLOW_TASK_PENDING);
         }
         cflow_executor_destroy(&executor);
+        check(cflow_process_retainer_destroy(&retainer)==SALTS_OK);
+        json_free(left);json_free(right);
         praktor_c11_value_store_destroy(&root);
         praktor_workflow_task_registry_destroy(registry);
     }
