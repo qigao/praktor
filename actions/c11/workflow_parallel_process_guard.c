@@ -23,10 +23,13 @@ int praktor_c11_workflow_parallel_commit_after_process_drain(
      * release callback payloads while driving, but cannot be reentered. */
     status=cflow_process_retainer_run_ready(retainer,max_steps,&reaped,&pending);
     if(out_pending)*out_pending=pending;
+    /* Surface the first actual NativeIO/close/ack error even if adopted
+     * processes are still pending; do not turn a permanent failure into an
+     * ordinary EBUSY retry or an invented terminal acknowledgment. */
+    if(status!=SALTS_OK&&status!=SALTS_EBUSY)
+        return PRAKTOR_C11_PARALLEL_RECOVERY;
     if(status==SALTS_EBUSY||pending!=0u)
         return PRAKTOR_C11_PARALLEL_BUSY;
-    if(status!=SALTS_OK)
-        return PRAKTOR_C11_PARALLEL_RECOVERY;
     return praktor_c11_workflow_parallel_commit(
         registry,task_outputs,branch_values,branch_count);
 }
