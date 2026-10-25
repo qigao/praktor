@@ -756,3 +756,123 @@ spec("Full workflow versus C11 task metadata and native orchestration") {
         full_workflow_matches_native_projections(yaml,"mixed-parity-inline.yml");
     }
 }
+
+
+static int qualify_c_graph(const char *yaml,
+                           praktor_workflow_dependencies **out,
+                           char *error,size_t capacity) {
+    TaskYamlDetail::YamlDocument doc(yaml);
+    const auto tasks=doc.root()["tasks"];
+    std::vector<WorkflowValue> owned;
+    std::vector<const json_value_t*> views;
+    owned.reserve(tasks.num_children());
+    views.reserve(tasks.num_children());
+    for(const auto& task:tasks) {
+        json_value_t *raw=nullptr;
+        praktor_yaml_field_error diagnostic{};
+        const int status=praktor_yaml_task_metadata_create(
+            task.native(),&raw,&diagnostic);
+        if(status!=SALTS_OK) {
+            if(diagnostic.text)info("C task metadata refused: %s",diagnostic.text);
+            praktor_yaml_field_error_dispose(&diagnostic);
+            return status;
+        }
+        praktor_yaml_field_error_dispose(&diagnostic);
+        owned.push_back(WorkflowValue::adoptJson(raw));
+    }
+    for(const auto& metadata:owned)views.push_back(metadata.raw());
+    /* The native graph must own all names, edges and indices after both
+     * metadata JSON and provider DOM owners go out of scope. */
+    return praktor_workflow_dependencies_create(
+        views.data(),views.size(),out,error,capacity);
+}
+spec("C11 workflow DAG refusal matches production buildGraph") {
+    it("matches duplicate names, dangling dependencies, cycles and triggers") {
+        const char *sources[]={
+            "tasks:\n"
+            "  - {name: same, command: echo one}\n"
+            "  - {name: same, command: echo two}\n",
+            "tasks:\n"
+            "  - {name: first, command: echo first, depends_on: [unknown]}\n",
+            "tasks:\n"
+            "  - {name: first, command: echo first, depends_on: [second]}\n"
+            "  - {name: second, command: echo second, depends_on: [first]}\n",
+            "tasks:\n"
+            "  - {name: first, command: echo first, depends_on: [first]}\n",
+            "tasks:\n"
+            "  - name: first\n"
+            "    command: echo first\n"
+            "    triggers: {on_success: [unknown]}\n",
+            "tasks:\n"
+            "  - name: first\n"
+            "    command: echo first\n"
+            "    triggers: {on_failure: [unknown]}\n",
+            "tasks:\n"
+            "  - name: first\n"
+            "    command: echo first\n"
+            "    triggers: {on_complete: [unknown]}\n",
+            "tasks:\n"
+            "  - name: first\n"
+            "    command: echo first\n"
+            "    finally: unknown\n",
+            "tasks:\n"
+            "  - name: first\n"
+            "    command: echo first\n"
+            "    triggers: {on_success: [unknown]}\n"
+            "    depends_on: [also_unknown]\n",
+            "tasks:\n"
+            "  - name: same\n"
+            "    command: echo first\n"
+            "    triggers: {on_success: [unknown]}\n"
+            "  - name: same\n"
+            "    command: echo second\n"
+        };
+        for(const char *source:sources) {
+            std::string old_error;
+            try {
+                const auto workflow=TaskParser::parseText(source,"graph-parity");
+                (void)TaskParser::buildGraph(workflow);
+            } catch(const std::exception& e) {
+                old_error=e.what();
+            }
+            praktor_workflow_dependencies *native=nullptr;
+            char diagnostic[512]{};
+            const int status=qualify_c_graph(source,&native,
+                diagnostic,sizeof diagnostic);
+            check(!old_error.empty());
+            check(status==SALTS_EINVAL);
+            check(native==nullptr);
+            check(old_error==diagnostic);
+        }
+    }
+    it("keeps duplicate dependency edges and ignores dynamic trigger targets") {
+        const char *source=
+            "tasks:\n"
+            "  - name: first\n"
+            "    command: echo first\n"
+            "    triggers: {on_success: ['{{ dynamic_target }}']}\n"
+            "  - name: second\n"
+            "    command: echo second\n"
+            "    depends_on: [first, first]\n"
+            "    finally: first\n";
+        const auto workflow=TaskParser::parseText(source,"graph-parity");
+        const auto production=TaskParser::buildGraph(workflow);
+        praktor_workflow_dependencies *native=nullptr;
+        char diagnostic[256]{};
+        check(qualify_c_graph(source,&native,
+            diagnostic,sizeof diagnostic)==SALTS_OK);
+        check(native!=nullptr);
+        if(native) {
+            check(praktor_workflow_dependencies_task_count(native)==2u);
+            check(praktor_workflow_dependencies_edge_count(native)==2u);
+            check(production.getEdges(workflow.tasks[0]).size()==2u);
+            for(size_t i=0;i<2u;++i) {
+                size_t from=SIZE_MAX,to=SIZE_MAX;
+                check(praktor_workflow_dependencies_edge_at(native,i,
+                    &from,&to)==SALTS_OK);
+                check(from==0u&&to==1u);
+            }
+            praktor_workflow_dependencies_destroy(native);
+        }
+    }
+}
