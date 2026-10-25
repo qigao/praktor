@@ -4,7 +4,7 @@
  * commits typed outputs only AFTER worker wait_idle proves terminal settlement.
  * Shared gate/counters are atomic so ASan/TSan can assess the handoff.
  */
-#include "workflow_parallel_commit.h"
+#include "workflow_parallel_process_guard.h"
 #include <cflow/executor.h>
 #include <salts/thread.h>
 #include <stdatomic.h>
@@ -119,6 +119,8 @@ spec("Salts CFlow WorkerExecutor C11 Parallel owner-turn qualification") {
         cflow_executor executor={0};cflow_executor_control control={0};
         praktor_workflow_task_registry *registry=test_registry();
         praktor_c11_value_store root={0};
+        cflow_process_retainer retainer={0};
+        size_t process_pending=SIZE_MAX;
         praktor_c11_value_txn txns[2]={{0},{0}};
         worker_gate gate;worker_branch branches[2];
         const char *a_text="{\"result\":{\"id\":1}}";
@@ -130,6 +132,7 @@ spec("Salts CFlow WorkerExecutor C11 Parallel owner-turn qualification") {
         check(a&&b);gate_init(&gate);
         check(praktor_c11_value_store_init(&root,4u,32u,32u)==PRAKTOR_C11_VALUE_OK);
         check(praktor_c11_value_store_set(&root,"seed","base")==PRAKTOR_C11_VALUE_OK);
+        check(cflow_process_retainer_init(&retainer,1u)==SALTS_OK);
         check(cflow_executor_worker_init_with_capacity(&executor,2u,2u));
         check(cflow_executor_as_control(&executor,&control));
         for(size_t i=0;i<2u;++i) {
@@ -154,8 +157,15 @@ spec("Salts CFlow WorkerExecutor C11 Parallel owner-turn qualification") {
             check(atomic_load(&branches[i].ran)==1u);
             check(atomic_load(&branches[i].write_status)==PRAKTOR_C11_VALUE_OK);
         }
-        check(praktor_c11_workflow_parallel_commit(registry,outputs,txns,2u)==
+        /* CLOSED admission + idle callbacks + empty retainer are required,
+         * not merely an optimistic txn with two successful worker returns. */
+        check(cflow_executor_control_shutdown(
+            &control,CFLOW_EXECUTOR_SHUTDOWN_DRAIN));
+        check(cflow_executor_control_wait_idle(&control)==CFLOW_EXECUTOR_WAIT_IDLE);
+        check(praktor_c11_workflow_parallel_commit_after_cflow_and_process_drain(
+            registry,outputs,txns,2u,&control,&retainer,8u,&process_pending)==
             PRAKTOR_C11_PARALLEL_OK);
+        check(process_pending==0u);
         check(!txns[0].impl&&!txns[1].impl);
         json_free(a);json_free(b);
         check(text_is(&root,"seed","base")&&text_is(&root,"left","L")&&
@@ -165,6 +175,7 @@ spec("Salts CFlow WorkerExecutor C11 Parallel owner-turn qualification") {
         check(output_is(registry,0u,"result","{\"id\":1}"));
         check(output_is(registry,1u,"result","{\"id\":2}"));
         cflow_executor_destroy(&executor);
+        check(cflow_process_retainer_destroy(&retainer)==SALTS_OK);
         praktor_c11_value_store_destroy(&root);
         praktor_workflow_task_registry_destroy(registry);
     }
