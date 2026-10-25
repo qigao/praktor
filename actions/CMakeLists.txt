@@ -140,6 +140,18 @@ if(PRAKTOR_ENABLE_C11_ACTIONS)
         C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF
         POSITION_INDEPENDENT_CODE ON FOLDER "actions/c11")
 
+    if(ENABLE_TESTS)
+        add_executable(actions_c11_workflow_parallel_commit_test
+            c11/workflow_parallel_commit_test.c)
+        target_link_libraries(actions_c11_workflow_parallel_commit_test PRIVATE
+            praktor_c11_workflow_parallel_commit Salts::TinyTest)
+        set_target_properties(actions_c11_workflow_parallel_commit_test PROPERTIES
+            C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF
+            LINKER_LANGUAGE C FOLDER "actions/c11/tests")
+        add_test(NAME actions_c11_workflow_parallel_commit_test
+            COMMAND actions_c11_workflow_parallel_commit_test)
+    endif()
+
     # Independent AST/Process Session; never links actions or praktor_shell.
     include(${CMAKE_CURRENT_SOURCE_DIR}/c11/session_targets.cmake)
 
