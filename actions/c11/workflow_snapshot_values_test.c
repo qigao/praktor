@@ -253,7 +253,7 @@ spec("C11 WorkflowContext native task scope and selected output ownership") {
             "    command: echo second\n";
         const char *keys[]={"answer"};
         praktor_workflow_snapshot *snap=snapshot_for(yaml);
-        praktor_c11_value_store root={0},stale={0};
+        praktor_c11_value_store root={0};
         praktor_c11_native_host a={0},b={0};
         praktor_c11_bt_host hooks={0};
         praktor_c11_value_txn staged={0};
