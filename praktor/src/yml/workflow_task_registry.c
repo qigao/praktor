@@ -78,10 +78,14 @@ void praktor_workflow_task_registry_destroy(
     praktor_workflow_task_registry *owner) {
     size_t i;
     if(!owner)return;
-    for(i=0;i<owner->count;++i) {
-        free(owner->slots[i].name);
-        free(owner->slots[i].reason);
-        json_free(owner->slots[i].outputs);
+    /* A failed constructor may have published task_count before allocating
+     * its slot array. Destruction must be valid for every provisional state. */
+    if(owner->slots) {
+        for(i=0;i<owner->count;++i) {
+            free(owner->slots[i].name);
+            free(owner->slots[i].reason);
+            json_free(owner->slots[i].outputs);
+        }
     }
     free(owner->slots);
     free(owner);
