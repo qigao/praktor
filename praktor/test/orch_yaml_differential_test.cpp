@@ -1,9 +1,16 @@
 #include "praktor_test.hpp"
 #include "../src/yml/task_yaml_internal.hpp"
 #include "yml/orch_yaml.h"
+#include "yml/yaml_task_metadata.h"
+#include "yml/yaml_workflow_metadata.h"
+#include "yml/task_parser.hpp"
+#include <algorithm>
 #include <exception>
 #include <fstream>
 #include <iterator>
+#include <memory>
+#include <vector>
+#include <utility>
 #include <stdexcept>
 #include <string>
 
@@ -485,4 +492,177 @@ spec("C11 named orchestration CSTL AST parity with legacy parser") {
         }
     }
 
+}
+
+
+/* Full-workflow qualification boundary: C11 produces borrowed-input-free task
+ * metadata and orchestration trees; the unmodified TaskParser supplies the
+ * production comparison. No workflow executes, and this test does not create
+ * a second C++ or C scheduler. */
+static std::string workflow_corpus_read(const char *path) {
+    const std::string absolute=std::string(PRAKTOR_ORCH_CORPUS_ROOT)+"/"+path;
+    std::ifstream stream(absolute,std::ios::binary);
+    if(!stream)throw std::runtime_error("Cannot read workflow corpus: "+absolute);
+    return std::string{
+        std::istreambuf_iterator<char>(stream),std::istreambuf_iterator<char>()};
+}
+static void full_workflow_matches_native_projections(const std::string& yaml,
+                                                     const std::string& source) {
+    const Workflow legacy=TaskParser::parseText(yaml,source);
+    const auto graph=TaskParser::buildGraph(legacy);
+    WorkflowValue native_workflow;
+    {
+        TaskYamlDetail::YamlDocument document(yaml);
+        json_value_t *metadata=nullptr;
+        praktor_yaml_field_error error{};
+        const int status=praktor_yaml_workflow_metadata_create(
+            document.root().native(),&metadata,&error);
+        if(status!=SALTS_OK) {
+            if(error.text)info("Workflow metadata error: %s",error.text);
+            check(status==SALTS_OK);
+            praktor_yaml_field_error_dispose(&error);
+            return;
+        }
+        praktor_yaml_field_error_dispose(&error);
+        native_workflow=WorkflowValue::adoptJson(metadata);
+    }
+    if(native_workflow.contains("name"))
+        check(native_workflow.at("name").as<std::string>()==legacy.name);
+    if(native_workflow.contains("strict_inputs"))
+        check(native_workflow.at("strict_inputs").as<bool>()==legacy.strict_inputs);
+
+    /* Each native result must remain sound after destroying its YAML DOM. */
+    std::size_t compared_asts=0;
+    for(std::size_t i=0;i<legacy.tasks.size();++i) {
+        WorkflowValue meta;
+        std::unique_ptr<praktor_orch_tree,decltype(&praktor_orch_tree_destroy)>
+            native(nullptr,&praktor_orch_tree_destroy);
+        {
+            TaskYamlDetail::YamlDocument document(yaml);
+            const auto tasks=document.root()["tasks"];
+            check(tasks.is_seq());
+            check(tasks.num_children()==legacy.tasks.size());
+            if(i>=tasks.num_children())return;
+            const auto task=tasks.child_at(i);
+            json_value_t *raw=nullptr;
+            praktor_yaml_field_error error{};
+            const int metadata_status=praktor_yaml_task_metadata_create(
+                task.native(),&raw,&error);
+            if(metadata_status!=SALTS_OK) {
+                if(error.text)info("Task metadata error: %s",error.text);
+                check(metadata_status==SALTS_OK);
+                praktor_yaml_field_error_dispose(&error);
+                return;
+            }
+            praktor_yaml_field_error_dispose(&error);
+            meta=WorkflowValue::adoptJson(raw);
+            const std::string kind=meta.contains("runner_kind")
+                ?meta.at("runner_kind").as<std::string>():std::string{};
+            if(kind=="orch_root"||kind=="actions") {
+                praktor_orch_tree *tree=nullptr;
+                char diagnostic[512]{};
+                const int result=kind=="actions"?
+                    praktor_orch_from_named_yaml(task["actions"].native(),
+                        &tree,diagnostic,sizeof diagnostic):
+                    praktor_orch_from_flat_yaml(task.native(),
+                        meta.at("orch_node_type").as<std::string>().c_str(),
+                        &tree,diagnostic,sizeof diagnostic);
+                if(result!=SALTS_OK)
+                    info("Native tree failure: %s, task: %s",
+                         diagnostic,legacy.tasks[i].name.c_str());
+                check(result==SALTS_OK);
+                native.reset(tree);
+            }
+        }
+        const auto& selected=legacy.tasks[i];
+        check(meta.at("name").as<std::string>()==selected.name);
+        const std::string runner=meta.contains("runner_kind")
+            ?meta.at("runner_kind").as<std::string>():std::string{};
+        const int candidates=meta.contains("runner_count")
+            ?meta.at("runner_count").as<int>():0;
+        check(candidates<=1);
+        if(!runner.empty()) {
+            check(selected.declared_runner==
+                  (runner=="orch_root"?"actions":runner));
+        }
+        const auto dependencies=meta.contains("depends_on")
+            ?meta.at("depends_on").array_range():std::vector<WorkflowValue>{};
+        check(dependencies.size()==selected.depends_on.size());
+        for(std::size_t j=0;j<dependencies.size()&&j<selected.depends_on.size();++j)
+            check(dependencies[j].as<std::string>()==selected.depends_on[j]);
+        if(meta.contains("env")) {
+            check(meta.at("env").size()==selected.env.size());
+            for(const auto& entry:meta.at("env").object_range()) {
+                const auto found=selected.env.find(entry.key());
+                check(found!=selected.env.end());
+                if(found!=selected.env.end())
+                    check(found->second==entry.value().as<std::string>());
+            }
+        }
+        if(native) {
+            check(selected.action==TaskAction::Orch);
+            check(std::holds_alternative<OrchParams>(selected.specifics));
+            if(std::holds_alternative<OrchParams>(selected.specifics))
+                check(native_ast_equals_legacy(
+                    std::get<OrchParams>(selected.specifics).root,
+                    praktor_orch_tree_root(native.get())));
+            ++compared_asts;
+        }
+        /* Validate the actual production dependency graph against parsed task
+         * names, rather than treating a task's depends_on list as graph proof. */
+        for(const auto& dep:selected.depends_on) {
+            const auto predecessor=std::find_if(
+                legacy.tasks.begin(),legacy.tasks.end(),
+                [&](const Task& candidate){return candidate.name==dep;});
+            check(predecessor!=legacy.tasks.end());
+            if(predecessor!=legacy.tasks.end()) {
+                const auto outgoing=graph.getEdges(*predecessor);
+                check(std::any_of(outgoing.begin(),outgoing.end(),
+                    [&](const Task& next){return next.name==selected.name;}));
+            }
+        }
+    }
+    check(compared_asts>0);
+}
+spec("Full workflow versus C11 task metadata and native orchestration") {
+    it("compares five repository workflows after YAML document destruction") {
+        const char *files[]={
+            "examples/orch_build_pipeline.yml",
+            "examples/orch_parallel_testing.yml",
+            "examples/orch_shortcuts_demo.yml",
+            "examples/orch_version_extraction.yml",
+            "examples/orch_env_vars_example.yml"
+        };
+        for(const char *path:files) {
+            const std::string yaml=workflow_corpus_read(path);
+            full_workflow_matches_native_projections(yaml,path);
+        }
+    }
+    it("matches a mixed command/action/flat-branch workflow") {
+        const char *yaml=
+            "name: full-parity\n"
+            "variables: {MODE: fast}\n"
+            "tasks:\n"
+            "  - name: prepare\n"
+            "    command: echo ready\n"
+            "    parse_json: {path: '$.ready', output_key: ready}\n"
+            "  - name: act\n"
+            "    depends_on: [prepare]\n"
+            "    env: {TEST_MODE: '1'}\n"
+            "    actions:\n"
+            "      Sequence:\n"
+            "        - Shell: {cmd: echo started}\n"
+            "        - FileExists: {path: marker}\n"
+            "  - name: decide\n"
+            "    depends_on: [act]\n"
+            "    if: ready\n"
+            "    then: [{Shell: {cmd: yes}}, {Sleep: 1}]\n"
+            "    else: {Shell: {cmd: no}}\n"
+            "  - name: deliver\n"
+            "    depends_on: [decide, prepare]\n"
+            "    parallel:\n"
+            "      - Shell: {cmd: alpha}\n"
+            "      - Shell: {cmd: beta}\n";
+        full_workflow_matches_native_projections(yaml,"mixed-parity-inline.yml");
+    }
 }
