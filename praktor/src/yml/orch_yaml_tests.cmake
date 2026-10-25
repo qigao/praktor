@@ -19,3 +19,12 @@ target_link_libraries(orch_workflow_c_test PRIVATE
 set_target_properties(orch_workflow_c_test PROPERTIES
     C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF LINKER_LANGUAGE C)
 add_test(NAME orch_workflow_c_test COMMAND orch_workflow_c_test)
+add_executable(workflow_dependencies_fault_test
+    ${CMAKE_CURRENT_LIST_DIR}/../../test/workflow_dependencies_fault_test.c)
+target_include_directories(workflow_dependencies_fault_test PRIVATE
+    ${CMAKE_CURRENT_LIST_DIR}/../../include)
+target_link_libraries(workflow_dependencies_fault_test PRIVATE
+    Salts::JsonParser Salts::TinyTest)
+set_target_properties(workflow_dependencies_fault_test PROPERTIES
+    C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF LINKER_LANGUAGE C)
+add_test(NAME workflow_dependencies_fault_test COMMAND workflow_dependencies_fault_test)
