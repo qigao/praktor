@@ -15,7 +15,7 @@ target_include_directories(orch_workflow_c_test PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/../../include)
 target_link_libraries(orch_workflow_c_test PRIVATE
     praktor_orch_yaml praktor_yaml_task_metadata
-    praktor_yaml_workflow_metadata Salts::TinyTest)
+    praktor_yaml_workflow_metadata praktor_workflow_dependencies Salts::TinyTest)
 set_target_properties(orch_workflow_c_test PROPERTIES
     C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF LINKER_LANGUAGE C)
 add_test(NAME orch_workflow_c_test COMMAND orch_workflow_c_test)
