@@ -4,6 +4,7 @@
 #include "yml/yaml_task_metadata.h"
 #include "yml/yaml_workflow_metadata.h"
 #include "yml/workflow_dependencies.h"
+#include "yml/workflow_snapshot.h"
 #include "yml/task_parser.hpp"
 #include <algorithm>
 #include <exception>
