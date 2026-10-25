@@ -256,4 +256,35 @@ spec("C11 structured task status and immutable outputs") {
         praktor_workflow_task_registry_destroy(owner);
     }
 
+    it("rejects ABA stale preparation after re-entry with unchanged state and pointer") {
+        praktor_workflow_task_registry *owner=make_registry();
+        const char *text="{\"value\":123}";
+        json_value_t *updates=json_parse(text,strlen(text));
+        praktor_workflow_task_output_update rows[2]={{0u,updates},{1u,updates}};
+        praktor_workflow_task_output_group *prepared=NULL;
+        praktor_workflow_task_state state=PRAKTOR_WORKFLOW_TASK_PENDING;
+        const json_value_t *borrowed=(const json_value_t *)owner;
+        check(updates!=NULL);
+        check(praktor_workflow_task_registry_start(owner,0u)==SALTS_OK);
+        check(praktor_workflow_task_registry_prepare_output_group(
+            owner,rows,2u,&prepared)==SALTS_OK);
+        check(prepared!=NULL);
+        /* Same status, same NULL outputs pointer, but a DIFFERENT lifecycle
+         * generation. State+pointer equality alone would admit this stale
+         * publication after an explicit trigger/each task re-entry. */
+        check(praktor_workflow_task_registry_start(owner,0u)==SALTS_OK);
+        check(praktor_workflow_task_registry_state(owner,0u,&state)==SALTS_OK);
+        check(state==PRAKTOR_WORKFLOW_TASK_RUNNING);
+        check(praktor_workflow_task_registry_publish_output_group(
+            owner,&prepared)==SALTS_EBUSY);
+        check(prepared!=NULL);
+        check(praktor_workflow_task_registry_get_outputs(owner,0u,&borrowed)==SALTS_EBUSY);
+        check(borrowed==(const json_value_t *)owner);
+        check(praktor_workflow_task_registry_state(owner,1u,&state)==SALTS_OK);
+        check(state==PRAKTOR_WORKFLOW_TASK_PENDING);
+        praktor_workflow_task_registry_discard_output_group(prepared);
+        json_free(updates);
+        praktor_workflow_task_registry_destroy(owner);
+    }
+
 }
