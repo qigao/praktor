@@ -142,6 +142,10 @@ static void walk(const char *source,const char *kind,bool accepted) {
         set_fault(0);
         if(injected_at_point) {
             check(status!=SALTS_OK && out==saved);
+            /* Every injected boundary error on a well-formed YAML input is
+             * ENOMEM: silently converting a failed field read into EINVAL
+             * obscures the allocator/provider failure category. */
+            if(accepted)check(status==SALTS_ENOMEM);
         } else if(accepted) {
             check(status==SALTS_OK && out!=NULL && out!=saved);
             if(status==SALTS_OK)praktor_orch_tree_destroy(out);
@@ -170,6 +174,17 @@ spec("C11 orchestration parser boundary faults") {
              "if: ready\n"
              "then: [{Shell: {cmd: yes}}, {Sleep: 1}]\n"
              "else: {Shell: {cmd: no}}\n","if",true);
+    }
+    it("preserves ENOMEM for mandatory flat fields and publication") {
+        walk("name: choose\n"
+             "if: ready\n"
+             "then: {Shell: {cmd: run}}\n","if",true);
+        walk("name: select\n"
+             "switch: mode\n"
+             "cases: [{Shell: {cmd: one}}, {Shell: {cmd: two}}]\n","switch",true);
+        walk("name: delayed\n"
+             "delay: 5\n"
+             "child: {Shell: {cmd: run}}\n","delay",true);
     }
     it("does not treat failed optional while/max_iterations reads as absence") {
         walk("name: loop\n"
