@@ -20,19 +20,13 @@ static bool contains(const praktor_c11_value_store *store,
         n==strlen(value)&&strcmp(copy,value)==0;
 }
 static const char *with_vars=
-    "name: text context
-"
-    "variables: {MODE: fast, REV: '2'}
-"
-    "tasks:
-"
-    "  - {name: run, command: echo test}
-";
+    "name: text context\n"
+    "variables: {MODE: fast, REV: '2'}\n"
+    "tasks:\n"
+    "  - {name: run, command: echo test}\n";
 static const char *no_vars=
-    "tasks:
-"
-    "  - {name: run, command: echo test}
-";
+    "tasks:\n"
+    "  - {name: run, command: echo test}\n";
 
 spec("C11 WorkflowContext root string admission") {
     it("uses the existing store to atomically overlay user variables") {
