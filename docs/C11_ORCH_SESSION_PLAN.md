@@ -224,4 +224,33 @@ postprocessors or arbitrary command sequences. This is a single-owner
 test qualification, not a general production WorkflowContext/WorkflowPlan
 or crash-atomic execution guarantee.
 
+## Canonical command + ParseRegex — explicit C11 admission
+
+The source-only opt-in
+`praktor_c11_orch_session_plan_create_native_command_regex()`
+admits **only** the canonical three-node `Sequence → Shell → ParseRegex`
+projection, with exactly one child process and a matching `stdout`
+output/input port binding. Internally, Plan admission now uses **one enum
+profile** in place of four independently combinable boolean permissions.
+All previously admitted Shell, single-command, JSON and KeyValue modes
+keep their independent wrappers; default Plan still refuses Shell. A real
+initialized Process recovery owner is mandatory.
+
+The native Host already has a bounded POSIX-ERE `ParseRegex` engine,
+capture-group parser, regex cache and fail-closed unsupported-regex behavior.
+This candidate adds a real OS-process DAG integration test using
+`command: echo native-command` with
+`parse_regex: {pattern: '(native)', output_key: parsed}`.
+The private value `parsed=native` must remain invisible to root until
+CFlow finalization and the Process-retainer barrier permit selected-output
+and typed TaskRegistry publication. Then, and only then, a dependent native
+`set_variable` receives the committed result. Negative admission testing
+rejects mismatched `stdout` bindings without altering an already-owned Plan.
+
+This **does not** admit arbitrary PCRE/Legacy regex extensions
+(backreferences are explicitly unsupported by the C11 engine),
+general multi-command pipelines, ParseLines, production C++ scheduler
+cutover, or worker-thread Session movement. Unit-level NativeHost regex
+tests remain separately mandatory.
+
 PR #79 stays **Draft / do not merge** until full cutover gates pass.

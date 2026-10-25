@@ -71,6 +71,15 @@ int praktor_c11_orch_session_plan_create_native_command_keyvalue(
     const praktor_orch_tree *tree,const salts_bt_tree_config *limits,
     praktor_c11_orch_session_plan **out,
     char *error,size_t error_capacity);
+/* Explicit source-only native command+regex qualification. Admits only
+ * canonical Sequence -> one Shell -> one ParseRegex with matching 'stdout'
+ * port names. Uses the existing bounded NativeHost regex implementation,
+ * no Legacy fallback, and a mandatory initialized Process retainer.
+ * Unsupported regex constructs still fail closed at native execution. */
+int praktor_c11_orch_session_plan_create_native_command_regex(
+    const praktor_orch_tree *tree,const salts_bt_tree_config *limits,
+    praktor_c11_orch_session_plan **out,
+    char *error,size_t error_capacity);
 void praktor_c11_orch_session_plan_destroy(
     praktor_c11_orch_session_plan *plan);
 size_t praktor_c11_orch_session_plan_node_count(

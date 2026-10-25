@@ -71,11 +71,37 @@ size_t praktor_c11_orch_session_plan_node_count(
     return plan?plan->count:0u;
 }
 
+/* One explicit internal admission profile prevents invalid combinations of
+ * independent booleans as native command/postprocessors are qualified.
+ * Public opt-in wrappers preserve their existing independent contracts. */
+typedef enum orch_plan_profile {
+    ORCH_PLAN_DEFAULT=0,
+    ORCH_PLAN_SINGLE_SHELL,
+    ORCH_PLAN_SINGLE_COMMAND,
+    ORCH_PLAN_COMMAND_JSON,
+    ORCH_PLAN_COMMAND_KEYVALUE,
+    ORCH_PLAN_COMMAND_REGEX
+} orch_plan_profile;
+static bool is_command_parser_profile(orch_plan_profile profile) {
+    return profile==ORCH_PLAN_COMMAND_JSON||
+           profile==ORCH_PLAN_COMMAND_KEYVALUE||
+           profile==ORCH_PLAN_COMMAND_REGEX;
+}
+static praktor_orch_type parser_type_for(orch_plan_profile profile) {
+    if(profile==ORCH_PLAN_COMMAND_KEYVALUE)return PRAKTOR_ORCH_PARSE_KEY_VALUE;
+    if(profile==ORCH_PLAN_COMMAND_REGEX)return PRAKTOR_ORCH_PARSE_REGEX;
+    return PRAKTOR_ORCH_PARSE_JSON;
+}
+static const char *parser_profile_name(orch_plan_profile profile) {
+    if(profile==ORCH_PLAN_COMMAND_KEYVALUE)return "KeyValue";
+    if(profile==ORCH_PLAN_COMMAND_REGEX)return "Regex";
+    return "JSON";
+}
+
 static int create_plan(
     const praktor_orch_tree *tree,const salts_bt_tree_config *limits,
     praktor_c11_orch_session_plan **out,char *error,size_t cap,
-    bool allow_single_shell,bool allow_single_command,
-    bool allow_command_json,bool allow_command_keyvalue) {
+    orch_plan_profile profile) {
     praktor_c11_orch_session_plan *plan=NULL;
     orch_visit *stack=NULL;
     size_t node_capacity,top=0u;
@@ -93,7 +119,7 @@ static int create_plan(
     plan=(praktor_c11_orch_session_plan *)calloc(1u,sizeof(*plan));
     if(!plan)return fail(error,cap,SALTS_ENOMEM,"Cannot allocate Orch Session Plan");
     plan->capacity=node_capacity;
-    if(allow_single_command) {
+    if(profile==ORCH_PLAN_SINGLE_COMMAND) {
         const praktor_orch_node *root=praktor_orch_tree_root(tree);
         const praktor_orch_node *child=NULL;
         if(node_capacity!=2u||
@@ -106,9 +132,8 @@ static int create_plan(
             goto done;
         }
     }
-    if(allow_command_json||allow_command_keyvalue) {
-        const praktor_orch_type required_parser=
-            allow_command_keyvalue?PRAKTOR_ORCH_PARSE_KEY_VALUE:PRAKTOR_ORCH_PARSE_JSON;
+    if(is_command_parser_profile(profile)) {
+        const praktor_orch_type required_parser=parser_type_for(profile);
         const praktor_orch_node *root=praktor_orch_tree_root(tree);
         const praktor_orch_node *shell=NULL,*parser=NULL;
         bool stream_key=false,input_key=false;
@@ -122,10 +147,13 @@ static int create_plan(
            praktor_orch_node_type(parser)!=required_parser||
            praktor_orch_child_count(shell)!=0u||
            praktor_orch_child_count(parser)!=0u) {
-            status=fail(error,cap,SALTS_ENOTSUP,
-                allow_command_keyvalue?
-                "Native Command KeyValue qualification requires one Shell followed by ParseKeyValue":
-                "Native Command JSON qualification requires one Shell followed by ParseJson");
+            char detail[180]={0};
+            (void)snprintf(detail,sizeof detail,
+                "Native Command %s qualification requires one Shell followed by Parse%s",
+                parser_profile_name(profile),
+                profile==ORCH_PLAN_COMMAND_KEYVALUE?"KeyValue":
+                    profile==ORCH_PLAN_COMMAND_REGEX?"Regex":"Json");
+            status=fail(error,cap,SALTS_ENOTSUP,detail);
             goto done;
         }
         /* Existing command lowering uses stdout on both ends. Reject ASTs
@@ -143,22 +171,22 @@ static int create_plan(
                vstr_eq(p.value,vstr_from_cstr("stdout")))input_key=true;
         }
         if(!stream_key||!input_key) {
-            status=fail(error,cap,SALTS_ENOTSUP,
-                allow_command_keyvalue?
-                "Native Command KeyValue requires canonical stdout port binding":
-                "Native Command JSON requires canonical stdout port binding");
+            char detail[180]={0};
+            (void)snprintf(detail,sizeof detail,
+                "Native Command %s requires canonical stdout port binding",
+                parser_profile_name(profile));
+            status=fail(error,cap,SALTS_ENOTSUP,detail);
             goto done;
         }
     }
-    if(allow_single_shell &&
+    if(profile==ORCH_PLAN_SINGLE_SHELL &&
        (node_capacity!=1u ||
         praktor_orch_node_type(praktor_orch_tree_root(tree))!=PRAKTOR_ORCH_SHELL)) {
         status=fail(error,cap,SALTS_ENOTSUP,
             "Native Shell qualification only admits one canonical Shell node");
         goto done;
     }
-    plan->requires_native_process_owner=allow_single_shell||allow_single_command||
-                                         allow_command_json||allow_command_keyvalue;
+    plan->requires_native_process_owner=profile!=ORCH_PLAN_DEFAULT;
     plan->nodes=(praktor_c11_session_node *)calloc(
         node_capacity,sizeof(*plan->nodes));
     stack=(orch_visit *)calloc(node_capacity,sizeof(*stack));
@@ -191,9 +219,9 @@ static int create_plan(
             goto done;
         }
         if(!supported(type) &&
-           !(allow_single_shell&&type==PRAKTOR_ORCH_SHELL&&node_capacity==1u) &&
-           !(allow_single_command&&type==PRAKTOR_ORCH_SHELL) &&
-           !((allow_command_json||allow_command_keyvalue)&&type==PRAKTOR_ORCH_SHELL)) {
+           !(profile==ORCH_PLAN_SINGLE_SHELL&&type==PRAKTOR_ORCH_SHELL&&node_capacity==1u) &&
+           !(profile==ORCH_PLAN_SINGLE_COMMAND&&type==PRAKTOR_ORCH_SHELL) &&
+           !(is_command_parser_profile(profile)&&type==PRAKTOR_ORCH_SHELL)) {
             status=fail(error,cap,SALTS_ENOTSUP,
                 "Orch action not qualified for native C11 Session; no Legacy fallback");
             goto done;
@@ -295,28 +323,34 @@ done:
 int praktor_c11_orch_session_plan_create(
     const praktor_orch_tree *tree,const salts_bt_tree_config *limits,
     praktor_c11_orch_session_plan **out,char *error,size_t cap) {
-    return create_plan(tree,limits,out,error,cap,false,false,false,false);
+    return create_plan(tree,limits,out,error,cap,ORCH_PLAN_DEFAULT);
 }
 int praktor_c11_orch_session_plan_create_native_shell(
     const praktor_orch_tree *tree,const salts_bt_tree_config *limits,
     praktor_c11_orch_session_plan **out,char *error,size_t cap) {
-    return create_plan(tree,limits,out,error,cap,true,false,false,false);
+    return create_plan(tree,limits,out,error,cap,ORCH_PLAN_SINGLE_SHELL);
 }
 int praktor_c11_orch_session_plan_create_native_command(
     const praktor_orch_tree *tree,const salts_bt_tree_config *limits,
     praktor_c11_orch_session_plan **out,char *error,size_t cap) {
-    return create_plan(tree,limits,out,error,cap,false,true,false,false);
+    return create_plan(tree,limits,out,error,cap,ORCH_PLAN_SINGLE_COMMAND);
 }
 int praktor_c11_orch_session_plan_create_native_command_json(
     const praktor_orch_tree *tree,const salts_bt_tree_config *limits,
     praktor_c11_orch_session_plan **out,char *error,size_t cap) {
-    return create_plan(tree,limits,out,error,cap,false,false,true,false);
+    return create_plan(tree,limits,out,error,cap,ORCH_PLAN_COMMAND_JSON);
 }
 
 int praktor_c11_orch_session_plan_create_native_command_keyvalue(
     const praktor_orch_tree *tree,const salts_bt_tree_config *limits,
     praktor_c11_orch_session_plan **out,char *error,size_t cap) {
-    return create_plan(tree,limits,out,error,cap,false,false,false,true);
+    return create_plan(tree,limits,out,error,cap,ORCH_PLAN_COMMAND_KEYVALUE);
+}
+
+int praktor_c11_orch_session_plan_create_native_command_regex(
+    const praktor_orch_tree *tree,const salts_bt_tree_config *limits,
+    praktor_c11_orch_session_plan **out,char *error,size_t cap) {
+    return create_plan(tree,limits,out,error,cap,ORCH_PLAN_COMMAND_REGEX);
 }
 
 int praktor_c11_orch_session_plan_init_session(
