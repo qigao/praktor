@@ -81,7 +81,8 @@ target_link_libraries(orch_yaml_differential_test.${TARGET_NAME_LIB}
             praktor_yaml_task_metadata
             praktor_yaml_workflow_metadata
             praktor_workflow_dependencies
-            praktor_workflow_snapshot)
+            praktor_workflow_snapshot
+            praktor_workflow_task_registry)
 target_include_directories(orch_yaml_differential_test.${TARGET_NAME_LIB}
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../shared/process/include)
 target_compile_definitions(orch_yaml_differential_test.${TARGET_NAME_LIB} PRIVATE
