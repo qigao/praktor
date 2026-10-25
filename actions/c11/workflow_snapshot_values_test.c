@@ -236,3 +236,110 @@ spec("C11 WorkflowContext root string admission") {
     }
 
 }
+
+
+/* Distinct NativeHost slots are seeded from the canonical root + the selected
+ * task.vars, without copying unrelated peer task locals back into the root. */
+spec("C11 WorkflowContext native task scope and selected output ownership") {
+    it("loads isolated NativeHosts and prepares only explicitly selected task outputs") {
+        const char *yaml=
+            "variables: {MODE: root, BASE: initial}\n"
+            "tasks:\n"
+            "  - name: first\n"
+            "    vars: {MODE: alpha, LOCAL: secret}\n"
+            "    command: echo first\n"
+            "  - name: second\n"
+            "    vars: {MODE: beta, PEER: mine}\n"
+            "    command: echo second\n";
+        const char *keys[]={"answer"};
+        praktor_workflow_snapshot *snap=snapshot_for(yaml);
+        praktor_c11_value_store root={0},stale={0};
+        praktor_c11_native_host a={0},b={0};
+        praktor_c11_bt_host hooks={0};
+        praktor_c11_value_txn staged={0};
+        praktor_c11_leaf_parameter params[2]={
+            {"key",PRAKTOR_C11_LEAF_STRING,"answer",0.0,false},
+            {"value",PRAKTOR_C11_LEAF_STRING,"{MODE}",0.0,false}
+        };
+        praktor_c11_leaf_request req={0u,"SetVariable",params,2u,false,NULL};
+        salts_bt_node_status status=SALTS_BT_FAILURE;
+        int present=1;
+        check(praktor_c11_value_store_init(&root,8u,32u,64u)==PRAKTOR_C11_VALUE_OK);
+        check(praktor_c11_value_store_set(&root,"SYS","global")==PRAKTOR_C11_VALUE_OK);
+        check(praktor_c11_workflow_seed_root_text_variables(snap,&root)==PRAKTOR_C11_VALUE_OK);
+        check(praktor_c11_native_host_init(&a,8u,32u,64u)==SALTS_OK);
+        check(praktor_c11_native_host_init(&b,8u,32u,64u)==SALTS_OK);
+        check(praktor_c11_value_store_set(
+            praktor_c11_native_host_values(&a),"STALE","discard")==PRAKTOR_C11_VALUE_OK);
+        check(praktor_c11_workflow_load_task_text_scope(snap,0u,&root,
+            praktor_c11_native_host_values(&a))==PRAKTOR_C11_VALUE_OK);
+        check(contains(praktor_c11_native_host_values(&a),"MODE","alpha"));
+        check(contains(praktor_c11_native_host_values(&a),"LOCAL","secret"));
+        check(contains(praktor_c11_native_host_values(&a),"SYS","global"));
+        check(praktor_c11_value_store_contains(
+            praktor_c11_native_host_values(&a),"STALE",&present)==PRAKTOR_C11_VALUE_OK&&present==0);
+        check(contains(&root,"MODE","root"));
+        check(praktor_c11_native_host_bind(&a,&hooks)==SALTS_OK);
+        check(hooks.tick_typed_leaf(hooks.user,&req,&status)==SALTS_OK);
+        check(status==SALTS_BT_SUCCESS);
+        check(contains(praktor_c11_native_host_values(&a),"answer","alpha"));
+        check(praktor_c11_workflow_prepare_task_text_outputs(
+            &root,praktor_c11_native_host_values(&a),keys,1u,&staged)==PRAKTOR_C11_VALUE_OK);
+        check(staged.impl!=NULL);
+        check(praktor_c11_value_store_contains(&root,"answer",&present)==PRAKTOR_C11_VALUE_OK&&present==0);
+        check(praktor_c11_value_txn_commit(&staged)==PRAKTOR_C11_VALUE_OK);
+        check(staged.impl==NULL);
+        check(contains(&root,"answer","alpha"));
+        check(contains(&root,"MODE","root"));
+        check(praktor_c11_value_store_contains(&root,"LOCAL",&present)==PRAKTOR_C11_VALUE_OK&&present==0);
+        check(praktor_c11_workflow_load_task_text_scope(snap,1u,&root,
+            praktor_c11_native_host_values(&b))==PRAKTOR_C11_VALUE_OK);
+        praktor_workflow_snapshot_destroy(snap);
+        check(contains(praktor_c11_native_host_values(&b),"MODE","beta"));
+        check(contains(praktor_c11_native_host_values(&b),"PEER","mine"));
+        check(contains(praktor_c11_native_host_values(&b),"answer","alpha"));
+        check(praktor_c11_value_store_contains(
+            praktor_c11_native_host_values(&b),"LOCAL",&present)==PRAKTOR_C11_VALUE_OK&&present==0);
+        check(contains(praktor_c11_native_host_values(&a),"MODE","alpha"));
+        praktor_c11_native_host_destroy(&b);
+        praktor_c11_native_host_destroy(&a);
+        praktor_c11_value_store_destroy(&root);
+    }
+
+    it("rejects incomplete outputs, duplicates and mismatched Host limits without mutation") {
+        const char *yaml=
+            "variables: {MODE: root}\n"
+            "tasks:\n"
+            "  - name: one\n"
+            "    vars: {MODE: child}\n"
+            "    command: echo one\n";
+        const char *missing[]={"missing"};
+        const char *dupe[]={"MODE","MODE"};
+        praktor_workflow_snapshot *snap=snapshot_for(yaml);
+        praktor_c11_value_store root={0},child={0},different={0};
+        praktor_c11_value_txn out={0};
+        check(praktor_c11_value_store_init(&root,4u,32u,32u)==PRAKTOR_C11_VALUE_OK);
+        check(praktor_c11_workflow_seed_root_text_variables(snap,&root)==PRAKTOR_C11_VALUE_OK);
+        check(praktor_c11_value_store_init(&child,4u,32u,32u)==PRAKTOR_C11_VALUE_OK);
+        check(praktor_c11_value_store_set(&child,"SAVED","before")==PRAKTOR_C11_VALUE_OK);
+        check(praktor_c11_workflow_load_task_text_scope(snap,99u,&root,&child)==PRAKTOR_C11_VALUE_EINVAL);
+        check(contains(&child,"SAVED","before"));
+        check(praktor_c11_workflow_load_task_text_scope(snap,0u,&root,&child)==PRAKTOR_C11_VALUE_OK);
+        check(contains(&child,"MODE","child"));
+        check(praktor_c11_workflow_prepare_task_text_outputs(
+            &root,&child,missing,1u,&out)==PRAKTOR_C11_VALUE_ENOTFOUND);
+        check(out.impl==NULL&&contains(&root,"MODE","root"));
+        check(praktor_c11_workflow_prepare_task_text_outputs(
+            &root,&child,dupe,2u,&out)==PRAKTOR_C11_VALUE_EINVAL);
+        check(out.impl==NULL);
+        check(praktor_c11_value_store_init(&different,3u,32u,32u)==PRAKTOR_C11_VALUE_OK);
+        check(praktor_c11_value_store_set(&different,"SAVED","keep")==PRAKTOR_C11_VALUE_OK);
+        check(praktor_c11_workflow_load_task_text_scope(
+            snap,0u,&root,&different)==PRAKTOR_C11_VALUE_EINVAL);
+        check(contains(&different,"SAVED","keep"));
+        praktor_c11_value_store_destroy(&different);
+        praktor_c11_value_store_destroy(&child);
+        praktor_c11_value_store_destroy(&root);
+        praktor_workflow_snapshot_destroy(snap);
+    }
+}

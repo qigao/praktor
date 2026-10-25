@@ -119,6 +119,29 @@ int praktor_c11_value_store_clone(praktor_c11_value_store *destination,
   return PRAKTOR_C11_VALUE_OK;
 }
 
+/* Bounded native value-store transfer. A live Session must never observe
+ * this handle replacement while its leaf callbacks are in progress. */
+int praktor_c11_value_store_replace_clone(praktor_c11_value_store *destination,
+                                          const praktor_c11_value_store *source) {
+  const praktor_c11_value_store_impl *dst = store_impl(destination);
+  const praktor_c11_value_store_impl *src = store_impl(source);
+  praktor_c11_value_store staging = {0};
+  void *previous;
+  int status;
+  if (!dst || !src || destination == source ||
+      dst->capacity != src->capacity ||
+      dst->max_key_bytes != src->max_key_bytes ||
+      dst->max_value_bytes != src->max_value_bytes)
+    return PRAKTOR_C11_VALUE_EINVAL;
+  status = praktor_c11_value_store_clone(&staging, source);
+  if (status != PRAKTOR_C11_VALUE_OK) return status;
+  previous = destination->impl;
+  destination->impl = staging.impl;
+  staging.impl = previous;
+  praktor_c11_value_store_destroy(&staging);
+  return PRAKTOR_C11_VALUE_OK;
+}
+
 void praktor_c11_value_store_destroy(praktor_c11_value_store *store) {
   praktor_c11_value_store_impl *impl = store_impl(store);
   if (impl == NULL) return;

@@ -19,9 +19,10 @@
 
 static const char *success_yaml=
     "name: C11 native DAG leaves\n"
-    "variables: {seed: '7'}\n"
+    "variables: {seed: '9'}\n"
     "tasks:\n"
     "  - name: prepare\n"
+    "    vars: {seed: '7'}\n"
     "    set_variable: answer\n"
     "    from: seed\n"
     "  - name: verify\n"
@@ -34,6 +35,7 @@ static const char *cancel_yaml=
     "variables: {late: original}\n"
     "tasks:\n"
     "  - name: wait\n"
+    "    vars: {late: task-local}\n"
     "    actions:\n"
     "      Sequence:\n"
     "        - Sleep: {duration: 10s}\n"
@@ -98,8 +100,9 @@ static void task_init(native_dag_fixture *f,native_task *task,size_t index) {
     check(praktor_c11_native_host_init_with_config(
         &task->host,&host_config)==SALTS_OK);
     check(praktor_c11_native_host_bind(&task->host,&task->hooks)==SALTS_OK);
-    check(praktor_c11_workflow_seed_root_text_variables(
-        f->snapshot,praktor_c11_native_host_values(&task->host))==
+    check(praktor_c11_workflow_load_task_text_scope(
+        f->snapshot,index,&f->root,
+        praktor_c11_native_host_values(&task->host))==
         PRAKTOR_C11_VALUE_OK);
     praktor_c11_session_config_init(&task->config);
     task->config.host=task->hooks;
@@ -194,8 +197,12 @@ spec("Real native C11 Session leaves driven by DAG owner and CFlow") {
         check_dag(&f,1u,0u,0u,PRAKTOR_WORKFLOW_DAG_CONTINUE,false);
         /* No mutation of canonical root/TaskRegistry until after finalize,
          * closed CFlow admission and Process-retainer quiescence. */
-        check(praktor_c11_value_txn_begin(&txn,&f.root)==PRAKTOR_C11_VALUE_OK);
-        check(praktor_c11_value_txn_set(&txn,"answer",answer)==PRAKTOR_C11_VALUE_OK);
+        {
+            const char *outputs[]={"answer"};
+            check(praktor_c11_workflow_prepare_task_text_outputs(
+                &f.root,praktor_c11_native_host_values(&first.host),
+                outputs,1u,&txn)==PRAKTOR_C11_VALUE_OK);
+        }
         output=json_parse("{\"answer\":\"7\"}",14u);
         check(output!=NULL);
         update.task_index=0u;
@@ -208,6 +215,7 @@ spec("Real native C11 Session leaves driven by DAG owner and CFlow") {
         check(praktor_workflow_dag_finish(f.dag,0u,true)==SALTS_OK);
         check_dag(&f,0u,1u,1u,PRAKTOR_WORKFLOW_DAG_CONTINUE,false);
         check(text_is(&f.root,"answer","7"));
+        check(text_is(&f.root,"seed","9")); /* task seed=7 never merged */
         json_free(output);
         cflow_executor_destroy(&executor);
         task_destroy(&first);
@@ -215,11 +223,12 @@ spec("Real native C11 Session leaves driven by DAG owner and CFlow") {
         check(praktor_workflow_dag_claim_ready(f.dag,ids,2u,&count)==SALTS_OK);
         check(count==1u&&ids[0]==1u);
         task_init(&f,&second,1u);
-        /* This narrow owner-side projection is explicit, NOT a full native
-         * lexical WorkflowContext or implicit CFlow worker merge. */
-        check(praktor_c11_value_store_set(
-            praktor_c11_native_host_values(&second.host),"answer",answer)==
-            PRAKTOR_C11_VALUE_OK);
+        /* The dependent Host is atomically forked from the updated root:
+         * no hand-written answer injection and no wholesale local merge. */
+        check(text_is(praktor_c11_native_host_values(&second.host),
+                      "answer","7"));
+        check(text_is(praktor_c11_native_host_values(&second.host),
+                      "seed","9"));
         executor=(cflow_executor){0};control=(cflow_executor_control){0};
         owner_execute(&executor,&control,&second);
         check(second.outcome==SALTS_BT_SUCCESS);
@@ -246,7 +255,7 @@ spec("Real native C11 Session leaves driven by DAG owner and CFlow") {
         check_dag(&f,1u,0u,0u,PRAKTOR_WORKFLOW_DAG_CONTINUE,false);
         check(text_is(&f.root,"late","original"));
         check(text_is(praktor_c11_native_host_values(&waiting.host),
-                      "late","original"));
+                      "late","task-local"));
         /* CFlow finalized the tick, NOT the still-running Session. */
         check(praktor_c11_session_cancel(&waiting.session)==SALTS_OK);
         check(praktor_workflow_dag_stop(

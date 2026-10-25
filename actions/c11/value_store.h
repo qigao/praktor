@@ -39,6 +39,12 @@ void praktor_c11_value_store_destroy(praktor_c11_value_store *store);
 /* Deep-copy an immutable baseline into an independent store with equal bounds. */
 int praktor_c11_value_store_clone(praktor_c11_value_store *destination,
                                   const praktor_c11_value_store *source);
+/* Strong single-owner replacement of an already initialized store by a deep
+ * copy with exactly matching capacity and key/value limits. Neither owner is
+ * changed on error (including allocation failure). Never use on a store
+ * actively accessed by a Session/other callback or held by live transactions. */
+int praktor_c11_value_store_replace_clone(praktor_c11_value_store *destination,
+                                          const praktor_c11_value_store *source);
 int praktor_c11_value_store_set(praktor_c11_value_store *store,
                                 const char *key, const char *value);
 typedef struct praktor_c11_value_write {

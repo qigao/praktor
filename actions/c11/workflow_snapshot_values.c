@@ -74,3 +74,77 @@ int praktor_c11_workflow_fork_task_text_variables(
     praktor_c11_value_store_destroy(&staging);
     return result;
 }
+
+/* No NativeHost implementation knowledge: callers pass the pre-existing
+ * value_store slot exposed through native_host_values(). The canonical
+ * value-store replacement owns all copied task state. */
+int praktor_c11_workflow_load_task_text_scope(
+    const praktor_workflow_snapshot *snapshot,size_t task_index,
+    const praktor_c11_value_store *root,
+    praktor_c11_value_store *destination) {
+    praktor_c11_value_store staged={0};
+    int status;
+    if(!snapshot||!root||!destination||root==destination||
+       !root->impl||!destination->impl)return PRAKTOR_C11_VALUE_EINVAL;
+    status=praktor_c11_workflow_fork_task_text_variables(
+        snapshot,task_index,root,&staged);
+    if(status!=PRAKTOR_C11_VALUE_OK)return status;
+    status=praktor_c11_value_store_replace_clone(destination,&staged);
+    praktor_c11_value_store_destroy(&staged);
+    return status;
+}
+
+/* The only publication set is the explicit list selected by the Owner, not
+ * a wholesale merge of root or task-local inherited variables. All writes
+ * reside in a canonical optimistic transaction until the Owner commits. */
+int praktor_c11_workflow_prepare_task_text_outputs(
+    praktor_c11_value_store *root,
+    const praktor_c11_value_store *task_scope,
+    const char *const *selected_keys,size_t key_count,
+    praktor_c11_value_txn *out) {
+    praktor_c11_value_txn staged={0};
+    size_t retained=0u,i,j;
+    int status;
+    if(!root||!root->impl||!task_scope||!task_scope->impl||
+       root==task_scope||!out||out->impl||!selected_keys||!key_count)
+        return PRAKTOR_C11_VALUE_EINVAL;
+    if(key_count>PRAKTOR_C11_WORKFLOW_MAX_TEXT_OUTPUTS)
+        return PRAKTOR_C11_VALUE_ENOSPC;
+    for(i=0u;i<key_count;++i) {
+        if(!selected_keys[i]||!selected_keys[i][0])
+            return PRAKTOR_C11_VALUE_EINVAL;
+        for(j=0u;j<i;++j)
+            if(strcmp(selected_keys[i],selected_keys[j])==0)
+                return PRAKTOR_C11_VALUE_EINVAL;
+    }
+    status=praktor_c11_value_txn_begin(&staged,root);
+    if(status!=PRAKTOR_C11_VALUE_OK)return status;
+    for(i=0u;i<key_count;++i) {
+        size_t size=0u,read_size=0u;
+        char *copy=NULL;
+        status=praktor_c11_value_store_get(
+            task_scope,selected_keys[i],NULL,0u,&size);
+        if(status!=PRAKTOR_C11_VALUE_ENOBUFS)goto fail;
+        if(size>=PRAKTOR_C11_WORKFLOW_MAX_TEXT_OUTPUT_BYTES-retained) {
+            status=PRAKTOR_C11_VALUE_ENOBUFS;
+            goto fail;
+        }
+        copy=(char *)calloc(size+1u,1u);
+        if(!copy){status=PRAKTOR_C11_VALUE_ENOMEM;goto fail;}
+        status=praktor_c11_value_store_get(
+            task_scope,selected_keys[i],copy,size+1u,&read_size);
+        if(status==PRAKTOR_C11_VALUE_OK&&read_size==size)
+            status=praktor_c11_value_txn_set(
+                &staged,selected_keys[i],copy);
+        else if(status==PRAKTOR_C11_VALUE_OK)
+            status=PRAKTOR_C11_VALUE_EINVAL;
+        free(copy);
+        if(status!=PRAKTOR_C11_VALUE_OK)goto fail;
+        retained+=size+1u;
+    }
+    *out=staged;
+    return PRAKTOR_C11_VALUE_OK;
+fail:
+    praktor_c11_value_txn_abort(&staged);
+    return status;
+}

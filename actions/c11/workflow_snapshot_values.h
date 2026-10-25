@@ -42,6 +42,33 @@ int praktor_c11_workflow_fork_task_text_variables(
     const praktor_c11_value_store *root,
     praktor_c11_value_store *child);
 
+/* Qualification-only single-owner WorkflowContext task boundary.
+ * Materializes the canonical immutable root + task.vars using the existing
+ * fork, then atomically replaces an ALREADY INITIALIZED destination store.
+ * Destination must have the same capacity/key/value limits as root. Intended
+ * for a newly initialized NativeHost before Session starts or hooks run.
+ * Root and prior destination are untouched on any failure; no implicit
+ * local-write or inherited-variable mergeback. */
+int praktor_c11_workflow_load_task_text_scope(
+    const praktor_workflow_snapshot *snapshot,size_t task_index,
+    const praktor_c11_value_store *root,
+    praktor_c11_value_store *destination);
+
+/* Only explicitly selected output names may flow from a private task
+ * scope back into the canonical root. This prepares an independent existing
+ * value_store transaction, NOT a commit or an automatic diff of task.vars.
+ * Root and *out remain unchanged on missing/duplicate/oversize/OOM input.
+ * The resulting transaction must be committed after callback finalization
+ * and Process/TaskRegistry publication gates, or explicitly aborted.
+ * No CFlow worker may use the root while the one Owner prepares/publishes. */
+#define PRAKTOR_C11_WORKFLOW_MAX_TEXT_OUTPUTS 128u
+#define PRAKTOR_C11_WORKFLOW_MAX_TEXT_OUTPUT_BYTES (1024u * 1024u)
+int praktor_c11_workflow_prepare_task_text_outputs(
+    praktor_c11_value_store *root,
+    const praktor_c11_value_store *task_scope,
+    const char *const *selected_keys,size_t key_count,
+    praktor_c11_value_txn *out);
+
 #ifdef __cplusplus
 }
 #endif
