@@ -877,3 +877,72 @@ spec("C11 workflow DAG refusal matches production buildGraph") {
         }
     }
 }
+
+
+/* Complete C-owned inline composition, evaluated against the unchanged C++
+ * TaskParser and DAG. Neither side executes a task. */
+static void compare_owned_inline_workflow(const std::string& yaml,const char *name) {
+    const auto legacy=TaskParser::parseText(yaml,name);
+    const auto legacy_graph=TaskParser::buildGraph(legacy);
+    praktor_workflow_snapshot *raw=nullptr;
+    char diagnostic[512]{};
+    const int status=praktor_workflow_snapshot_create_inline(
+        vstr_from_buf(yaml.data(),yaml.size()),&raw,diagnostic,sizeof diagnostic);
+    if(status!=SALTS_OK)info("Snapshot %s: %s",name,diagnostic);
+    check(status==SALTS_OK);
+    std::unique_ptr<praktor_workflow_snapshot,
+                    decltype(&praktor_workflow_snapshot_destroy)> snapshot(
+        raw,&praktor_workflow_snapshot_destroy);
+    if(!snapshot)return;
+    check(praktor_workflow_snapshot_task_count(snapshot.get())==legacy.tasks.size());
+    const auto *native_graph=praktor_workflow_snapshot_dependencies(snapshot.get());
+    check(native_graph!=nullptr);
+    size_t edges=0;
+    for(size_t i=0;i<legacy.tasks.size();++i) {
+        const auto& task=legacy.tasks[i];
+        const auto *metadata=praktor_workflow_snapshot_task_metadata(snapshot.get(),i);
+        const auto *name_value=metadata?json_object_get(metadata,"name"):nullptr;
+        check(name_value&&json_string(name_value));
+        if(name_value&&json_string(name_value))
+            check(task.name==json_string(name_value));
+        praktor_workflow_snapshot_task_kind kind{};
+        check(praktor_workflow_snapshot_task_kind_at(snapshot.get(),i,&kind)==SALTS_OK);
+        check(kind==(task.declared_runner=="command"
+            ?PRAKTOR_WORKFLOW_SNAPSHOT_COMMAND
+            :PRAKTOR_WORKFLOW_SNAPSHOT_ORCHESTRATION));
+        const auto *tree=praktor_workflow_snapshot_task_tree(snapshot.get(),i);
+        check(tree!=nullptr);
+        check(std::holds_alternative<OrchParams>(task.specifics));
+        if(tree&&std::holds_alternative<OrchParams>(task.specifics))
+            check(native_ast_equals_legacy(std::get<OrchParams>(task.specifics).root,
+                praktor_orch_tree_root(tree)));
+        for(const auto& dep:task.depends_on) {
+            const auto previous=std::find_if(legacy.tasks.begin(),legacy.tasks.end(),
+                [&](const Task& candidate){return candidate.name==dep;});
+            check(previous!=legacy.tasks.end());
+            if(previous==legacy.tasks.end())continue;
+            const size_t from=static_cast<size_t>(previous-legacy.tasks.begin());
+            size_t got_from=SIZE_MAX,got_to=SIZE_MAX;
+            check(praktor_workflow_dependencies_edge_at(native_graph,edges,
+                &got_from,&got_to)==SALTS_OK);
+            check(got_from==from&&got_to==i);
+            check(!legacy_graph.getEdges(*previous).empty());
+            ++edges;
+        }
+    }
+    check(praktor_workflow_dependencies_edge_count(native_graph)==edges);
+}
+spec("Owned C11 inline workflow snapshot versus production TaskParser") {
+    it("compares six repository orchestration workflows") {
+        const char *files[]={
+            "examples/orch_build_pipeline.yml",
+            "examples/orch_parallel_testing.yml",
+            "examples/orch_shortcuts_demo.yml",
+            "examples/orch_version_extraction.yml",
+            "examples/orch_env_vars_example.yml",
+            "examples/orch_mustache_example.yml"
+        };
+        for(const auto *path:files)
+            compare_owned_inline_workflow(workflow_corpus_read(path),path);
+    }
+}
