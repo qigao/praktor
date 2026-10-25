@@ -19,6 +19,36 @@ static bool has_param(const praktor_orch_node *node,const char *key,const char *
 }
 
 spec("Named C11 orchestration YAML into canonical CSTL AST"){
+    it("retains caller tree on required-parameter and control-child errors"){
+        const struct {const char *source,*reason;} cases[]={
+            {"Shell: {output_key: raw}\n","Missing required parameter 'cmd'"},
+            {"ParseRegex: {input_key: raw}\n","Missing required parameter 'pattern'"},
+            {"WaitEvent: {timeout: 40}\n","Missing required parameter 'event'"},
+            {"Sleep: {}\n","Missing required parameter 'duration'"},
+            {"Sequence: []\n","Control node 'sequence' must have at least one child"},
+            {"Inverter: {}\n","inverter must have exactly one child"},
+            {"Sequence:\n  children:\n    - Shell: {output_key: x}\n    - Shell: {cmd: later}\n",
+                "Missing required parameter 'cmd'"}
+        };
+        praktor_orch_command command={0};
+        praktor_orch_tree *previous=NULL,*out;
+        size_t i;
+        command.command=vstr_from_cstr("keep-original");
+        check(praktor_orch_from_command(&command,&previous,NULL,0)==SALTS_OK);
+        out=previous;
+        for(i=0;i<sizeof(cases)/sizeof(cases[0]);++i){
+            praktor_yaml_document *doc=doc_for(cases[i].source);
+            char error[512]={0};
+            check(praktor_orch_from_named_yaml(praktor_yaml_root(doc),&out,
+                error,sizeof error)==SALTS_EINVAL);
+            check(out==previous);
+            check(strstr(error,cases[i].reason)!=NULL);
+            check(strstr(error,"at line")!=NULL);
+            praktor_yaml_document_destroy(doc);
+        }
+        praktor_orch_tree_destroy(previous);
+    }
+
     it("preserves ordered children and a nested decorator without borrowing input"){
         praktor_yaml_document *doc=doc_for(
             "Sequence:\n  - Shell: {cmd: echo first}\n  - Inverter:\n      child:\n        Shell: {cmd: echo second}\n");
