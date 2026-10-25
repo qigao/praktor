@@ -181,8 +181,8 @@ if(PRAKTOR_ENABLE_C11_ACTIONS)
         add_executable(actions_c11_workflow_parallel_worker_test
             c11/workflow_parallel_worker_test.c)
         target_link_libraries(actions_c11_workflow_parallel_worker_test PRIVATE
-            praktor_c11_workflow_parallel_commit Salts::CFlow Salts::Platform
-            Salts::TinyTest)
+            praktor_c11_workflow_parallel_process_guard Salts::CFlow
+            Salts::Platform Salts::TinyTest)
         set_target_properties(actions_c11_workflow_parallel_worker_test PROPERTIES
             C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF
             LINKER_LANGUAGE C FOLDER "actions/c11/tests")
