@@ -1,4 +1,5 @@
 #include "workflow_snapshot_values.h"
+#include "native_host.h"
 #include <string.h>
 #include <tinytest.h>
 
@@ -199,6 +200,39 @@ spec("C11 WorkflowContext root string admission") {
         praktor_c11_value_store_destroy(&child);
         praktor_c11_value_store_destroy(&root);
         praktor_workflow_snapshot_destroy(snapshot);
+    }
+    it("seeds the existing C11 Native Host before typed SetVariable dispatch") {
+        praktor_workflow_snapshot *snapshot=snapshot_for(with_vars);
+        praktor_c11_native_host host={0};
+        praktor_c11_bt_host hooks={0};
+        praktor_c11_value_store *values=NULL;
+        praktor_c11_leaf_parameter params[2]={
+            {"key",PRAKTOR_C11_LEAF_STRING,"result",0.0,false},
+            {"value",PRAKTOR_C11_LEAF_STRING,"{MODE}",0.0,false}
+        };
+        praktor_c11_leaf_request request={
+            0u,"SetVariable",params,2u,false,NULL
+        };
+        salts_bt_node_status status=SALTS_BT_FAILURE;
+        check(praktor_c11_native_host_init(&host,4u,32u,64u)==SALTS_OK);
+        values=praktor_c11_native_host_values(&host);
+        check(values!=NULL);
+        if(values) {
+            check(praktor_c11_workflow_seed_root_text_variables(
+                snapshot,values)==PRAKTOR_C11_VALUE_OK);
+        }
+        praktor_workflow_snapshot_destroy(snapshot);
+        snapshot=NULL;
+        check(praktor_c11_native_host_bind(&host,&hooks)==SALTS_OK);
+        check(hooks.tick_typed_leaf!=NULL);
+        if(hooks.tick_typed_leaf) {
+            check(hooks.tick_typed_leaf(hooks.user,&request,&status)==SALTS_OK);
+            check(status==SALTS_BT_SUCCESS);
+        }
+        check(contains(values,"result","fast"));
+        check(contains(values,"REV","2"));
+        praktor_c11_native_host_destroy(&host);
+        check(host.impl==NULL);
     }
 
 }
