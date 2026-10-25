@@ -148,3 +148,116 @@ spec("C11 Parallel native Process recovery owner commit barrier") {
         dispose(&f);
     }
 }
+
+
+typedef struct strict_callback_probe {
+    unsigned ran,cancelled,finalized;
+} strict_callback_probe;
+static void strict_run(void *user) {
+    ++((strict_callback_probe *)user)->ran;
+}
+static void strict_cancel(void *user) {
+    ++((strict_callback_probe *)user)->cancelled;
+}
+static void strict_finalize(void *user) {
+    ++((strict_callback_probe *)user)->finalized;
+}
+static cflow_executor_task strict_task(strict_callback_probe *probe) {
+    cflow_executor_task task={0};
+    task.run=strict_run;
+    task.cancel=strict_cancel;
+    task.finalize=strict_finalize;
+    task.user=probe;
+    return task;
+}
+spec("Strict CFlow executor and Process Parallel owner publication barrier") {
+    it("requires a sealed and drained Executor before committing branch state") {
+        guard_fixture f;
+        cflow_executor executor={0};
+        cflow_executor_control control={0};
+        strict_callback_probe probes[2]={{0},{0}};
+        size_t pending=SIZE_MAX;
+        initialize(&f);
+        check(cflow_executor_manual_init_with_capacity(&executor,2u));
+        check(cflow_executor_as_control(&executor,&control));
+        for(size_t i=0;i<2u;++i) {
+            cflow_executor_task task=strict_task(&probes[i]);
+            check(cflow_executor_try_post_task(&executor,&task)==CFLOW_ADMISSION_ACCEPTED);
+        }
+        check(praktor_c11_workflow_parallel_commit_after_cflow_and_process_drain(
+            f.registry,f.updates,f.branches,2u,&control,&f.retainer,8u,
+            &pending)==PRAKTOR_C11_PARALLEL_BUSY);
+        check(praktor_c11_value_store_size(&f.root)==1u);
+        check(cflow_executor_control_shutdown(
+            &control,CFLOW_EXECUTOR_SHUTDOWN_DRAIN));
+        check(praktor_c11_workflow_parallel_commit_after_cflow_and_process_drain(
+            f.registry,f.updates,f.branches,2u,&control,&f.retainer,8u,
+            &pending)==PRAKTOR_C11_PARALLEL_BUSY);
+        check(cflow_executor_run_ready(&executor)==2u);
+        check(cflow_executor_control_wait_idle(&control)==CFLOW_EXECUTOR_WAIT_IDLE);
+        check(probes[0].ran==1u&&probes[1].ran==1u);
+        check(probes[0].finalized==1u&&probes[1].finalized==1u);
+        check(praktor_c11_workflow_parallel_commit_after_cflow_and_process_drain(
+            f.registry,f.updates,f.branches,2u,&control,&f.retainer,8u,
+            &pending)==PRAKTOR_C11_PARALLEL_OK);
+        check(pending==0u);
+        check(!f.branches[0].impl&&!f.branches[1].impl);
+        check(stored(&f.root,"left","L")&&stored(&f.root,"right","R"));
+        cflow_executor_destroy(&executor);
+        dispose(&f);
+    }
+    it("refuses cancelled branches even when all callbacks are settled") {
+        guard_fixture f;
+        cflow_executor executor={0};
+        cflow_executor_control control={0};
+        strict_callback_probe probes[2]={{0},{0}};
+        size_t pending=SIZE_MAX;
+        initialize(&f);
+        check(cflow_executor_manual_init_with_capacity(&executor,2u));
+        check(cflow_executor_as_control(&executor,&control));
+        for(size_t i=0;i<2u;++i) {
+            cflow_executor_task task=strict_task(&probes[i]);
+            check(cflow_executor_try_post_task(&executor,&task)==CFLOW_ADMISSION_ACCEPTED);
+        }
+        check(cflow_executor_control_shutdown(
+            &control,CFLOW_EXECUTOR_SHUTDOWN_CANCEL_PENDING));
+        check(cflow_executor_run_ready(&executor)==0u);
+        check(cflow_executor_control_wait_idle(&control)==CFLOW_EXECUTOR_WAIT_IDLE);
+        check(probes[0].ran==0u&&probes[1].ran==0u);
+        check(probes[0].cancelled==1u&&probes[1].cancelled==1u);
+        check(probes[0].finalized==1u&&probes[1].finalized==1u);
+        check(praktor_c11_workflow_parallel_commit_after_cflow_and_process_drain(
+            f.registry,f.updates,f.branches,2u,&control,&f.retainer,8u,
+            &pending)==PRAKTOR_C11_PARALLEL_CANCELLED);
+        check(pending==0u);
+        check(praktor_c11_value_store_size(&f.root)==1u);
+        check(f.branches[0].impl&&f.branches[1].impl);
+        cflow_executor_destroy(&executor);
+        dispose(&f);
+    }
+    it("refuses a missing group branch after bounded Executor rejection") {
+        guard_fixture f;
+        cflow_executor executor={0};
+        cflow_executor_control control={0};
+        strict_callback_probe probes[2]={{0},{0}};
+        size_t pending=SIZE_MAX;
+        initialize(&f);
+        check(cflow_executor_manual_init_with_capacity(&executor,1u));
+        check(cflow_executor_as_control(&executor,&control));
+        cflow_executor_task first=strict_task(&probes[0]);
+        cflow_executor_task second=strict_task(&probes[1]);
+        check(cflow_executor_try_post_task(&executor,&first)==CFLOW_ADMISSION_ACCEPTED);
+        check(cflow_executor_try_post_task(&executor,&second)==CFLOW_ADMISSION_FULL);
+        check(cflow_executor_control_shutdown(
+            &control,CFLOW_EXECUTOR_SHUTDOWN_DRAIN));
+        check(cflow_executor_run_ready(&executor)==1u);
+        check(cflow_executor_control_wait_idle(&control)==CFLOW_EXECUTOR_WAIT_IDLE);
+        check(praktor_c11_workflow_parallel_commit_after_cflow_and_process_drain(
+            f.registry,f.updates,f.branches,2u,&control,&f.retainer,8u,
+            &pending)==PRAKTOR_C11_PARALLEL_INVALID);
+        check(praktor_c11_value_store_size(&f.root)==1u);
+        check(f.branches[0].impl&&f.branches[1].impl);
+        cflow_executor_destroy(&executor);
+        dispose(&f);
+    }
+}
