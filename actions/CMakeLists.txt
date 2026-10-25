@@ -112,6 +112,18 @@ if(PRAKTOR_ENABLE_C11_ACTIONS)
             LINKER_LANGUAGE C FOLDER "actions/c11/tests")
         add_test(NAME actions_c11_workflow_snapshot_values_test
             COMMAND actions_c11_workflow_snapshot_values_test)
+
+        # Compiles the same C11 handoff with test-only failed allocation,
+        # clone and atomic batch publication boundaries; no C++ executor.
+        add_executable(actions_c11_workflow_snapshot_values_fault_test
+            c11/workflow_snapshot_values_fault_test.c)
+        target_link_libraries(actions_c11_workflow_snapshot_values_fault_test PRIVATE
+            praktor_workflow_snapshot praktor_c11_value_store Salts::TinyTest)
+        set_target_properties(actions_c11_workflow_snapshot_values_fault_test PROPERTIES
+            C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF
+            LINKER_LANGUAGE C FOLDER "actions/c11/tests")
+        add_test(NAME actions_c11_workflow_snapshot_values_fault_test
+            COMMAND actions_c11_workflow_snapshot_values_fault_test)
     endif()
 
     # Independent AST/Process Session; never links actions or praktor_shell.
