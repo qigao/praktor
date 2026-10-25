@@ -221,4 +221,48 @@ spec("C11 typed task registry owner fault rollback") {
         check(live_count==0u);
     }
 
+    it("rolls back all grouped JSON staging on each owner/provider allocation fault") {
+        praktor_workflow_snapshot *snapshot=make_snapshot();
+        praktor_workflow_task_registry *owner=NULL;
+        const char *first_text="{\"left\":{\"nested\":[1,2]}}";
+        const char *second_text="{\"right\":{\"nested\":[3,4]}}";
+        json_value_t *first=json_parse(first_text,strlen(first_text));
+        json_value_t *second=json_parse(second_text,strlen(second_text));
+        praktor_workflow_task_output_update updates[2]={{0u,first},{1u,second}};
+        size_t retained;
+        unsigned point;
+        fault_at(0u);
+        check(first&&second);
+        check(praktor_workflow_task_registry_create(snapshot,&owner)==SALTS_OK);
+        praktor_workflow_snapshot_destroy(snapshot);
+        retained=live_count;
+        for(point=1u;point<40u;++point) {
+            praktor_workflow_task_output_group *prepared=NULL;
+            int status;
+            bool hit;
+            fault_at(point);
+            status=praktor_workflow_task_registry_prepare_output_group(
+                owner,updates,2u,&prepared);
+            hit=injected;
+            fault_at(0u);
+            if(hit) {
+                check(status==SALTS_ENOMEM);
+                check(prepared==NULL);
+            } else {
+                check(status==SALTS_OK);
+                check(prepared!=NULL);
+                praktor_workflow_task_registry_discard_output_group(prepared);
+            }
+            check(live_count==retained);
+            check(owner->slots[0].state==PRAKTOR_WORKFLOW_TASK_PENDING);
+            check(owner->slots[1].state==PRAKTOR_WORKFLOW_TASK_PENDING);
+            check(!owner->slots[0].outputs&&!owner->slots[1].outputs);
+            if(!hit)break;
+        }
+        check(point>1u&&point<40u);
+        json_free(first);json_free(second);
+        praktor_workflow_task_registry_destroy(owner);
+        check(live_count==0u);
+    }
+
 }
