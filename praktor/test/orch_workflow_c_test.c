@@ -4,6 +4,7 @@
 #include "yml/orch_yaml.h"
 #include "yml/yaml_task_metadata.h"
 #include "yml/yaml_workflow_metadata.h"
+#include "yml/workflow_dependencies.h"
 #include <json_parser.h>
 #include <salts/error_codes.h>
 #include <string.h>
@@ -53,6 +54,9 @@ spec("C11-only workflow metadata to orchestration AST") {
         praktor_yaml_node task_nodes={0};
         json_value_t *root=NULL,*meta[4]={0};
         praktor_orch_tree *trees[4]={0};
+        praktor_workflow_dependencies *graph=NULL;
+        const json_value_t *views[4];
+        char graph_error[256]={0};
         const char *names[]={"prepare","orchestration","choose","parallel_task"};
         const char *kinds[]={"command","actions","orch_root","orch_root"};
         praktor_orch_type expected_types[]={
@@ -105,12 +109,91 @@ spec("C11-only workflow metadata to orchestration AST") {
                 check(second&&strcmp(second,"prepare")==0);
             }
         }
+        for(i=0;i<4u;++i)views[i]=meta[i];
+        check(praktor_workflow_dependencies_create(views,4u,&graph,
+            graph_error,sizeof graph_error)==SALTS_OK);
+        check(graph!=NULL&&graph_error[0]=='\0');
         for(i=0;i<4u;++i) {
             praktor_orch_tree_destroy(trees[i]);
             json_free(meta[i]);
         }
         json_free(root);
+        /* The graph must outlive both source YAML and C-owned JSON metadata. */
+        check(praktor_workflow_dependencies_task_count(graph)==4u);
+        check(praktor_workflow_dependencies_edge_count(graph)==4u);
+        for(i=0;i<4u;++i) {
+            vstr name={0};
+            check(praktor_workflow_dependencies_task_name(graph,i,&name)==SALTS_OK);
+            check(vstr_eq(name,vstr_from_cstr(names[i])));
+        }
+        {
+            size_t predecessor=SIZE_MAX,dependent=SIZE_MAX;
+            const size_t expected[][2]={{0u,1u},{1u,2u},{2u,3u},{0u,3u}};
+            for(i=0;i<4u;++i) {
+                check(praktor_workflow_dependencies_edge_at(graph,i,
+                    &predecessor,&dependent)==SALTS_OK);
+                check(predecessor==expected[i][0]&&dependent==expected[i][1]);
+            }
+        }
+        praktor_workflow_dependencies_destroy(graph);
     }
+    it("preserves a qualified graph when duplicate names or cycles are rejected") {
+        const char *bad_sources[]={
+            "tasks:\n  - {name: same, command: echo first}\n"
+            "  - {name: same, command: echo second}\n",
+            "tasks:\n  - name: a\n    command: echo a\n    depends_on: [b]\n"
+            "  - name: b\n    command: echo b\n    depends_on: [a]\n",
+            "tasks:\n  - name: a\n    command: echo a\n    depends_on: [missing]\n",
+            "tasks:\n  - name: a\n    command: echo a\n    triggers: {on_success: [missing]}\n"
+        };
+        const char *messages[]={
+            "Duplicate task name: 'same'",
+            "Cycle detected in workflow dependencies",
+            "Task 'a' depends on unknown task 'missing'",
+            "Task 'a' trigger 'on_success' references unknown task 'missing'"
+        };
+        praktor_workflow_dependencies *saved=NULL,*out;
+        json_value_t *valid=json_create_object();
+        const json_value_t *valid_items[1]={valid};
+        size_t i;
+        check(valid!=NULL);
+        check(json_object_add_n(valid,"name",4u,json_create_string("retained")));
+        check(praktor_workflow_dependencies_create(
+            valid_items,1u,&saved,NULL,0)==SALTS_OK);
+        out=saved;
+        json_free(valid);
+        for(i=0;i<sizeof(bad_sources)/sizeof(bad_sources[0]);++i) {
+            praktor_yaml_document *doc=NULL;
+            praktor_yaml_node tasks={0};
+            json_value_t *items[2]={0};
+            const json_value_t *borrowed[2]={0};
+            char error[256]={0};
+            size_t n;
+            check(praktor_yaml_document_create(
+                vstr_from_cstr(bad_sources[i]),&doc,NULL)==SALTS_OK);
+            check(praktor_yaml_get(praktor_yaml_root(doc),"tasks",
+                &tasks,NULL)==SALTS_OK);
+            n=praktor_yaml_count(tasks);
+            check(n>=1u&&n<=2u);
+            for(size_t j=0;j<n;++j) {
+                check(praktor_yaml_task_metadata_create(
+                    praktor_yaml_at(tasks,j),&items[j],NULL)==SALTS_OK);
+                borrowed[j]=items[j];
+            }
+            praktor_yaml_document_destroy(doc);
+            check(praktor_workflow_dependencies_create(borrowed,n,
+                &out,error,sizeof error)==SALTS_EINVAL);
+            check(out==saved&&strcmp(error,messages[i])==0);
+            for(size_t j=0;j<n;++j)json_free(items[j]);
+        }
+        {
+            vstr text={0};
+            check(praktor_workflow_dependencies_task_name(saved,0u,&text)==SALTS_OK);
+            check(vstr_eq(text,vstr_from_cstr("retained")));
+        }
+        praktor_workflow_dependencies_destroy(saved);
+    }
+
     it("preserves a qualified prior tree when a later task is malformed") {
         praktor_yaml_document *doc=NULL;
         praktor_yaml_node tasks={0};
