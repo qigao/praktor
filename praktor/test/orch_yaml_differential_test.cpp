@@ -943,7 +943,8 @@ spec("Owned C11 inline workflow snapshot versus production TaskParser") {
         };
         for(const auto *path:files)
             compare_owned_inline_workflow(workflow_corpus_read(path),path);
-    }    it("matches command output, nested conditions and repeated dependencies") {
+    }
+    it("matches command output, nested conditions and repeated dependencies") {
         const char *yaml=
             "name: One-owner parity\n"
             "tasks:\n"
