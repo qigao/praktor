@@ -543,11 +543,11 @@ static void full_workflow_matches_native_projections(const std::string& yaml,
             check(tasks.is_seq());
             check(tasks.num_children()==legacy.tasks.size());
             if(i>=tasks.num_children())return;
-            const auto task=tasks.child_at(i);
+            const praktor_yaml_node task=praktor_yaml_at(tasks.native(),i);
             json_value_t *raw=nullptr;
             praktor_yaml_field_error error{};
             const int metadata_status=praktor_yaml_task_metadata_create(
-                task.native(),&raw,&error);
+                task,&raw,&error);
             if(metadata_status!=SALTS_OK) {
                 if(error.text)info("Task metadata error: %s",error.text);
                 check(metadata_status==SALTS_OK);
@@ -561,12 +561,18 @@ static void full_workflow_matches_native_projections(const std::string& yaml,
             if(kind=="orch_root"||kind=="actions") {
                 praktor_orch_tree *tree=nullptr;
                 char diagnostic[512]{};
-                const int result=kind=="actions"?
-                    praktor_orch_from_named_yaml(task["actions"].native(),
-                        &tree,diagnostic,sizeof diagnostic):
-                    praktor_orch_from_flat_yaml(task.native(),
-                        meta.at("orch_node_type").as<std::string>().c_str(),
+                int result=SALTS_OK;
+                if(kind=="actions") {
+                    praktor_yaml_node branch={0};
+                    result=praktor_yaml_get(task,"actions",&branch,nullptr);
+                    if(result==SALTS_OK)
+                        result=praktor_orch_from_named_yaml(
+                            branch,&tree,diagnostic,sizeof diagnostic);
+                } else {
+                    const auto kind_name=meta.at("orch_node_type").as<std::string>();
+                    result=praktor_orch_from_flat_yaml(task,kind_name.c_str(),
                         &tree,diagnostic,sizeof diagnostic);
+                }
                 if(result!=SALTS_OK)
                     info("Native tree failure: %s, task: %s",
                          diagnostic,legacy.tasks[i].name.c_str());
