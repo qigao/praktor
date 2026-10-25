@@ -146,7 +146,6 @@ static int parse_named_entry(named_build *b,praktor_yaml_node value,size_t paren
     const praktor_orch_spec *spec;
     tstr type_name=NULL;
     size_t index,i;
-    bool saw_child=false;
     int status;
     if(depth>NAMED_YAML_MAX_DEPTH)return fail(b,SALTS_EINVAL,"Named orchestration nesting limit");
     if(b->count>=PRAKTOR_ORCH_MAX_NODES)
@@ -175,38 +174,70 @@ static int parse_named_entry(named_build *b,praktor_yaml_node value,size_t paren
         return children(b,value,index,depth);
     }
     if(praktor_yaml_is_map(value)) {
+        bool has_child=false,has_children=false;
+        char type_lower[64];
+        size_t t;
+        (void)snprintf(type_lower,sizeof type_lower,"%s",spec->name);
+        for(t=0;type_lower[t];++t)
+            type_lower[t]=(char)tolower((unsigned char)type_lower[t]);
+        /* Legacy map-style parsing validates every scalar and canonical key
+         * before descending into children.  The order is observable when a
+         * node contains both an invalid scalar and an invalid child subtree. */
         for(i=0;i<praktor_yaml_count(value);++i) {
             praktor_yaml_node field=praktor_yaml_at(value,i);
-            tstr key=NULL;
+            tstr key=NULL,text=NULL;
+            const char *canonical;
             status=praktor_yaml_key(field,&key,NULL);
-            if(status!=SALTS_OK)return fail(b,status,"Cannot decode orchestration parameter key");
-            if(strcmp(key,"child")==0||strcmp(key,"children")==0) {
-                bool multiple=strcmp(key,"children")==0;
-                tstr_free(key);
-                if(saw_child)return fail(b,SALTS_EINVAL,"Duplicate child/children");
-                saw_child=true;
-                if(!spec->allows_children)return fail(b,SALTS_EINVAL,"Leaf cannot have children");
-                status=multiple?children(b,field,index,depth):
-                    flat_branch(b,field,index,depth);
-                if(status!=SALTS_OK)return status;
-            } else {
-                tstr text=NULL;
-                if(!canonical_param(spec,key)) {
-                    char message[256];
-                    (void)snprintf(message,sizeof message,
-                        "Unknown orchestration parameter '%s' for node type '%s'",
-                        key,spec->name);
-                    tstr_free(key);
-                    return fail_at(b,SALTS_EINVAL,field,message);
-                }
-                status=praktor_yaml_scalar(field,&text,NULL);
-                if(status!=SALTS_OK) {
-                    tstr_free(key);
-                    return fail_at(b,status,field,"Orchestration parameter must be scalar");
-                }
-                status=param(b,index,key,text);
-                if(status!=SALTS_OK)return status;
+            if(status!=SALTS_OK)
+                return fail_at(b,status,field,"Cannot decode orchestration parameter key");
+            if(key_is(key,"child")) {
+                has_child=true;tstr_free(key);continue;
             }
+            if(key_is(key,"children")) {
+                has_children=true;tstr_free(key);continue;
+            }
+            canonical=canonical_param(spec,key);
+            if(!canonical) {
+                char message[256];
+                (void)snprintf(message,sizeof message,
+                    "Unknown orchestration parameter '%s' for node type '%s'",
+                    key,type_lower);
+                tstr_free(key);
+                return fail_at(b,SALTS_EINVAL,field,message);
+            }
+            status=praktor_yaml_scalar(field,&text,NULL);
+            if(status!=SALTS_OK) {
+                char message[256];
+                (void)snprintf(message,sizeof message,
+                    "Orchestration parameter '%s' for node type '%s' must be a scalar",
+                    key,type_lower);
+                tstr_free(key);
+                return fail_at(b,status,field,message);
+            }
+            status=param(b,index,key,text);
+            if(status!=SALTS_OK)return status;
+        }
+        if(has_child&&has_children)
+            return fail_at(b,SALTS_EINVAL,value,
+                "Orchestration node cannot define both 'child' and 'children'");
+        /* The flags above use the legacy normalized-key test, but subsequent
+         * retrieval deliberately uses the same exact raw sibling name as the
+         * legacy node["child"]/node["children"] operator. */
+        if(has_children||has_child) {
+            praktor_yaml_node branch={0};
+            const char *name=has_children?"children":"child";
+            status=praktor_yaml_get(value,name,&branch,NULL);
+            if(status!=SALTS_OK)
+                return fail_at(b,SALTS_EINVAL,value,
+                    "Orchestration child field is not accessible by its canonical name");
+            if(!spec->allows_children) {
+                char message[128];
+                (void)snprintf(message,sizeof message,
+                    "Leaf node '%s' cannot have children",type_lower);
+                return fail_at(b,SALTS_EINVAL,branch,message);
+            }
+            return has_children?children(b,branch,index,depth):
+                flat_branch(b,branch,index,depth);
         }
         return SALTS_OK;
     }
