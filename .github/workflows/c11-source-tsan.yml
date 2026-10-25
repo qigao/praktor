@@ -323,33 +323,13 @@ jobs:
           export LD_LIBRARY_PATH="$SALTS_SOURCE_TSAN_ROOT/lib:$SALTS_UTILS_SOURCE_TSAN_ROOT/lib:$CHTTP_ROOT/lib:${LD_LIBRARY_PATH:-}"
           ctest --test-dir build/p1-praktor-tsan \
             --no-tests=error --output-on-failure --parallel 1 --timeout 90 \
-            -R '^(schema_projection_cli|schema_projection_test|schema_projection_cli_usage|expression_lexer_test|expression_evaluator_c_test|yaml_document_c_test|yaml_document_fault_test|yaml_document_legacy_fault_test|yaml_fields_c_test|yaml_fields_fault_test|yaml_value_c_test|yaml_value_fault_test|yaml_action_c_test|yaml_action_fault_test|yaml_task_fields_c_test|yaml_task_fields_fault_test|orch_tree_c_test|orch_tree_fault_test|workflow_profile_c_test|praktor_file_hash_c_test|praktor_init_c_test|workflow_contract_api_test\.Praktor|host_tool_api_test\.Praktor|workflow_value_c_test|workflow_value_fault_test|workflow_value_test\.praktor_lib|structured_document_query_c_test|structured_document_query_test\.praktor_lib|expression_evaluator_test\.praktor_lib|actions_output_core_test|test_output_parser|shell_executor_test|praktor_process_driver_test|praktor_process_worker_test|praktor_process_control_test|praktor_process_native_test|praktor_service_control_test|praktor_service_process_test|service_executor_test\.praktor_lib|managed_process_executor_test\.praktor_lib|core_only_workflow_test\.praktor_lib|actions_c11_tree_executor_session_test|actions_c11_session_yaml_differential_test|workflow_task_registry_c_test|workflow_task_registry_fault_test|actions_c11_workflow_parallel_commit_test|actions_c11_workflow_parallel_commit_fault_test|actions_c11_workflow_parallel_executor_test|actions_c11_workflow_parallel_worker_test|actions_c11_workflow_parallel_process_guard_test|actions_c11_workflow_parallel_process_guard_fault_test|actions_c11_workflow_parallel_process_driver_test)
+            -R '^(schema_projection_cli|schema_projection_test|schema_projection_cli_usage|expression_lexer_test|expression_evaluator_c_test|yaml_document_c_test|yaml_document_fault_test|yaml_document_legacy_fault_test|yaml_fields_c_test|yaml_fields_fault_test|yaml_value_c_test|yaml_value_fault_test|yaml_action_c_test|yaml_action_fault_test|yaml_task_fields_c_test|yaml_task_fields_fault_test|orch_tree_c_test|orch_tree_fault_test|workflow_profile_c_test|praktor_file_hash_c_test|praktor_init_c_test|workflow_contract_api_test\.Praktor|host_tool_api_test\.Praktor|workflow_value_c_test|workflow_value_fault_test|workflow_value_test\.praktor_lib|structured_document_query_c_test|structured_document_query_test\.praktor_lib|expression_evaluator_test\.praktor_lib|actions_output_core_test|test_output_parser|shell_executor_test|praktor_process_driver_test|praktor_process_worker_test|praktor_process_control_test|praktor_process_native_test|praktor_service_control_test|praktor_service_process_test|service_executor_test\.praktor_lib|managed_process_executor_test\.praktor_lib|core_only_workflow_test\.praktor_lib|actions_c11_tree_executor_session_test|actions_c11_session_yaml_differential_test|workflow_task_registry_c_test|workflow_task_registry_fault_test|actions_c11_workflow_parallel_commit_test|actions_c11_workflow_parallel_commit_fault_test|actions_c11_workflow_parallel_executor_test|actions_c11_workflow_parallel_worker_test|actions_c11_workflow_parallel_process_guard_test|actions_c11_workflow_parallel_process_guard_fault_test|actions_c11_workflow_parallel_process_driver_test)'
 
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: c11-complete-source-tsan-evidence
-          if-no-files-found: ignore
-          retention-days: 14
-          path: |
-            ${{ runner.temp }}/praktor-curl-cache.log
-            build/p1-native-c-tsan/Testing/Temporary/LastTest.log
-            build/p1-session-standalone-tsan/Testing/Temporary/LastTest.log
-            build/p1-session-c-tsan/Testing/Temporary/LastTest.log
-            build/p1-source-tsan-audit.json
-            build/p1-source-tsan-linked-libraries.txt
-            build/p1-salts-tsan/compile_commands.json
-            build/p1-salts-utils-tsan/compile_commands.json
-            build/p1-salts-utils-tsan/Testing/Temporary/LastTest.log
-            build/p1-praktor-tsan/Testing/Temporary/LastTest.log
-            build/p1-salts-tsan/CMakeFiles/CMakeConfigureLog.yaml
-            build/p1-salts-utils-tsan/CMakeFiles/CMakeConfigureLog.yaml
-
-
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: c11-complete-source-tsan-evidence
+          name: c11-complete-source-tsan-evidence-${{ github.run_attempt }}
+          overwrite: true
           if-no-files-found: ignore
           retention-days: 14
           path: |
