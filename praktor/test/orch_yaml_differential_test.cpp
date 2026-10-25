@@ -233,6 +233,45 @@ spec("C11 named orchestration CSTL AST parity with legacy parser") {
         check(compared>=7);
     }
 
+    it("preserves legacy named-map parameter error precedence and locations") {
+        const char *source=
+            "Sequence:\n"
+            "  child:\n"
+            "    Shell: {cmd: [bad]}\n"
+            "  bogus: wrong\n";
+        TaskYamlDetail::YamlDocument document(source);
+        std::string legacy_error;
+        try { (void)TaskYamlDetail::parse_orch_node(document.root()); }
+        catch (const std::exception& e) { legacy_error=e.what(); }
+        praktor_orch_tree *native=nullptr;
+        char error[256]{};
+        const int status=praktor_orch_from_named_yaml(
+            document.root().native(),&native,error,sizeof error);
+        check(status!=SALTS_OK);
+        check(native==nullptr);
+        check(legacy_error.find("Unknown orchestration parameter 'bogus'")!=std::string::npos);
+        check(std::string(error).find("Unknown orchestration parameter 'bogus'")!=std::string::npos);
+        check(legacy_error.find("at line")!=std::string::npos);
+        check(std::string(error).find("at line")!=std::string::npos);
+    }
+    it("preserves legacy named-map child/children conflict precedence") {
+        const char *source=
+            "Sequence:\n"
+            "  child: {Shell: {cmd: first}}\n"
+            "  children: [{Shell: {cmd: second}}]\n";
+        TaskYamlDetail::YamlDocument document(source);
+        std::string legacy_error;
+        try { (void)TaskYamlDetail::parse_orch_node(document.root()); }
+        catch (const std::exception& e) { legacy_error=e.what(); }
+        praktor_orch_tree *native=nullptr;
+        char error[256]{};
+        check(praktor_orch_from_named_yaml(document.root().native(),
+            &native,error,sizeof error)!=SALTS_OK);
+        check(native==nullptr);
+        check(legacy_error.find("both 'child' and 'children'")!=std::string::npos);
+        check(std::string(error).find("both 'child' and 'children'")!=std::string::npos);
+    }
+
     it("agrees with legacy on invalid flat forms and never publishes partial ASTs") {
         struct FlatCase { const char *kind; const char *source; };
         const FlatCase cases[] = {
