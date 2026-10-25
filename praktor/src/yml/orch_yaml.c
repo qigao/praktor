@@ -475,7 +475,14 @@ static int flat_parse(named_build *b,praktor_yaml_node map,size_t parent,unsigne
         if(!flat_find_field(map,"then",&branch))return fail(b,SALTS_EINVAL,"if requires a then branch");
         status=flat_branch(b,branch,index,depth);
         if(status!=SALTS_OK)return status;
-        if(flat_find_field(map,"else",&branch))return flat_branch(b,branch,index,depth);
+        /* Optionality is a presence decision, not a failed lookup: ENOMEM
+         * while fetching a present branch must never commit a shortened AST. */
+        if(praktor_yaml_has(map,"else")) {
+            status=praktor_yaml_get(map,"else",&branch,NULL);
+            if(status!=SALTS_OK)
+                return fail_at(b,status,map,"Cannot read orchestration else branch");
+            return flat_branch(b,branch,index,depth);
+        }
         return SALTS_OK;
     }
     if(type==PRAKTOR_ORCH_WHILE_DO) {
@@ -490,8 +497,11 @@ static int flat_parse(named_build *b,praktor_yaml_node map,size_t parent,unsigne
             status=flat_branch(b,field,index,depth);
             if(status!=SALTS_OK)return status;
         }
-        if(flat_find_field(map,"max_iterations",&field)) {
+        if(praktor_yaml_has(map,"max_iterations")) {
             tstr value=NULL;
+            status=praktor_yaml_get(map,"max_iterations",&field,NULL);
+            if(status!=SALTS_OK)
+                return fail_at(b,status,map,"Cannot read orchestration max_iterations");
             status=praktor_yaml_scalar(field,&value,NULL);
             if(status!=SALTS_OK)return fail(b,SALTS_EINVAL,"Orchestration max_iterations must be an integer scalar");
             status=flat_validate_integer(b,value);
@@ -527,10 +537,14 @@ static int flat_parse(named_build *b,praktor_yaml_node map,size_t parent,unsigne
     }
     {
         praktor_yaml_node value_node={0},from_node={0};
-        bool has_value=flat_find_field(map,"value",&value_node);
-        bool has_from=flat_find_field(map,"from",&from_node);
-        if(has_value==has_from)return fail(b,SALTS_EINVAL,"set_variable requires exactly one of value or from");
-        field=has_value?value_node:from_node;
+        bool has_value=praktor_yaml_has(map,"value");
+        bool has_from=praktor_yaml_has(map,"from");
+        if(has_value==has_from)
+            return fail(b,SALTS_EINVAL,"set_variable requires exactly one of value or from");
+        field=(praktor_yaml_node){0};
+        status=praktor_yaml_get(map,has_value?"value":"from",&field,NULL);
+        if(status!=SALTS_OK)
+            return fail_at(b,status,map,"Cannot read orchestration value/from");
         {
             tstr value=NULL;
             status=praktor_yaml_scalar(field,&value,NULL);
