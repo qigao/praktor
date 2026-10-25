@@ -182,4 +182,43 @@ spec("C11 typed task registry owner fault rollback") {
         praktor_workflow_task_registry_destroy(owner);
         check(live_count==0u);
     }
+    it("never publishes one field of a partially built typed output batch") {
+        praktor_workflow_snapshot *snapshot=make_snapshot();
+        praktor_workflow_task_registry *owner=NULL;
+        json_value_t *old=json_create_string("old");
+        const char *source="{\"alpha\":\"new\",\"beta\":{\"n\":3}}";
+        json_value_t *batch=json_parse(source,strlen(source));
+        unsigned point;
+        fault_at(0u);
+        check(old&&batch);
+        check(praktor_workflow_task_registry_create(snapshot,&owner)==SALTS_OK);
+        praktor_workflow_snapshot_destroy(snapshot);
+        check(praktor_workflow_task_registry_set_output(owner,0u,
+            vstr_from_cstr("alpha"),old)==SALTS_OK);
+        for(point=1u;point<30u;++point) {
+            int status;
+            bool hit;
+            fault_at(point);
+            status=praktor_workflow_task_registry_merge_outputs(owner,0u,batch);
+            hit=injected;
+            fault_at(0u);
+            if(hit) {
+                const json_value_t *outputs=owner->slots[0].outputs;
+                const char *value=json_get_string(outputs,"alpha");
+                check(status==SALTS_ENOMEM);
+                check(value&&strcmp(value,"old")==0);
+                check(json_object_get(outputs,"beta")==NULL);
+                check(owner->slots[0].state==PRAKTOR_WORKFLOW_TASK_RUNNING);
+            } else {
+                check(status==SALTS_OK);
+                check(json_get_string(owner->slots[0].outputs,"alpha")!=NULL);
+            }
+            if(!hit)break;
+        }
+        check(point>1u&&point<30u);
+        json_free(batch);json_free(old);
+        praktor_workflow_task_registry_destroy(owner);
+        check(live_count==0u);
+    }
+
 }
