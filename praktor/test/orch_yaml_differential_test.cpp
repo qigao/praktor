@@ -1045,4 +1045,46 @@ spec("C11 typed task output ownership versus accepted TaskRegistry outcomes") {
             json_serialize_free(actual);
         }
     }
+    it("matches successful multi-output updates before finalization") {
+        const char *yaml=
+            "tasks:\n"
+            "  - {name: collect, command: echo collect}\n";
+        praktor_workflow_snapshot *snapshot=nullptr;
+        check(praktor_workflow_snapshot_create_inline(
+            vstr_from_cstr(yaml),&snapshot,nullptr,0)==SALTS_OK);
+        praktor_workflow_task_registry *owner=nullptr;
+        check(praktor_workflow_task_registry_create(snapshot,&owner)==SALTS_OK);
+        praktor_workflow_snapshot_destroy(snapshot);
+        std::unique_ptr<praktor_workflow_task_registry,
+                        decltype(&praktor_workflow_task_registry_destroy)> native(
+            owner,&praktor_workflow_task_registry_destroy);
+        if(!native)return;
+        TaskRegistry legacy;
+        const WorkflowValue first=WorkflowValue::parse(
+            "{\"one\":{\"v\":1},\"two\":[true,false]}");
+        const WorkflowValue patch=WorkflowValue::parse(
+            "{\"one\":{\"v\":2},\"three\":1234567890123456789}");
+        legacy.mergeOutputs("collect",first);
+        check(praktor_workflow_task_registry_merge_outputs(
+            native.get(),0u,first.raw())==SALTS_OK);
+        legacy.mergeOutputs("collect",patch);
+        check(praktor_workflow_task_registry_merge_outputs(
+            native.get(),0u,patch.raw())==SALTS_OK);
+        legacy.markCompleted("collect");
+        check(praktor_workflow_task_registry_complete(native.get(),0u)==SALTS_OK);
+        for(const char *key:{"one","two","three"}) {
+            const json_value_t *value=nullptr;
+            check(praktor_workflow_task_registry_get_output(
+                native.get(),0u,vstr_from_cstr(key),&value)==SALTS_OK);
+            if(value) {
+                char *encoded=json_serialize(value,nullptr);
+                check(encoded!=nullptr);
+                if(encoded) {
+                    check(legacy.getOutput("collect",key).to_string()==encoded);
+                    json_serialize_free(encoded);
+                }
+            }
+        }
+    }
+
 }
