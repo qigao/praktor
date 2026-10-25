@@ -344,9 +344,74 @@ static void parse_key_value(void) {
   praktor_c11_native_host_destroy(&host);
 }
 
+static void parse_json_native(void) {
+  praktor_c11_native_host host={0};
+  praktor_c11_bt_host hooks={0};
+  praktor_c11_value_store *values;
+  praktor_c11_leaf_parameter ports[2]={
+      {"path",PRAKTOR_C11_LEAF_STRING,"items[1].name",0.0,false},
+      {"output_key",PRAKTOR_C11_LEAF_STRING,"result",0.0,false}};
+  praktor_c11_leaf_request request={0u,"ParseJson",ports,2u,false,NULL};
+  salts_bt_node_status outcome=SALTS_BT_FAILURE;
+  char copied[257]={0};
+  size_t length=0u;
+  check(praktor_c11_native_host_init(&host,4u,64u,256u)==SALTS_OK);
+  check(praktor_c11_native_host_bind(&host,&hooks)==SALTS_OK);
+  values=praktor_c11_native_host_values(&host);
+  check(praktor_c11_value_store_set(values,"shell_output",
+       "{\"items\":[{\"name\":\"alpha\"},{\"name\":\"beta\"}],\"ok\":true}")==
+       PRAKTOR_C11_VALUE_OK);
+  check(praktor_c11_value_store_set(values,"result","prior")==PRAKTOR_C11_VALUE_OK);
+  check(hooks.tick_typed_leaf(hooks.user,&request,&outcome)==SALTS_OK&&
+        outcome==SALTS_BT_SUCCESS);
+  check(praktor_c11_value_store_get(values,"result",copied,sizeof copied,
+        &length)==PRAKTOR_C11_VALUE_OK&&strcmp(copied,"beta")==0);
+  ports[0].text="  $.items[0].name  ";
+  check(hooks.tick_typed_leaf(hooks.user,&request,&outcome)==SALTS_OK&&
+        outcome==SALTS_BT_SUCCESS);
+  check(praktor_c11_value_store_get(values,"result",copied,sizeof copied,
+        &length)==PRAKTOR_C11_VALUE_OK&&strcmp(copied,"alpha")==0);
+  ports[0].text="ok";
+  check(hooks.tick_typed_leaf(hooks.user,&request,&outcome)==SALTS_OK&&
+        outcome==SALTS_BT_SUCCESS);
+  check(praktor_c11_value_store_get(values,"result",copied,sizeof copied,
+        &length)==PRAKTOR_C11_VALUE_OK&&strcmp(copied,"true")==0);
+  /* No match and malformed JSON must not modify prior typed/text output. */
+  ports[0].text="items[99].name";
+  check(hooks.tick_typed_leaf(hooks.user,&request,&outcome)==SALTS_OK&&
+        outcome==SALTS_BT_FAILURE);
+  check(praktor_c11_value_store_get(values,"result",copied,sizeof copied,
+        &length)==PRAKTOR_C11_VALUE_OK&&strcmp(copied,"true")==0);
+  ports[0].text="$";
+  check(praktor_c11_value_store_set(values,"shell_output","{broken")==
+        PRAKTOR_C11_VALUE_OK);
+  check(hooks.tick_typed_leaf(hooks.user,&request,&outcome)==SALTS_OK&&
+        outcome==SALTS_BT_FAILURE);
+  check(praktor_c11_value_store_get(values,"result",copied,sizeof copied,
+        &length)==PRAKTOR_C11_VALUE_OK&&strcmp(copied,"true")==0);
+  /* JSON \u0000 becomes a binary string. Native text store rejects it. */
+  check(praktor_c11_value_store_set(values,"shell_output",
+       "{\"value\":\"a\\u0000b\"}")==PRAKTOR_C11_VALUE_OK);
+  ports[0].text="value";
+  check(hooks.tick_typed_leaf(hooks.user,&request,&outcome)==SALTS_ENOTSUP);
+  check(praktor_c11_value_store_get(values,"result",copied,sizeof copied,
+        &length)==PRAKTOR_C11_VALUE_OK&&strcmp(copied,"true")==0);
+  /* A full store rejects a third key; cannot publish partial results. */
+  check(praktor_c11_value_store_set(values,"shell_output","{\"value\":7}")==
+        PRAKTOR_C11_VALUE_OK);
+  check(praktor_c11_value_store_set(values,"other","occupied")==PRAKTOR_C11_VALUE_OK);
+  check(praktor_c11_value_store_set(values,"fourth","occupied")==PRAKTOR_C11_VALUE_OK);
+  ports[1].text="fifth";
+  check(hooks.tick_typed_leaf(hooks.user,&request,&outcome)==SALTS_ENOBUFS);
+  check(praktor_c11_value_store_get(values,"result",copied,sizeof copied,
+        &length)==PRAKTOR_C11_VALUE_OK&&strcmp(copied,"true")==0);
+  praktor_c11_native_host_destroy(&host);
+}
+
 spec("C11 Native Host") {
   it("dispatches bounded typed values and fails closed") { stateless_leaves(); }
   it("owns cooperative Sleep activations per Session") { sleep_leaves(); }
+  it("selects canonical JSONPath values without partial C11 output publication") { parse_json_native(); }
   it("parses lines with Legacy newline and parameter semantics") { parse_lines(); }
   it("extracts bounded POSIX capture groups without the C++ Executor") { parse_regex(); }
   it("fails closed at configured regex cache and capture bounds") { parse_regex_bounds(); }

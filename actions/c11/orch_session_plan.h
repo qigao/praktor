@@ -54,6 +54,14 @@ int praktor_c11_orch_session_plan_create_native_command(
     const praktor_orch_tree *tree,const salts_bt_tree_config *limits,
     praktor_c11_orch_session_plan **out,
     char *error,size_t error_capacity);
+/* Explicit C11 qualification for canonical single-command JSON postprocessing:
+ * Sequence -> one Shell -> one ParseJson, with the canonical stdout handoff.
+ * Other parser combinations, multi-command flows and ordinary create()
+ * remain fail-closed. Requires an initialized Process retainer. Test-only. */
+int praktor_c11_orch_session_plan_create_native_command_json(
+    const praktor_orch_tree *tree,const salts_bt_tree_config *limits,
+    praktor_c11_orch_session_plan **out,
+    char *error,size_t error_capacity);
 void praktor_c11_orch_session_plan_destroy(
     praktor_c11_orch_session_plan *plan);
 size_t praktor_c11_orch_session_plan_node_count(

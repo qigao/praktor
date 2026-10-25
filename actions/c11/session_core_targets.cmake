@@ -4,7 +4,7 @@ include(${CMAKE_CURRENT_LIST_DIR}/regex_tre_target.cmake)
 add_library(praktor_c11_native_host STATIC
     ${CMAKE_CURRENT_LIST_DIR}/native_host.c)
 target_include_directories(praktor_c11_native_host PUBLIC ${CMAKE_CURRENT_LIST_DIR})
-target_link_libraries(praktor_c11_native_host PUBLIC praktor_c11_value_store praktor_c11_bt_core PRIVATE Salts::Platform praktor_output_core praktor_regex_tre)
+target_link_libraries(praktor_c11_native_host PUBLIC praktor_c11_value_store praktor_c11_bt_core PRIVATE Salts::Platform Salts::JsonParser praktor_output_core praktor_regex_tre)
 target_compile_features(praktor_c11_native_host PUBLIC c_std_11)
 if(UNIX)
     target_link_libraries(praktor_c11_native_host PRIVATE m)

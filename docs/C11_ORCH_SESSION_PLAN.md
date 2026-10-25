@@ -168,4 +168,32 @@ single-command gate. A canonical command with more than one Shell child
 is also ineligible. This does **not** assert ParseJson parity, command
 sequence ownership, Mustache expansion, or a production cutover.
 
+## Bounded C11 ParseJson / canonical JSON command
+
+The original C++ `OutputParser::parseJson()` uses SaltsUtils JSON DOM and
+JSONPath. The native C11 Host now calls those same installed parser APIs:
+trim/normalize paths, select the **first** JSONPath match, emit raw text for
+JSON strings, and canonical serialized JSON for numbers, arrays, objects,
+booleans or null. Missing input, invalid JSON, bad paths and absent matches
+return a leaf FAILURE without modifying previously published output. An
+embedded-NUL JSON string is explicitly `ENOTSUP` because the existing C11
+ValueStore is text-only; oversize/capacity failures remain strong and bounded.
+
+A separate opt-in `praktor_c11_orch_session_plan_create_native_command_json()`
+admits only the canonical three-node `Sequence -> Shell -> ParseJson` form
+with a single Shell, exactly the established `stdout` input/output binding,
+and a real initialized SaltsUtils Process retainer. Default Plan creation
+still refuses command-derived Shell; `create_native_command()` remains
+strictly the two-node single command without postprocessors. Native
+`ParseJson` itself is allowed as a separately qualified leaf with a
+NativeHost.
+
+The actual `command: echo 7` plus `parse_json: {path: '$', output_key: parsed}`
+DAG test drives real CFlow ManualExecutor and OS process, then stages only
+`parsed=7` for Process/TaskRegistry group publication. The dependent
+CheckExitCode task can run only after root visibility and DAG admission.
+`parse_regex`, multi-command execution, script, arbitrary JSONPath
+streaming, Mustache and general command postprocessors have **not** been
+admitted by this narrow command-JSON profile.
+
 PR #79 stays **Draft / do not merge** until full cutover gates pass.

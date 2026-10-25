@@ -1,6 +1,8 @@
 #include "native_host.h"
 #include "core/output_scan.h"
 #include "regex_tre.h"
+#include <json_parser.h>
+#include <ctype.h>
 #include <salts/clock.h>
 #include <errno.h>
 #include <limits.h>
@@ -337,6 +339,88 @@ static int tick_parse_lines(native_host_impl *impl,
   return SALTS_OK;
 }
 
+/* Native JSONPath delegates to the canonical installed C11 SaltsUtils parser.
+ * Equivalent to Legacy OutputParser::parseJson for UTF-8 text: normalize
+ * paths, select first match, unquote JSON strings, serialize other values.
+ * Parse/no-match failure leaves existing outputs untouched. Binary JSON
+ * strings cannot be stored in the bounded C11 text store and fail closed. */
+static int tick_parse_json(native_host_impl *impl,
+                           const praktor_c11_leaf_request *request,
+                           salts_bt_node_status *status) {
+  const praktor_c11_leaf_parameter *param;
+  char *key=impl->scratch;
+  char *input=key+impl->scratch_capacity;
+  char *path=input+impl->scratch_capacity;
+  char *temporary=path+impl->scratch_capacity;
+  char *out_key=temporary+impl->scratch_capacity;
+  json_value_t *document=NULL,*selected=NULL;
+  char *serialized=NULL;
+  const char *value=NULL;
+  size_t required=0u,length=0u;
+  int r;
+  param=parameter(request,"input_key");
+  r=param ? resolve(impl,param,key,temporary)
+          : copy_text(key,impl->scratch_capacity,"shell_output");
+  if(r!=SALTS_OK)return r;
+  r=praktor_c11_value_store_get(&impl->values,key,input,
+                                impl->scratch_capacity,&required);
+  if(r==PRAKTOR_C11_VALUE_ENOTFOUND){*status=SALTS_BT_FAILURE;return SALTS_OK;}
+  if(r!=PRAKTOR_C11_VALUE_OK)
+    return r==PRAKTOR_C11_VALUE_ENOBUFS?SALTS_ENOBUFS:SALTS_EINVAL;
+  param=parameter(request,"path");
+  r=param?resolve(impl,param,path,temporary)
+         :copy_text(path,impl->scratch_capacity,"");
+  if(r!=SALTS_OK)return r;
+  /* Legacy trims whitespace before converting key and array notation. */
+  {
+    char *start=path;
+    while(*start&&isspace((unsigned char)*start))++start;
+    length=strlen(start);
+    while(length&&isspace((unsigned char)start[length-1u]))--length;
+    memmove(path,start,length);path[length]='\0';
+  }
+  length=strlen(path);
+  if(!length){r=copy_text(path,impl->scratch_capacity,"$");if(r!=SALTS_OK)return r;}
+  else if(path[0]=='['){
+    if(length+1u>=impl->scratch_capacity)return SALTS_ENOBUFS;
+    memmove(path+1u,path,length+1u);path[0]='$';
+  }else if(path[0]!='$'){
+    if(length+2u>=impl->scratch_capacity)return SALTS_ENOBUFS;
+    memmove(path+2u,path,length+1u);path[0]='$';path[1]='.';
+  }
+  param=parameter(request,"output_key");
+  r=param?resolve(impl,param,out_key,temporary)
+         :copy_text(out_key,impl->scratch_capacity,"parsed_output");
+  if(r!=SALTS_OK)return r;
+  document=json_parse(input,strlen(input));
+  if(!document){*status=SALTS_BT_FAILURE;return SALTS_OK;}
+  selected=json_path_get(document,path); /* borrowed from document */
+  if(!selected){json_free(document);*status=SALTS_BT_FAILURE;return SALTS_OK;}
+  if(json_type(selected)==JSON_STRING){
+    value=json_string(selected);
+    length=json_string_len(selected);
+    if((!value&&length)||(length&&memchr(value,'\0',length))){
+      json_free(document);return SALTS_ENOTSUP;
+    }
+    if(!value)value="";
+  }else{
+    serialized=json_serialize(selected,&length);
+    if(!serialized){json_free(document);return SALTS_ENOMEM;}
+    value=serialized;
+  }
+  if(length>=impl->scratch_capacity)r=SALTS_ENOBUFS;
+  else{
+    int write=praktor_c11_value_store_set(&impl->values,out_key,value);
+    r=write==PRAKTOR_C11_VALUE_OK?SALTS_OK:
+      write==PRAKTOR_C11_VALUE_ENOMEM?SALTS_ENOMEM:
+      write==PRAKTOR_C11_VALUE_EINVAL?SALTS_EINVAL:SALTS_ENOBUFS;
+  }
+  json_serialize_free(serialized);
+  json_free(document);
+  if(r!=SALTS_OK)return r;
+  *status=SALTS_BT_SUCCESS;return SALTS_OK;
+}
+
 static int tick_parse_regex(native_host_impl *impl,
                             const praktor_c11_leaf_request *request,
                             salts_bt_node_status *status) {
@@ -464,6 +548,7 @@ static int tick_leaf(void *user, const praktor_c11_leaf_request *request,
   }
   if (strcmp(request->action, "Sleep") == 0) return tick_sleep(impl, request, status);
   if (find_sleep(impl, request) != NULL) return SALTS_EINVAL;
+  if (strcmp(request->action, "ParseJson") == 0) return tick_parse_json(impl, request, status);
   if (strcmp(request->action, "ParseRegex") == 0) return tick_parse_regex(impl, request, status);
   if (strcmp(request->action, "ParseLines") == 0) return tick_parse_lines(impl, request, status);
   if (strcmp(request->action, "ParseKeyValue") == 0) return tick_parse_key_value(impl, request, status);

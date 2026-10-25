@@ -6,8 +6,9 @@
 extern "C" {
 #endif
 /* Single-driver owner: fixed-capacity values and preallocated parameter scratch.
- * Typed SetVariable, CheckExitCode, cooperative Sleep, ParseRegex, filtered
- * ParseLines, and ParseKeyValue (sorted JSON, last duplicate wins).
+ * Typed SetVariable, CheckExitCode, cooperative Sleep, native ParseJson
+ * through canonical SaltsUtils JSONPath, ParseRegex, filtered ParseLines,
+ * and ParseKeyValue (sorted JSON, last duplicate wins).
  * No legacy objects. Regex cache misses compile within fixed slot/pattern bounds;
  * hits and all non-regex leaves allocate nothing per tick. Borrow hooks only
  * until destroy.
