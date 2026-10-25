@@ -234,21 +234,25 @@ cleanup:
     json_free(staged);
     return result;
 }
-int praktor_workflow_task_registry_merge_outputs(
-    praktor_workflow_task_registry *owner,size_t index,
-    const json_value_t *updates) {
-    task_slot *slot=slot_for(owner,index);
+/* Prepare a complete output object without changing the task or taking
+ * ownership of the caller's JSON. Single-field and grouped publication share
+ * this exact JsonParser admission path. */
+static int stage_output_update(const task_slot *slot,
+                               const json_value_t *updates,
+                               json_value_t **out) {
     json_value_t *staged=NULL;
     json_budget budget={0};
     size_t i;
     int status=SALTS_EINVAL;
-    if(!owner||!updates||json_type(updates)!=JSON_OBJECT)return status;
-    if(!slot)return SALTS_ENOENT;
-    if(finalized(slot->state))return SALTS_EBUSY;
-    if(!admissible_json(updates,1u,&budget))return status;
-    if(json_object_size(updates)>PRAKTOR_WORKFLOW_TASK_MAX_OUTPUTS)
+    if(!slot||!updates||!out||json_type(updates)!=JSON_OBJECT)
         return status;
-    if(json_object_size(updates)==0u)return SALTS_OK;
+    if(!admissible_json(updates,1u,&budget)||
+       json_object_size(updates)>PRAKTOR_WORKFLOW_TASK_MAX_OUTPUTS)
+        return status;
+    if(json_object_size(updates)==0u) {
+        *out=NULL;
+        return SALTS_OK;
+    }
     staged=slot->outputs?json_clone(slot->outputs):json_create_object();
     if(!staged)return SALTS_ENOMEM;
     for(i=0;i<json_object_size(updates);++i) {
@@ -267,19 +271,130 @@ int praktor_workflow_task_registry_merge_outputs(
             status=SALTS_ENOMEM;
             goto done;
         }
-        /* Success transfers this clone to the provisional JSON owner. */
     }
     if(json_object_size(staged)>PRAKTOR_WORKFLOW_TASK_MAX_OUTPUTS)goto done;
     budget=(json_budget){0};
     if(!admissible_json(staged,1u,&budget))goto done;
+    *out=staged;
+    return SALTS_OK;
+done:
+    json_free(staged);
+    return status;
+}
+int praktor_workflow_task_registry_merge_outputs(
+    praktor_workflow_task_registry *owner,size_t index,
+    const json_value_t *updates) {
+    task_slot *slot=slot_for(owner,index);
+    json_value_t *staged=NULL;
+    int status;
+    if(!owner||!updates||json_type(updates)!=JSON_OBJECT)return SALTS_EINVAL;
+    if(!slot)return SALTS_ENOENT;
+    if(finalized(slot->state))return SALTS_EBUSY;
+    status=stage_output_update(slot,updates,&staged);
+    if(status!=SALTS_OK||!staged)return status;
     json_free(slot->outputs);
     slot->outputs=staged;
     if(slot->state==PRAKTOR_WORKFLOW_TASK_PENDING)
         slot->state=PRAKTOR_WORKFLOW_TASK_RUNNING;
     return SALTS_OK;
-done:
-    json_free(staged);
+}
+
+typedef struct staged_output_entry {
+    size_t index;
+    json_value_t *staged;
+    const json_value_t *observed_outputs;
+    praktor_workflow_task_state observed_state;
+} staged_output_entry;
+struct praktor_workflow_task_output_group {
+    praktor_workflow_task_registry *owner;
+    staged_output_entry *entries;
+    size_t count;
+};
+void praktor_workflow_task_registry_discard_output_group(
+    praktor_workflow_task_output_group *group) {
+    size_t i;
+    if(!group)return;
+    if(group->entries)
+        for(i=0;i<group->count;++i)
+            json_free(group->entries[i].staged);
+    free(group->entries);
+    free(group);
+}
+int praktor_workflow_task_registry_prepare_output_group(
+    praktor_workflow_task_registry *owner,
+    const praktor_workflow_task_output_update *updates,size_t count,
+    praktor_workflow_task_output_group **out) {
+    praktor_workflow_task_output_group *group=NULL;
+    size_t i,j;
+    int status=SALTS_EINVAL;
+    if(!owner||!updates||!out||!count||count>owner->count)
+        return status;
+    /* Reject duplicate task slots before cloning any input. This keeps one
+     * deterministic publication per task and prevents ordering ambiguity. */
+    for(i=0;i<count;++i) {
+        if(updates[i].task_index>=owner->count||!updates[i].updates||
+           json_type(updates[i].updates)!=JSON_OBJECT)return status;
+        for(j=0;j<i;++j)
+            if(updates[i].task_index==updates[j].task_index)return status;
+    }
+    group=(praktor_workflow_task_output_group *)calloc(1,sizeof(*group));
+    if(!group)return SALTS_ENOMEM;
+    group->owner=owner;
+    group->count=count;
+    group->entries=(staged_output_entry *)calloc(count,sizeof(*group->entries));
+    if(!group->entries) {
+        status=SALTS_ENOMEM;
+        goto failed;
+    }
+    for(i=0;i<count;++i) {
+        task_slot *slot=&owner->slots[updates[i].task_index];
+        staged_output_entry *entry=&group->entries[i];
+        if(finalized(slot->state)) {
+            status=SALTS_EBUSY;
+            goto failed;
+        }
+        entry->index=updates[i].task_index;
+        entry->observed_state=slot->state;
+        entry->observed_outputs=slot->outputs;
+        status=stage_output_update(slot,updates[i].updates,&entry->staged);
+        if(status!=SALTS_OK)goto failed;
+    }
+    *out=group;
+    return SALTS_OK;
+failed:
+    praktor_workflow_task_registry_discard_output_group(group);
     return status;
+}
+int praktor_workflow_task_registry_publish_output_group(
+    praktor_workflow_task_registry *owner,
+    praktor_workflow_task_output_group **prepared) {
+    praktor_workflow_task_output_group *group;
+    size_t i;
+    if(!owner||!prepared||!(*prepared))return SALTS_EINVAL;
+    group=*prepared;
+    if(group->owner!=owner)return SALTS_EINVAL;
+    /* One owner turn: full preflight, then purely pointer swaps and releases.
+     * There are no allocations, callbacks or failure paths in publication. */
+    for(i=0;i<group->count;++i) {
+        const staged_output_entry *entry=&group->entries[i];
+        const task_slot *slot=&owner->slots[entry->index];
+        if(slot->state!=entry->observed_state||
+           slot->outputs!=entry->observed_outputs)
+            return SALTS_EBUSY;
+    }
+    for(i=0;i<group->count;++i) {
+        staged_output_entry *entry=&group->entries[i];
+        task_slot *slot=&owner->slots[entry->index];
+        if(!entry->staged)continue; /* Empty branch output is a no-op. */
+        json_free(slot->outputs);
+        slot->outputs=entry->staged;
+        entry->staged=NULL;
+        if(slot->state==PRAKTOR_WORKFLOW_TASK_PENDING)
+            slot->state=PRAKTOR_WORKFLOW_TASK_RUNNING;
+    }
+    *prepared=NULL;
+    praktor_workflow_task_registry_discard_output_group(group);
+    return SALTS_OK;
 }
 int praktor_workflow_task_registry_get_output(
     const praktor_workflow_task_registry *owner,size_t index,
