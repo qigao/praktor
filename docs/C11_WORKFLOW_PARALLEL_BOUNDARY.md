@@ -90,6 +90,30 @@ publishing. Do not infer them from a task status or child exit code alone.
   WorkerExecutor and Process barrier binaries, with source Salts dynamic-link
   attestation; building without running is not acceptance.
 
+## C11 DAG readiness qualification (source only)
+
+An experimental C11 `workflow_dag_state` now borrows the already-admitted
+`praktor_workflow_dependencies` graph. It counts remaining edges, reserves
+ready task indices in declaration order under a bounded concurrency limit,
+and waits for the **single application owner** to report completion or
+admission refusal. Duplicate dependencies retire with original cardinality.
+Failure/cancel/deadline seals future reservations; already-admitted siblings
+must settle before the state may be freed. This is not a second CFlow queue,
+thread pool, task registry, JSON owner, or graph parser.
+
+This first slice covers only workflows whose projected tasks are all regularly
+schedulable. Trigger-only tasks, dynamic/Each expansion, observer semantics,
+CFlow owner-loop dispatch, Process leases, and atomic Parallel publication
+must be composed explicitly and verified before production use. Graph lifetime
+is borrowed. Task completion must be relayed after actual CFlow callback
+finalization, and rejected admission must never pretend a callback occurred.
+The current simple completion walk scans the bounded graph's edge list; it is
+not a claimed large-DAG performance replacement.
+
+CI qualifies C11 dependency cardinality/capacity, deterministic admission,
+completed/failed/cancelled sibling settlement, refusal, and runtime safety
+in core-only, ASan/UBSan, and complete-source TSan test selections.
+
 ## Still outside this qualification
 
 The production DAG/trigger scheduler, structured WorkflowValue lexical scopes,

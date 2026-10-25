@@ -71,3 +71,11 @@ set_target_properties(workflow_task_registry_fault_test PROPERTIES
     C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF LINKER_LANGUAGE C)
 add_test(NAME workflow_task_registry_fault_test
     COMMAND workflow_task_registry_fault_test)
+
+add_executable(workflow_dag_state_c_test
+    ${CMAKE_CURRENT_LIST_DIR}/../../test/workflow_dag_state_test.c)
+target_link_libraries(workflow_dag_state_c_test PRIVATE
+    praktor_workflow_dag_state Salts::TinyTest)
+set_target_properties(workflow_dag_state_c_test PROPERTIES
+    C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF LINKER_LANGUAGE C)
+add_test(NAME workflow_dag_state_c_test COMMAND workflow_dag_state_c_test)
