@@ -34,9 +34,10 @@ static bool output_matches(const praktor_workflow_task_registry *owner,
 spec("C11 structured task status and immutable outputs") {
     it("owns typed nested JSON independently from its workflow and caller") {
         praktor_workflow_task_registry *owner=make_registry();
-        json_value_t *source=json_parse(
+        const char *source_text=
             "{\"records\":[{\"n\":9007199254740993,\"label\":\"中\"}],"
-            "\"enabled\":true}",65u);
+            "\"enabled\":true}";
+        json_value_t *source=json_parse(source_text,strlen(source_text));
         praktor_workflow_task_state state=PRAKTOR_WORKFLOW_TASK_FAILED;
         const json_value_t *visible=NULL;
         vstr name={0};
@@ -59,15 +60,22 @@ spec("C11 structured task status and immutable outputs") {
             "\"enabled\":true}"));
         check(praktor_workflow_task_registry_get_outputs(owner,0u,&visible)==SALTS_OK);
         check(visible&&json_object_size(visible)==1u);
-        check(praktor_workflow_task_registry_set_output(owner,0u,
-            vstr_from_cstr("after"),json_create_null())==SALTS_EBUSY);
+        {
+            json_value_t *after=json_create_null();
+            check(after!=NULL);
+            check(praktor_workflow_task_registry_set_output(owner,0u,
+                vstr_from_cstr("after"),after)==SALTS_EBUSY);
+            json_free(after);
+        }
         check(praktor_workflow_task_registry_complete(owner,0u)==SALTS_EBUSY);
         praktor_workflow_task_registry_destroy(owner);
     }
     it("replaces outputs atomically while running and finalizes failure") {
         praktor_workflow_task_registry *owner=make_registry();
-        json_value_t *first=json_parse("{\"epoch\":1}",11u);
-        json_value_t *second=json_parse("{\"epoch\":2,\"ok\":false}",22u);
+        const char *first_text="{\"epoch\":1}";
+        const char *second_text="{\"epoch\":2,\"ok\":false}";
+        json_value_t *first=json_parse(first_text,strlen(first_text));
+        json_value_t *second=json_parse(second_text,strlen(second_text));
         praktor_workflow_task_state state=PRAKTOR_WORKFLOW_TASK_PENDING;
         vstr reason={0};
         check(first&&second);
@@ -146,8 +154,13 @@ spec("C11 structured task status and immutable outputs") {
         check(borrow==sentinel);
         check(praktor_workflow_task_registry_skip(owner,0u)==SALTS_OK);
         check(praktor_workflow_task_registry_get_outputs(owner,0u,&borrow)==SALTS_EBUSY);
-        check(praktor_workflow_task_registry_set_output(owner,0u,
-            vstr_from_cstr("x"),json_create_bool(true))==SALTS_EBUSY);
+        {
+            json_value_t *value=json_create_bool(true);
+            check(value!=NULL);
+            check(praktor_workflow_task_registry_set_output(owner,0u,
+                vstr_from_cstr("x"),value)==SALTS_EBUSY);
+            json_free(value);
+        }
         check(praktor_workflow_task_registry_start(owner,0u)==SALTS_OK);
         check(praktor_workflow_task_registry_complete(owner,0u)==SALTS_OK);
         check(praktor_workflow_task_registry_get_outputs(owner,0u,&borrow)==SALTS_ENOENT);
