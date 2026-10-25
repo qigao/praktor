@@ -196,4 +196,64 @@ spec("C11 structured task status and immutable outputs") {
         praktor_workflow_task_registry_destroy(owner);
     }
 
+    it("prepares all task JSON before publication and survives source release") {
+        praktor_workflow_task_registry *owner=make_registry();
+        const char *first_text="{\"x\":1,\"obj\":{\"v\":true}}";
+        const char *second_text="{\"y\":[1,2,3]}";
+        json_value_t *first=json_parse(first_text,strlen(first_text));
+        json_value_t *second=json_parse(second_text,strlen(second_text));
+        praktor_workflow_task_output_update updates[2]={{0u,first},{1u,second}};
+        praktor_workflow_task_output_group *staged=NULL;
+        praktor_workflow_task_state state=PRAKTOR_WORKFLOW_TASK_FAILED;
+        check(first&&second);
+        check(praktor_workflow_task_registry_prepare_output_group(
+            owner,updates,2u,&staged)==SALTS_OK);
+        check(staged!=NULL);
+        json_free(first);json_free(second);
+        check(praktor_workflow_task_registry_state(owner,0u,&state)==SALTS_OK);
+        check(state==PRAKTOR_WORKFLOW_TASK_PENDING);
+        check(praktor_workflow_task_registry_publish_output_group(
+            owner,&staged)==SALTS_OK);
+        check(staged==NULL);
+        check(praktor_workflow_task_registry_complete(owner,0u)==SALTS_OK);
+        check(praktor_workflow_task_registry_complete(owner,1u)==SALTS_OK);
+        check(output_matches(owner,0u,"x","1"));
+        check(output_matches(owner,0u,"obj","{\"v\":true}"));
+        check(output_matches(owner,1u,"y","[1,2,3]"));
+        praktor_workflow_task_registry_destroy(owner);
+    }
+    it("refuses stale grouped outputs without partially mutating any task") {
+        praktor_workflow_task_registry *owner=make_registry();
+        json_value_t *first=json_create_string("bad-shape");
+        const char *valid_text="{\"x\":\"A\"}";
+        json_value_t *valid=json_parse(valid_text,strlen(valid_text));
+        praktor_workflow_task_output_update updates[2]={{0u,valid},{1u,first}};
+        praktor_workflow_task_output_group *staged=(praktor_workflow_task_output_group *)owner;
+        praktor_workflow_task_state state=PRAKTOR_WORKFLOW_TASK_FAILED;
+        check(praktor_workflow_task_registry_prepare_output_group(
+            owner,updates,2u,&staged)==SALTS_EINVAL);
+        check(staged==(praktor_workflow_task_output_group *)owner);
+        updates[1].updates=valid;
+        updates[1].task_index=0u;
+        check(praktor_workflow_task_registry_prepare_output_group(
+            owner,updates,2u,&staged)==SALTS_EINVAL);
+        check(staged==(praktor_workflow_task_output_group *)owner);
+        updates[1].task_index=1u;
+        staged=NULL;
+        check(praktor_workflow_task_registry_prepare_output_group(
+            owner,updates,2u,&staged)==SALTS_OK);
+        check(staged!=NULL);
+        check(praktor_workflow_task_registry_start(owner,1u)==SALTS_OK);
+        check(praktor_workflow_task_registry_publish_output_group(
+            owner,&staged)==SALTS_EBUSY);
+        check(staged!=NULL);
+        check(praktor_workflow_task_registry_state(owner,0u,&state)==SALTS_OK);
+        check(state==PRAKTOR_WORKFLOW_TASK_PENDING);
+        check(praktor_workflow_task_registry_state(owner,1u,&state)==SALTS_OK);
+        check(state==PRAKTOR_WORKFLOW_TASK_RUNNING);
+        praktor_workflow_task_registry_discard_output_group(staged);
+        json_free(first);json_free(valid);
+        praktor_workflow_task_registry_destroy(owner);
+    }
+
 }
