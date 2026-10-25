@@ -46,6 +46,32 @@ The native plan adapter does not re-enable retired Legacy node spellings. It als
 
 `actions_c11_orch_session_plan_test` checks actual YAML → Orch → Session compilation, SetVariable and CheckExitCode native effects, lifetime independence after destroying source/plan, running Sleep cancellation without a downstream SetVariable, Shell refusal without fallback, embedded-NUL refusal and bounded-node rejection. The test is included in normal CTest, lifecycle ASan/UBSan and complete-source TSan with a required-name admission assertion.
 
+## Owner-driven native leaf DAG qualification
+
+The next opt-in \`actions_c11_orch_dag_native_session_test\` starts from two
+canonical YAML task bodies: a flat \`set_variable\` with a dependency, and a
+named Sequence containing CheckExitCode and zero-duration Sleep. Each DAG task
+gets a separately owned C11 Session and NativeHost. The existing CFlow
+**ManualExecutor** invokes Session tick on the same thread that initializes,
+cancels and destroys it; no Session is handed to a WorkerExecutor thread.
+
+The first task changes only its private Host values. After its CFlow callback
+finalizes, the application Owner copies the observable value into an existing
+optimistic root transaction, uses the established CFlow/Process-retainer
+commit barrier and TaskRegistry typed output publication, marks the DAG
+predecessor complete and only then admits the dependent native Session.
+
+A separate cancellation probe drives a real 10-second Sleep for one tick.
+CFlow finishes/finalizes that single callback while the Session itself still
+reports RUNNING. The owner cancels the Session and refuses both publication
+and downstream admission. This proves that CFlow callback settlement is not
+a substitute for native Session terminal state.
+
+The manual text handoff between per-task Hosts is intentionally explicit and
+does **not** constitute the future native WorkflowContext scope/merge contract.
+Actual Shell/NativeIO tasks, event/trigger scheduling, and worker-thread
+Session transfer remain out of scope.
+
 These are first-stage **native leaf** tests, not proof that the C11 DAG now executes YAML leaves end-to-end. The subsequent integration gate must select ready tasks from `workflow_dag_state`, use an independently owned Session/NativeHost for each admitted task, relay run/cancel/finalize into a single owner turn, and publish TaskRegistry/transaction results only after CFlow and Process close barriers. Trigger/Each/dynamic task semantics, action-owner policies, file-based WorkflowPlan provenance, actual Shell/NativeIO lifecycle, and application parity remain outside this stage.
 
 PR #79 stays **Draft / do not merge** until full cutover gates pass.
