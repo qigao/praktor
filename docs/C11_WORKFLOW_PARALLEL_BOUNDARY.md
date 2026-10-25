@@ -125,6 +125,20 @@ Worker callbacks only write atomic test observations and never touch the DAG.
 This is still not a production dispatcher or a TaskRegistry/Process/Parallel
 end-to-end cutover.
 
+### YAML Snapshot → DAG → CFlow → typed/text publication probe
+
+`actions_c11_workflow_dag_publication_test` uses the real inline YAML
+Snapshot, its canonical C11 dependency graph, root-variable seeding, task
+registry and optimistic value transactions. Real CFlow WorkerExecutor callbacks
+produce *test-only* results, and the strict existing CFlow + Process-retainer
+barrier refuses cross-branch publication until callbacks finalize **and**
+the reserved Process lease is explicitly retired. Only then does the owner
+publish text and typed JSON outputs, mark tasks complete and unlock the
+downstream DAG task in a fresh CFlow cohort. On a failed callback it discards
+pre-staged JSON, aborts *all* sibling value transactions and suppresses the
+downstream task. The source YAML's Shell commands are deliberately not run:
+this is not a real leaf execution, Process-spawn or production cutover test.
+
 ## Still outside this qualification
 
 The production DAG/trigger scheduler, structured WorkflowValue lexical scopes,

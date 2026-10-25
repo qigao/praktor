@@ -203,6 +203,24 @@ if(PRAKTOR_ENABLE_C11_ACTIONS)
             COMMAND actions_c11_workflow_dag_cflow_test)
         set_tests_properties(actions_c11_workflow_dag_cflow_test
             PROPERTIES TIMEOUT 30)
+
+        # Real YAML Snapshot / DAG readiness, CFlow WorkerExecutor, root
+        # variables, typed TaskRegistry and native Process lease barrier.
+        # Deterministic callback effects only; no production leaf cutover.
+        add_executable(actions_c11_workflow_dag_publication_test
+            c11/workflow_dag_publication_test.c)
+        target_link_libraries(actions_c11_workflow_dag_publication_test PRIVATE
+            praktor_workflow_dag_state
+            praktor_c11_workflow_snapshot_values
+            praktor_c11_workflow_parallel_process_guard
+            Salts::CFlow Salts::TinyTest)
+        set_target_properties(actions_c11_workflow_dag_publication_test PROPERTIES
+            C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF
+            LINKER_LANGUAGE C FOLDER "actions/c11/tests")
+        add_test(NAME actions_c11_workflow_dag_publication_test
+            COMMAND actions_c11_workflow_dag_publication_test)
+        set_tests_properties(actions_c11_workflow_dag_publication_test
+            PROPERTIES TIMEOUT 30)
     endif()
 
     # Strict Process-retainer barrier for cross-branch commit; this wrapper
