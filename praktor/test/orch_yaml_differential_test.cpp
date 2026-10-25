@@ -189,6 +189,9 @@ spec("C11 named orchestration CSTL AST parity with legacy parser") {
             "examples/orch_parallel_testing.yml",
             "examples/simplified_parser_syntax.yml",
             "examples/orch_shortcuts_demo.yml",
+            "examples/orch_version_extraction.yml",
+            "examples/orch_env_vars_example.yml",
+            "examples/orch_mustache_example.yml",
             "sdk/examples/ops-event-handler-example.yml"
         };
         const char *runners[]={
@@ -230,7 +233,7 @@ spec("C11 named orchestration CSTL AST parity with legacy parser") {
                 }
             }
         }
-        check(compared>=7);
+        check(compared>=17);
     }
 
     it("preserves legacy named-map parameter error precedence and locations") {
