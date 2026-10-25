@@ -26,6 +26,7 @@ spec("C11 Parallel real Process close and retainer acknowledgment barrier") {
         praktor_c11_value_store root={0};
         praktor_c11_value_txn branch={0};
         cflow_process_retainer retainer={0};
+        cflow_process_retainer_token hold={0};
         praktor_process_driver driver={0};
         cmeta_process_options_t options;
         const char *output_text="{\"result\":true}";
@@ -45,7 +46,7 @@ spec("C11 Parallel real Process close and retainer acknowledgment barrier") {
         check(praktor_c11_value_store_set(&root,"seed","base")==PRAKTOR_C11_VALUE_OK);
         check(praktor_c11_value_txn_begin(&branch,&root)==PRAKTOR_C11_VALUE_OK);
         check(praktor_c11_value_txn_set(&branch,"done","yes")==PRAKTOR_C11_VALUE_OK);
-        check(cflow_process_retainer_init(&retainer,1u)==SALTS_OK);
+        check(cflow_process_retainer_init(&retainer,2u)==SALTS_OK);
         cmeta_process_options_init(&options);
 #if defined(_WIN32)
         options.program="ping -n 5 127.0.0.1 > NUL";
@@ -63,15 +64,21 @@ spec("C11 Parallel real Process close and retainer acknowledgment barrier") {
         /* The callback-bearing native Process now lives in the sole recovery
          * owner. Worker cancellation does not authorize destroying it. */
         check(cflow_process_retainer_destroy(&retainer)==SALTS_EBUSY);
+        /* Pin an additional reservation to make this rejection independent
+         * of how quickly the already-closing OS child acknowledges teardown.
+         * The real adopted Process remains under the retainer, never in a
+         * temporary global worker or user callback after driver release. */
+        check(cflow_process_retainer_reserve(&retainer,&hold)==SALTS_OK);
         commit_status=praktor_c11_workflow_parallel_commit_after_process_drain(
             registry,&update,&branch,1u,&retainer,8u,&pending);
         check(commit_status==PRAKTOR_C11_PARALLEL_BUSY);
-        check(pending==1u);
+        check(pending>=1u);
         check(branch.impl!=NULL);
         check(praktor_c11_value_store_size(&root)==1u);
         check(root_is(&root,"seed","base"));
         check(praktor_workflow_task_registry_state(registry,0u,&state)==SALTS_OK);
         check(state==PRAKTOR_WORKFLOW_TASK_PENDING);
+        check(cflow_process_retainer_release(&retainer,hold)==SALTS_OK);
         started=cmeta_hrtime();
         do {
             commit_status=praktor_c11_workflow_parallel_commit_after_process_drain(
