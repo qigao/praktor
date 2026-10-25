@@ -59,3 +59,15 @@ target_link_libraries(workflow_task_registry_c_test PRIVATE
 set_target_properties(workflow_task_registry_c_test PROPERTIES
     C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF LINKER_LANGUAGE C)
 add_test(NAME workflow_task_registry_c_test COMMAND workflow_task_registry_c_test)
+add_executable(workflow_task_registry_fault_test
+    ${CMAKE_CURRENT_LIST_DIR}/../../test/workflow_task_registry_fault_test.c)
+target_include_directories(workflow_task_registry_fault_test PRIVATE
+    ${CMAKE_CURRENT_LIST_DIR}/../../include)
+# This TU includes the C11 owner implementation with test-only boundaries.
+# Link canonical Snapshot + JsonParser, not the duplicate owner object code.
+target_link_libraries(workflow_task_registry_fault_test PRIVATE
+    praktor_workflow_snapshot Salts::TinyTest)
+set_target_properties(workflow_task_registry_fault_test PROPERTIES
+    C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF LINKER_LANGUAGE C)
+add_test(NAME workflow_task_registry_fault_test
+    COMMAND workflow_task_registry_fault_test)
