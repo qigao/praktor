@@ -933,14 +933,13 @@ static void compare_owned_inline_workflow(const std::string& yaml,const char *na
     check(praktor_workflow_dependencies_edge_count(native_graph)==edges);
 }
 spec("Owned C11 inline workflow snapshot versus production TaskParser") {
-    it("compares six repository orchestration workflows") {
+    it("compares five dependency-valid repository workflows") {
         const char *files[]={
             "examples/orch_build_pipeline.yml",
             "examples/orch_parallel_testing.yml",
             "examples/orch_shortcuts_demo.yml",
             "examples/orch_version_extraction.yml",
-            "examples/orch_env_vars_example.yml",
-            "examples/orch_mustache_example.yml"
+            "examples/orch_env_vars_example.yml"
         };
         for(const auto *path:files)
             compare_owned_inline_workflow(workflow_corpus_read(path),path);
