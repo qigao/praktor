@@ -528,6 +528,10 @@ static int flat_parse(named_build *b,praktor_yaml_node map,size_t parent,unsigne
     }
     if(type==PRAKTOR_ORCH_SWITCH) {
         tstr value=NULL;
+        /* The legacy switch parser refuses a missing cases field before it
+         * reads or validates the selector. Keep this diagnostic precedence. */
+        if(!praktor_yaml_has(map,"cases"))
+            return fail_at(b,SALTS_EINVAL,map,"switch requires a cases branch");
         status=flat_require(b,map,"switch",&field,"switch requires a selector");
         if(status!=SALTS_OK)return status;
         status=praktor_yaml_scalar(field,&value,NULL);
@@ -547,33 +551,34 @@ static int flat_parse(named_build *b,praktor_yaml_node map,size_t parent,unsigne
         }
         return SALTS_OK;
     }
-    status=flat_require(b,map,"set_variable",&field,"set_variable requires a key");
-    if(status!=SALTS_OK)return status;
     {
-        tstr value=NULL;
-        status=praktor_yaml_scalar(field,&value,NULL);
+        const bool has_value=praktor_yaml_has(map,"value");
+        const bool has_from=praktor_yaml_has(map,"from");
+        praktor_yaml_node value_node={0};
+        tstr text=NULL;
+        if(has_value==has_from)
+            return fail_at(b,SALTS_EINVAL,map,
+                "set_variable requires exactly one of 'value' or 'from'");
+        status=flat_require(b,map,"set_variable",&field,"set_variable requires a key");
+        if(status!=SALTS_OK)return status;
+        status=praktor_yaml_scalar(field,&text,NULL);
         if(status!=SALTS_OK)return fail_at(b,status,field,
             "Orchestration parameter 'key' for node type 'set_variable' must be a scalar");
-        status=flat_add_param(b,index,"key",value,field,"set_variable");
+        status=flat_add_param(b,index,"key",text,field,"set_variable");
         if(status!=SALTS_OK)return status;
-    }
-    {
-        praktor_yaml_node value_node={0},from_node={0};
-        bool has_value=praktor_yaml_has(map,"value");
-        bool has_from=praktor_yaml_has(map,"from");
-        if(has_value==has_from)
-            return fail(b,SALTS_EINVAL,"set_variable requires exactly one of value or from");
-        field=(praktor_yaml_node){0};
-        status=praktor_yaml_get(map,has_value?"value":"from",&field,NULL);
+        status=praktor_yaml_get(map,has_value?"value":"from",&value_node,NULL);
         if(status!=SALTS_OK)
             return fail_at(b,status,map,"Cannot read orchestration value/from");
-        {
-            tstr value=NULL;
-            status=praktor_yaml_scalar(field,&value,NULL);
-            if(status!=SALTS_OK)return fail_at(b,status,field,
-                "Orchestration set_variable value/from must be a scalar");
-            return flat_add_param(b,index,has_value?"value":"from",value,field,"set_variable");
+        text=NULL;
+        status=praktor_yaml_scalar(value_node,&text,NULL);
+        if(status!=SALTS_OK) {
+            char message[256];
+            (void)snprintf(message,sizeof message,
+                "Orchestration parameter '%s' for node type 'set_variable' must be a scalar",
+                has_value?"value":"from");
+            return fail_at(b,status,value_node,message);
         }
+        return flat_add_param(b,index,has_value?"value":"from",text,value_node,"set_variable");
     }
 }
 static int flat_publish(named_build *b,praktor_orch_tree **out) {
