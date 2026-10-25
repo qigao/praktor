@@ -227,6 +227,22 @@ if(PRAKTOR_ENABLE_C11_ACTIONS)
             LINKER_LANGUAGE C FOLDER "actions/c11/tests")
         add_test(NAME actions_c11_workflow_parallel_process_guard_fault_test
             COMMAND actions_c11_workflow_parallel_process_guard_fault_test)
+
+        # Real shell child / native Process lease handoff through the one
+        # existing C11 driver + SaltsUtils recovery owner. Never force-free
+        # a live NativeIO completion payload to make the test succeed.
+        add_executable(actions_c11_workflow_parallel_process_driver_test
+            c11/workflow_parallel_process_driver_test.c)
+        target_link_libraries(actions_c11_workflow_parallel_process_driver_test PRIVATE
+            praktor_c11_workflow_parallel_process_guard
+            praktor_process_driver Salts::Platform Salts::TinyTest)
+        set_target_properties(actions_c11_workflow_parallel_process_driver_test PROPERTIES
+            C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF
+            LINKER_LANGUAGE C FOLDER "actions/c11/tests")
+        add_test(NAME actions_c11_workflow_parallel_process_driver_test
+            COMMAND actions_c11_workflow_parallel_process_driver_test)
+        set_tests_properties(actions_c11_workflow_parallel_process_driver_test
+            PROPERTIES TIMEOUT 25)
     endif()
 
     # Independent AST/Process Session; never links actions or praktor_shell.
