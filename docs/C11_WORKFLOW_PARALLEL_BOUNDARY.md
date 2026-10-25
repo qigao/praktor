@@ -41,14 +41,24 @@ A successful Parallel result requires **all** of the following.
    reentrant mutations, perform one allocation-free preflight and publish
    every staged task JSON object. Consume the prepared owner on success.
 
-The C11 Parallel Process guard combines steps 4 through 7 **only**.
-Steps 1 through 3 remain the caller's responsibility. Do not infer them
-from task status or a child process exit code alone.
+The basic C11 Process guard combines steps 4 through 7 **only**.
+The stricter CFlow + Process guard additionally refuses a not-yet-CLOSED
+executor, missing/rejected tasks, nonzero cancellations, incomplete callback
+settlement and a non-idle executor. It demands exactly one fresh, group-owned
+CFlow task admission per Parallel branch. It uses CFlow's own statistics and
+wait_idle acknowledgment, not an invented "worker finished" flag.
+
+**Neither guard can infer the application's semantic branch success.**
+The caller must still cease admission and verify all branch results before
+publishing. Do not infer them from a task status or child exit code alone.
 
 ## Failure ownership
 
 - A live Process reservation or adopted Process produces PARALLEL_BUSY and
   must keep root values, output objects and optimistic transactions unchanged.
+- A CFlow Executor whose admission is still OPEN/CLOSING is BUSY. Cancelled
+  accepted callbacks produce PARALLEL_CANCELLED; missing or rejected task
+  admissions fail INVALID. No typed or text data may be published for them.
 - A native close, acknowledgment or NativeIO error produces PARALLEL_RECOVERY.
   It must not be transformed into an ordinary retry or invented success.
 - Conflict/capacity/memory failures of the canonical value group do not
