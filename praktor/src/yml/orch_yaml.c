@@ -69,12 +69,16 @@ static const char *canonical_param(const praktor_orch_spec *spec,const char *key
         if(spec->optional[i]&&key_is((tstr)key,spec->optional[i]))return spec->optional[i];
     return NULL;
 }
-static int validate_param(named_build *b,tstr key,tstr value) {
+/* Scalar validation keeps the legacy per-parameter diagnostic, with the
+ * decoded field's source location, whenever the originating YAML node exists.
+ * On rejection this function consumes both transient key/value owners. */
+static int validate_param(named_build *b,size_t index,tstr key,tstr value,
+                          praktor_yaml_node source,const char *type_lower) {
     static const char *const integer_keys[]={"capture_group","expected","timeout",
         "num_attempts","num_cycles","timeout_ms","delay_ms","max_iterations"};
     static const char *const boolean_keys[]={"stream_output","fail_if_missing"};
     size_t i,j,n=tstr_len(value),start=0;
-    bool integer=false,boolean=false;
+    bool integer=false,boolean=false,bad=false;
     if(runtime_scalar(value))return SALTS_OK;
     for(i=0;i<sizeof(integer_keys)/sizeof(integer_keys[0]);++i)
         if(key_is(key,integer_keys[i])){integer=true;break;}
@@ -82,34 +86,44 @@ static int validate_param(named_build *b,tstr key,tstr value) {
         if(key_is(key,boolean_keys[i])){boolean=true;break;}
     if(integer) {
         if(n&&(value[0]=='+'||value[0]=='-'))start=1u;
-        if(start==n) {
-            tstr_free(key);tstr_free(value);
-            return fail(b,SALTS_EINVAL,"Orchestration integer parameter must be an integer");
-        }
-        for(j=start;j<n;++j)if(value[j]<'0'||value[j]>'9') {
-            tstr_free(key);tstr_free(value);
-            return fail(b,SALTS_EINVAL,"Orchestration integer parameter must be an integer");
-        }
+        bad=start==n;
+        for(j=start;!bad&&j<n;++j)
+            if(value[j]<'0'||value[j]>'9')bad=true;
     }
-    if(boolean&&!(n==4u&&tolower((unsigned char)value[0])=='t'&&
-       tolower((unsigned char)value[1])=='r'&&tolower((unsigned char)value[2])=='u'&&
-       tolower((unsigned char)value[3])=='e')&&
-       !(n==5u&&tolower((unsigned char)value[0])=='f'&&
-       tolower((unsigned char)value[1])=='a'&&tolower((unsigned char)value[2])=='l'&&
-       tolower((unsigned char)value[3])=='s'&&tolower((unsigned char)value[4])=='e')) {
+    if(boolean) {
+        bool is_true=n==4u&&tolower((unsigned char)value[0])=='t'&&
+           tolower((unsigned char)value[1])=='r'&&tolower((unsigned char)value[2])=='u'&&
+           tolower((unsigned char)value[3])=='e';
+        bool is_false=n==5u&&tolower((unsigned char)value[0])=='f'&&
+           tolower((unsigned char)value[1])=='a'&&tolower((unsigned char)value[2])=='l'&&
+           tolower((unsigned char)value[3])=='s'&&tolower((unsigned char)value[4])=='e';
+        if(!is_true&&!is_false)bad=true;
+    }
+    if(bad) {
+        char message[256];
+        const praktor_orch_spec *spec=praktor_orch_spec_for(b->rows[index].node.type);
+        const char *canonical=canonical_param(spec,key);
+        int status;
+        (void)snprintf(message,sizeof message,
+            "Orchestration parameter '%s' for node type '%s' must be %s",
+            canonical?canonical:key,type_lower?type_lower:"unknown",
+            integer?"an integer":"a boolean");
+        if(type_lower&&source.document)
+            status=fail_at(b,SALTS_EINVAL,source,message);
+        else status=fail(b,SALTS_EINVAL,message);
         tstr_free(key);tstr_free(value);
-        return fail(b,SALTS_EINVAL,"Orchestration boolean parameter must be true or false");
+        return status;
     }
     return SALTS_OK;
 }
-static int param(named_build *b,size_t index,tstr key,tstr value) {
+static int param_with_source(named_build *b,size_t index,tstr key,tstr value,
+                             praktor_yaml_node source,const char *type_lower) {
     named_row *row=&b->rows[index];
     size_t p=row->node.param_count,j;
-    int validation=validate_param(b,key,value);
+    int validation=validate_param(b,index,key,value,source,type_lower);
     if(validation!=SALTS_OK)return validation;
-    /* The legacy map uses assignment into a canonical-key map: the last
-     * spelling wins without creating a second parameter entry. Keep the
-     * lower-level flat-node constructor's separate strict-duplicate contract. */
+    /* Named-map canonical aliases are last-wins, unlike the strict public
+     * flat-descriptor constructor, which rejects duplicate canonical keys. */
     for(j=0;j<p;++j)if(key_is(row->keys[j],key)) {
         tstr_free(row->keys[j]);tstr_free(row->values[j]);
         row->keys[j]=key;row->values[j]=value;
@@ -124,6 +138,9 @@ static int param(named_build *b,size_t index,tstr key,tstr value) {
     row->params[p]=(praktor_orch_input_param){tstr_to_v(key),tstr_to_v(value)};
     row->node.param_count=p+1u;
     return SALTS_OK;
+}
+static int param(named_build *b,size_t index,tstr key,tstr value) {
+    return param_with_source(b,index,key,value,(praktor_yaml_node){0},NULL);
 }
 static int parse(named_build *b,praktor_yaml_node map,size_t parent,unsigned depth);
 static int flat_branch(named_build *b,praktor_yaml_node branch,size_t parent,unsigned depth);
@@ -214,7 +231,7 @@ static int parse_named_entry(named_build *b,praktor_yaml_node value,size_t paren
                 tstr_free(key);
                 return fail_at(b,status,field,message);
             }
-            status=param(b,index,key,text);
+            status=param_with_source(b,index,key,text,field,type_lower);
             if(status!=SALTS_OK)return status;
         }
         if(has_child&&has_children)
