@@ -106,7 +106,7 @@ if(PRAKTOR_ENABLE_C11_ACTIONS)
         add_executable(actions_c11_workflow_snapshot_values_test
             c11/workflow_snapshot_values_test.c)
         target_link_libraries(actions_c11_workflow_snapshot_values_test PRIVATE
-            praktor_c11_workflow_snapshot_values Salts::TinyTest)
+            praktor_c11_workflow_snapshot_values praktor_c11_native_host Salts::TinyTest)
         set_target_properties(actions_c11_workflow_snapshot_values_test PROPERTIES
             C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF
             LINKER_LANGUAGE C FOLDER "actions/c11/tests")
