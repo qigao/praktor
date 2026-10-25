@@ -124,6 +124,35 @@ spec("C11 named orchestration CSTL AST parity with legacy parser") {
             }
         }
     }
+    it("admits normalized task metadata across flat control runner families") {
+        struct Case { const char *kind,*body; };
+        const Case cases[]={
+            {"if","if: ready\nthen: {Shell: {cmd: go}}\n"},
+            {"while","while: ready\ndo: {Shell: {cmd: tick}}\n"},
+            {"switch","switch: mode\ncases: [{Shell: {cmd: a}}]\n"},
+            {"set_variable","set_variable: result\nvalue: okay\n"},
+            {"timeout","timeout: 15\nchild: {Shell: {cmd: go}}\n"},
+            {"repeat","repeat: 2\nchild: {Shell: {cmd: go}}\n"},
+            {"run_once","run_once: ignored\nchild: {Shell: {cmd: go}}\n"}
+        };
+        for(const auto& item:cases) {
+            const std::string yaml=std::string(
+                "name: qualified\ndepends_on: [upstream]\ndotEnv: .env\n")+item.body;
+            TaskYamlDetail::YamlDocument document(yaml);
+            const OrchParams legacy=parse_orch_params(document.root(),item.kind);
+            praktor_orch_tree *native=nullptr;
+            char diagnostic[256]{};
+            const int status=praktor_orch_from_flat_yaml(
+                document.root().native(),item.kind,&native,diagnostic,sizeof diagnostic);
+            check(status==SALTS_OK);
+            check(native!=nullptr);
+            if(native) {
+                check(native_ast_equals_legacy(legacy.root,praktor_orch_tree_root(native)));
+                praktor_orch_tree_destroy(native);
+            }
+        }
+    }
+
     it("matches task-level named controls, decorators and leaves") {
         /* The legacy runner selector parses the selected YAML value, not
          * the metadata-bearing task map. The native parser must agree. */
