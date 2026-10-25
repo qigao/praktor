@@ -3,6 +3,7 @@
 #include "yml/orch_yaml.h"
 #include "yml/yaml_task_metadata.h"
 #include "yml/yaml_workflow_metadata.h"
+#include "yml/workflow_dependencies.h"
 #include "yml/task_parser.hpp"
 #include <algorithm>
 #include <exception>
@@ -562,6 +563,8 @@ static void full_workflow_matches_native_projections(const std::string& yaml,
 
     /* Each native result must remain sound after destroying its YAML DOM. */
     std::size_t compared_asts=0;
+    std::vector<WorkflowValue> native_metadata;
+    native_metadata.reserve(legacy.tasks.size());
     for(std::size_t i=0;i<legacy.tasks.size();++i) {
         WorkflowValue meta;
         std::unique_ptr<praktor_orch_tree,decltype(&praktor_orch_tree_destroy)>
@@ -662,8 +665,53 @@ static void full_workflow_matches_native_projections(const std::string& yaml,
                     [&](const Task& next){return next.name==selected.name;}));
             }
         }
+        native_metadata.emplace_back(std::move(meta));
     }
     check(compared_asts>0);
+
+    std::vector<const json_value_t*> task_views;
+    task_views.reserve(native_metadata.size());
+    for(const auto& metadata:native_metadata)task_views.push_back(metadata.raw());
+    praktor_workflow_dependencies *raw_graph=nullptr;
+    char graph_diagnostic[256]{};
+    const int graph_status=praktor_workflow_dependencies_create(
+        task_views.data(),task_views.size(),&raw_graph,
+        graph_diagnostic,sizeof graph_diagnostic);
+    if(graph_status!=SALTS_OK)
+        info("Native graph refusal: %s",graph_diagnostic);
+    check(graph_status==SALTS_OK);
+    std::unique_ptr<praktor_workflow_dependencies,
+                    decltype(&praktor_workflow_dependencies_destroy)> native_graph(
+        raw_graph,&praktor_workflow_dependencies_destroy);
+    native_metadata.clear(); /* Graph must own its names/edges after JSON release. */
+    if(!native_graph)return;
+    check(praktor_workflow_dependencies_task_count(native_graph.get())==
+          legacy.tasks.size());
+    size_t edge_index=0;
+    for(std::size_t dependent=0;dependent<legacy.tasks.size();++dependent) {
+        vstr actual_name={0};
+        check(praktor_workflow_dependencies_task_name(
+            native_graph.get(),dependent,&actual_name)==SALTS_OK);
+        check(vstr_eq(actual_name,vstr_from_cstr(legacy.tasks[dependent].name.c_str())));
+        for(const auto& dependency:legacy.tasks[dependent].depends_on) {
+            const auto predecessor=std::find_if(legacy.tasks.begin(),
+                legacy.tasks.end(),
+                [&](const Task& task){return task.name==dependency;});
+            check(predecessor!=legacy.tasks.end());
+            if(predecessor==legacy.tasks.end())continue;
+            const size_t index=static_cast<size_t>(predecessor-legacy.tasks.begin());
+            size_t native_predecessor=SIZE_MAX,native_dependent=SIZE_MAX;
+            check(praktor_workflow_dependencies_edge_at(native_graph.get(),edge_index,
+                &native_predecessor,&native_dependent)==SALTS_OK);
+            check(native_predecessor==index&&native_dependent==dependent);
+            bool found=false;
+            check(praktor_workflow_dependencies_has_edge(native_graph.get(),
+                index,dependent,&found)==SALTS_OK);
+            check(found);
+            ++edge_index;
+        }
+    }
+    check(praktor_workflow_dependencies_edge_count(native_graph.get())==edge_index);
 }
 spec("Full workflow versus C11 task metadata and native orchestration") {
     it("compares five repository workflows after YAML document destruction") {
