@@ -50,3 +50,12 @@ target_link_libraries(workflow_snapshot_fault_test PRIVATE
 set_target_properties(workflow_snapshot_fault_test PROPERTIES
     C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF LINKER_LANGUAGE C)
 add_test(NAME workflow_snapshot_fault_test COMMAND workflow_snapshot_fault_test)
+add_executable(workflow_task_registry_c_test
+    ${CMAKE_CURRENT_LIST_DIR}/../../test/workflow_task_registry_test.c)
+target_include_directories(workflow_task_registry_c_test PRIVATE
+    ${CMAKE_CURRENT_LIST_DIR}/../../include)
+target_link_libraries(workflow_task_registry_c_test PRIVATE
+    praktor_workflow_task_registry Salts::TinyTest)
+set_target_properties(workflow_task_registry_c_test PROPERTIES
+    C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF LINKER_LANGUAGE C)
+add_test(NAME workflow_task_registry_c_test COMMAND workflow_task_registry_c_test)
