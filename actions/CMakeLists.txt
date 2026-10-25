@@ -190,6 +190,21 @@ if(PRAKTOR_ENABLE_C11_ACTIONS)
             COMMAND actions_c11_workflow_parallel_worker_test)
     endif()
 
+    # Strict Process-retainer barrier for cross-branch commit; this wrapper
+    # borrows the existing SaltsUtils Process recovery owner and never starts
+    # a Process or invents completion when a lease is still active.
+    add_library(praktor_c11_workflow_parallel_process_guard STATIC
+        c11/workflow_parallel_process_guard.c
+        c11/workflow_parallel_process_guard.h)
+    target_include_directories(praktor_c11_workflow_parallel_process_guard PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/c11>)
+    target_link_libraries(praktor_c11_workflow_parallel_process_guard PUBLIC
+        praktor_c11_workflow_parallel_commit Salts::Process)
+    target_compile_features(praktor_c11_workflow_parallel_process_guard PUBLIC c_std_11)
+    set_target_properties(praktor_c11_workflow_parallel_process_guard PROPERTIES
+        C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF
+        POSITION_INDEPENDENT_CODE ON FOLDER "actions/c11")
+
     # Independent AST/Process Session; never links actions or praktor_shell.
     include(${CMAKE_CURRENT_SOURCE_DIR}/c11/session_targets.cmake)
 
