@@ -175,6 +175,19 @@ if(PRAKTOR_ENABLE_C11_ACTIONS)
             LINKER_LANGUAGE C FOLDER "actions/c11/tests")
         add_test(NAME actions_c11_workflow_parallel_executor_test
             COMMAND actions_c11_workflow_parallel_executor_test)
+
+        # Real concurrent Salts CFlow WorkerExecutor; no Praktor pool, and
+        # only the caller/owner publishes committed typed branch outputs.
+        add_executable(actions_c11_workflow_parallel_worker_test
+            c11/workflow_parallel_worker_test.c)
+        target_link_libraries(actions_c11_workflow_parallel_worker_test PRIVATE
+            praktor_c11_workflow_parallel_commit Salts::CFlow Salts::Platform
+            Salts::TinyTest)
+        set_target_properties(actions_c11_workflow_parallel_worker_test PROPERTIES
+            C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF
+            LINKER_LANGUAGE C FOLDER "actions/c11/tests")
+        add_test(NAME actions_c11_workflow_parallel_worker_test
+            COMMAND actions_c11_workflow_parallel_worker_test)
     endif()
 
     # Independent AST/Process Session; never links actions or praktor_shell.
