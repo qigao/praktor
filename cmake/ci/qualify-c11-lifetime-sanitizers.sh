@@ -52,9 +52,3 @@ esac
 ctest --test-dir "$build_dir" \
   --no-tests=error --output-on-failure --parallel 1 --timeout 75 \
   -R "$test_regex"
-
-    ;;
-esac
-ctest --test-dir "$build_dir" \
-  --no-tests=error --output-on-failure --parallel 1 --timeout 75 \
-  -R "$test_regex"
