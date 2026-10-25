@@ -199,7 +199,7 @@ if(PRAKTOR_ENABLE_C11_ACTIONS)
     target_include_directories(praktor_c11_workflow_parallel_process_guard PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/c11>)
     target_link_libraries(praktor_c11_workflow_parallel_process_guard PUBLIC
-        praktor_c11_workflow_parallel_commit Salts::Process)
+        praktor_c11_workflow_parallel_commit Salts::Process Salts::CFlow)
     target_compile_features(praktor_c11_workflow_parallel_process_guard PUBLIC c_std_11)
     set_target_properties(praktor_c11_workflow_parallel_process_guard PROPERTIES
         C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF
@@ -221,7 +221,8 @@ if(PRAKTOR_ENABLE_C11_ACTIONS)
         add_executable(actions_c11_workflow_parallel_process_guard_fault_test
             c11/workflow_parallel_process_guard_fault_test.c)
         target_link_libraries(actions_c11_workflow_parallel_process_guard_fault_test PRIVATE
-            praktor_c11_workflow_parallel_commit Salts::Process Salts::TinyTest)
+            praktor_c11_workflow_parallel_commit Salts::Process
+            Salts::CFlow Salts::TinyTest)
         set_target_properties(actions_c11_workflow_parallel_process_guard_fault_test PROPERTIES
             C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF
             LINKER_LANGUAGE C FOLDER "actions/c11/tests")
