@@ -79,7 +79,8 @@ target_link_libraries(structured_document_query_test.${TARGET_NAME_LIB}
 target_link_libraries(orch_yaml_differential_test.${TARGET_NAME_LIB}
     PRIVATE praktor_orch_yaml
             praktor_yaml_task_metadata
-            praktor_yaml_workflow_metadata)
+            praktor_yaml_workflow_metadata
+            praktor_workflow_dependencies)
 target_include_directories(orch_yaml_differential_test.${TARGET_NAME_LIB}
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../shared/process/include)
 target_compile_definitions(orch_yaml_differential_test.${TARGET_NAME_LIB} PRIVATE
