@@ -275,6 +275,37 @@ spec("C11 named orchestration CSTL AST parity with legacy parser") {
         check(std::string(error).find("both 'child' and 'children'")!=std::string::npos);
     }
 
+    it("matches required parameter and named-control child-count diagnostics") {
+        const char *sources[]={
+            "Shell: {output_key: out}\n",
+            "ParseRegex: {input_key: raw}\n",
+            "WaitEvent: {timeout: 30}\n",
+            "FileExists: {output_key: exists}\n",
+            "Sleep: {}\n",
+            "Sequence: []\n",
+            "Fallback: {children: []}\n",
+            "Parallel: {children: []}\n",
+            "Inverter: {}\n",
+            "RunOnce: {children: []}\n",
+            "PipelineSequence: {input_key: in}\n",
+            "Sequence:\n  children:\n    - Shell: {output_key: missing}\n    - Shell: {cmd: later}\n"
+        };
+        for(const char *source:sources) {
+            TaskYamlDetail::YamlDocument document(source);
+            std::string legacy_error;
+            try { (void)TaskYamlDetail::parse_orch_node(document.root()); }
+            catch(const std::exception& e) {legacy_error=e.what();}
+            praktor_orch_tree *native=nullptr;
+            char diagnostic[512]{};
+            const int status=praktor_orch_from_named_yaml(
+                document.root().native(),&native,diagnostic,sizeof diagnostic);
+            check(!legacy_error.empty());
+            check(status==SALTS_EINVAL);
+            check(native==nullptr);
+            check(std::string(diagnostic)==legacy_error);
+        }
+    }
+
     it("matches full legacy locations and canonical names for typed scalar errors") {
         struct ScalarCase { const char *source; const char *key; const char *kind; };
         const ScalarCase cases[] = {
