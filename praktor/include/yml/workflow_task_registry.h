@@ -69,6 +69,16 @@ int praktor_workflow_task_registry_set_output(
     praktor_workflow_task_registry *owner,size_t index,
     vstr key,const json_value_t *value);
 
+/* Atomic multi-output publication on one task. The source must be a JSON
+ * object with nonempty NUL-free keys, and is borrowed only during this call.
+ * Clones the entire candidate aggregate and admits it against the same
+ * task-level JSON budgets before one swap; invalid/oversize/OOM leaves
+ * previously published outputs and status untouched. This is NOT a Parallel
+ * branch group commit or a task-scheduler transition. */
+int praktor_workflow_task_registry_merge_outputs(
+    praktor_workflow_task_registry *owner,size_t index,
+    const json_value_t *updates);
+
 /* Borrowed immutable views; valid until start/re-entry/destroy. Get output
  * succeeds only for completed/failed tasks; no mutable/working JSON exposure.
  * Failure leaves outputs unchanged. ENOENT = absent key, EBUSY = not terminal.
