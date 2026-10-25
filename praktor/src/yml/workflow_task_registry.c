@@ -10,6 +10,7 @@ typedef struct task_slot {
     json_value_t *outputs;
     char *reason;
     size_t reason_len;
+    uint64_t revision; /* Monotonic mutation generation; ABA-safe stale gate. */
 } task_slot;
 struct praktor_workflow_task_registry {
     task_slot *slots;
@@ -27,6 +28,11 @@ static bool finalized(praktor_workflow_task_state state) {
     return state==PRAKTOR_WORKFLOW_TASK_SUCCESS||
            state==PRAKTOR_WORKFLOW_TASK_FAILED||
            state==PRAKTOR_WORKFLOW_TASK_SKIPPED;
+}
+/* Fail closed rather than wrapping a task generation into an older prepared
+ * view. Each successful observable task mutation consumes exactly one turn. */
+static bool revision_available(const task_slot *slot) {
+    return slot->revision!=UINT64_MAX;
 }
 /* Bound recursion BEFORE using canonical JsonParser::json_clone(), so caller
  * values cannot force unbounded JSON clone depth. Budget is logical retained
@@ -157,9 +163,11 @@ int praktor_workflow_task_registry_start(
     task_slot *slot=slot_for(owner,index);
     if(!owner)return SALTS_EINVAL;
     if(!slot)return SALTS_ENOENT;
+    if(!revision_available(slot))return SALTS_EBUSY;
     json_free(slot->outputs);slot->outputs=NULL;
     free(slot->reason);slot->reason=NULL;slot->reason_len=0u;
     slot->state=PRAKTOR_WORKFLOW_TASK_RUNNING;
+    ++slot->revision;
     return SALTS_OK;
 }
 int praktor_workflow_task_registry_complete(
@@ -167,8 +175,10 @@ int praktor_workflow_task_registry_complete(
     task_slot *slot=slot_for(owner,index);
     if(!owner)return SALTS_EINVAL;
     if(!slot)return SALTS_ENOENT;
-    if(finalized(slot->state))return SALTS_EBUSY;
+    if(finalized(slot->state)||!revision_available(slot))
+        return SALTS_EBUSY;
     slot->state=PRAKTOR_WORKFLOW_TASK_SUCCESS;
+    ++slot->revision;
     return SALTS_OK;
 }
 int praktor_workflow_task_registry_fail(
@@ -177,7 +187,8 @@ int praktor_workflow_task_registry_fail(
     char *copy;
     if(!owner||!vstr_is_valid(reason))return SALTS_EINVAL;
     if(!slot)return SALTS_ENOENT;
-    if(finalized(slot->state))return SALTS_EBUSY;
+    if(finalized(slot->state)||!revision_available(slot))
+        return SALTS_EBUSY;
     if(reason.len>PRAKTOR_WORKFLOW_TASK_MAX_REASON_BYTES||
        memchr(reason.data,'\0',reason.len)!=NULL)return SALTS_EINVAL;
     copy=(char *)malloc(reason.len+1u);
@@ -188,6 +199,7 @@ int praktor_workflow_task_registry_fail(
     slot->reason=copy;
     slot->reason_len=reason.len;
     slot->state=PRAKTOR_WORKFLOW_TASK_FAILED;
+    ++slot->revision;
     return SALTS_OK;
 }
 int praktor_workflow_task_registry_skip(
@@ -195,8 +207,10 @@ int praktor_workflow_task_registry_skip(
     task_slot *slot=slot_for(owner,index);
     if(!owner)return SALTS_EINVAL;
     if(!slot)return SALTS_ENOENT;
-    if(finalized(slot->state))return SALTS_EBUSY;
+    if(finalized(slot->state)||!revision_available(slot))
+        return SALTS_EBUSY;
     slot->state=PRAKTOR_WORKFLOW_TASK_SKIPPED;
+    ++slot->revision;
     return SALTS_OK;
 }
 int praktor_workflow_task_registry_set_output(
@@ -208,7 +222,8 @@ int praktor_workflow_task_registry_set_output(
     int result=SALTS_EINVAL;
     if(!owner||!vstr_is_valid(key)||!key.len||!value)return result;
     if(!slot)return SALTS_ENOENT;
-    if(finalized(slot->state))return SALTS_EBUSY;
+    if(finalized(slot->state)||!revision_available(slot))
+        return SALTS_EBUSY;
     if(key.len>PRAKTOR_WORKFLOW_TASK_MAX_JSON_BYTES||
        memchr(key.data,'\0',key.len)!=NULL)return result;
     if(!admissible_json(value,1u,&budget))return result;
@@ -228,6 +243,7 @@ int praktor_workflow_task_registry_set_output(
     slot->outputs=staged;
     if(slot->state==PRAKTOR_WORKFLOW_TASK_PENDING)
         slot->state=PRAKTOR_WORKFLOW_TASK_RUNNING;
+    ++slot->revision;
     return SALTS_OK;
 cleanup:
     json_free(copy);
@@ -289,13 +305,15 @@ int praktor_workflow_task_registry_merge_outputs(
     int status;
     if(!owner||!updates||json_type(updates)!=JSON_OBJECT)return SALTS_EINVAL;
     if(!slot)return SALTS_ENOENT;
-    if(finalized(slot->state))return SALTS_EBUSY;
+    if(finalized(slot->state)||!revision_available(slot))
+        return SALTS_EBUSY;
     status=stage_output_update(slot,updates,&staged);
     if(status!=SALTS_OK||!staged)return status;
     json_free(slot->outputs);
     slot->outputs=staged;
     if(slot->state==PRAKTOR_WORKFLOW_TASK_PENDING)
         slot->state=PRAKTOR_WORKFLOW_TASK_RUNNING;
+    ++slot->revision;
     return SALTS_OK;
 }
 
@@ -304,6 +322,7 @@ typedef struct staged_output_entry {
     json_value_t *staged;
     const json_value_t *observed_outputs;
     praktor_workflow_task_state observed_state;
+    uint64_t observed_revision;
 } staged_output_entry;
 struct praktor_workflow_task_output_group {
     praktor_workflow_task_registry *owner;
@@ -349,13 +368,14 @@ int praktor_workflow_task_registry_prepare_output_group(
     for(i=0;i<count;++i) {
         task_slot *slot=&owner->slots[updates[i].task_index];
         staged_output_entry *entry=&group->entries[i];
-        if(finalized(slot->state)) {
+        if(finalized(slot->state)||!revision_available(slot)) {
             status=SALTS_EBUSY;
             goto failed;
         }
         entry->index=updates[i].task_index;
         entry->observed_state=slot->state;
         entry->observed_outputs=slot->outputs;
+        entry->observed_revision=slot->revision;
         status=stage_output_update(slot,updates[i].updates,&entry->staged);
         if(status!=SALTS_OK)goto failed;
     }
@@ -379,7 +399,9 @@ int praktor_workflow_task_registry_publish_output_group(
         const staged_output_entry *entry=&group->entries[i];
         const task_slot *slot=&owner->slots[entry->index];
         if(slot->state!=entry->observed_state||
-           slot->outputs!=entry->observed_outputs)
+           slot->outputs!=entry->observed_outputs||
+           slot->revision!=entry->observed_revision||
+           !revision_available(slot))
             return SALTS_EBUSY;
     }
     for(i=0;i<group->count;++i) {
@@ -391,6 +413,7 @@ int praktor_workflow_task_registry_publish_output_group(
         entry->staged=NULL;
         if(slot->state==PRAKTOR_WORKFLOW_TASK_PENDING)
             slot->state=PRAKTOR_WORKFLOW_TASK_RUNNING;
+        ++slot->revision;
     }
     *prepared=NULL;
     praktor_workflow_task_registry_discard_output_group(group);
