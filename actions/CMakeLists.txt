@@ -126,6 +126,20 @@ if(PRAKTOR_ENABLE_C11_ACTIONS)
             COMMAND actions_c11_workflow_snapshot_values_fault_test)
     endif()
 
+    # Qualification-only cross-branch publication: canonical C11 optimistic
+    # value txn group + the C-owned TaskRegistry staged JSON owner.
+    # No C++ WorkflowContext, scheduler or second transaction implementation.
+    add_library(praktor_c11_workflow_parallel_commit STATIC
+        c11/workflow_parallel_commit.c c11/workflow_parallel_commit.h)
+    target_include_directories(praktor_c11_workflow_parallel_commit PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/c11>)
+    target_link_libraries(praktor_c11_workflow_parallel_commit PUBLIC
+        praktor_c11_value_store praktor_workflow_task_registry)
+    target_compile_features(praktor_c11_workflow_parallel_commit PUBLIC c_std_11)
+    set_target_properties(praktor_c11_workflow_parallel_commit PROPERTIES
+        C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF
+        POSITION_INDEPENDENT_CODE ON FOLDER "actions/c11")
+
     # Independent AST/Process Session; never links actions or praktor_shell.
     include(${CMAKE_CURRENT_SOURCE_DIR}/c11/session_targets.cmake)
 
