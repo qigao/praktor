@@ -46,6 +46,14 @@ int praktor_c11_orch_session_plan_create_native_shell(
     praktor_c11_orch_session_plan **out,
     char *error,size_t error_capacity);
 
+/* Explicit opt-in for the canonical command lowering ONLY when it yields
+ * Sequence -> one Shell child, with no parser/postprocessor or extra command.
+ * Requires a real initialized Process retainer at Session admission.
+ * Other commands and default create() remain fail-closed. Test-only API. */
+int praktor_c11_orch_session_plan_create_native_command(
+    const praktor_orch_tree *tree,const salts_bt_tree_config *limits,
+    praktor_c11_orch_session_plan **out,
+    char *error,size_t error_capacity);
 void praktor_c11_orch_session_plan_destroy(
     praktor_c11_orch_session_plan *plan);
 size_t praktor_c11_orch_session_plan_node_count(

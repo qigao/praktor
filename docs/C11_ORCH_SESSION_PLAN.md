@@ -146,4 +146,26 @@ dependencies). Consumer-only TSan is deliberately *not* the qualification
 for real Process/NativeIO because released dependency binaries are not
 fully instrumented.
 
+## Canonical single-command C11 Process qualification
+
+The new test-only `praktor_c11_orch_session_plan_create_native_command()`
+admits the **exact existing C11 Command projection** only when it is a
+two-node `Sequence → Shell` with one command and *no postprocessor*.
+The default Orch-to-Session converter still rejects the Shell child.
+The separate single-Shell admission remains independently bounded.
+A real initialized Process retainer is required before Session admission.
+
+`actions_c11_orch_dag_shell_process_test` now covers both:
+a flat task-level `shell:` runner and a normal `command: echo ...`
+runner. In each case real CFlow ManualExecutor/Session/Process callbacks
+must settle, then the Process barrier and selected output transaction
+publish `shell_exit_code`; the dependent CheckExitCode Session runs only
+after the DAG predecessor commits.
+
+Command+postprocessor input such as
+`command: ...` + `parse_json: ...` is explicitly rejected by this
+single-command gate. A canonical command with more than one Shell child
+is also ineligible. This does **not** assert ParseJson parity, command
+sequence ownership, Mustache expansion, or a production cutover.
+
 PR #79 stays **Draft / do not merge** until full cutover gates pass.
