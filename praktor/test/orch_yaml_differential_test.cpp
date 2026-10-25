@@ -331,6 +331,33 @@ spec("C11 named orchestration CSTL AST parity with legacy parser") {
         }
     }
 
+    it("matches legacy flat empty branch, switch and scalar shape errors") {
+        struct Case { const char *kind,*source; };
+        const Case cases[]={
+            {"if","name: test\nif: ready\nthen: []\n"},
+            {"while","name: test\nwhile: ready\ndo: []\n"},
+            {"switch","name: test\nswitch: mode\ncases: []\n"},
+            {"switch","name: test\nswitch: mode\ncases: {}\n"},
+            {"run_once","name: test\nrun_once: ignored\nchild: []\n"},
+            {"timeout","name: test\ntimeout: [invalid]\nchild: {Shell: {cmd: run}}\n"},
+            {"while","name: test\nwhile: ready\nmax_iterations: [invalid]\ndo: {Shell: {cmd: run}}\n"}
+        };
+        for(const auto& item:cases) {
+            TaskYamlDetail::YamlDocument document(item.source);
+            std::string legacy_error;
+            try { (void)parse_orch_params(document.root(),item.kind); }
+            catch(const std::exception& e) { legacy_error=e.what(); }
+            praktor_orch_tree *native=nullptr;
+            char diagnostic[512]{};
+            const int status=praktor_orch_from_flat_yaml(
+                document.root().native(),item.kind,&native,diagnostic,sizeof diagnostic);
+            check(!legacy_error.empty());
+            check(status==SALTS_EINVAL);
+            check(native==nullptr);
+            check(std::string(diagnostic)==legacy_error);
+        }
+    }
+
     it("agrees with legacy on invalid flat forms and never publishes partial ASTs") {
         struct FlatCase { const char *kind; const char *source; };
         const FlatCase cases[] = {
