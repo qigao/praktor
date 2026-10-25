@@ -167,4 +167,33 @@ spec("C11 structured task status and immutable outputs") {
         check(borrow==sentinel);
         praktor_workflow_task_registry_destroy(owner);
     }
+    it("publishes typed multi-output updates all-or-nothing") {
+        praktor_workflow_task_registry *owner=make_registry();
+        const char *initial_text=
+            "{\"first\":{\"count\":2},\"second\":[true,null]}";
+        const char *patch_text=
+            "{\"first\":{\"count\":3},\"third\":\"new\"}";
+        const char *bad_text="{\"fourth\":1,\"\":2}";
+        json_value_t *initial=json_parse(initial_text,strlen(initial_text));
+        json_value_t *patch=json_parse(patch_text,strlen(patch_text));
+        json_value_t *bad=json_parse(bad_text,strlen(bad_text));
+        praktor_workflow_task_state state=PRAKTOR_WORKFLOW_TASK_PENDING;
+        const json_value_t *out=NULL;
+        check(initial&&patch&&bad);
+        check(praktor_workflow_task_registry_merge_outputs(owner,0u,initial)==SALTS_OK);
+        check(praktor_workflow_task_registry_state(owner,0u,&state)==SALTS_OK);
+        check(state==PRAKTOR_WORKFLOW_TASK_RUNNING);
+        check(praktor_workflow_task_registry_merge_outputs(owner,0u,bad)==SALTS_EINVAL);
+        check(praktor_workflow_task_registry_merge_outputs(owner,0u,patch)==SALTS_OK);
+        json_free(initial);json_free(patch);json_free(bad);
+        check(praktor_workflow_task_registry_complete(owner,0u)==SALTS_OK);
+        check(output_matches(owner,0u,"first","{\"count\":3}"));
+        check(output_matches(owner,0u,"second","[true,null]"));
+        check(output_matches(owner,0u,"third","\"new\""));
+        check(praktor_workflow_task_registry_get_output(owner,0u,
+            vstr_from_cstr("fourth"),&out)==SALTS_ENOENT);
+        check(praktor_workflow_task_registry_merge_outputs(owner,0u,NULL)==SALTS_EINVAL);
+        praktor_workflow_task_registry_destroy(owner);
+    }
+
 }
