@@ -118,8 +118,11 @@ static void settle(praktor_workflow_dag_state *dag,
     check(atomic_load(&probes[index].ran)==expect_run);
     check(atomic_load(&probes[index].cancelled)==expect_cancel);
     check(atomic_load(&probes[index].finalized)==1u);
-    check(praktor_workflow_dag_finish(dag,index,
-        atomic_load(&probes[index].result)==1)==SALTS_OK);
+    /* MSVC C11 rejects nested atomic_load in a multi-argument call.
+     * Load after finalize, then pass a plain immutable success value. */
+    const int callback_result=atomic_load(&probes[index].result);
+    const bool succeeded=callback_result==1;
+    check(praktor_workflow_dag_finish(dag,index,succeeded)==SALTS_OK);
 }
 static void require_terminal(praktor_workflow_dag_state *dag,
                              praktor_workflow_dag_terminal reason,
