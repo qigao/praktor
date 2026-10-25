@@ -99,4 +99,106 @@ spec("C11 WorkflowContext root string admission") {
         praktor_workflow_snapshot_destroy(snap);
         praktor_c11_value_store_destroy(&store);
     }
+    it("forks independent task-local text views without writing to root or peers") {
+        const char *yaml=
+            "variables: {MODE: root, BASE: initial}\n"
+            "tasks:\n"
+            "  - name: one\n"
+            "    vars: {MODE: task-one, LOCAL: own}\n"
+            "    command: echo one\n"
+            "  - name: two\n"
+            "    vars: {MODE: task-two, PEER: mine}\n"
+            "    command: echo two\n";
+        praktor_workflow_snapshot *snapshot=snapshot_for(yaml);
+        praktor_c11_value_store root={0},a={0},b={0};
+        check(praktor_c11_value_store_init(&root,5u,32u,32u)==
+            PRAKTOR_C11_VALUE_OK);
+        check(praktor_c11_value_store_set(&root,"SYS","global")==
+            PRAKTOR_C11_VALUE_OK);
+        check(praktor_c11_workflow_seed_root_text_variables(snapshot,&root)==
+            PRAKTOR_C11_VALUE_OK);
+        check(praktor_c11_workflow_fork_task_text_variables(snapshot,0u,
+            &root,&a)==PRAKTOR_C11_VALUE_OK);
+        check(praktor_c11_workflow_fork_task_text_variables(snapshot,1u,
+            &root,&b)==PRAKTOR_C11_VALUE_OK);
+        praktor_workflow_snapshot_destroy(snapshot);
+        praktor_c11_value_store_destroy(&root);
+        check(contains(&a,"MODE","task-one"));
+        check(contains(&a,"BASE","initial"));
+        check(contains(&a,"LOCAL","own"));
+        check(contains(&a,"SYS","global"));
+        check(contains(&b,"MODE","task-two"));
+        check(contains(&b,"PEER","mine"));
+        {
+            int present=1;
+            check(praktor_c11_value_store_contains(&b,"LOCAL",&present)==
+                PRAKTOR_C11_VALUE_OK&&present==0);
+        }
+        check(praktor_c11_value_store_set(&a,"LOCAL","changed")==
+            PRAKTOR_C11_VALUE_OK);
+        check(contains(&a,"LOCAL","changed"));
+        check(contains(&b,"MODE","task-two"));
+        praktor_c11_value_store_destroy(&b);
+        praktor_c11_value_store_destroy(&a);
+    }
+    it("fails a task fork atomically when the inherited store is full") {
+        const char *yaml=
+            "variables: {MODE: root, BASE: initial}\n"
+            "tasks:\n"
+            "  - name: one\n"
+            "    vars: {MODE: task-one, LOCAL: new}\n"
+            "    command: echo one\n";
+        praktor_workflow_snapshot *snapshot=snapshot_for(yaml);
+        praktor_c11_value_store root={0},child={0};
+        int present=1;
+        check(praktor_c11_value_store_init(&root,3u,32u,32u)==
+            PRAKTOR_C11_VALUE_OK);
+        check(praktor_c11_value_store_set(&root,"SYS","original")==
+            PRAKTOR_C11_VALUE_OK);
+        check(praktor_c11_workflow_seed_root_text_variables(snapshot,&root)==
+            PRAKTOR_C11_VALUE_OK);
+        check(praktor_c11_workflow_fork_task_text_variables(snapshot,0u,
+            &root,&child)==PRAKTOR_C11_VALUE_ENOSPC);
+        check(child.impl==NULL);
+        check(contains(&root,"MODE","root"));
+        check(contains(&root,"BASE","initial"));
+        check(contains(&root,"SYS","original"));
+        check(praktor_c11_value_store_contains(&root,"LOCAL",&present)==
+            PRAKTOR_C11_VALUE_OK&&present==0);
+        praktor_workflow_snapshot_destroy(snapshot);
+        praktor_c11_value_store_destroy(&root);
+    }
+    it("refuses oversized task values, invalid indices and live output handles") {
+        const char *yaml=
+            "tasks:\n"
+            "  - name: one\n"
+            "    vars: {MODE: too-long}\n"
+            "    command: echo one\n";
+        praktor_workflow_snapshot *snapshot=snapshot_for(yaml);
+        praktor_c11_value_store root={0},child={0};
+        check(praktor_c11_value_store_init(&root,3u,32u,4u)==
+            PRAKTOR_C11_VALUE_OK);
+        check(praktor_c11_value_store_set(&root,"MODE","root")==
+            PRAKTOR_C11_VALUE_OK);
+        check(praktor_c11_workflow_fork_task_text_variables(snapshot,0u,
+            &root,&child)==PRAKTOR_C11_VALUE_ENOBUFS);
+        check(child.impl==NULL);
+        check(contains(&root,"MODE","root"));
+        check(praktor_c11_workflow_fork_task_text_variables(snapshot,9u,
+            &root,&child)==PRAKTOR_C11_VALUE_EINVAL);
+        check(child.impl==NULL);
+        check(praktor_c11_workflow_fork_task_text_variables(snapshot,0u,
+            &root,&root)==PRAKTOR_C11_VALUE_EINVAL);
+        check(praktor_c11_value_store_init(&child,1u,32u,32u)==
+            PRAKTOR_C11_VALUE_OK);
+        check(praktor_c11_value_store_set(&child,"SAVED","here")==
+            PRAKTOR_C11_VALUE_OK);
+        check(praktor_c11_workflow_fork_task_text_variables(snapshot,0u,
+            &root,&child)==PRAKTOR_C11_VALUE_EINVAL);
+        check(contains(&child,"SAVED","here"));
+        praktor_c11_value_store_destroy(&child);
+        praktor_c11_value_store_destroy(&root);
+        praktor_workflow_snapshot_destroy(snapshot);
+    }
+
 }
