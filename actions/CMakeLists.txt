@@ -150,6 +150,18 @@ if(PRAKTOR_ENABLE_C11_ACTIONS)
             LINKER_LANGUAGE C FOLDER "actions/c11/tests")
         add_test(NAME actions_c11_workflow_parallel_commit_test
             COMMAND actions_c11_workflow_parallel_commit_test)
+
+        # Test-only interposition of value_txn_commit_group: the real typed
+        # owner is staged before the failed root group and never published.
+        add_executable(actions_c11_workflow_parallel_commit_fault_test
+            c11/workflow_parallel_commit_fault_test.c)
+        target_link_libraries(actions_c11_workflow_parallel_commit_fault_test PRIVATE
+            praktor_workflow_task_registry praktor_c11_value_store Salts::TinyTest)
+        set_target_properties(actions_c11_workflow_parallel_commit_fault_test PROPERTIES
+            C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF
+            LINKER_LANGUAGE C FOLDER "actions/c11/tests")
+        add_test(NAME actions_c11_workflow_parallel_commit_fault_test
+            COMMAND actions_c11_workflow_parallel_commit_fault_test)
     endif()
 
     # Independent AST/Process Session; never links actions or praktor_shell.
