@@ -27,6 +27,21 @@ int praktor_c11_workflow_seed_root_text_variables(
     const praktor_workflow_snapshot *snapshot,
     praktor_c11_value_store *store);
 
+/* Qualification-only task-local text snapshot.
+ * The root/base store is borrowed and never modified. Child must be a
+ * zero-initialized, distinct handle; success uniquely owns an independent
+ * clone of all visible root text values with task.vars overlaid atomically.
+ * Failure destroys the provisional clone and leaves child (including its
+ * prior zero state), root, and snapshot unchanged. The clone is a bounded
+ * materialized view, not the final hierarchical WorkflowContext: it does
+ * not track a local-write delta or permit merging inherited values back.
+ * Reuse existing value_store transactions for a future owner-controlled
+ * per-task/Parallel commit instead of merging this map wholesale. */
+int praktor_c11_workflow_fork_task_text_variables(
+    const praktor_workflow_snapshot *snapshot, size_t task_index,
+    const praktor_c11_value_store *root,
+    praktor_c11_value_store *child);
+
 #ifdef __cplusplus
 }
 #endif
