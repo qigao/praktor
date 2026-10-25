@@ -654,7 +654,7 @@ spec("C11 multi-worker real Process and separate bounded recovery owners") {
             {0u,typed},{1u,typed},{2u,typed}};
         size_t ids[4]={SIZE_MAX,SIZE_MAX,SIZE_MAX,SIZE_MAX};
         size_t count=0u,pending=SIZE_MAX,reaped=0u,total_reaped=0u;
-        int recovery=PRAKTOR_C11_PARALLEL_BUSY;
+        int recovery_result=PRAKTOR_C11_PARALLEL_BUSY;
         gate_init(&gate);
         check(praktor_c11_process_cohort_recovery_init(&recovery)==PRAKTOR_C11_PARALLEL_OK);
         fixture_init(&f,multi_cancel_yaml,3u);
@@ -724,16 +724,16 @@ spec("C11 multi-worker real Process and separate bounded recovery owners") {
             const uint64_t started=cmeta_hrtime();
             do {
                 reaped=0u;
-                recovery=praktor_c11_workflow_parallel_drain_process_retainers(
+                recovery_result=praktor_c11_workflow_parallel_drain_process_retainers(
                     &recovery,owners,3u,64u,&pending,&reaped);
                 total_reaped+=reaped;
-                check(recovery==PRAKTOR_C11_PARALLEL_OK||
-                      recovery==PRAKTOR_C11_PARALLEL_BUSY);
-                if(recovery==PRAKTOR_C11_PARALLEL_BUSY)cmeta_sleep_ms(2u);
-            } while(recovery==PRAKTOR_C11_PARALLEL_BUSY&&
+                check(recovery_result==PRAKTOR_C11_PARALLEL_OK||
+                      recovery_result==PRAKTOR_C11_PARALLEL_BUSY);
+                if(recovery_result==PRAKTOR_C11_PARALLEL_BUSY)cmeta_sleep_ms(2u);
+            } while(recovery_result==PRAKTOR_C11_PARALLEL_BUSY&&
                     cmeta_hrtime()-started<UINT64_C(8000000000));
         }
-        check(recovery==PRAKTOR_C11_PARALLEL_OK&&pending==0u);
+        check(recovery_result==PRAKTOR_C11_PARALLEL_OK&&pending==0u);
         check(total_reaped>=2u); /* one genuinely adopted native Process per active worker */
         check(praktor_workflow_dag_stop(
             f.dag,PRAKTOR_WORKFLOW_DAG_CANCELLED)==SALTS_OK);
