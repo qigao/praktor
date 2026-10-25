@@ -357,6 +357,9 @@ static int flat_branch(named_build *b,praktor_yaml_node branch,size_t parent,uns
     size_t i,index;
     int status;
     if(praktor_yaml_is_seq(branch)) {
+        if(!praktor_yaml_count(branch))
+            return fail_at(b,SALTS_EINVAL,branch,
+                "Orchestration branch sequence must contain at least one child");
         status=flat_append_node(b,PRAKTOR_ORCH_SEQUENCE,parent,depth,&index);
         if(status!=SALTS_OK)return status;
         for(i=0;i<praktor_yaml_count(branch);++i) {
@@ -453,8 +456,13 @@ static int flat_parse(named_build *b,praktor_yaml_node map,size_t parent,unsigne
             "Flat decorator requires a scalar and child branch");
         if(status!=SALTS_OK)return status;
         status=praktor_yaml_scalar(field,&value,NULL);
-        if(status!=SALTS_OK)
-            return fail_at(b,status,field,"Flat decorator value must be a scalar");
+        if(status!=SALTS_OK) {
+            char message[256];
+            (void)snprintf(message,sizeof message,
+                "Orchestration parameter '%s' for node type '%s' must be a scalar",
+                single_param?single_param:kind,kind);
+            return fail_at(b,status,field,message);
+        }
         if(single_param) {
             status=flat_add_param(b,index,single_param,value,field,kind);
             if(status!=SALTS_OK)return status;
@@ -510,7 +518,7 @@ static int flat_parse(named_build *b,praktor_yaml_node map,size_t parent,unsigne
                 return fail_at(b,status,map,"Cannot read orchestration max_iterations");
             status=praktor_yaml_scalar(field,&value,NULL);
             if(status!=SALTS_OK)return fail_at(b,status,field,
-                "Orchestration max_iterations must be an integer scalar");
+                "Orchestration parameter 'max_iterations' for node type 'while' must be a scalar");
             status=flat_add_param(b,index,"max_iterations",value,field,"while");
             if(status!=SALTS_OK)return status;
         }
@@ -529,7 +537,10 @@ static int flat_parse(named_build *b,praktor_yaml_node map,size_t parent,unsigne
         if(status!=SALTS_OK)return status;
         status=flat_require(b,map,"cases",&branch,"switch requires a cases branch");
         if(status!=SALTS_OK)return status;
-        if(!praktor_yaml_is_seq(branch))return fail(b,SALTS_EINVAL,"switch cases must be a sequence");
+        if(!praktor_yaml_is_seq(branch))
+            return fail_at(b,SALTS_EINVAL,branch,"switch cases must be a sequence");
+        if(!praktor_yaml_count(branch))
+            return fail_at(b,SALTS_EINVAL,map,"switch requires at least one case branch");
         for(i=0;i<praktor_yaml_count(branch);++i) {
             status=flat_branch(b,praktor_yaml_at(branch,i),index,depth);
             if(status!=SALTS_OK)return status;
