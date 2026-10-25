@@ -294,7 +294,15 @@ spec("DeclarativeTreeExecutor variable resolution order") {
         DeclarativeTreeExecutor executor;
         auto result = executor.execute(task, context);
 
-        // Should work fine without any templates
+        // Retain the exact native Process/Shell failure evidence on CI. A
+        // previously observed macOS failure reported only result.success=false
+        // for plain echo; never weaken or retry the acceptance assertion.
+        if (!result.success) {
+            info("plain Shell failed: error=%s exit=%lld stdout=%s stderr=%s",
+                 result.error_message.c_str(),
+                 static_cast<long long>(result.exit_code),
+                 result.stdout_data.c_str(), result.stderr_data.c_str());
+        }
         check((result.success));
     }
 }
