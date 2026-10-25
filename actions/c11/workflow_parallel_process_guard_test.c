@@ -309,6 +309,10 @@ spec("C11 per-worker bounded Process retainer cohort barrier") {
         check(pending==0u);
         check(!f.branches[0].impl&&!f.branches[1].impl);
         check(stored(&f.root,"left","L")&&stored(&f.root,"right","R"));
+        /* Typed output reads are only admitted for terminal TaskRegistry
+         * slots; the Owner must mark success AFTER atomic publication. */
+        for(size_t i=0u;i<2u;++i)
+            check(praktor_workflow_task_registry_complete(f.registry,i)==SALTS_OK);
         check(output_is(f.registry,0u,"output","{\"id\":1}"));
         check(output_is(f.registry,1u,"output","{\"id\":2}"));
         cflow_executor_destroy(&executor);
