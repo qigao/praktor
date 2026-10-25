@@ -264,6 +264,7 @@ spec("Strict CFlow executor and Process Parallel owner publication barrier") {
 spec("C11 per-worker bounded Process retainer cohort barrier") {
     it("fails closed for aliasing, saturation and unfinished recovery, then publishes atomically") {
         guard_fixture f;
+        praktor_c11_process_cohort_recovery recovery={0};
         cflow_process_retainer local[2]={{0},{0}};
         cflow_process_retainer *owners[2]={&local[0],&local[1]};
         cflow_process_retainer *aliased[2]={&local[0],&local[0]};
@@ -274,6 +275,8 @@ spec("C11 per-worker bounded Process retainer cohort barrier") {
         const bool branch_succeeded[2]={true,true};
         size_t pending=SIZE_MAX,reaped=SIZE_MAX;
         initialize(&f);
+        check(praktor_c11_process_cohort_recovery_init(&recovery)==PRAKTOR_C11_PARALLEL_OK);
+        check(praktor_c11_process_cohort_recovery_init(&recovery)==PRAKTOR_C11_PARALLEL_INVALID);
         for(size_t i=0u;i<2u;++i)
             check(cflow_process_retainer_init(&local[i],1u)==SALTS_OK);
         check(cflow_executor_manual_init_with_capacity(&executor,2u));
@@ -285,27 +288,27 @@ spec("C11 per-worker bounded Process retainer cohort barrier") {
         check(cflow_process_retainer_reserve(&local[1],&held)==SALTS_OK);
         check(cflow_process_retainer_reserve(&local[1],&overflow)==SALTS_ENOBUFS);
         check(praktor_c11_workflow_parallel_commit_after_cflow_and_process_drains(
-            f.registry,f.updates,f.branches,2u,branch_succeeded,&control,owners,2u,8u,
+            f.registry,f.updates,f.branches,2u,branch_succeeded,&recovery,&control,owners,2u,8u,
             &pending)==PRAKTOR_C11_PARALLEL_BUSY);
         check(pending==0u); /* OPEN: must not touch retainer */
         check(praktor_c11_workflow_parallel_drain_process_retainers(
-            aliased,2u,8u,&pending,&reaped)==PRAKTOR_C11_PARALLEL_INVALID);
+            &recovery,aliased,2u,8u,&pending,&reaped)==PRAKTOR_C11_PARALLEL_INVALID);
         check(pending==0u&&reaped==0u);
         check(praktor_c11_workflow_parallel_commit_after_cflow_and_process_drains(
-            f.registry,f.updates,f.branches,2u,branch_succeeded,&control,owners,1u,8u,
+            f.registry,f.updates,f.branches,2u,branch_succeeded,&recovery,&control,owners,1u,8u,
             &pending)==PRAKTOR_C11_PARALLEL_INVALID);
         check(cflow_executor_control_shutdown(&control,CFLOW_EXECUTOR_SHUTDOWN_DRAIN));
         check(cflow_executor_run_ready(&executor)==2u);
         check(cflow_executor_control_wait_idle(&control)==CFLOW_EXECUTOR_WAIT_IDLE);
         check(praktor_c11_workflow_parallel_commit_after_cflow_and_process_drains(
-            f.registry,f.updates,f.branches,2u,branch_succeeded,&control,owners,2u,8u,
+            f.registry,f.updates,f.branches,2u,branch_succeeded,&recovery,&control,owners,2u,8u,
             &pending)==PRAKTOR_C11_PARALLEL_BUSY);
         check(pending==1u);
         check(f.branches[0].impl&&f.branches[1].impl);
         check(praktor_c11_value_store_size(&f.root)==1u);
         check(cflow_process_retainer_release(&local[1],held)==SALTS_OK);
         check(praktor_c11_workflow_parallel_commit_after_cflow_and_process_drains(
-            f.registry,f.updates,f.branches,2u,branch_succeeded,&control,owners,2u,8u,
+            f.registry,f.updates,f.branches,2u,branch_succeeded,&recovery,&control,owners,2u,8u,
             &pending)==PRAKTOR_C11_PARALLEL_OK);
         check(pending==0u);
         check(!f.branches[0].impl&&!f.branches[1].impl);
@@ -323,6 +326,7 @@ spec("C11 per-worker bounded Process retainer cohort barrier") {
     }
     it("reports optimistic group conflict without publishing any typed or text output") {
         guard_fixture f;
+        praktor_c11_process_cohort_recovery recovery={0};
         cflow_process_retainer local[2]={{0},{0}};
         cflow_process_retainer *owners[2]={&local[0],&local[1]};
         cflow_executor executor={0};
@@ -331,6 +335,7 @@ spec("C11 per-worker bounded Process retainer cohort barrier") {
         const bool branch_succeeded[2]={true,true};
         size_t pending=SIZE_MAX;
         initialize(&f);
+        check(praktor_c11_process_cohort_recovery_init(&recovery)==PRAKTOR_C11_PARALLEL_OK);
         for(size_t i=0u;i<2u;++i)
             check(cflow_process_retainer_init(&local[i],1u)==SALTS_OK);
         check(cflow_executor_manual_init_with_capacity(&executor,2u));
@@ -347,7 +352,7 @@ spec("C11 per-worker bounded Process retainer cohort barrier") {
         check(praktor_c11_value_store_set(&f.root,"left","external")==
               PRAKTOR_C11_VALUE_OK);
         check(praktor_c11_workflow_parallel_commit_after_cflow_and_process_drains(
-            f.registry,f.updates,f.branches,2u,branch_succeeded,&control,owners,2u,8u,
+            f.registry,f.updates,f.branches,2u,branch_succeeded,&recovery,&control,owners,2u,8u,
             &pending)==PRAKTOR_C11_PARALLEL_CONFLICT);
         check(pending==0u&&f.branches[0].impl&&f.branches[1].impl);
         check(stored(&f.root,"seed","base")&&stored(&f.root,"left","external"));
@@ -364,6 +369,7 @@ spec("C11 per-worker bounded Process retainer cohort barrier") {
     }
     it("refuses cancelled pending callbacks without touching the worker retainers") {
         guard_fixture f;
+        praktor_c11_process_cohort_recovery recovery={0};
         cflow_process_retainer local[2]={{0},{0}};
         cflow_process_retainer *owners[2]={&local[0],&local[1]};
         cflow_executor executor={0};
@@ -373,6 +379,7 @@ spec("C11 per-worker bounded Process retainer cohort barrier") {
         cflow_process_retainer_token hold={0};
         size_t pending=SIZE_MAX,reaped=SIZE_MAX;
         initialize(&f);
+        check(praktor_c11_process_cohort_recovery_init(&recovery)==PRAKTOR_C11_PARALLEL_OK);
         for(size_t i=0u;i<2u;++i)
             check(cflow_process_retainer_init(&local[i],1u)==SALTS_OK);
         check(cflow_executor_manual_init_with_capacity(&executor,2u));
@@ -386,15 +393,15 @@ spec("C11 per-worker bounded Process retainer cohort barrier") {
         check(cflow_executor_run_ready(&executor)==0u);
         check(cflow_executor_control_wait_idle(&control)==CFLOW_EXECUTOR_WAIT_IDLE);
         check(praktor_c11_workflow_parallel_commit_after_cflow_and_process_drains(
-            f.registry,f.updates,f.branches,2u,branch_succeeded,&control,owners,2u,8u,
+            f.registry,f.updates,f.branches,2u,branch_succeeded,&recovery,&control,owners,2u,8u,
             &pending)==PRAKTOR_C11_PARALLEL_CANCELLED);
         check(pending==0u&&f.branches[0].impl&&f.branches[1].impl);
         check(praktor_c11_workflow_parallel_drain_process_retainers(
-            owners,2u,8u,&pending,&reaped)==PRAKTOR_C11_PARALLEL_BUSY);
+            &recovery,owners,2u,8u,&pending,&reaped)==PRAKTOR_C11_PARALLEL_BUSY);
         check(pending==1u&&reaped==0u);
         check(cflow_process_retainer_release(&local[1],hold)==SALTS_OK);
         check(praktor_c11_workflow_parallel_drain_process_retainers(
-            owners,2u,8u,&pending,&reaped)==PRAKTOR_C11_PARALLEL_OK);
+            &recovery,owners,2u,8u,&pending,&reaped)==PRAKTOR_C11_PARALLEL_OK);
         check(pending==0u&&praktor_c11_value_store_size(&f.root)==1u);
         cflow_executor_destroy(&executor);
         for(size_t i=0u;i<2u;++i)
@@ -406,6 +413,7 @@ spec("C11 per-worker bounded Process retainer cohort barrier") {
 spec("Semantic Worker Process failure blocks the entire Parallel group") {
     it("refuses completed-but-failed branches before touching Process retainers") {
         guard_fixture f;
+        praktor_c11_process_cohort_recovery recovery={0};
         cflow_process_retainer local[2]={{0},{0}};
         cflow_process_retainer *owners[2]={&local[0],&local[1]};
         cflow_process_retainer_token hold={0};
@@ -415,6 +423,7 @@ spec("Semantic Worker Process failure blocks the entire Parallel group") {
         const bool branch_succeeded[2]={true,false};
         size_t pending=SIZE_MAX,reaped=SIZE_MAX;
         initialize(&f);
+        check(praktor_c11_process_cohort_recovery_init(&recovery)==PRAKTOR_C11_PARALLEL_OK);
         for(size_t i=0u;i<2u;++i)
             check(cflow_process_retainer_init(&local[i],1u)==SALTS_OK);
         check(cflow_executor_manual_init_with_capacity(&executor,2u));
@@ -429,7 +438,7 @@ spec("Semantic Worker Process failure blocks the entire Parallel group") {
         check(probes[0].finalized==1u&&probes[1].finalized==1u);
         check(cflow_process_retainer_reserve(&local[1],&hold)==SALTS_OK);
         check(praktor_c11_workflow_parallel_commit_after_cflow_and_process_drains(
-            f.registry,f.updates,f.branches,2u,branch_succeeded,&control,owners,2u,8u,
+            f.registry,f.updates,f.branches,2u,branch_succeeded,&recovery,&control,owners,2u,8u,
             &pending)==PRAKTOR_C11_PARALLEL_FAILED);
         /* No retainer poll and no partial typed/text output on semantic failure. */
         check(pending==0u&&f.branches[0].impl&&f.branches[1].impl);
@@ -437,10 +446,10 @@ spec("Semantic Worker Process failure blocks the entire Parallel group") {
         check(praktor_c11_value_store_size(&f.root)==1u);
         check(cflow_process_retainer_release(&local[1],hold)==SALTS_OK);
         check(praktor_c11_workflow_parallel_drain_process_retainers(
-            owners,2u,8u,&pending,&reaped)==PRAKTOR_C11_PARALLEL_OK);
+            &recovery,owners,2u,8u,&pending,&reaped)==PRAKTOR_C11_PARALLEL_OK);
         check(pending==0u&&reaped==0u);
         check(praktor_c11_workflow_parallel_commit_after_cflow_and_process_drains(
-            f.registry,f.updates,f.branches,2u,branch_succeeded,&control,owners,2u,8u,
+            f.registry,f.updates,f.branches,2u,branch_succeeded,&recovery,&control,owners,2u,8u,
             &pending)==PRAKTOR_C11_PARALLEL_FAILED);
         cflow_executor_destroy(&executor);
         for(size_t i=0u;i<2u;++i)

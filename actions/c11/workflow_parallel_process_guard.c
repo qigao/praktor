@@ -76,6 +76,20 @@ int praktor_c11_workflow_parallel_commit_after_cflow_and_process_drain(
         registry,task_outputs,branch_values,branch_count,retainer,
         max_steps,out_pending);
 }
+enum { PRAKTOR_C11_COHORT_GATE_MARKER = 0x50435231u };
+
+int praktor_c11_process_cohort_recovery_init(
+    praktor_c11_process_cohort_recovery *gate) {
+    if(!gate||gate->marker!=0u||gate->first_native_error!=SALTS_OK)
+        return PRAKTOR_C11_PARALLEL_INVALID;
+    gate->marker=PRAKTOR_C11_COHORT_GATE_MARKER;
+    return PRAKTOR_C11_PARALLEL_OK;
+}
+
+static bool valid_cohort_gate(const praktor_c11_process_cohort_recovery *gate) {
+    return gate&&gate->marker==PRAKTOR_C11_COHORT_GATE_MARKER;
+}
+
 /* Per-worker retainers have NO internal cross-callback synchronization.
  * Validate the complete set before calling even the first retainer. In
  * particular two wrapper objects pointing to the same impl are not distinct
@@ -93,13 +107,15 @@ static int validate_retainer_group(cflow_process_retainer *const *owners,
 }
 
 int praktor_c11_workflow_parallel_drain_process_retainers(
+    praktor_c11_process_cohort_recovery *gate,
     cflow_process_retainer *const *owners,size_t count,size_t max_steps,
     size_t *out_pending,size_t *out_reaped) {
     size_t pending_total=0u,reaped_total=0u;
     int result=PRAKTOR_C11_PARALLEL_OK;
     if(out_pending)*out_pending=0u;
     if(out_reaped)*out_reaped=0u;
-    if(validate_retainer_group(owners,count,max_steps)!=PRAKTOR_C11_PARALLEL_OK)
+    if(!valid_cohort_gate(gate)||
+       validate_retainer_group(owners,count,max_steps)!=PRAKTOR_C11_PARALLEL_OK)
         return PRAKTOR_C11_PARALLEL_INVALID;
     for(size_t i=0u;i<count;++i) {
         size_t pending=0u,reaped=0u;
@@ -111,14 +127,20 @@ int praktor_c11_workflow_parallel_drain_process_retainers(
         reaped_total+=reaped;
         /* Keep draining independent owners after an error, but never
          * normalize that error into a BUSY retry or success. */
-        if(status!=SALTS_OK&&status!=SALTS_EBUSY)
+        if(status!=SALTS_OK&&status!=SALTS_EBUSY) {
+            if(gate->first_native_error==SALTS_OK)
+                gate->first_native_error=status; /* first provider error wins */
             result=PRAKTOR_C11_PARALLEL_RECOVERY;
+        }
         else if(result==PRAKTOR_C11_PARALLEL_OK&&
                 (status==SALTS_EBUSY||pending!=0u))
             result=PRAKTOR_C11_PARALLEL_BUSY;
     }
     if(out_pending)*out_pending=pending_total;
     if(out_reaped)*out_reaped=reaped_total;
+    /* A later successful cleanup cannot revive an aborted cohort. */
+    if(gate->first_native_error!=SALTS_OK)
+        return PRAKTOR_C11_PARALLEL_RECOVERY;
     return result;
 }
 
@@ -126,7 +148,8 @@ int praktor_c11_workflow_parallel_commit_after_cflow_and_process_drains(
     praktor_workflow_task_registry *registry,
     const praktor_workflow_task_output_update *task_outputs,
     praktor_c11_value_txn *branch_values,size_t branch_count,
-    const bool *branch_succeeded,cflow_executor_control *control,
+    const bool *branch_succeeded,
+    praktor_c11_process_cohort_recovery *gate,cflow_executor_control *control,
     cflow_process_retainer *const *owners,size_t count,
     size_t max_steps,size_t *out_pending) {
     cflow_executor_protocol_stats stats={0};
@@ -134,7 +157,7 @@ int praktor_c11_workflow_parallel_commit_after_cflow_and_process_drains(
     int drained;
     if(out_pending)*out_pending=0u;
     if(!registry||!task_outputs||!branch_values||!branch_count||
-       !branch_succeeded||!control||branch_count!=count||
+       !branch_succeeded||!valid_cohort_gate(gate)||!control||branch_count!=count||
        validate_retainer_group(owners,count,max_steps)!=PRAKTOR_C11_PARALLEL_OK)
         return PRAKTOR_C11_PARALLEL_INVALID;
     if(!cflow_executor_control_get_stats(control,&stats))
@@ -156,12 +179,14 @@ int praktor_c11_workflow_parallel_commit_after_cflow_and_process_drains(
         return PRAKTOR_C11_PARALLEL_BUSY;
     if(waited!=CFLOW_EXECUTOR_WAIT_IDLE)
         return PRAKTOR_C11_PARALLEL_INVALID;
+    if(gate->first_native_error!=SALTS_OK)
+        return PRAKTOR_C11_PARALLEL_RECOVERY;
     /* CFlow callback completion is NOT a guarantee of successful Process.
      * Read semantic results only after all finalizers and idle have settled. */
     for(size_t i=0u;i<branch_count;++i)
         if(!branch_succeeded[i])return PRAKTOR_C11_PARALLEL_FAILED;
     drained=praktor_c11_workflow_parallel_drain_process_retainers(
-        owners,count,max_steps,out_pending,NULL);
+        gate,owners,count,max_steps,out_pending,NULL);
     if(drained!=PRAKTOR_C11_PARALLEL_OK)return drained;
     return praktor_c11_workflow_parallel_commit(
         registry,task_outputs,branch_values,branch_count);

@@ -542,6 +542,7 @@ spec("C11 multi-worker real Process and separate bounded recovery owners") {
     it("publishes two concurrent Command+ParseLines results only after every retainer drains") {
         process_fixture f;
         process_gate gate;
+        praktor_c11_process_cohort_recovery recovery={0};
         process_worker workers[2];
         bool branch_succeeded[2]={false,false};
         cflow_process_retainer local[2]={{0},{0}};
@@ -555,6 +556,7 @@ spec("C11 multi-worker real Process and separate bounded recovery owners") {
         size_t ids[3]={SIZE_MAX,SIZE_MAX,SIZE_MAX},count=0u,pending=SIZE_MAX;
         int status=PRAKTOR_C11_PARALLEL_BUSY;
         gate_init(&gate);
+        check(praktor_c11_process_cohort_recovery_init(&recovery)==PRAKTOR_C11_PARALLEL_OK);
         fixture_init(&f,multi_success_yaml,2u);
         if(!f.snapshot)return;
         check(praktor_workflow_dag_claim_ready(f.dag,ids,3u,&count)==SALTS_OK);
@@ -598,7 +600,7 @@ spec("C11 multi-worker real Process and separate bounded recovery owners") {
          * reservation still prevents *both* typed/text publications. */
         check(cflow_process_retainer_reserve(&local[1],&held)==SALTS_OK);
         check(praktor_c11_workflow_parallel_commit_after_cflow_and_process_drains(
-            f.registry,updates,transactions,2u,branch_succeeded,&control,owners,2u,8u,
+            f.registry,updates,transactions,2u,branch_succeeded,&recovery,&control,owners,2u,8u,
             &pending)==PRAKTOR_C11_PARALLEL_BUSY);
         check(pending==1u&&transactions[0].impl&&transactions[1].impl);
         check(root_lacks(&f.root,"left_count")&&root_lacks(&f.root,"right_count"));
@@ -607,7 +609,7 @@ spec("C11 multi-worker real Process and separate bounded recovery owners") {
             const uint64_t started=cmeta_hrtime();
             do {
                 status=praktor_c11_workflow_parallel_commit_after_cflow_and_process_drains(
-                    f.registry,updates,transactions,2u,branch_succeeded,&control,owners,2u,64u,
+                    f.registry,updates,transactions,2u,branch_succeeded,&recovery,&control,owners,2u,64u,
                     &pending);
                 check(status==PRAKTOR_C11_PARALLEL_OK||
                       status==PRAKTOR_C11_PARALLEL_BUSY);
@@ -637,6 +639,7 @@ spec("C11 multi-worker real Process and separate bounded recovery owners") {
     it("cancels two simultaneously running Shells and a queued callback without shared retainer access") {
         process_fixture f;
         process_gate gate;
+        praktor_c11_process_cohort_recovery recovery={0};
         process_worker workers[3];
         const bool branch_succeeded[3]={false,false,false};
         cflow_process_retainer local[3]={{0},{0},{0}};
@@ -653,6 +656,7 @@ spec("C11 multi-worker real Process and separate bounded recovery owners") {
         size_t count=0u,pending=SIZE_MAX,reaped=0u,total_reaped=0u;
         int recovery=PRAKTOR_C11_PARALLEL_BUSY;
         gate_init(&gate);
+        check(praktor_c11_process_cohort_recovery_init(&recovery)==PRAKTOR_C11_PARALLEL_OK);
         fixture_init(&f,multi_cancel_yaml,3u);
         if(!f.snapshot){json_free(typed);return;}
         check(typed!=NULL);
@@ -704,7 +708,7 @@ spec("C11 multi-worker real Process and separate bounded recovery owners") {
                 "forbidden")==PRAKTOR_C11_VALUE_OK);
         }
         check(praktor_c11_workflow_parallel_commit_after_cflow_and_process_drains(
-            f.registry,updates,transactions,3u,branch_succeeded,&control,owners,3u,8u,
+            f.registry,updates,transactions,3u,branch_succeeded,&recovery,&control,owners,3u,8u,
             &pending)==PRAKTOR_C11_PARALLEL_CANCELLED);
         check(pending==0u); /* cancellation cannot drive a retainer */
         check(root_lacks(&f.root,"first_result")&&
@@ -721,7 +725,7 @@ spec("C11 multi-worker real Process and separate bounded recovery owners") {
             do {
                 reaped=0u;
                 recovery=praktor_c11_workflow_parallel_drain_process_retainers(
-                    owners,3u,64u,&pending,&reaped);
+                    &recovery,owners,3u,64u,&pending,&reaped);
                 total_reaped+=reaped;
                 check(recovery==PRAKTOR_C11_PARALLEL_OK||
                       recovery==PRAKTOR_C11_PARALLEL_BUSY);
@@ -755,6 +759,7 @@ spec("C11 multi-worker real Process and separate bounded recovery owners") {
     it("fails closed when a worker Process retainer is saturated before spawn") {
         process_fixture f;
         process_gate gate;
+        praktor_c11_process_cohort_recovery recovery={0};
         process_worker workers[2];
         bool branch_succeeded[2]={false,false};
         cflow_process_retainer local[2]={{0},{0}};
@@ -768,6 +773,7 @@ spec("C11 multi-worker real Process and separate bounded recovery owners") {
         praktor_workflow_task_output_update updates[2]={{0u,typed},{1u,typed}};
         size_t ids[3]={SIZE_MAX,SIZE_MAX,SIZE_MAX},count=0u,pending=SIZE_MAX,reaped=SIZE_MAX;
         gate_init(&gate);
+        check(praktor_c11_process_cohort_recovery_init(&recovery)==PRAKTOR_C11_PARALLEL_OK);
         fixture_init(&f,multi_success_yaml,2u);
         if(!f.snapshot){json_free(typed);return;}
         check(typed!=NULL);
@@ -790,7 +796,7 @@ spec("C11 multi-worker real Process and separate bounded recovery owners") {
         }
         check(await_worker_count(&gate,2u));
         check(praktor_c11_workflow_parallel_commit_after_cflow_and_process_drains(
-            f.registry,updates,transactions,2u,branch_succeeded,&control,owners,2u,8u,
+            f.registry,updates,transactions,2u,branch_succeeded,&recovery,&control,owners,2u,8u,
             &pending)==PRAKTOR_C11_PARALLEL_BUSY);
         check(pending==0u); /* OPEN executor must not poll native recovery */
         check(cflow_executor_control_shutdown(&control,CFLOW_EXECUTOR_SHUTDOWN_DRAIN));
@@ -814,7 +820,7 @@ spec("C11 multi-worker real Process and separate bounded recovery owners") {
         /* Even fabricated candidate outputs cannot be published once the
          * real native Process leaf reported semantic failure. */
         check(praktor_c11_workflow_parallel_commit_after_cflow_and_process_drains(
-            f.registry,updates,transactions,2u,branch_succeeded,&control,owners,2u,8u,
+            f.registry,updates,transactions,2u,branch_succeeded,&recovery,&control,owners,2u,8u,
             &pending)==PRAKTOR_C11_PARALLEL_FAILED);
         check(pending==0u&&transactions[0].impl&&transactions[1].impl);
         check(root_is(&f.root,"BASE","untouched"));
@@ -822,10 +828,10 @@ spec("C11 multi-worker real Process and separate bounded recovery owners") {
         check_dag(&f,2u,0u,0u,PRAKTOR_WORKFLOW_DAG_CONTINUE,false);
         check(cflow_process_retainer_release(&local[0],hold)==SALTS_OK);
         check(praktor_c11_workflow_parallel_drain_process_retainers(
-            owners,2u,8u,&pending,&reaped)==PRAKTOR_C11_PARALLEL_OK);
+            &recovery,owners,2u,8u,&pending,&reaped)==PRAKTOR_C11_PARALLEL_OK);
         check(pending==0u&&reaped==0u);
         check(praktor_c11_workflow_parallel_commit_after_cflow_and_process_drains(
-            f.registry,updates,transactions,2u,branch_succeeded,&control,owners,2u,8u,
+            f.registry,updates,transactions,2u,branch_succeeded,&recovery,&control,owners,2u,8u,
             &pending)==PRAKTOR_C11_PARALLEL_FAILED);
         for(size_t i=0u;i<2u;++i) {
             praktor_c11_value_txn_abort(&transactions[i]);

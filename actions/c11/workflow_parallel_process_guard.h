@@ -5,6 +5,7 @@
 #include <salts/process_retainer.h>
 #include <cflow/executor.h>
 #include <stdbool.h>
+#include <stdint.h>
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -64,6 +65,23 @@ int praktor_c11_workflow_parallel_commit_after_cflow_and_process_drain(
     size_t max_steps,
     size_t *out_pending);
 
+/* Source-only, owner-local and bounded in-memory error latch for ONE
+ * immutable Parallel cohort. Caller passes the SAME zero-initialized record
+ * through every recovery sweep and publication preflight. Initialization is
+ * once-only: attempting to initialize an already active/poisoned gate fails.
+ * On first native non-EBUSY recovery error, first_native_error is retained;
+ * clearing the underlying NativeIO condition and reaching pending==0 can
+ * never grant permission to publish that cohort. There is NO implicit reset.
+ * This state does not survive a process crash; no restart/durable journal or
+ * production scheduler capability is being claimed. */
+typedef struct praktor_c11_process_cohort_recovery {
+    uint32_t marker;
+    int first_native_error;
+} praktor_c11_process_cohort_recovery;
+
+int praktor_c11_process_cohort_recovery_init(
+    praktor_c11_process_cohort_recovery *gate);
+
 /* Per-worker Process barrier: each CFlow callback exclusively borrows its
  * own bounded retainer. Do not share an impl between array entries. Caller
  * MUST have joined *all* callbacks/finalizers and stopped admission before
@@ -78,8 +96,12 @@ int praktor_c11_workflow_parallel_commit_after_cflow_and_process_drain(
  * single retainer operation.
  *
  * This drain-only API is for canceled/failed cohorts as well as success.
- * It does NOT prove CFlow quiescence itself; caller supplies that proof. */
+ * It does NOT prove CFlow quiescence itself; caller supplies that proof.
+ * The state record is mandatory and latches the first NativeIO failure.
+ * Recovery turns may continue to release leases after a latch, returning
+ * RECOVERY even if the current pending count reaches zero. */
 int praktor_c11_workflow_parallel_drain_process_retainers(
+    praktor_c11_process_cohort_recovery *gate,
     cflow_process_retainer *const *retainers, size_t retainer_count,
     size_t max_steps, size_t *out_pending, size_t *out_reaped);
 
@@ -91,13 +113,17 @@ int praktor_c11_workflow_parallel_drain_process_retainers(
  * It is read ONLY after CLOSED + wait_idle; a false value returns
  * PARALLEL_FAILED before any retainer is driven or output is published.
  * Caller aborts the group and separately drains native leases.
+ * The same initialized gate used by the cohort's recovery turns is required;
+ * a previously latched NativeIO error returns RECOVERY even after a later
+ * clean retainer sweep. Gate may never be reset to force publication.
  * All DAG/registry changes happen afterward on the application Owner.
  * No shared retainer, C++ production backend change, or public SDK switch. */
 int praktor_c11_workflow_parallel_commit_after_cflow_and_process_drains(
     praktor_workflow_task_registry *registry,
     const praktor_workflow_task_output_update *task_outputs,
     praktor_c11_value_txn *branch_values, size_t branch_count,
-    const bool *branch_succeeded, cflow_executor_control *control,
+    const bool *branch_succeeded,
+    praktor_c11_process_cohort_recovery *gate, cflow_executor_control *control,
     cflow_process_retainer *const *retainers, size_t retainer_count,
     size_t max_steps, size_t *out_pending);
 

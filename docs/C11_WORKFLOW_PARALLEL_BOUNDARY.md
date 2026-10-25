@@ -191,3 +191,29 @@ admission; the independent sibling must succeed. No group outputs may
 publish even after the hold is released. No fallback, global recovery
 thread or production C++ executor cutover is authorized. Legacy macOS
 Shell cancellation #81 remains separately open.
+
+### First-error latching across multi-retainer recovery turns (candidate)
+
+A single `run_ready` call returning `SALTS_EIO` is not made safe just
+because a later attempt returns `SALTS_OK` and reports zero pending leases.
+The source-only multi-worker recovery contract now binds one
+zero-initialized `praktor_c11_process_cohort_recovery` record to ONE Parallel
+cohort. It is initialized exactly once and passed to all recovery/commit
+turns. The record retains the *first* non-EBUSY NativeIO/close/ack error.
+No implicit reset or retry is allowed for this cohort.
+
+On a latched error, a later recovery sweep may still drive each independent
+retainer to quiescence and report an updated `out_pending`, but its status
+remains `PRAKTOR_C11_PARALLEL_RECOVERY`; the commit barrier refuses all
+typed/text output publication even after the pending count reaches zero.
+The application Owner must abort all candidate branch transactions, block
+DAG successor admission, and settle/destroy all native recovery owners.
+Initializing a live/poisoned record again is an explicit error. A `BUSY`
+result without an underlying provider error does not poison the record.
+
+This record is **owner-local in-memory lifetime state**, NOT a disk journal,
+crash-atomic publication scheme, restart recovery, or production backend
+replacement. The old compatibility single-retainer API is unchanged;
+new multi-worker code must use the latched cohort entry points. Only the
+source-only qualification profile exercises this behavior. PR #79 stays
+Draft, and the unrelated macOS Legacy Shell cancellation #81 stays Open.
