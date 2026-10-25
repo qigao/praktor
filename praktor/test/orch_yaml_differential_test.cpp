@@ -272,6 +272,35 @@ spec("C11 named orchestration CSTL AST parity with legacy parser") {
         check(std::string(error).find("both 'child' and 'children'")!=std::string::npos);
     }
 
+    it("matches full legacy locations and canonical names for typed scalar errors") {
+        struct ScalarCase { const char *source; const char *key; const char *kind; };
+        const ScalarCase cases[] = {
+            {"ParseRegex: {input_key: source, pattern: ok, captureGroup: invalid}\n",
+                "capture_group","an integer"},
+            {"Shell: {cmd: echo, STREAM_OUTPUT: maybe}\n",
+                "stream_output","a boolean"},
+            {"FileExists: {path: marker, failIfMissing: 123}\n",
+                "fail_if_missing","a boolean"},
+            {"WaitEvent: {event: ready, timeout: 1.5}\n",
+                "timeout","an integer"}
+        };
+        for(const auto& item:cases) {
+            TaskYamlDetail::YamlDocument document(item.source);
+            std::string legacy_error;
+            try { (void)TaskYamlDetail::parse_orch_node(document.root()); }
+            catch(const std::exception& e) { legacy_error=e.what(); }
+            praktor_orch_tree *native=nullptr;
+            char diagnostic[512]{};
+            const int status=praktor_orch_from_named_yaml(
+                document.root().native(),&native,diagnostic,sizeof diagnostic);
+            check(status!=SALTS_OK);
+            check(native==nullptr);
+            check(legacy_error.find(item.key)!=std::string::npos);
+            check(legacy_error.find(item.kind)!=std::string::npos);
+            check(std::string(diagnostic)==legacy_error);
+        }
+    }
+
     it("agrees with legacy on invalid flat forms and never publishes partial ASTs") {
         struct FlatCase { const char *kind; const char *source; };
         const FlatCase cases[] = {
