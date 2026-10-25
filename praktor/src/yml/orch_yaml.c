@@ -148,7 +148,8 @@ static int flat_parse(named_build *b,praktor_yaml_node map,size_t parent,unsigne
 static int children(named_build *b,praktor_yaml_node seq,size_t parent,unsigned depth) {
     size_t i;
     if(!praktor_yaml_is_seq(seq))
-        return fail(b,SALTS_EINVAL,"Named orchestration children must be a sequence");
+        return fail_at(b,SALTS_EINVAL,seq,
+            "Orchestration children block must be a sequence");
     for(i=0;i<praktor_yaml_count(seq);++i) {
         int status=parse(b,praktor_yaml_at(seq,i),parent,depth+1u);
         if(status!=SALTS_OK)return status;
@@ -250,29 +251,61 @@ static int parse_named_entry(named_build *b,praktor_yaml_node value,size_t paren
     if(b->count>=PRAKTOR_ORCH_MAX_NODES)
         return fail(b,SALTS_EINVAL,"Named orchestration node limit");
     status=praktor_yaml_key(value,&type_name,NULL);
-    if(status!=SALTS_OK)return fail(b,status,"Cannot decode orchestration type key");
+    if(status!=SALTS_OK)
+        return fail_at(b,status,value,"Cannot decode orchestration type key");
     /* Legacy named spellings were explicitly retired. The flat forms must
      * remain the sole accepted syntax for these control/decorator nodes. */
     if(key_is(type_name,"IfThenElse")||key_is(type_name,"WhileDo")||
        key_is(type_name,"Switch")||key_is(type_name,"SetVariable")||
        key_is(type_name,"Timeout")||key_is(type_name,"Repeat")||
        key_is(type_name,"Delay")) {
+        char message[512],lower[128];
+        const char *guide=NULL;
+        size_t n;
+        (void)snprintf(lower,sizeof lower,"%s",type_name);
+        for(n=0;lower[n];++n)lower[n]=(char)tolower((unsigned char)lower[n]);
+        if(key_is(type_name,"IfThenElse"))
+            guide="Use flat 'if' / 'then' / 'else' syntax";
+        else if(key_is(type_name,"WhileDo"))
+            guide="Use flat 'while' / 'do' syntax";
+        else if(key_is(type_name,"Switch"))
+            guide="Use flat 'switch' with sibling 'cases' syntax";
+        else if(key_is(type_name,"SetVariable"))
+            guide="Use flat 'set_variable' plus sibling 'value' or 'from' syntax";
+        if(guide)
+            (void)snprintf(message,sizeof message,
+                "Legacy orchestration node type '%s' has been removed. %s",
+                type_name,guide);
+        else
+            (void)snprintf(message,sizeof message,
+                "Legacy orchestration node type '%s' has been removed. Use flat '%s' plus sibling 'child' syntax",
+                type_name,lower);
         tstr_free(type_name);
-        return fail_at(b,SALTS_EINVAL,value,
-            "Legacy orchestration node type has been removed; use flat syntax");
+        return fail_at(b,SALTS_EINVAL,value,message);
     }
     (void)snprintf(type_lower,sizeof type_lower,"%s",type_name);
     for(i=0;type_lower[i];++i)
         type_lower[i]=(char)tolower((unsigned char)type_lower[i]);
     status=praktor_orch_find_type(tstr_to_v(type_name),&type);
+    if(status!=SALTS_OK) {
+        char message[256];
+        (void)snprintf(message,sizeof message,
+            "Unknown orchestration node type: '%s'",type_name);
+        tstr_free(type_name);
+        return fail_at(b,status==SALTS_ENOENT?SALTS_EINVAL:status,value,message);
+    }
     tstr_free(type_name);
-    if(status!=SALTS_OK)return fail_at(b,SALTS_EINVAL,value,"Unknown named orchestration type");
     spec=praktor_orch_spec_for(type);
     index=b->count++;
     b->rows[index].node.type=type;
     b->rows[index].node.parent_index=parent;
     if(praktor_yaml_is_seq(value)) {
-        if(!spec->allows_children)return fail(b,SALTS_EINVAL,"Leaf cannot have children");
+        if(!spec->allows_children) {
+            char message[128];
+            (void)snprintf(message,sizeof message,
+                "Leaf node '%s' cannot have children",type_lower);
+            return fail_at(b,SALTS_EINVAL,value,message);
+        }
         status=children(b,value,index,depth);
         return status==SALTS_OK?validate_named_row(b,index,value,type_lower):status;
     }
@@ -344,14 +377,38 @@ static int parse_named_entry(named_build *b,praktor_yaml_node value,size_t paren
         const char *required=NULL;
         tstr key=NULL,text=NULL;
         size_t count=0;
+        char message[256],required_list[128]={0};
+        if(!praktor_yaml_has_val(value))
+            return fail_at(b,SALTS_EINVAL,value,
+                "Orchestration node value must be a map, sequence, or scalar");
         for(i=0;i<sizeof(spec->required)/sizeof(spec->required[0]);++i)
-            if(spec->required[i]) {required=spec->required[i];++count;}
-        if(count!=1u)return fail(b,SALTS_EINVAL,"Named shorthand requires one parameter");
+            if(spec->required[i]) {
+                required=spec->required[i];++count;
+                (void)snprintf(required_list+strlen(required_list),
+                    sizeof required_list-strlen(required_list),"%s%s",
+                    required_list[0]?", ":"",required);
+            }
+        if(count!=1u) {
+            if(!count)
+                (void)snprintf(message,sizeof message,
+                    "Node type '%s' does not support simplified syntax (no required parameters)",
+                    type_lower);
+            else
+                (void)snprintf(message,sizeof message,
+                    "Node type '%s' requires multiple parameters (%s). Use map syntax",
+                    type_lower,required_list);
+            return fail_at(b,SALTS_EINVAL,value,message);
+        }
         status=praktor_yaml_scalar(value,&text,NULL);
-        if(status!=SALTS_OK)return fail(b,status,"Named shorthand must be scalar");
+        if(status!=SALTS_OK)
+            return fail_at(b,status,value,
+                "Orchestration simplified syntax requires a scalar value");
         key=tstr_dup(required);
-        if(!key) {tstr_free(text);return fail(b,SALTS_ENOMEM,"Cannot allocate param key");}
-        status=param(b,index,key,text);
+        if(!key) {
+            tstr_free(text);
+            return fail(b,SALTS_ENOMEM,"Cannot allocate param key");
+        }
+        status=param_with_source(b,index,key,text,value,type_lower);
         return status==SALTS_OK?validate_named_row(b,index,value,type_lower):status;
     }
 }
@@ -379,8 +436,12 @@ static int parse(named_build *b,praktor_yaml_node map,size_t parent,unsigned dep
     }
     if(depth>NAMED_YAML_MAX_DEPTH)
         return fail(b,SALTS_EINVAL,"Named orchestration nesting limit");
-    if(!praktor_yaml_is_map(map)||praktor_yaml_count(map)!=1u)
-        return fail(b,SALTS_EINVAL,"Named node requires exactly one type key");
+    if(!praktor_yaml_is_map(map))
+        return fail_at(b,SALTS_EINVAL,map,
+            "Orchestration node must be a map");
+    if(praktor_yaml_count(map)!=1u)
+        return fail_at(b,SALTS_EINVAL,map,
+            "Orchestration node must have exactly one key (node type)");
     return parse_named_entry(b,praktor_yaml_at(map,0),parent,depth);
 }
 
