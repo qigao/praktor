@@ -5,6 +5,7 @@
 #include "yml/yaml_workflow_metadata.h"
 #include "yml/workflow_dependencies.h"
 #include "yml/workflow_snapshot.h"
+#include "yml/workflow_task_registry.h"
 #include "yml/task_parser.hpp"
 #include <algorithm>
 #include <exception>
@@ -966,4 +967,82 @@ spec("Owned C11 inline workflow snapshot versus production TaskParser") {
         compare_owned_inline_workflow(yaml,"inline-owner-parity");
     }
 
+}
+
+
+spec("C11 typed task output ownership versus accepted TaskRegistry outcomes") {
+    it("preserves structured scalar identity, repeated updates and re-entry") {
+        const char *yaml=
+            "tasks:\n"
+            "  - {name: collect, command: echo collect}\n"
+            "  - {name: report, command: echo report, depends_on: [collect]}\n";
+        praktor_workflow_snapshot *snapshot=nullptr;
+        char diagnostic[256]{};
+        check(praktor_workflow_snapshot_create_inline(vstr_from_cstr(yaml),
+            &snapshot,diagnostic,sizeof diagnostic)==SALTS_OK);
+        praktor_workflow_task_registry *owned=nullptr;
+        check(praktor_workflow_task_registry_create(snapshot,&owned)==SALTS_OK);
+        praktor_workflow_snapshot_destroy(snapshot);
+        std::unique_ptr<praktor_workflow_task_registry,
+                        decltype(&praktor_workflow_task_registry_destroy)> native(
+            owned,&praktor_workflow_task_registry_destroy);
+        if(!native)return;
+        TaskRegistry legacy;
+        const std::string key="result";
+        for(const char *source:{
+            "{\"epoch\":1,\"records\":[true,null,\"雪\"]}",
+            "{\"epoch\":2,\"records\":[1,2,3]}",
+            "{\"epoch\":9007199254740993,\"valid\":true}"
+        }) {
+            const WorkflowValue value=WorkflowValue::parse(source);
+            legacy.setOutput("collect",key,value);
+            check(praktor_workflow_task_registry_set_output(
+                native.get(),0u,vstr_from_cstr(key.c_str()),value.raw())==SALTS_OK);
+        }
+        legacy.markCompleted("collect");
+        check(praktor_workflow_task_registry_complete(native.get(),0u)==SALTS_OK);
+        check(legacy.getStatus("collect")=="success");
+        praktor_workflow_task_state status=PRAKTOR_WORKFLOW_TASK_PENDING;
+        check(praktor_workflow_task_registry_state(native.get(),0u,&status)==SALTS_OK);
+        check(status==PRAKTOR_WORKFLOW_TASK_SUCCESS);
+        const json_value_t *view=nullptr;
+        check(praktor_workflow_task_registry_get_output(native.get(),0u,
+            vstr_from_cstr(key.c_str()),&view)==SALTS_OK);
+        const auto expected=legacy.getOutput("collect",key).to_string();
+        if(view) {
+            char *actual=json_serialize(view,nullptr);
+            check(actual!=nullptr);
+            if(actual) {
+                check(expected==actual);
+                json_serialize_free(actual);
+            }
+        }
+        legacy.startTask("collect");
+        check(praktor_workflow_task_registry_start(native.get(),0u)==SALTS_OK);
+        check(legacy.getStatus("collect")=="running");
+        check(praktor_workflow_task_registry_state(native.get(),0u,&status)==SALTS_OK);
+        check(status==PRAKTOR_WORKFLOW_TASK_RUNNING);
+        check(praktor_workflow_task_registry_get_output(native.get(),0u,
+            vstr_from_cstr(key.c_str()),&view)==SALTS_EBUSY);
+        const WorkflowValue next=WorkflowValue::parse("{\"failed\":true}");
+        legacy.setOutput("collect",key,next);
+        check(praktor_workflow_task_registry_set_output(native.get(),0u,
+            vstr_from_cstr(key.c_str()),next.raw())==SALTS_OK);
+        legacy.markFailed("collect","controlled failure");
+        check(praktor_workflow_task_registry_fail(native.get(),0u,
+            vstr_from_cstr("controlled failure"))==SALTS_OK);
+        check(legacy.getStatus("collect")=="failed");
+        check(praktor_workflow_task_registry_state(native.get(),0u,&status)==SALTS_OK);
+        check(status==PRAKTOR_WORKFLOW_TASK_FAILED);
+        vstr reason={0};
+        check(praktor_workflow_task_registry_failure_reason(native.get(),0u,&reason)==SALTS_OK);
+        check(vstr_eq(reason,vstr_from_cstr(legacy.getFailureReason("collect").c_str())));
+        check(praktor_workflow_task_registry_get_output(native.get(),0u,
+            vstr_from_cstr(key.c_str()),&view)==SALTS_OK);
+        if(view) {
+            char *actual=json_serialize(view,nullptr);
+            check(actual&&std::string(actual)==legacy.getOutput("collect",key).to_string());
+            json_serialize_free(actual);
+        }
+    }
 }
