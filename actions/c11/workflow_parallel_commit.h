@@ -41,7 +41,8 @@ typedef enum praktor_c11_parallel_commit_status {
     PRAKTOR_C11_PARALLEL_MEMORY,
     PRAKTOR_C11_PARALLEL_BUSY,
     PRAKTOR_C11_PARALLEL_INVARIANT,
-    PRAKTOR_C11_PARALLEL_RECOVERY /* live native Process/ack failure; retain owner */
+    PRAKTOR_C11_PARALLEL_RECOVERY, /* Native Process/ack failure; retain owner */
+    PRAKTOR_C11_PARALLEL_CANCELLED /* CFlow canceled any accepted task; abort group */
 } praktor_c11_parallel_commit_status;
 
 int praktor_c11_workflow_parallel_commit(
