@@ -282,6 +282,36 @@ if(PRAKTOR_ENABLE_C11_ACTIONS)
     # Independent AST/Process Session; never links actions or praktor_shell.
     include(${CMAKE_CURRENT_SOURCE_DIR}/c11/session_targets.cmake)
 
+    # Source-only native conversion of canonical Orch AST to C11 Session plan.
+    # No C++ bridge, alternate parser, scheduler or implicit Legacy fallback.
+    add_library(praktor_c11_orch_session_plan STATIC
+        c11/orch_session_plan.c c11/orch_session_plan.h)
+    target_include_directories(praktor_c11_orch_session_plan PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/c11>)
+    target_link_libraries(praktor_c11_orch_session_plan PUBLIC
+        praktor_c11_session_core praktor_orch_tree)
+    target_compile_features(praktor_c11_orch_session_plan PUBLIC c_std_11)
+    set_target_properties(praktor_c11_orch_session_plan PROPERTIES
+        C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF
+        POSITION_INDEPENDENT_CODE ON FOLDER "actions/c11")
+
+    if(ENABLE_TESTS)
+        add_executable(actions_c11_orch_session_plan_test
+            c11/orch_session_plan_test.c)
+        target_link_libraries(actions_c11_orch_session_plan_test PRIVATE
+            praktor_c11_orch_session_plan
+            praktor_workflow_snapshot
+            praktor_c11_native_host
+            Salts::TinyTest)
+        set_target_properties(actions_c11_orch_session_plan_test PROPERTIES
+            C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF
+            LINKER_LANGUAGE C FOLDER "actions/c11/tests")
+        add_test(NAME actions_c11_orch_session_plan_test
+            COMMAND actions_c11_orch_session_plan_test)
+        set_tests_properties(actions_c11_orch_session_plan_test
+            PROPERTIES TIMEOUT 30)
+    endif()
+
     # Explicit legacy compatibility constructors and Blackboard overloads only.
     add_library(praktor_actions_c11 STATIC c11/session_legacy_adapter.cpp)
     target_include_directories(praktor_actions_c11 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
