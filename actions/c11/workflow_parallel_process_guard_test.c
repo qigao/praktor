@@ -336,15 +336,16 @@ spec("C11 per-worker bounded Process retainer cohort barrier") {
         check(cflow_executor_control_shutdown(&control,CFLOW_EXECUTOR_SHUTDOWN_DRAIN));
         check(cflow_executor_run_ready(&executor)==2u);
         check(cflow_executor_control_wait_idle(&control)==CFLOW_EXECUTOR_WAIT_IDLE);
-        /* Both branches took a snapshot before an external Owner edit. */
-        check(praktor_c11_value_store_set(&f.root,"seed","changed")==
+        /* Conflict must touch a key this transaction actually writes.
+         * An unrelated seed edit would not be a true optimistic conflict. */
+        check(praktor_c11_value_store_set(&f.root,"left","external")==
               PRAKTOR_C11_VALUE_OK);
         check(praktor_c11_workflow_parallel_commit_after_cflow_and_process_drains(
             f.registry,f.updates,f.branches,2u,&control,owners,2u,8u,
             &pending)==PRAKTOR_C11_PARALLEL_CONFLICT);
         check(pending==0u&&f.branches[0].impl&&f.branches[1].impl);
-        check(stored(&f.root,"seed","changed"));
-        check(praktor_c11_value_store_size(&f.root)==1u);
+        check(stored(&f.root,"seed","base")&&stored(&f.root,"left","external"));
+        check(praktor_c11_value_store_size(&f.root)==2u);
         praktor_workflow_task_state state=PRAKTOR_WORKFLOW_TASK_RUNNING;
         for(size_t i=0u;i<2u;++i) {
             check(praktor_workflow_task_registry_state(f.registry,i,&state)==SALTS_OK);
