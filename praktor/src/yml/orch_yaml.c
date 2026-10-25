@@ -155,6 +155,87 @@ static int children(named_build *b,praktor_yaml_node seq,size_t parent,unsigned 
     }
     return SALTS_OK;
 }
+/* Validate a completed named subtree at its original YAML source, before
+ * handing it to the independent C AST constructor.  The child parser is
+ * finished first, as in the legacy parser, so a malformed child takes
+ * precedence over a missing parameter on its parent. */
+static int validate_named_row(named_build *b,size_t index,praktor_yaml_node origin,
+                              const char *type_lower) {
+    const named_row *row=&b->rows[index];
+    const praktor_orch_spec *spec=praktor_orch_spec_for(row->node.type);
+    size_t i,j,child_count=0;
+    char message[256],required[128]={0};
+    for(i=0;i<sizeof(spec->required)/sizeof(spec->required[0]);++i) {
+        if(!spec->required[i])continue;
+        (void)snprintf(required+strlen(required),sizeof required-strlen(required),
+            "%s%s",required[0]?", ":"",spec->required[i]);
+    }
+    for(i=0;i<sizeof(spec->required)/sizeof(spec->required[0]);++i) {
+        bool present=false;
+        if(!spec->required[i])continue;
+        for(j=0;j<row->node.param_count;++j)
+            if(key_is(row->keys[j],spec->required[i])){present=true;break;}
+        if(!present) {
+            (void)snprintf(message,sizeof message,
+                "Missing required parameter '%s' for node type '%s'. Required parameters: %s",
+                spec->required[i],type_lower,required);
+            return fail_at(b,SALTS_EINVAL,origin,message);
+        }
+    }
+    for(i=index+1;i<b->count;++i)
+        if(b->rows[i].node.parent_index==index)++child_count;
+    /* If/while are normally parsed via the flat path; keep their structural
+     * validation here as well to avoid a parallel definition of the rule. */
+    if(row->node.type==PRAKTOR_ORCH_IF_THEN_ELSE||
+       row->node.type==PRAKTOR_ORCH_WHILE_DO) {
+        bool scalar_condition=false;
+        for(i=0;i<row->node.param_count;++i)
+            if(key_is(row->keys[i],"condition"))scalar_condition=true;
+        if(row->node.type==PRAKTOR_ORCH_IF_THEN_ELSE) {
+            const size_t min=scalar_condition?1u:2u,max=scalar_condition?2u:3u;
+            if(child_count<min||child_count>max)
+                return fail_at(b,SALTS_EINVAL,origin,
+                    "if requires a condition plus then/else branches");
+        } else if(child_count!=(scalar_condition?1u:2u))
+            return fail_at(b,SALTS_EINVAL,origin,
+                "while requires a condition and a do branch");
+        return SALTS_OK;
+    }
+    if(row->node.type==PRAKTOR_ORCH_SWITCH&&child_count==0)
+        return fail_at(b,SALTS_EINVAL,origin,
+            "switch requires at least one case branch");
+    switch(row->node.type) {
+        case PRAKTOR_ORCH_INVERTER:
+        case PRAKTOR_ORCH_FORCE_SUCCESS:
+        case PRAKTOR_ORCH_FORCE_FAILURE:
+        case PRAKTOR_ORCH_REPEAT:
+        case PRAKTOR_ORCH_TIMEOUT:
+        case PRAKTOR_ORCH_DELAY:
+        case PRAKTOR_ORCH_KEEP_RUNNING_UNTIL_FAILURE:
+        case PRAKTOR_ORCH_RUN_ONCE:
+        case PRAKTOR_ORCH_CONSUME_QUEUE:
+        case PRAKTOR_ORCH_PRECONDITION:
+        case PRAKTOR_ORCH_ENTRY_UPDATED:
+            if(child_count!=1u) {
+                char lower[64];size_t n;
+                (void)snprintf(lower,sizeof lower,"%s",spec->name);
+                for(n=0;lower[n];++n)
+                    lower[n]=(char)tolower((unsigned char)lower[n]);
+                (void)snprintf(message,sizeof message,
+                    "%s must have exactly one child",lower);
+                return fail_at(b,SALTS_EINVAL,origin,message);
+            }
+            break;
+        default:
+            if(spec->control&&child_count==0u) {
+                (void)snprintf(message,sizeof message,
+                    "Control node '%s' must have at least one child",type_lower);
+                return fail_at(b,SALTS_EINVAL,origin,message);
+            }
+            break;
+    }
+    return SALTS_OK;
+}
 /* Shared named-node admission for recursive YAML and task-level runner values.
  * The task-level caller selects one exact field, not the metadata-bearing map.
  * Never retain the borrowed YAML value/key handle beyond this construction. */
@@ -162,6 +243,7 @@ static int parse_named_entry(named_build *b,praktor_yaml_node value,size_t paren
     praktor_orch_type type=PRAKTOR_ORCH_TYPE_COUNT;
     const praktor_orch_spec *spec;
     tstr type_name=NULL;
+    char type_lower[64];
     size_t index,i;
     int status;
     if(depth>NAMED_YAML_MAX_DEPTH)return fail(b,SALTS_EINVAL,"Named orchestration nesting limit");
@@ -179,6 +261,9 @@ static int parse_named_entry(named_build *b,praktor_yaml_node value,size_t paren
         return fail_at(b,SALTS_EINVAL,value,
             "Legacy orchestration node type has been removed; use flat syntax");
     }
+    (void)snprintf(type_lower,sizeof type_lower,"%s",type_name);
+    for(i=0;type_lower[i];++i)
+        type_lower[i]=(char)tolower((unsigned char)type_lower[i]);
     status=praktor_orch_find_type(tstr_to_v(type_name),&type);
     tstr_free(type_name);
     if(status!=SALTS_OK)return fail_at(b,SALTS_EINVAL,value,"Unknown named orchestration type");
@@ -188,15 +273,11 @@ static int parse_named_entry(named_build *b,praktor_yaml_node value,size_t paren
     b->rows[index].node.parent_index=parent;
     if(praktor_yaml_is_seq(value)) {
         if(!spec->allows_children)return fail(b,SALTS_EINVAL,"Leaf cannot have children");
-        return children(b,value,index,depth);
+        status=children(b,value,index,depth);
+        return status==SALTS_OK?validate_named_row(b,index,value,type_lower):status;
     }
     if(praktor_yaml_is_map(value)) {
         bool has_child=false,has_children=false;
-        char type_lower[64];
-        size_t t;
-        (void)snprintf(type_lower,sizeof type_lower,"%s",spec->name);
-        for(t=0;type_lower[t];++t)
-            type_lower[t]=(char)tolower((unsigned char)type_lower[t]);
         /* Legacy map-style parsing validates every scalar and canonical key
          * before descending into children.  The order is observable when a
          * node contains both an invalid scalar and an invalid child subtree. */
@@ -253,10 +334,11 @@ static int parse_named_entry(named_build *b,praktor_yaml_node value,size_t paren
                     "Leaf node '%s' cannot have children",type_lower);
                 return fail_at(b,SALTS_EINVAL,branch,message);
             }
-            return has_children?children(b,branch,index,depth):
+            status=has_children?children(b,branch,index,depth):
                 flat_branch(b,branch,index,depth);
+            return status==SALTS_OK?validate_named_row(b,index,value,type_lower):status;
         }
-        return SALTS_OK;
+        return validate_named_row(b,index,value,type_lower);
     }
     {
         const char *required=NULL;
@@ -269,7 +351,8 @@ static int parse_named_entry(named_build *b,praktor_yaml_node value,size_t paren
         if(status!=SALTS_OK)return fail(b,status,"Named shorthand must be scalar");
         key=tstr_dup(required);
         if(!key) {tstr_free(text);return fail(b,SALTS_ENOMEM,"Cannot allocate param key");}
-        return param(b,index,key,text);
+        status=param(b,index,key,text);
+        return status==SALTS_OK?validate_named_row(b,index,value,type_lower):status;
     }
 }
 
