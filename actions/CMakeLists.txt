@@ -188,6 +188,21 @@ if(PRAKTOR_ENABLE_C11_ACTIONS)
             LINKER_LANGUAGE C FOLDER "actions/c11/tests")
         add_test(NAME actions_c11_workflow_parallel_worker_test
             COMMAND actions_c11_workflow_parallel_worker_test)
+
+        # Qualification: owner-only DAG readiness drives the canonical CFlow
+        # Manual/WorkerExecutor. No second queue, new worker or production
+        # WorkflowExecutor substitution.
+        add_executable(actions_c11_workflow_dag_cflow_test
+            c11/workflow_dag_cflow_test.c)
+        target_link_libraries(actions_c11_workflow_dag_cflow_test PRIVATE
+            praktor_workflow_dag_state Salts::CFlow Salts::Platform Salts::TinyTest)
+        set_target_properties(actions_c11_workflow_dag_cflow_test PROPERTIES
+            C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF
+            LINKER_LANGUAGE C FOLDER "actions/c11/tests")
+        add_test(NAME actions_c11_workflow_dag_cflow_test
+            COMMAND actions_c11_workflow_dag_cflow_test)
+        set_tests_properties(actions_c11_workflow_dag_cflow_test
+            PROPERTIES TIMEOUT 30)
     endif()
 
     # Strict Process-retainer barrier for cross-branch commit; this wrapper

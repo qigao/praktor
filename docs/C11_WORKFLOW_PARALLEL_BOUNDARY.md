@@ -114,6 +114,17 @@ CI qualifies C11 dependency cardinality/capacity, deterministic admission,
 completed/failed/cancelled sibling settlement, refusal, and runtime safety
 in core-only, ASan/UBSan, and complete-source TSan test selections.
 
+The separate `actions_c11_workflow_dag_cflow_test` qualification executes
+those indices through the real Salts CFlow ManualExecutor and WorkerExecutor.
+Each accepted task receives exactly one run/cancel and finalize; rejected
+admissions receive none. Dependency releases happen only in a single owner
+turn *after* `control_wait_idle` confirms callback settlement. Tests cover
+three diamond-DAG waves (including repeated edges), two overlapping workers,
+sibling failure, cancellation of queued work, and bounded queue refusal.
+Worker callbacks only write atomic test observations and never touch the DAG.
+This is still not a production dispatcher or a TaskRegistry/Process/Parallel
+end-to-end cutover.
+
 ## Still outside this qualification
 
 The production DAG/trigger scheduler, structured WorkflowValue lexical scopes,
