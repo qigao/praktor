@@ -1,5 +1,6 @@
 #include "orch_session_plan.h"
 #include "plan.h"
+#include <salts/process_retainer.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -13,6 +14,7 @@ typedef struct orch_visit {
 struct praktor_c11_orch_session_plan {
     praktor_c11_session_node *nodes;
     size_t count, capacity, retained_bytes;
+    bool requires_native_process_owner;
 };
 
 static int fail(char *error,size_t cap,int code,const char *reason) {
@@ -68,9 +70,10 @@ size_t praktor_c11_orch_session_plan_node_count(
     return plan?plan->count:0u;
 }
 
-int praktor_c11_orch_session_plan_create(
+static int create_plan(
     const praktor_orch_tree *tree,const salts_bt_tree_config *limits,
-    praktor_c11_orch_session_plan **out,char *error,size_t cap) {
+    praktor_c11_orch_session_plan **out,char *error,size_t cap,
+    bool allow_single_shell) {
     praktor_c11_orch_session_plan *plan=NULL;
     orch_visit *stack=NULL;
     size_t node_capacity,top=0u;
@@ -88,6 +91,14 @@ int praktor_c11_orch_session_plan_create(
     plan=(praktor_c11_orch_session_plan *)calloc(1u,sizeof(*plan));
     if(!plan)return fail(error,cap,SALTS_ENOMEM,"Cannot allocate Orch Session Plan");
     plan->capacity=node_capacity;
+    if(allow_single_shell &&
+       (node_capacity!=1u ||
+        praktor_orch_node_type(praktor_orch_tree_root(tree))!=PRAKTOR_ORCH_SHELL)) {
+        status=fail(error,cap,SALTS_ENOTSUP,
+            "Native Shell qualification only admits one canonical Shell node");
+        goto done;
+    }
+    plan->requires_native_process_owner=allow_single_shell;
     plan->nodes=(praktor_c11_session_node *)calloc(
         node_capacity,sizeof(*plan->nodes));
     stack=(orch_visit *)calloc(node_capacity,sizeof(*stack));
@@ -119,7 +130,8 @@ int praktor_c11_orch_session_plan_create(
             status=fail(error,cap,SALTS_EINVAL,"Invalid Orch action type");
             goto done;
         }
-        if(!supported(type)) {
+        if(!supported(type) &&
+           !(allow_single_shell&&type==PRAKTOR_ORCH_SHELL&&node_capacity==1u)) {
             status=fail(error,cap,SALTS_ENOTSUP,
                 "Orch action not qualified for native C11 Session; no Legacy fallback");
             goto done;
@@ -218,10 +230,24 @@ done:
     praktor_c11_orch_session_plan_destroy(plan);
     return status;
 }
+int praktor_c11_orch_session_plan_create(
+    const praktor_orch_tree *tree,const salts_bt_tree_config *limits,
+    praktor_c11_orch_session_plan **out,char *error,size_t cap) {
+    return create_plan(tree,limits,out,error,cap,false);
+}
+int praktor_c11_orch_session_plan_create_native_shell(
+    const praktor_orch_tree *tree,const salts_bt_tree_config *limits,
+    praktor_c11_orch_session_plan **out,char *error,size_t cap) {
+    return create_plan(tree,limits,out,error,cap,true);
+}
+
 int praktor_c11_orch_session_plan_init_session(
     const praktor_c11_orch_session_plan *plan,
     const praktor_c11_session_config *config,
     praktor_c11_session *session) {
     if(!plan||!plan->count||!config||!session)return SALTS_EINVAL;
+    if(plan->requires_native_process_owner &&
+       (!config->retainer||!config->retainer->impl))
+        return SALTS_ENOTSUP;
     return praktor_c11_session_init(session,config,plan->nodes,plan->count);
 }

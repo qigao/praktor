@@ -114,4 +114,36 @@ mapping, concurrent WorkerExecutor Session migration, or file-based
 WorkflowPlan cutover. Shared Root/TaskRegistry mutation remains one
 serialized Owner turn, with no native persistence or crash-atomic guarantee.
 
+## Explicit native Shell/Process DAG qualification
+
+The default `praktor_c11_orch_session_plan_create()` **still rejects** Shell
+and retains all previous fail-closed/Legacy-refusal tests. A separate opt-in
+`praktor_c11_orch_session_plan_create_native_shell()` admits **exactly one**
+canonical task-level Shell node, not an arbitrary Orchestration graph or
+implicit fallback. Its plan records that a real, initialized
+`cflow_process_retainer` is required. Session admission fails closed if that
+owner is absent. The only execution implementation remains the existing
+C11 Session, SaltsUtils Process driver and NativeIO recovery owner.
+
+`actions_c11_orch_dag_shell_process_test` drives the real pipeline:
+canonical YAML → Orch Shell → explicit C11 Session plan → owner-affine
+CFlow ManualExecutor callback → real OS child → Process close/retainer →
+explicitly selected `shell_exit_code` transaction plus typed TaskRegistry
+group publication → dependent native CheckExitCode. No DAG successor may
+run until the process barrier reports zero pending recovery work.
+
+A separate cancellation test starts a long-running real child on each
+platform, ticks it once, closes CFlow callback admission, cancels the
+still-running Session with zero native close budget, destroys its Session/
+NativeHost, and drains any adopted Process through the sole retainer.
+Neither the root store nor TaskRegistry may publish shell outputs and the
+dependent task remains blocked.
+
+This is an opt-in **test-only single-Shell admission**, not a blanket Shell
+capability declaration. It is selected in ordinary tests, lifecycle
+ASan/UBSan and complete-source TSan (with immutable fully instrumented
+dependencies). Consumer-only TSan is deliberately *not* the qualification
+for real Process/NativeIO because released dependency binaries are not
+fully instrumented.
+
 PR #79 stays **Draft / do not merge** until full cutover gates pass.

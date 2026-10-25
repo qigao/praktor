@@ -34,6 +34,18 @@ int praktor_c11_orch_session_plan_create(
     const praktor_orch_tree *tree, const salts_bt_tree_config *limits,
     praktor_c11_orch_session_plan **out,
     char *error, size_t error_capacity);
+/* Explicit, qualification-only native Process admission for EXACTLY one
+ * canonical Orch Shell root (not a composite tree or an automatic fallback).
+ * The default create() above still refuses Shell.
+ * The plan records its Process-owner requirement; init_session refuses
+ * a missing/uninitialized retainer before touching the destination Session.
+ * Actual start/close/transfer is exclusively done by the canonical
+ * C11 Session + Salts::Process driver. This API is not installed as SDK ABI. */
+int praktor_c11_orch_session_plan_create_native_shell(
+    const praktor_orch_tree *tree,const salts_bt_tree_config *limits,
+    praktor_c11_orch_session_plan **out,
+    char *error,size_t error_capacity);
+
 void praktor_c11_orch_session_plan_destroy(
     praktor_c11_orch_session_plan *plan);
 size_t praktor_c11_orch_session_plan_node_count(
