@@ -88,6 +88,32 @@ if(PRAKTOR_ENABLE_C11_ACTIONS)
     set_target_properties(praktor_c11_value_store PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF POSITION_INDEPENDENT_CODE ON FOLDER "actions/c11")
     cmake_config_target(praktor_c11_value_store NO_INSTALL NO_VERSION FOLDER "actions/c11")
 
+    # Narrow C WorkflowContext admission: overlay root string variables via the
+    # canonical C11 value store's atomic set_many contract. This is not a
+    # replacement for structured WorkflowValue, TaskRegistry or task scopes.
+    add_library(praktor_c11_workflow_snapshot_values STATIC
+        c11/workflow_snapshot_values.c c11/workflow_snapshot_values.h)
+    target_include_directories(praktor_c11_workflow_snapshot_values PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/c11>)
+    target_link_libraries(praktor_c11_workflow_snapshot_values PUBLIC
+        praktor_workflow_snapshot praktor_c11_value_store)
+    target_compile_features(praktor_c11_workflow_snapshot_values PUBLIC c_std_11)
+    set_target_properties(praktor_c11_workflow_snapshot_values PROPERTIES
+        C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF
+        POSITION_INDEPENDENT_CODE ON FOLDER "actions/c11")
+
+    if(ENABLE_TESTS)
+        add_executable(actions_c11_workflow_snapshot_values_test
+            c11/workflow_snapshot_values_test.c)
+        target_link_libraries(actions_c11_workflow_snapshot_values_test PRIVATE
+            praktor_c11_workflow_snapshot_values Salts::TinyTest)
+        set_target_properties(actions_c11_workflow_snapshot_values_test PROPERTIES
+            C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF
+            LINKER_LANGUAGE C FOLDER "actions/c11/tests")
+        add_test(NAME actions_c11_workflow_snapshot_values_test
+            COMMAND actions_c11_workflow_snapshot_values_test)
+    endif()
+
     # Independent AST/Process Session; never links actions or praktor_shell.
     include(${CMAKE_CURRENT_SOURCE_DIR}/c11/session_targets.cmake)
 
