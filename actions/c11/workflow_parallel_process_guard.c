@@ -1,5 +1,6 @@
 #include "workflow_parallel_process_guard.h"
 #include <salts/error_codes.h>
+#include <stdint.h>
 
 /* Process retainer is the sole owner of reservations/adopted Process handles.
  * A successful worker callback or cancellation request never implies native
@@ -74,4 +75,90 @@ int praktor_c11_workflow_parallel_commit_after_cflow_and_process_drain(
     return praktor_c11_workflow_parallel_commit_after_process_drain(
         registry,task_outputs,branch_values,branch_count,retainer,
         max_steps,out_pending);
+}
+/* Per-worker retainers have NO internal cross-callback synchronization.
+ * Validate the complete set before calling even the first retainer. In
+ * particular two wrapper objects pointing to the same impl are not distinct
+ * recovery owners. Owner alone drives this bounded, single-threaded sweep. */
+static int validate_retainer_group(cflow_process_retainer *const *owners,
+                                   size_t count,size_t max_steps) {
+    if(!owners||!count||!max_steps)return PRAKTOR_C11_PARALLEL_INVALID;
+    for(size_t i=0u;i<count;++i) {
+        if(!owners[i]||!owners[i]->impl)return PRAKTOR_C11_PARALLEL_INVALID;
+        for(size_t j=0u;j<i;++j)
+            if(owners[i]==owners[j]||owners[i]->impl==owners[j]->impl)
+                return PRAKTOR_C11_PARALLEL_INVALID;
+    }
+    return PRAKTOR_C11_PARALLEL_OK;
+}
+
+int praktor_c11_workflow_parallel_drain_process_retainers(
+    cflow_process_retainer *const *owners,size_t count,size_t max_steps,
+    size_t *out_pending,size_t *out_reaped) {
+    size_t pending_total=0u,reaped_total=0u;
+    int result=PRAKTOR_C11_PARALLEL_OK;
+    if(out_pending)*out_pending=0u;
+    if(out_reaped)*out_reaped=0u;
+    if(validate_retainer_group(owners,count,max_steps)!=PRAKTOR_C11_PARALLEL_OK)
+        return PRAKTOR_C11_PARALLEL_INVALID;
+    for(size_t i=0u;i<count;++i) {
+        size_t pending=0u,reaped=0u;
+        const int status=cflow_process_retainer_run_ready(
+            owners[i],max_steps,&reaped,&pending);
+        if(pending>SIZE_MAX-pending_total||reaped>SIZE_MAX-reaped_total)
+            return PRAKTOR_C11_PARALLEL_INVALID;
+        pending_total+=pending;
+        reaped_total+=reaped;
+        /* Keep draining independent owners after an error, but never
+         * normalize that error into a BUSY retry or success. */
+        if(status!=SALTS_OK&&status!=SALTS_EBUSY)
+            result=PRAKTOR_C11_PARALLEL_RECOVERY;
+        else if(result==PRAKTOR_C11_PARALLEL_OK&&
+                (status==SALTS_EBUSY||pending!=0u))
+            result=PRAKTOR_C11_PARALLEL_BUSY;
+    }
+    if(out_pending)*out_pending=pending_total;
+    if(out_reaped)*out_reaped=reaped_total;
+    return result;
+}
+
+int praktor_c11_workflow_parallel_commit_after_cflow_and_process_drains(
+    praktor_workflow_task_registry *registry,
+    const praktor_workflow_task_output_update *task_outputs,
+    praktor_c11_value_txn *branch_values,size_t branch_count,
+    cflow_executor_control *control,
+    cflow_process_retainer *const *owners,size_t count,
+    size_t max_steps,size_t *out_pending) {
+    cflow_executor_protocol_stats stats={0};
+    cflow_executor_wait_status waited;
+    int drained;
+    if(out_pending)*out_pending=0u;
+    if(!registry||!task_outputs||!branch_values||!branch_count||
+       !control||branch_count!=count||
+       validate_retainer_group(owners,count,max_steps)!=PRAKTOR_C11_PARALLEL_OK)
+        return PRAKTOR_C11_PARALLEL_INVALID;
+    if(!cflow_executor_control_get_stats(control,&stats))
+        return PRAKTOR_C11_PARALLEL_INVALID;
+    if(stats.accepted!=branch_count||stats.rejected_full!=0u||
+       stats.rejected_closed!=0u||stats.rejected_would_block!=0u)
+        return PRAKTOR_C11_PARALLEL_INVALID;
+    if(stats.cancelled!=0u)
+        return PRAKTOR_C11_PARALLEL_CANCELLED;
+    /* No retainer is even observed while any worker callback/finalizer
+     * could still reserve, adopt, or close a native Process. */
+    if(stats.lifecycle!=CFLOW_EXECUTOR_CLOSED||
+       stats.queued!=0u||stats.running!=0u||
+       stats.completed!=stats.accepted)
+        return PRAKTOR_C11_PARALLEL_BUSY;
+    waited=cflow_executor_control_wait_idle(control);
+    if(waited==CFLOW_EXECUTOR_WAIT_PENDING||
+       waited==CFLOW_EXECUTOR_WAIT_WOULD_BLOCK)
+        return PRAKTOR_C11_PARALLEL_BUSY;
+    if(waited!=CFLOW_EXECUTOR_WAIT_IDLE)
+        return PRAKTOR_C11_PARALLEL_INVALID;
+    drained=praktor_c11_workflow_parallel_drain_process_retainers(
+        owners,count,max_steps,out_pending,NULL);
+    if(drained!=PRAKTOR_C11_PARALLEL_OK)return drained;
+    return praktor_c11_workflow_parallel_commit(
+        registry,task_outputs,branch_values,branch_count);
 }

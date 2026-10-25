@@ -150,3 +150,26 @@ across independent owners, and these tests do not establish it as such.
 
 PR #79 stays **Draft / do not merge** until the whole-program parity
 and cancellation/NativeIO lifecycle gates are completed.
+### Multiple real Process workers: bounded retainer cohort (candidate)
+
+The source-only C11 barrier supports an explicit **one worker/branch → one
+bounded Process retainer** group. Each CFlow WorkerExecutor callback owns
+and drives its Session/NativeHost and touches **only its own** retainer.
+Retainers have no shared internal thread-safety guarantee. Every reservation
+must be acquired *before* spawning a native Process; a saturated retainer
+fails closed with `SALTS_ENOBUFS`. Rejected CFlow posts are never silently
+normalized to success.
+
+After executor admission is shut down and every run/cancel/finalize callback
+has settled (`CLOSED` and `wait_idle`), a **single application Owner**
+drives each non-aliased retainer with bounded per-retainer steps. Publication
+requires zero pending reservations **and** zero adopted processes across all
+workers. A failed NativeIO close returns `PARALLEL_RECOVERY`, an outstanding
+lease returns `PARALLEL_BUSY`, and an optimistic value conflict returns
+`PARALLEL_CONFLICT`. None may publish partial typed/text outputs or
+unblock a dependent DAG successor. Cancelled cohorts never commit; the Owner
+still explicitly drains adopted processes *after* worker quiescence.
+
+This is a C11 conformance path, **not** a new Process implementation or
+production C++ WorkerExecutor switch. PR #79 remains Draft / DO NOT MERGE.
+The independent macOS Legacy Shell cancellation issue #81 remains open.

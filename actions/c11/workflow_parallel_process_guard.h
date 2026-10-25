@@ -63,6 +63,39 @@ int praktor_c11_workflow_parallel_commit_after_cflow_and_process_drain(
     size_t max_steps,
     size_t *out_pending);
 
+/* Per-worker Process barrier: each CFlow callback exclusively borrows its
+ * own bounded retainer. Do not share an impl between array entries. Caller
+ * MUST have joined *all* callbacks/finalizers and stopped admission before
+ * driving ANY retainer from the Owner. No worker may resume or reenter the
+ * retainer during this phase. max_steps bounds work PER retainer.
+ *
+ * A nonzero pending total (including unused live reservations) is BUSY;
+ * an actual close/NativeIO error from ANY worker retainer is RECOVERY.
+ * Both statuses preserve the caller's staged output group for explicit abort
+ * or a later exclusive recovery turn. Reaped counts include only real
+ * completed adopted Processes. Invalid/aliased retainers fail without a
+ * single retainer operation.
+ *
+ * This drain-only API is for canceled/failed cohorts as well as success.
+ * It does NOT prove CFlow quiescence itself; caller supplies that proof. */
+int praktor_c11_workflow_parallel_drain_process_retainers(
+    cflow_process_retainer *const *retainers, size_t retainer_count,
+    size_t max_steps, size_t *out_pending, size_t *out_reaped);
+
+/* Source-only owner-turn admission for one retainer PER branch (1:1).
+ * The group must be CLOSED + finalized + idle, with no rejected/cancelled
+ * callbacks; each retained Process must be fully reaped before the existing
+ * optimistic typed/text group transaction commits. All DAG/registry changes
+ * happen afterward on the application Owner, never in worker callbacks.
+ * No shared retainer, C++ production backend change, or public SDK switch. */
+int praktor_c11_workflow_parallel_commit_after_cflow_and_process_drains(
+    praktor_workflow_task_registry *registry,
+    const praktor_workflow_task_output_update *task_outputs,
+    praktor_c11_value_txn *branch_values, size_t branch_count,
+    cflow_executor_control *control,
+    cflow_process_retainer *const *retainers, size_t retainer_count,
+    size_t max_steps, size_t *out_pending);
+
 #ifdef __cplusplus
 }
 #endif

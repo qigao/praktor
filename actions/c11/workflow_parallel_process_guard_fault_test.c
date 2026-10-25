@@ -8,11 +8,18 @@
 static int injected_status=SALTS_OK;
 static size_t injected_pending=0u;
 static size_t calls=0u;
+static cflow_process_retainer *override_owner=NULL;
+static int override_status=SALTS_OK;
+static size_t override_pending=0u;
 static int fault_retainer_ready(cflow_process_retainer *owner,size_t steps,
                                 size_t *out_reaped,size_t *out_pending) {
     (void)owner;(void)steps;
     ++calls;
     if(out_reaped)*out_reaped=0u;
+    if(owner==override_owner) {
+        if(out_pending)*out_pending=override_pending;
+        return override_status;
+    }
     if(out_pending)*out_pending=injected_pending;
     return injected_status;
 }
@@ -79,5 +86,35 @@ spec("Parallel native Process recovery errors are fail-closed") {
         praktor_c11_value_store_destroy(&root);
         check(cflow_process_retainer_destroy(&retainer)==SALTS_OK);
         praktor_workflow_task_registry_destroy(registry);
+    }
+}
+spec("Independent Process recovery failures remain fail-closed") {
+    it("does not hide one worker's NativeIO error behind another drained retainer") {
+        cflow_process_retainer local[2]={{0},{0}};
+        cflow_process_retainer *owners[2]={&local[0],&local[1]};
+        size_t pending=SIZE_MAX,reaped=SIZE_MAX;
+        for(size_t i=0u;i<2u;++i)
+            check(cflow_process_retainer_init(&local[i],1u)==SALTS_OK);
+        injected_status=SALTS_OK;injected_pending=0u;
+        override_owner=&local[1];override_status=SALTS_EIO;override_pending=1u;
+        calls=0u;
+        check(praktor_c11_workflow_parallel_drain_process_retainers(
+            owners,2u,8u,&pending,&reaped)==PRAKTOR_C11_PARALLEL_RECOVERY);
+        check(pending==1u&&reaped==0u&&calls==2u);
+        override_pending=0u;
+        check(praktor_c11_workflow_parallel_drain_process_retainers(
+            owners,2u,8u,&pending,&reaped)==PRAKTOR_C11_PARALLEL_RECOVERY);
+        check(pending==0u);
+        override_status=SALTS_EBUSY;override_pending=1u;
+        check(praktor_c11_workflow_parallel_drain_process_retainers(
+            owners,2u,8u,&pending,&reaped)==PRAKTOR_C11_PARALLEL_BUSY);
+        check(pending==1u);
+        override_status=SALTS_OK;override_pending=0u;
+        check(praktor_c11_workflow_parallel_drain_process_retainers(
+            owners,2u,8u,&pending,&reaped)==PRAKTOR_C11_PARALLEL_OK);
+        check(pending==0u);
+        override_owner=NULL;
+        for(size_t i=0u;i<2u;++i)
+            check(cflow_process_retainer_destroy(&local[i])==SALTS_OK);
     }
 }
