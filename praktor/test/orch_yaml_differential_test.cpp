@@ -605,6 +605,12 @@ static void full_workflow_matches_native_projections(const std::string& yaml,
                     check(found->second==entry.value().as<std::string>());
             }
         }
+        if(meta.contains("dot_env")) {
+            const auto projected=meta.at("dot_env").array_range();
+            check(projected.size()==selected.dot_env.size());
+            for(std::size_t j=0;j<projected.size()&&j<selected.dot_env.size();++j)
+                check(projected[j].as<std::string>()==selected.dot_env[j]);
+        }
         if(native) {
             check(selected.action==TaskAction::Orch);
             check(std::holds_alternative<OrchParams>(selected.specifics));
@@ -661,6 +667,7 @@ spec("Full workflow versus C11 task metadata and native orchestration") {
             "        - FileExists: {path: marker}\n"
             "  - name: decide\n"
             "    depends_on: [act]\n"
+            "    dotEnv: [.env.local]\n"
             "    if: ready\n"
             "    then: [{Shell: {cmd: yes}}, {Sleep: 1}]\n"
             "    else: {Shell: {cmd: no}}\n"
