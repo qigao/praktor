@@ -304,6 +304,33 @@ spec("C11 named orchestration CSTL AST parity with legacy parser") {
         }
     }
 
+    it("matches exact legacy flat numeric and unknown-key diagnostics") {
+        struct Case { const char *kind, *source; };
+        const Case cases[]={
+            {"while","name: loop\nwhile: ready\nmax_iterations: bad\ndo: {Shell: {cmd: tick}}\n"},
+            {"timeout","name: t\ntimeout: 1.5\nchild: {Shell: {cmd: go}}\n"},
+            {"repeat","name: r\nrepeat: invalid\nchild: {Shell: {cmd: go}}\n"},
+            {"delay","name: d\ndelay: '--'\nchild: {Shell: {cmd: go}}\n"},
+            {"keep_running_until_failure","name: k\nkeep_running_until_failure: x\nchild: {Shell: {cmd: go}}\n"},
+            {"if","name: choice\nif: ready\nthen: {Shell: {cmd: go}}\nbogus: bad\n"},
+            {"set_variable","name: assign\nset_variable: key\nvalue: ok\nunknown: bad\n"}
+        };
+        for(const auto &item:cases) {
+            TaskYamlDetail::YamlDocument document(item.source);
+            std::string legacy_error;
+            try { (void)parse_orch_params(document.root(),item.kind); }
+            catch(const std::exception& e) { legacy_error=e.what(); }
+            praktor_orch_tree *native=nullptr;
+            char diagnostic[512]{};
+            const int status=praktor_orch_from_flat_yaml(
+                document.root().native(),item.kind,&native,diagnostic,sizeof diagnostic);
+            check(!legacy_error.empty());
+            check(status==SALTS_EINVAL);
+            check(native==nullptr);
+            check(std::string(diagnostic)==legacy_error);
+        }
+    }
+
     it("agrees with legacy on invalid flat forms and never publishes partial ASTs") {
         struct FlatCase { const char *kind; const char *source; };
         const FlatCase cases[] = {
