@@ -75,8 +75,12 @@ bool is_flat_single_child_form(const TaskYamlDetail::YamlNodeRef& node, const ch
 }
 
 bool is_task_level_metadata_key(const std::string& normalized_key) {
+    /* All lookup keys are already normalized by normalize_lookup_key().
+     * Keep this whitelist normalized as well: raw depends_on/dotEnv map to
+     * dependson/dotenv. Flat if/while/switch/decorator task runners must not
+     * reject valid workflow-level metadata as orchestration parameters. */
     static const std::unordered_set<std::string> task_keys = {
-        "name", "description", "depends_on", "vars", "env", "dot_env", "fallback", "selector", "when",
+        "name", "description", "dependson", "vars", "env", "dotenv", "fallback", "selector", "when",
         "each", "timeout", "triggers",
         "workingdir", "silent", "sources", "generates", "finally",
         "command", "uses", "dynamictasks", "outputformat",
