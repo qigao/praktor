@@ -245,7 +245,7 @@ static int parse_named_entry(named_build *b,praktor_yaml_node value,size_t paren
             const char *name=has_children?"children":"child";
             status=praktor_yaml_get(value,name,&branch,NULL);
             if(status!=SALTS_OK)
-                return fail_at(b,SALTS_EINVAL,value,
+                return fail_at(b,status==SALTS_ENOENT?SALTS_EINVAL:status,value,
                     "Orchestration child field is not accessible by its canonical name");
             if(!spec->allows_children) {
                 char message[128];
@@ -312,11 +312,16 @@ static bool flat_key_matches(const char *actual,const char *expected) {
         ++a;++e;
     }
 }
-/* Flat sibling lookups intentionally use the provider's exact raw key
- * semantics, matching legacy node.has_child()/operator[]; normalized aliases
- * are allowed by the whitelist but do not silently become actual siblings. */
-static bool flat_find_field(praktor_yaml_node map,const char *name,praktor_yaml_node *out) {
-    return out&&praktor_yaml_get(map,name,out,NULL)==SALTS_OK;
+/* Preserve the provider's exact raw-span key lookup.  A missing required
+ * field is an input error; allocation/provider failures must retain their
+ * original status and must never be reinterpreted as field absence. */
+static int flat_require(named_build *b,praktor_yaml_node map,const char *name,
+                        praktor_yaml_node *out,const char *missing_message) {
+    int status=praktor_yaml_get(map,name,out,NULL);
+    if(status==SALTS_OK)return SALTS_OK;
+    if(status==SALTS_ENOENT)
+        return fail_at(b,SALTS_EINVAL,map,missing_message);
+    return fail_at(b,status,map,"Cannot read orchestration field");
 }
 static bool flat_task_metadata_key(const char *key) {
     static const char *const keys[]={
@@ -404,7 +409,8 @@ static int flat_validate_keys(named_build *b,praktor_yaml_node map,const char *k
         tstr key=NULL;
         bool allowed;
         int status=praktor_yaml_key(praktor_yaml_at(map,i),&key,NULL);
-        if(status!=SALTS_OK)return fail(b,SALTS_EINVAL,"Cannot decode flat orchestration key");
+        if(status!=SALTS_OK)return fail_at(b,status,praktor_yaml_at(map,i),
+            "Cannot decode flat orchestration key");
         allowed=flat_key_allowed(key,kind)||(allow_metadata&&flat_task_metadata_key(key));
         tstr_free(key);
         if(!allowed)return fail(b,SALTS_EINVAL,"Unknown orchestration parameter in flat control form");
@@ -449,8 +455,12 @@ static int flat_parse(named_build *b,praktor_yaml_node map,size_t parent,unsigne
     if(status!=SALTS_OK)return status;
     if(single_child) {
         tstr value=NULL;
-        if(!flat_find_field(map,kind,&field)||!flat_find_field(map,"child",&branch))
-            return fail_at(b,SALTS_EINVAL,map,"Flat decorator requires a scalar and child branch");
+        status=flat_require(b,map,kind,&field,
+            "Flat decorator requires a scalar and child branch");
+        if(status!=SALTS_OK)return status;
+        status=flat_require(b,map,"child",&branch,
+            "Flat decorator requires a scalar and child branch");
+        if(status!=SALTS_OK)return status;
         status=praktor_yaml_scalar(field,&value,NULL);
         if(status!=SALTS_OK)
             return fail_at(b,status,field,"Flat decorator value must be a scalar");
@@ -461,18 +471,21 @@ static int flat_parse(named_build *b,praktor_yaml_node map,size_t parent,unsigne
         return flat_branch(b,branch,index,depth);
     }
     if(type==PRAKTOR_ORCH_IF_THEN_ELSE) {
-        if(!flat_find_field(map,"if",&field))return fail(b,SALTS_EINVAL,"if requires an 'if' condition");
+        status=flat_require(b,map,"if",&field,"if requires an 'if' condition");
+        if(status!=SALTS_OK)return status;
         if(praktor_yaml_has_val(field)) {
             tstr value=NULL;
             status=praktor_yaml_scalar(field,&value,NULL);
-            if(status!=SALTS_OK)return fail(b,SALTS_EINVAL,"Orchestration if condition must be scalar, node, or sequence");
+            if(status!=SALTS_OK)return fail_at(b,status,field,
+                "Orchestration if condition must be a scalar, node, or sequence");
             status=flat_add_param(b,index,"condition",value);
             if(status!=SALTS_OK)return status;
         } else {
             status=flat_branch(b,field,index,depth);
             if(status!=SALTS_OK)return status;
         }
-        if(!flat_find_field(map,"then",&branch))return fail(b,SALTS_EINVAL,"if requires a then branch");
+        status=flat_require(b,map,"then",&branch,"if requires a then branch");
+        if(status!=SALTS_OK)return status;
         status=flat_branch(b,branch,index,depth);
         if(status!=SALTS_OK)return status;
         /* Optionality is a presence decision, not a failed lookup: ENOMEM
@@ -486,11 +499,13 @@ static int flat_parse(named_build *b,praktor_yaml_node map,size_t parent,unsigne
         return SALTS_OK;
     }
     if(type==PRAKTOR_ORCH_WHILE_DO) {
-        if(!flat_find_field(map,"while",&field))return fail(b,SALTS_EINVAL,"while requires a 'while' condition");
+        status=flat_require(b,map,"while",&field,"while requires a 'while' condition");
+        if(status!=SALTS_OK)return status;
         if(praktor_yaml_has_val(field)) {
             tstr value=NULL;
             status=praktor_yaml_scalar(field,&value,NULL);
-            if(status!=SALTS_OK)return fail(b,SALTS_EINVAL,"Orchestration while condition must be scalar, node, or sequence");
+            if(status!=SALTS_OK)return fail_at(b,status,field,
+                "Orchestration while condition must be a scalar, node, or sequence");
             status=flat_add_param(b,index,"condition",value);
             if(status!=SALTS_OK)return status;
         } else {
@@ -503,23 +518,28 @@ static int flat_parse(named_build *b,praktor_yaml_node map,size_t parent,unsigne
             if(status!=SALTS_OK)
                 return fail_at(b,status,map,"Cannot read orchestration max_iterations");
             status=praktor_yaml_scalar(field,&value,NULL);
-            if(status!=SALTS_OK)return fail(b,SALTS_EINVAL,"Orchestration max_iterations must be an integer scalar");
+            if(status!=SALTS_OK)return fail_at(b,status,field,
+                "Orchestration max_iterations must be an integer scalar");
             status=flat_validate_integer(b,value);
             if(status!=SALTS_OK)return status;
             status=flat_add_param(b,index,"max_iterations",value);
             if(status!=SALTS_OK)return status;
         }
-        if(!flat_find_field(map,"do",&branch))return fail(b,SALTS_EINVAL,"while requires a do branch");
+        status=flat_require(b,map,"do",&branch,"while requires a do branch");
+        if(status!=SALTS_OK)return status;
         return flat_branch(b,branch,index,depth);
     }
     if(type==PRAKTOR_ORCH_SWITCH) {
         tstr value=NULL;
-        if(!flat_find_field(map,"switch",&field))return fail(b,SALTS_EINVAL,"switch requires a selector");
+        status=flat_require(b,map,"switch",&field,"switch requires a selector");
+        if(status!=SALTS_OK)return status;
         status=praktor_yaml_scalar(field,&value,NULL);
-        if(status!=SALTS_OK)return fail(b,SALTS_EINVAL,"Orchestration switch selector must be scalar");
+        if(status!=SALTS_OK)return fail_at(b,status,field,
+            "Orchestration switch selector must be a scalar");
         status=flat_add_param(b,index,"variable",value);
         if(status!=SALTS_OK)return status;
-        if(!flat_find_field(map,"cases",&branch))return fail(b,SALTS_EINVAL,"switch requires a cases branch");
+        status=flat_require(b,map,"cases",&branch,"switch requires a cases branch");
+        if(status!=SALTS_OK)return status;
         if(!praktor_yaml_is_seq(branch))return fail(b,SALTS_EINVAL,"switch cases must be a sequence");
         for(i=0;i<praktor_yaml_count(branch);++i) {
             status=flat_branch(b,praktor_yaml_at(branch,i),index,depth);
@@ -527,11 +547,13 @@ static int flat_parse(named_build *b,praktor_yaml_node map,size_t parent,unsigne
         }
         return SALTS_OK;
     }
-    if(!flat_find_field(map,"set_variable",&field))return fail(b,SALTS_EINVAL,"set_variable requires a key");
+    status=flat_require(b,map,"set_variable",&field,"set_variable requires a key");
+    if(status!=SALTS_OK)return status;
     {
         tstr value=NULL;
         status=praktor_yaml_scalar(field,&value,NULL);
-        if(status!=SALTS_OK)return fail(b,SALTS_EINVAL,"set_variable key must be scalar");
+        if(status!=SALTS_OK)return fail_at(b,status,field,
+            "Orchestration parameter 'key' for node type 'set_variable' must be a scalar");
         status=flat_add_param(b,index,"key",value);
         if(status!=SALTS_OK)return status;
     }
@@ -548,7 +570,8 @@ static int flat_parse(named_build *b,praktor_yaml_node map,size_t parent,unsigne
         {
             tstr value=NULL;
             status=praktor_yaml_scalar(field,&value,NULL);
-            if(status!=SALTS_OK)return fail(b,SALTS_EINVAL,"set_variable value/from must be scalar");
+            if(status!=SALTS_OK)return fail_at(b,status,field,
+                "Orchestration set_variable value/from must be a scalar");
             return flat_add_param(b,index,has_value?"value":"from",value);
         }
     }
@@ -628,7 +651,7 @@ int praktor_orch_from_flat_yaml(praktor_yaml_node node,const char *node_type,
         status=praktor_yaml_get(node,node_type,&value,NULL);
         if(status==SALTS_OK)
             status=parse_named_entry(&b,value,PRAKTOR_ORCH_ROOT_PARENT,0u);
-        else status=fail_at(&b,SALTS_EINVAL,node,
+        else status=fail_at(&b,status==SALTS_ENOENT?SALTS_EINVAL:status,node,
                            "Missing named orchestration runner field");
     }
     if(status==SALTS_OK)status=flat_publish(&b,out);
