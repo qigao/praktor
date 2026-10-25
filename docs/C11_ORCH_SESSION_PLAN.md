@@ -306,4 +306,39 @@ second parser or changing the production executor:
 These checks test bounded owner-turn failure contracts, not persistence,
 cross-thread Session migration or production C++ replacement.
 
+## WorkerExecutor → worker-local Session (source-only gate)
+
+`actions_c11_orch_worker_session_test` exercises real
+`cflow_executor_worker_init_with_capacity()` callbacks and the existing
+C11 Orch Session Plan/NativeHost runtime. The Owner prepares bounded,
+immutable plans and independent task input snapshots before posting; each
+worker callback alone creates its Host and Session, ticks or cancels the
+Session, copies a bounded result and destroys both runtime owners **before**
+CFlow finalization. No live Session, NativeHost pointer, or mutable DAG
+owner is passed between threads.
+
+Two worker-local Sessions run concurrently while root values, task registry
+and DAG remain unchanged. After CLOSED admission, all finalizers and
+`wait_idle`, the single application Owner stages both bounded results in
+separate optimistic transactions and commits text plus typed TaskRegistry
+outputs as one group. Only then can the successor become ready; the
+successor also runs as a new worker-local Session on an independent task
+input snapshot.
+
+Cancellation exercises a real running native Sleep Session: the application
+Owner requests cancellation via an atomic flag, the same worker calls
+`praktor_c11_session_cancel()` and destroys its Session before returning,
+and CFlow cancels a second queued callback without ever constructing that
+queued Session. No root publication or dependent DAG admission is permitted.
+
+This is **not** Shell/Process Session portability or a production scheduler
+switch. Live NativeIO/Process leases still require independent retainer,
+close/drain and worker-affinity qualification. There is no worker-to-worker
+Session handoff and no cross-thread call to a borrowed Session.
+
+The test is included in normal Linux/Windows/macOS CTest, Linux lifecycle
+ASan/UBSan and **mandatory complete-source TSan**, with actual instrumented
+CFlow/Salts DSO linkage checked separately. Consumer-only TSan against
+uninstrumented released CFlow is intentionally not used as race evidence.
+
 PR #79 stays **Draft / do not merge** until full cutover gates pass.
