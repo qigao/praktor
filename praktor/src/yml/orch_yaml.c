@@ -344,13 +344,14 @@ static int flat_append_node(named_build *b,praktor_orch_type type,size_t parent,
     b->rows[*index].node.parent_index=parent;
     return SALTS_OK;
 }
-static int flat_add_param(named_build *b,size_t index,const char *key,tstr value) {
+static int flat_add_param(named_build *b,size_t index,const char *key,tstr value,
+                          praktor_yaml_node source,const char *node_type) {
     tstr owned_key=tstr_dup(key);
     if(!owned_key) {
         tstr_free(value);
         return fail(b,SALTS_ENOMEM,"Cannot allocate orchestration parameter key");
     }
-    return param(b,index,owned_key,value);
+    return param_with_source(b,index,owned_key,value,source,node_type);
 }
 static int flat_branch(named_build *b,praktor_yaml_node branch,size_t parent,unsigned depth) {
     size_t i,index;
@@ -412,24 +413,14 @@ static int flat_validate_keys(named_build *b,praktor_yaml_node map,const char *k
         if(status!=SALTS_OK)return fail_at(b,status,praktor_yaml_at(map,i),
             "Cannot decode flat orchestration key");
         allowed=flat_key_allowed(key,kind)||(allow_metadata&&flat_task_metadata_key(key));
+        if(!allowed) {
+            char message[256];
+            (void)snprintf(message,sizeof message,
+                "Unknown orchestration parameter '%s' for node type '%s'",key,kind);
+            tstr_free(key);
+            return fail_at(b,SALTS_EINVAL,praktor_yaml_at(map,i),message);
+        }
         tstr_free(key);
-        if(!allowed)return fail(b,SALTS_EINVAL,"Unknown orchestration parameter in flat control form");
-    }
-    return SALTS_OK;
-}
-static int flat_validate_integer(named_build *b,tstr text) {
-    size_t i=0,n=tstr_len(text),j;
-    /* Preserve runtime-substituted scalar admission: any brace bypasses
-     * compile-time decimal validation, exactly as the legacy parser does. */
-    for(j=0;j<n;++j)if(text[j]=='{'||text[j]=='}')return SALTS_OK;
-    if(n&&(text[0]=='+'||text[0]=='-'))i=1u;
-    if(i==n) {
-        tstr_free(text);
-        return fail(b,SALTS_EINVAL,"Orchestration integer parameter must be an integer");
-    }
-    for(;i<n;++i)if(text[i]<'0'||text[i]>'9') {
-        tstr_free(text);
-        return fail(b,SALTS_EINVAL,"Orchestration integer parameter must be an integer");
     }
     return SALTS_OK;
 }
@@ -465,7 +456,7 @@ static int flat_parse(named_build *b,praktor_yaml_node map,size_t parent,unsigne
         if(status!=SALTS_OK)
             return fail_at(b,status,field,"Flat decorator value must be a scalar");
         if(single_param) {
-            status=flat_add_param(b,index,single_param,value);
+            status=flat_add_param(b,index,single_param,value,field,kind);
             if(status!=SALTS_OK)return status;
         } else tstr_free(value); /* run_once token is deliberately ignored */
         return flat_branch(b,branch,index,depth);
@@ -478,7 +469,7 @@ static int flat_parse(named_build *b,praktor_yaml_node map,size_t parent,unsigne
             status=praktor_yaml_scalar(field,&value,NULL);
             if(status!=SALTS_OK)return fail_at(b,status,field,
                 "Orchestration if condition must be a scalar, node, or sequence");
-            status=flat_add_param(b,index,"condition",value);
+            status=flat_add_param(b,index,"condition",value,field,"if");
             if(status!=SALTS_OK)return status;
         } else {
             status=flat_branch(b,field,index,depth);
@@ -506,7 +497,7 @@ static int flat_parse(named_build *b,praktor_yaml_node map,size_t parent,unsigne
             status=praktor_yaml_scalar(field,&value,NULL);
             if(status!=SALTS_OK)return fail_at(b,status,field,
                 "Orchestration while condition must be a scalar, node, or sequence");
-            status=flat_add_param(b,index,"condition",value);
+            status=flat_add_param(b,index,"condition",value,field,"while");
             if(status!=SALTS_OK)return status;
         } else {
             status=flat_branch(b,field,index,depth);
@@ -520,9 +511,7 @@ static int flat_parse(named_build *b,praktor_yaml_node map,size_t parent,unsigne
             status=praktor_yaml_scalar(field,&value,NULL);
             if(status!=SALTS_OK)return fail_at(b,status,field,
                 "Orchestration max_iterations must be an integer scalar");
-            status=flat_validate_integer(b,value);
-            if(status!=SALTS_OK)return status;
-            status=flat_add_param(b,index,"max_iterations",value);
+            status=flat_add_param(b,index,"max_iterations",value,field,"while");
             if(status!=SALTS_OK)return status;
         }
         status=flat_require(b,map,"do",&branch,"while requires a do branch");
@@ -536,7 +525,7 @@ static int flat_parse(named_build *b,praktor_yaml_node map,size_t parent,unsigne
         status=praktor_yaml_scalar(field,&value,NULL);
         if(status!=SALTS_OK)return fail_at(b,status,field,
             "Orchestration switch selector must be a scalar");
-        status=flat_add_param(b,index,"variable",value);
+        status=flat_add_param(b,index,"variable",value,field,"switch");
         if(status!=SALTS_OK)return status;
         status=flat_require(b,map,"cases",&branch,"switch requires a cases branch");
         if(status!=SALTS_OK)return status;
@@ -554,7 +543,7 @@ static int flat_parse(named_build *b,praktor_yaml_node map,size_t parent,unsigne
         status=praktor_yaml_scalar(field,&value,NULL);
         if(status!=SALTS_OK)return fail_at(b,status,field,
             "Orchestration parameter 'key' for node type 'set_variable' must be a scalar");
-        status=flat_add_param(b,index,"key",value);
+        status=flat_add_param(b,index,"key",value,field,"set_variable");
         if(status!=SALTS_OK)return status;
     }
     {
@@ -572,7 +561,7 @@ static int flat_parse(named_build *b,praktor_yaml_node map,size_t parent,unsigne
             status=praktor_yaml_scalar(field,&value,NULL);
             if(status!=SALTS_OK)return fail_at(b,status,field,
                 "Orchestration set_variable value/from must be a scalar");
-            return flat_add_param(b,index,has_value?"value":"from",value);
+            return flat_add_param(b,index,has_value?"value":"from",value,field,"set_variable");
         }
     }
 }
