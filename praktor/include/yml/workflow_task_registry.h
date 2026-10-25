@@ -79,6 +79,40 @@ int praktor_workflow_task_registry_merge_outputs(
     praktor_workflow_task_registry *owner,size_t index,
     const json_value_t *updates);
 
+/* Two-phase output publication for a bounded group of distinct task indices.
+ * Prepare does all JSON allocations and validation without mutating registry.
+ * Prepared group uniquely owns all staged output JSON, independent of update
+ * inputs, and borrows its registry which MUST outlive the group.
+ *
+ * Publish is allocation-free and requires the same single-driver owner turn
+ * as prepare. It preflights ALL task states and existing output identities,
+ * then swaps every staged output; no partial updates are visible. Successful
+ * publication consumes *prepared, setting it to NULL. If any task changed
+ * after preparation, it fails with SALTS_EBUSY leaving the registry and group
+ * unchanged; caller must destroy or retry the group.
+ *
+ * This prepares typed outputs only; it does not publish C11 value-store
+ * transactions. The separate qualification-only Parallel adapter invokes
+ * existing value_txn_commit_group() before this no-fail owner publication.
+ * No concurrent mutation, callback reentry or owner destruction is admitted.
+ * On failure prepare leaves *out unchanged. */
+typedef struct praktor_workflow_task_output_group
+    praktor_workflow_task_output_group;
+typedef struct praktor_workflow_task_output_update {
+    size_t task_index;
+    const json_value_t *updates; /* borrowed source object */
+} praktor_workflow_task_output_update;
+int praktor_workflow_task_registry_prepare_output_group(
+    praktor_workflow_task_registry *owner,
+    const praktor_workflow_task_output_update *updates,size_t count,
+    praktor_workflow_task_output_group **out);
+int praktor_workflow_task_registry_publish_output_group(
+    praktor_workflow_task_registry *owner,
+    praktor_workflow_task_output_group **prepared);
+void praktor_workflow_task_registry_discard_output_group(
+    praktor_workflow_task_output_group *prepared);
+
+
 /* Borrowed immutable views; valid until start/re-entry/destroy. Get output
  * succeeds only for completed/failed tasks; no mutable/working JSON exposure.
  * Failure leaves outputs unchanged. ENOENT = absent key, EBUSY = not terminal.
