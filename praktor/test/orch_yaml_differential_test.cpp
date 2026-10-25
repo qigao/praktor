@@ -275,6 +275,69 @@ spec("C11 named orchestration CSTL AST parity with legacy parser") {
         check(std::string(error).find("both 'child' and 'children'")!=std::string::npos);
     }
 
+    it("matches legacy named shorthand and retired-type errors verbatim") {
+        const char *sources[]={
+            "Sequence: not_a_sequence\n",
+            "Parallel: ignored\n",
+            "RunOnce: only_once\n",
+            "Inverter: ignored\n",
+            "ParseRegex: one_parameter\n",
+            "IfThenElse: {condition: ready}\n",
+            "if_then_else: {condition: ready}\n",
+            "WhileDo: {condition: ready}\n",
+            "Switch: {variable: mode}\n",
+            "SetVariable: {key: key, value: value}\n",
+            "Timeout: {timeout_ms: 5}\n",
+            "Repeat: {num_cycles: 2}\n",
+            "Delay: {delay_ms: 3}\n"
+        };
+        for(const char *source:sources) {
+            TaskYamlDetail::YamlDocument document(source);
+            std::string legacy_error;
+            try { (void)TaskYamlDetail::parse_orch_node(document.root()); }
+            catch(const std::exception& e) {legacy_error=e.what();}
+            praktor_orch_tree *native=nullptr;
+            char diagnostic[512]{};
+            const int status=praktor_orch_from_named_yaml(
+                document.root().native(),&native,diagnostic,sizeof diagnostic);
+            check(!legacy_error.empty());
+            check(status==SALTS_EINVAL);
+            check(native==nullptr);
+            check(std::string(diagnostic)==legacy_error);
+        }
+    }
+    it("matches invalid named child mappings and sequences") {
+        const char *sources[]={
+            "Sequence:\n  children: {Shell: {cmd: one}}\n",
+            "Parallel:\n  children: {Shell: {cmd: one}}\n",
+            "Shell:\n  children: [{Shell: {cmd: one}}]\n",
+            "Shell:\n  child: {Sleep: 1}\n",
+            "Sequence:\n  - Shell: {cmd: ok}\n  - not_a_node\n",
+            "Sequence:\n  children: [42]\n",
+            "Sequence:\n  child: [1]\n",
+            "Sequence:\n  child: {InvalidNode: {}}\n",
+            "Sequence:\n  child: {Shell: {cmd: ok}, Sleep: 1}\n",
+            "A: {}\nB: {}\n",
+            "- Shell: {cmd: yes}\n- Sleep: 1\n"
+        };
+        for(const char *source:sources) {
+            TaskYamlDetail::YamlDocument document(source);
+            std::string legacy_error;
+            try { (void)TaskYamlDetail::parse_orch_node(document.root()); }
+            catch(const std::exception& e) {legacy_error=e.what();}
+            praktor_orch_tree *native=nullptr;
+            char diagnostic[512]{};
+            const int status=praktor_orch_from_named_yaml(
+                document.root().native(),&native,diagnostic,sizeof diagnostic);
+            check(!legacy_error.empty());
+            check(status==SALTS_EINVAL);
+            check(native==nullptr);
+            if(std::string(source).find("InvalidNode")!=std::string::npos)
+                check(std::string(diagnostic).find("Unknown orchestration node type: 'InvalidNode'")!=std::string::npos);
+            else
+                check(std::string(diagnostic)==legacy_error);
+        }
+    }
     it("matches required parameter and named-control child-count diagnostics") {
         const char *sources[]={
             "Shell: {output_key: out}\n",
