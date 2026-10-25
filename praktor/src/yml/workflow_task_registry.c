@@ -234,6 +234,53 @@ cleanup:
     json_free(staged);
     return result;
 }
+int praktor_workflow_task_registry_merge_outputs(
+    praktor_workflow_task_registry *owner,size_t index,
+    const json_value_t *updates) {
+    task_slot *slot=slot_for(owner,index);
+    json_value_t *staged=NULL;
+    json_budget budget={0};
+    size_t i;
+    int status=SALTS_EINVAL;
+    if(!owner||!updates||json_type(updates)!=JSON_OBJECT)return status;
+    if(!slot)return SALTS_ENOENT;
+    if(finalized(slot->state))return SALTS_EBUSY;
+    if(!admissible_json(updates,1u,&budget))return status;
+    if(json_object_size(updates)>PRAKTOR_WORKFLOW_TASK_MAX_OUTPUTS)
+        return status;
+    if(json_object_size(updates)==0u)return SALTS_OK;
+    staged=slot->outputs?json_clone(slot->outputs):json_create_object();
+    if(!staged)return SALTS_ENOMEM;
+    for(i=0;i<json_object_size(updates);++i) {
+        const char *key=json_object_key(updates,i);
+        const size_t length=json_object_key_len(updates,i);
+        const json_value_t *value=json_object_value(updates,i);
+        json_value_t *copy=NULL;
+        if(!key||!length||memchr(key,'\0',length)!=NULL)goto done;
+        copy=json_clone(value);
+        if(!copy) {
+            status=SALTS_ENOMEM;
+            goto done;
+        }
+        if(!json_object_add_n(staged,key,length,copy)) {
+            json_free(copy);
+            status=SALTS_ENOMEM;
+            goto done;
+        }
+        /* Success transfers this clone to the provisional JSON owner. */
+    }
+    if(json_object_size(staged)>PRAKTOR_WORKFLOW_TASK_MAX_OUTPUTS)goto done;
+    budget=(json_budget){0};
+    if(!admissible_json(staged,1u,&budget))goto done;
+    json_free(slot->outputs);
+    slot->outputs=staged;
+    if(slot->state==PRAKTOR_WORKFLOW_TASK_PENDING)
+        slot->state=PRAKTOR_WORKFLOW_TASK_RUNNING;
+    return SALTS_OK;
+done:
+    json_free(staged);
+    return status;
+}
 int praktor_workflow_task_registry_get_output(
     const praktor_workflow_task_registry *owner,size_t index,
     vstr key,const json_value_t **out) {
