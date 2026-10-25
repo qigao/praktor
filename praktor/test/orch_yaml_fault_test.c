@@ -171,6 +171,17 @@ spec("C11 orchestration parser boundary faults") {
              "then: [{Shell: {cmd: yes}}, {Sleep: 1}]\n"
              "else: {Shell: {cmd: no}}\n","if",true);
     }
+    it("does not treat failed optional while/max_iterations reads as absence") {
+        walk("name: loop\n"
+             "while: ready\n"
+             "max_iterations: 7\n"
+             "do: {Shell: {cmd: tick}}\n","while",true);
+    }
+    it("does not publish a partial set_variable when value retrieval fails") {
+        walk("name: assign\n"
+             "set_variable: result\n"
+             "value: ready\n","set_variable",true);
+    }
     it("rolls back named runner field and late-invalid parameters") {
         walk("name: task\n"
              "sequence:\n"
