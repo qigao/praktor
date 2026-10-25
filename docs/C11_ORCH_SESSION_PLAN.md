@@ -282,4 +282,28 @@ are supported on every platform, that individual output line metadata
 is durable, or that production WorkflowContext and WorkerExecutor have
 moved to C11. The explicit test profile remains opt-in and Draft.
 
+## Exact-head failure-path regression gate (source-only)
+
+The next candidate extends the existing full-source TSan-selected
+`actions_c11_native_host_test` and real Process-backed
+`actions_c11_orch_dag_shell_process_test` rather than introducing a
+second parser or changing the production executor:
+
+- Regex capacity exhaustion, missing capture, invalid expression, unsupported
+  backreferences and absent input must preserve the previously published
+  NativeHost result. Invalid ParseLines filters retain Legacy's no-filter
+  behavior; unsupported backreference filters reject without changing either
+  the parsed text or its count.
+- A successful real command followed by a nonmatching Regex is a failed task:
+  root and TaskRegistry receive no parsed value, and its dependent DAG task
+  must not be admitted.
+- After real Command + ParseLines succeeds, a competing root write between
+  selected-output staging and the CFlow/Process/TaskRegistry commit must cause
+  `PRAKTOR_C11_PARALLEL_CONFLICT`. The competing value survives,
+  the optimistic transaction remains owned until abort, the typed output
+  stays uncommitted, and the dependent DAG task remains blocked.
+
+These checks test bounded owner-turn failure contracts, not persistence,
+cross-thread Session migration or production C++ replacement.
+
 PR #79 stays **Draft / do not merge** until full cutover gates pass.

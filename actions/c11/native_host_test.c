@@ -289,6 +289,96 @@ static void parse_lines_atomic_failure(void) {
   praktor_c11_native_host_destroy(&host);
 }
 
+
+/* A completed regex match is not authority to overwrite another port when
+ * the value store is full. Parse/no-match/unsupported failures are similarly
+ * forbidden from modifying a prior output. */
+static void parse_regex_atomic_failures(void) {
+  praktor_c11_native_host host = {0};
+  praktor_c11_bt_host hooks = {0};
+  praktor_c11_value_store *values;
+  praktor_c11_leaf_parameter ports[3] = {
+      {"pattern", PRAKTOR_C11_LEAF_STRING, "(fresh)", 0.0, false},
+      {"output_key", PRAKTOR_C11_LEAF_STRING, "capture", 0.0, false},
+      {"capture_group", PRAKTOR_C11_LEAF_NUMBER, NULL, 1.0, false}};
+  praktor_c11_leaf_request request = {0u, "ParseRegex", ports, 3u, false, NULL};
+  salts_bt_node_status status = SALTS_BT_FAILURE;
+  char text[65] = {0};
+  size_t size = 0u;
+  int present = 1;
+  check(praktor_c11_native_host_init(&host, 2u, 32u, 64u) == SALTS_OK);
+  check(praktor_c11_native_host_bind(&host, &hooks) == SALTS_OK);
+  values = praktor_c11_native_host_values(&host);
+  check(praktor_c11_value_store_set(values, "shell_output", "fresh") == PRAKTOR_C11_VALUE_OK);
+  check(praktor_c11_value_store_set(values, "capture", "prior") == PRAKTOR_C11_VALUE_OK);
+
+  /* Both slots are occupied: a new result key must not create a partial value. */
+  ports[1].text = "extra";
+  check(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_ENOBUFS);
+  check(praktor_c11_value_store_contains(values, "extra", &present) ==
+        PRAKTOR_C11_VALUE_OK && present == 0);
+  check(praktor_c11_value_store_get(values, "capture", text, sizeof text, &size) ==
+        PRAKTOR_C11_VALUE_OK && strcmp(text, "prior") == 0);
+
+  ports[1].text = "capture";
+  ports[2].number = 2.0; /* the pattern has only one capture group */
+  check(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_OK &&
+        status == SALTS_BT_FAILURE);
+  ports[2].number = 1.0;
+  ports[0].text = "[";
+  check(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_OK &&
+        status == SALTS_BT_FAILURE);
+  ports[0].text = "(f)\\1";
+  check(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_ENOTSUP);
+  ports[0].text = "(fresh)";
+  check(praktor_c11_value_store_erase(values, "shell_output") == PRAKTOR_C11_VALUE_OK);
+  check(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_OK &&
+        status == SALTS_BT_FAILURE);
+  check(praktor_c11_value_store_get(values, "capture", text, sizeof text, &size) ==
+        PRAKTOR_C11_VALUE_OK && strcmp(text, "prior") == 0);
+  praktor_c11_native_host_destroy(&host);
+}
+
+/* Legacy ignores malformed optional line filters, but native-only unsupported
+ * regex features must fail closed without replacing either paired output. */
+static void parse_lines_filter_atomic_failures(void) {
+  praktor_c11_native_host host = {0};
+  praktor_c11_bt_host hooks = {0};
+  praktor_c11_value_store *values;
+  praktor_c11_leaf_parameter ports[2] = {
+      {"output_key", PRAKTOR_C11_LEAF_STRING, "parsed", 0.0, false},
+      {"filter", PRAKTOR_C11_LEAF_STRING, "(o)\\1", 0.0, false}};
+  praktor_c11_leaf_request request = {0u, "ParseLines", ports, 2u, false, NULL};
+  salts_bt_node_status status = SALTS_BT_FAILURE;
+  char text[65] = {0};
+  size_t size = 0u;
+  check(praktor_c11_native_host_init(&host, 3u, 32u, 64u) == SALTS_OK);
+  check(praktor_c11_native_host_bind(&host, &hooks) == SALTS_OK);
+  values = praktor_c11_native_host_values(&host);
+  check(praktor_c11_value_store_set(values, "shell_output", "one\ntwo") ==
+        PRAKTOR_C11_VALUE_OK);
+  check(praktor_c11_value_store_set(values, "parsed", "prior") == PRAKTOR_C11_VALUE_OK);
+  check(praktor_c11_value_store_set(values, "parsed_count", "9") == PRAKTOR_C11_VALUE_OK);
+  check(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_ENOTSUP);
+  check(praktor_c11_value_store_get(values, "parsed", text, sizeof text, &size) ==
+        PRAKTOR_C11_VALUE_OK && strcmp(text, "prior") == 0);
+  check(praktor_c11_value_store_get(values, "parsed_count", text, sizeof text, &size) ==
+        PRAKTOR_C11_VALUE_OK && strcmp(text, "9") == 0);
+  ports[1].text = "["; /* invalid Legacy-style filter means no filter */
+  check(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_OK &&
+        status == SALTS_BT_SUCCESS);
+  check(praktor_c11_value_store_get(values, "parsed", text, sizeof text, &size) ==
+        PRAKTOR_C11_VALUE_OK && strcmp(text, "one\ntwo") == 0);
+  check(praktor_c11_value_store_get(values, "parsed_count", text, sizeof text, &size) ==
+        PRAKTOR_C11_VALUE_OK && strcmp(text, "2") == 0);
+  check(praktor_c11_value_store_erase(values, "shell_output") == PRAKTOR_C11_VALUE_OK);
+  check(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_OK &&
+        status == SALTS_BT_FAILURE);
+  check(praktor_c11_value_store_get(values, "parsed_count", text, sizeof text, &size) ==
+        PRAKTOR_C11_VALUE_OK && strcmp(text, "2") == 0);
+  praktor_c11_native_host_destroy(&host);
+}
+
 static void parse_key_value(void) {
   praktor_c11_native_host host = {0};
   praktor_c11_bt_host hooks = {0};
@@ -416,5 +506,7 @@ spec("C11 Native Host") {
   it("extracts bounded POSIX capture groups without the C++ Executor") { parse_regex(); }
   it("fails closed at configured regex cache and capture bounds") { parse_regex_bounds(); }
   it("publishes line content and count atomically within bounds") { parse_lines_atomic_failure(); }
+  it("preserves prior regex output across no-match, unsupported and capacity failures") { parse_regex_atomic_failures(); }
+  it("keeps ParseLines paired outputs intact across unsupported filters") { parse_lines_filter_atomic_failures(); }
   it("encodes sorted key/value JSON without allocating or partial publication") { parse_key_value(); }
 }

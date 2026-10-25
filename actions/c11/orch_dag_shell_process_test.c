@@ -63,6 +63,16 @@ static const char *command_regex_yaml=
  * Windows CRLF is intentionally not normalized by the Legacy-compatible
  * parser; assert count instead of making a platform-specific line-ending
  * claim in this cross-platform DAG qualification. */
+static const char *command_regex_no_match_yaml=
+    "variables: {BASE: untouched}\n"
+    "tasks:\n"
+    "  - name: parsed_command\n"
+    "    command: echo native-command\n"
+    "    parse_regex: {pattern: '(missing)', output_key: parsed}\n"
+    "  - name: verify\n"
+    "    depends_on: [parsed_command]\n"
+    "    set_variable: confirmed\n"
+    "    from: parsed\n";
 static const char *command_lines_yaml=
     "variables: {BASE: untouched}\n"
     "tasks:\n"
@@ -895,6 +905,115 @@ spec("Native Shell Process ownership through C11 DAG and CFlow ManualExecutor") 
         assert_dag(&f,0u,2u,0u,PRAKTOR_WORKFLOW_DAG_CONTINUE,true);
         cflow_executor_destroy(&next);
         session_destroy(&second);
+        fixture_destroy(&f);
+    }
+
+    it("fails a real regex nonmatch without releasing the dependent DAG task") {
+        shell_fixture f;
+        shell_owner_task first;
+        cflow_executor executor={0};
+        cflow_executor_control control={0};
+        size_t ids[2]={SIZE_MAX,SIZE_MAX},count=0u;
+        praktor_workflow_task_state state=PRAKTOR_WORKFLOW_TASK_PENDING;
+        int present=1;
+        fixture_init(&f,command_regex_no_match_yaml);
+        if(!f.snapshot)return;
+        check(praktor_workflow_dag_claim_ready(f.dag,ids,2u,&count)==SALTS_OK);
+        check(count==1u&&ids[0]==0u);
+        session_init(&f,&first,0u,5,false);
+        first.until_terminal=true;
+        dispatch_one(&executor,&control,&first);
+        /* The child process succeeded, but the ParseRegex leaf did not. */
+        check(first.outcome==SALTS_BT_FAILURE);
+        check(root_is(praktor_c11_native_host_values(&first.host),"shell_exit_code","0"));
+        check(praktor_c11_value_store_contains(
+            praktor_c11_native_host_values(&first.host),"parsed",&present)==
+            PRAKTOR_C11_VALUE_OK&&present==0);
+        check(praktor_c11_value_store_contains(&f.root,"parsed",&present)==
+              PRAKTOR_C11_VALUE_OK&&present==0);
+        check(root_is(&f.root,"BASE","untouched"));
+        check(praktor_workflow_task_registry_state(f.registry,0u,&state)==SALTS_OK);
+        check(state==PRAKTOR_WORKFLOW_TASK_PENDING);
+        check(praktor_workflow_task_registry_fail(
+            f.registry,0u,vstr_from_cstr("regex did not match"))==SALTS_OK);
+        check(praktor_workflow_dag_finish(f.dag,0u,false)==SALTS_OK);
+        assert_dag(&f,0u,1u,0u,PRAKTOR_WORKFLOW_DAG_FAILED,false);
+        count=SIZE_MAX;
+        check(praktor_workflow_dag_claim_ready(f.dag,ids,2u,&count)==SALTS_EBUSY);
+        check(count==0u); /* no set_variable successor */
+        cflow_executor_destroy(&executor);
+        session_destroy(&first);
+        fixture_destroy(&f);
+    }
+
+    it("rejects conflicted ParseLines publication as one text and typed group") {
+        shell_fixture f;
+        shell_owner_task first;
+        cflow_executor executor={0};
+        cflow_executor_control control={0};
+        praktor_c11_value_txn transaction={0};
+        praktor_workflow_task_output_update update={0};
+        json_value_t *typed=NULL;
+        const char *selected[]={"parsed_count"};
+        const char *typed_text="{\"lines\":\"unpublished\"}";
+        const json_value_t *borrowed=NULL;
+        praktor_workflow_task_state state=PRAKTOR_WORKFLOW_TASK_PENDING;
+        size_t ids[2]={SIZE_MAX,SIZE_MAX},count=0u,pending=SIZE_MAX;
+        int publication=PRAKTOR_C11_PARALLEL_BUSY;
+        int present=1;
+        fixture_init(&f,command_lines_yaml);
+        if(!f.snapshot)return;
+        check(praktor_workflow_dag_claim_ready(f.dag,ids,2u,&count)==SALTS_OK);
+        check(count==1u&&ids[0]==0u);
+        session_init(&f,&first,0u,6,false);
+        first.until_terminal=true;
+        dispatch_one(&executor,&control,&first);
+        check(first.outcome==SALTS_BT_SUCCESS);
+        check(root_is(praktor_c11_native_host_values(&first.host),"parsed_count","1"));
+        check(praktor_c11_workflow_prepare_task_text_outputs(
+            &f.root,praktor_c11_native_host_values(&first.host),
+            selected,1u,&transaction)==PRAKTOR_C11_VALUE_OK);
+        /* A competing owner write occurs AFTER staging but BEFORE commit:
+         * there must be no typed publication despite a completed Process. */
+        check(praktor_c11_value_store_set(
+            &f.root,"parsed_count","interloper")==PRAKTOR_C11_VALUE_OK);
+        typed=json_parse(typed_text,strlen(typed_text));
+        check(typed!=NULL);
+        update.task_index=0u;update.updates=typed;
+        {
+            const uint64_t started=cmeta_hrtime();
+            do {
+                publication=praktor_c11_workflow_parallel_commit_after_cflow_and_process_drain(
+                    f.registry,&update,&transaction,1u,&control,&f.retainer,64u,&pending);
+                check(publication==PRAKTOR_C11_PARALLEL_BUSY||
+                      publication==PRAKTOR_C11_PARALLEL_CONFLICT);
+                if(publication==PRAKTOR_C11_PARALLEL_BUSY)cmeta_sleep_ms(2u);
+            } while(publication==PRAKTOR_C11_PARALLEL_BUSY&&
+                    cmeta_hrtime()-started<UINT64_C(8000000000));
+        }
+        check(publication==PRAKTOR_C11_PARALLEL_CONFLICT);
+        check(pending==0u&&transaction.impl!=NULL);
+        check(root_is(&f.root,"parsed_count","interloper"));
+        check(praktor_c11_value_store_contains(&f.root,"parsed",&present)==
+              PRAKTOR_C11_VALUE_OK&&present==0);
+        check(praktor_workflow_task_registry_state(f.registry,0u,&state)==SALTS_OK);
+        check(state==PRAKTOR_WORKFLOW_TASK_PENDING);
+        borrowed=(const json_value_t *)f.registry;
+        check(praktor_workflow_task_registry_get_output(
+            f.registry,0u,vstr_from_cstr("lines"),&borrowed)==SALTS_EBUSY);
+        check(borrowed==(const json_value_t *)f.registry);
+        praktor_c11_value_txn_abort(&transaction);
+        check(transaction.impl==NULL);
+        check(praktor_workflow_task_registry_fail(
+            f.registry,0u,vstr_from_cstr("publication conflict"))==SALTS_OK);
+        check(praktor_workflow_dag_finish(f.dag,0u,false)==SALTS_OK);
+        assert_dag(&f,0u,1u,0u,PRAKTOR_WORKFLOW_DAG_FAILED,false);
+        count=SIZE_MAX;
+        check(praktor_workflow_dag_claim_ready(f.dag,ids,2u,&count)==SALTS_EBUSY);
+        check(count==0u);
+        json_free(typed);
+        cflow_executor_destroy(&executor);
+        session_destroy(&first);
         fixture_destroy(&f);
     }
 
