@@ -168,7 +168,7 @@ spec("CFlow ManualExecutor driven C11 Parallel admission and owner publication")
         praktor_c11_value_store_destroy(&root);
         praktor_workflow_task_registry_destroy(registry);
     }
-    it("bounded queue rejection and failed branch both require group abort") {
+    it("bounded queue rejection requires group abort before publication") {
         cflow_executor executor={0};
         cflow_executor_control control={0};
         praktor_workflow_task_registry *registry=registry_for_test();
@@ -203,4 +203,38 @@ spec("CFlow ManualExecutor driven C11 Parallel admission and owner publication")
         praktor_c11_value_store_destroy(&root);
         praktor_workflow_task_registry_destroy(registry);
     }
+    it("failed settled branch cannot trigger a partial group commit") {
+        cflow_executor executor={0};
+        praktor_workflow_task_registry *registry=registry_for_test();
+        praktor_c11_value_store root={0};
+        praktor_c11_value_txn txns[2]={{0},{0}};
+        branch_probe probes[2]={
+            {.transaction=&txns[0],.key="left",.value="L"},
+            {.transaction=&txns[1],.key="right",.value="R",.fail_run=true}
+        };
+        praktor_workflow_task_state state=PRAKTOR_WORKFLOW_TASK_RUNNING;
+        check(praktor_c11_value_store_init(&root,3u,32u,32u)==PRAKTOR_C11_VALUE_OK);
+        check(cflow_executor_manual_init_with_capacity(&executor,2u));
+        for(size_t i=0;i<2u;++i) {
+            cflow_executor_task task=task_for(&probes[i]);
+            check(praktor_c11_value_txn_begin(&txns[i],&root)==PRAKTOR_C11_VALUE_OK);
+            check(cflow_executor_try_post_task(&executor,&task)==CFLOW_ADMISSION_ACCEPTED);
+        }
+        check(cflow_executor_run_ready(&executor)==2u);
+        check(probes[0].run_count==1u&&probes[0].succeeded);
+        check(probes[1].run_count==1u&&!probes[1].succeeded);
+        check(probes[0].final_count==1u&&probes[1].final_count==1u);
+        /* This is owner policy: a failed branch aborts ALL still-active
+         * transactions; there is no partial success publication. */
+        for(size_t i=0;i<2u;++i)praktor_c11_value_txn_abort(&txns[i]);
+        check(praktor_c11_value_store_size(&root)==0u);
+        for(size_t i=0;i<2u;++i) {
+            check(praktor_workflow_task_registry_state(registry,i,&state)==SALTS_OK);
+            check(state==PRAKTOR_WORKFLOW_TASK_PENDING);
+        }
+        cflow_executor_destroy(&executor);
+        praktor_c11_value_store_destroy(&root);
+        praktor_workflow_task_registry_destroy(registry);
+    }
+
 }
