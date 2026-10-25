@@ -80,21 +80,25 @@ typedef enum orch_plan_profile {
     ORCH_PLAN_SINGLE_COMMAND,
     ORCH_PLAN_COMMAND_JSON,
     ORCH_PLAN_COMMAND_KEYVALUE,
-    ORCH_PLAN_COMMAND_REGEX
+    ORCH_PLAN_COMMAND_REGEX,
+    ORCH_PLAN_COMMAND_LINES
 } orch_plan_profile;
 static bool is_command_parser_profile(orch_plan_profile profile) {
     return profile==ORCH_PLAN_COMMAND_JSON||
            profile==ORCH_PLAN_COMMAND_KEYVALUE||
-           profile==ORCH_PLAN_COMMAND_REGEX;
+           profile==ORCH_PLAN_COMMAND_REGEX||
+           profile==ORCH_PLAN_COMMAND_LINES;
 }
 static praktor_orch_type parser_type_for(orch_plan_profile profile) {
     if(profile==ORCH_PLAN_COMMAND_KEYVALUE)return PRAKTOR_ORCH_PARSE_KEY_VALUE;
     if(profile==ORCH_PLAN_COMMAND_REGEX)return PRAKTOR_ORCH_PARSE_REGEX;
+    if(profile==ORCH_PLAN_COMMAND_LINES)return PRAKTOR_ORCH_PARSE_LINES;
     return PRAKTOR_ORCH_PARSE_JSON;
 }
 static const char *parser_profile_name(orch_plan_profile profile) {
     if(profile==ORCH_PLAN_COMMAND_KEYVALUE)return "KeyValue";
     if(profile==ORCH_PLAN_COMMAND_REGEX)return "Regex";
+    if(profile==ORCH_PLAN_COMMAND_LINES)return "Lines";
     return "JSON";
 }
 
@@ -152,7 +156,8 @@ static int create_plan(
                 "Native Command %s qualification requires one Shell followed by Parse%s",
                 parser_profile_name(profile),
                 profile==ORCH_PLAN_COMMAND_KEYVALUE?"KeyValue":
-                    profile==ORCH_PLAN_COMMAND_REGEX?"Regex":"Json");
+                    profile==ORCH_PLAN_COMMAND_REGEX?"Regex":
+                        profile==ORCH_PLAN_COMMAND_LINES?"Lines":"Json");
             status=fail(error,cap,SALTS_ENOTSUP,detail);
             goto done;
         }
@@ -351,6 +356,12 @@ int praktor_c11_orch_session_plan_create_native_command_regex(
     const praktor_orch_tree *tree,const salts_bt_tree_config *limits,
     praktor_c11_orch_session_plan **out,char *error,size_t cap) {
     return create_plan(tree,limits,out,error,cap,ORCH_PLAN_COMMAND_REGEX);
+}
+
+int praktor_c11_orch_session_plan_create_native_command_lines(
+    const praktor_orch_tree *tree,const salts_bt_tree_config *limits,
+    praktor_c11_orch_session_plan **out,char *error,size_t cap) {
+    return create_plan(tree,limits,out,error,cap,ORCH_PLAN_COMMAND_LINES);
 }
 
 int praktor_c11_orch_session_plan_init_session(

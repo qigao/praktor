@@ -253,4 +253,33 @@ general multi-command pipelines, ParseLines, production C++ scheduler
 cutover, or worker-thread Session movement. Unit-level NativeHost regex
 tests remain separately mandatory.
 
+## Canonical command + ParseLines — selected-count output qualification
+
+The separate source-only, opt-in
+`praktor_c11_orch_session_plan_create_native_command_lines()`
+admits precisely one Canonical `Sequence → Shell → ParseLines` with the
+original `stdout` output/input binding and an initialized native Process
+recovery owner. The default Plan converter, noncanonical ports, extra
+children and Legacy fallback all remain disallowed. This extends the
+single enum-based admission profile without adding a parser.
+
+The already-qualified C11 NativeHost line scanner preserves Legacy
+newline semantics, including CRLF, empty lines, regex filtering and atomic
+paired writes to `<output_key>` and `<output_key>_count`. Because Windows
+retains the carriage return in line text, the cross-platform real-process
+DAG probe checks the portable `parsed_count=1` on
+`command: echo ready` plus `parse_lines: {output_key: parsed}`.
+The private `parsed` text is observed, but **not** selected for publication:
+only `parsed_count` is prepared in the existing optimistic text
+transaction and committed after CFlow/Process quiescence with the typed
+TaskRegistry group. The dependent flat `set_variable` inherits the
+committed count, while root cannot see the unselected `parsed` value.
+A negative AST test refuses a mismatched stdout binding without modifying
+a previously accepted Session Plan.
+
+This qualification does not imply that arbitrary line-processing filters
+are supported on every platform, that individual output line metadata
+is durable, or that production WorkflowContext and WorkerExecutor have
+moved to C11. The explicit test profile remains opt-in and Draft.
+
 PR #79 stays **Draft / do not merge** until full cutover gates pass.

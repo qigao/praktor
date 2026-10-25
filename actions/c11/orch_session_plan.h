@@ -80,6 +80,17 @@ int praktor_c11_orch_session_plan_create_native_command_regex(
     const praktor_orch_tree *tree,const salts_bt_tree_config *limits,
     praktor_c11_orch_session_plan **out,
     char *error,size_t error_capacity);
+/* Explicit source-only native command+lines qualification. Only one
+ * canonical Sequence -> Shell -> ParseLines with matching stdout ports and
+ * an initialized Process retainer. ParseLines uses the existing bounded
+ * NativeHost line scanner; its text and *_count remain task-local until the
+ * application Owner explicitly selects and publishes output keys.
+ * Default plan, noncanonical ports, multi-command and Legacy fallback
+ * remain rejected. */
+int praktor_c11_orch_session_plan_create_native_command_lines(
+    const praktor_orch_tree *tree,const salts_bt_tree_config *limits,
+    praktor_c11_orch_session_plan **out,
+    char *error,size_t error_capacity);
 void praktor_c11_orch_session_plan_destroy(
     praktor_c11_orch_session_plan *plan);
 size_t praktor_c11_orch_session_plan_node_count(
