@@ -4,6 +4,7 @@
 #include "workflow_parallel_commit.h"
 #include <salts/process_retainer.h>
 #include <cflow/executor.h>
+#include <stdbool.h>
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -85,14 +86,18 @@ int praktor_c11_workflow_parallel_drain_process_retainers(
 /* Source-only owner-turn admission for one retainer PER branch (1:1).
  * The group must be CLOSED + finalized + idle, with no rejected/cancelled
  * callbacks; each retained Process must be fully reaped before the existing
- * optimistic typed/text group transaction commits. All DAG/registry changes
- * happen afterward on the application Owner, never in worker callbacks.
+ * optimistic typed/text group transaction commits. branch_succeeded is a
+ * post-finalization immutable copy of actual branch semantic outcomes.
+ * It is read ONLY after CLOSED + wait_idle; a false value returns
+ * PARALLEL_FAILED before any retainer is driven or output is published.
+ * Caller aborts the group and separately drains native leases.
+ * All DAG/registry changes happen afterward on the application Owner.
  * No shared retainer, C++ production backend change, or public SDK switch. */
 int praktor_c11_workflow_parallel_commit_after_cflow_and_process_drains(
     praktor_workflow_task_registry *registry,
     const praktor_workflow_task_output_update *task_outputs,
     praktor_c11_value_txn *branch_values, size_t branch_count,
-    cflow_executor_control *control,
+    const bool *branch_succeeded, cflow_executor_control *control,
     cflow_process_retainer *const *retainers, size_t retainer_count,
     size_t max_steps, size_t *out_pending);
 

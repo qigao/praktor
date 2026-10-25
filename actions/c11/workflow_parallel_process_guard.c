@@ -126,7 +126,7 @@ int praktor_c11_workflow_parallel_commit_after_cflow_and_process_drains(
     praktor_workflow_task_registry *registry,
     const praktor_workflow_task_output_update *task_outputs,
     praktor_c11_value_txn *branch_values,size_t branch_count,
-    cflow_executor_control *control,
+    const bool *branch_succeeded,cflow_executor_control *control,
     cflow_process_retainer *const *owners,size_t count,
     size_t max_steps,size_t *out_pending) {
     cflow_executor_protocol_stats stats={0};
@@ -134,7 +134,7 @@ int praktor_c11_workflow_parallel_commit_after_cflow_and_process_drains(
     int drained;
     if(out_pending)*out_pending=0u;
     if(!registry||!task_outputs||!branch_values||!branch_count||
-       !control||branch_count!=count||
+       !branch_succeeded||!control||branch_count!=count||
        validate_retainer_group(owners,count,max_steps)!=PRAKTOR_C11_PARALLEL_OK)
         return PRAKTOR_C11_PARALLEL_INVALID;
     if(!cflow_executor_control_get_stats(control,&stats))
@@ -156,6 +156,10 @@ int praktor_c11_workflow_parallel_commit_after_cflow_and_process_drains(
         return PRAKTOR_C11_PARALLEL_BUSY;
     if(waited!=CFLOW_EXECUTOR_WAIT_IDLE)
         return PRAKTOR_C11_PARALLEL_INVALID;
+    /* CFlow callback completion is NOT a guarantee of successful Process.
+     * Read semantic results only after all finalizers and idle have settled. */
+    for(size_t i=0u;i<branch_count;++i)
+        if(!branch_succeeded[i])return PRAKTOR_C11_PARALLEL_FAILED;
     drained=praktor_c11_workflow_parallel_drain_process_retainers(
         owners,count,max_steps,out_pending,NULL);
     if(drained!=PRAKTOR_C11_PARALLEL_OK)return drained;

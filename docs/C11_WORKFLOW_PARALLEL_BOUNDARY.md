@@ -173,3 +173,21 @@ still explicitly drains adopted processes *after* worker quiescence.
 This is a C11 conformance path, **not** a new Process implementation or
 production C++ WorkerExecutor switch. PR #79 remains Draft / DO NOT MERGE.
 The independent macOS Legacy Shell cancellation issue #81 remains open.
+
+### Multi-Worker semantic outcome and saturated native admission
+
+CFlow completed callback counts do not prove native Shell success. The
+multi-retainer owner-turn guard now requires a bounded post-finalization
+branch_succeeded[] result array, which it reads only after CLOSED +
+wait_idle. A failed branch returns PARALLEL_FAILED, leaving text and typed
+transactions intact for explicit abort, and without polling a retainer or
+releasing DAG successors. Native recovery remains a separate exclusive
+Owner turn even when a group has already been semantically rejected.
+
+The source-only Process qualification also deliberately pre-fills one
+capacity-one retainer before two actual CFlow WorkerExecutor callbacks
+run concurrently. The saturated branch must fail its native Process
+admission; the independent sibling must succeed. No group outputs may
+publish even after the hold is released. No fallback, global recovery
+thread or production C++ executor cutover is authorized. Legacy macOS
+Shell cancellation #81 remains separately open.

@@ -543,6 +543,7 @@ spec("C11 multi-worker real Process and separate bounded recovery owners") {
         process_fixture f;
         process_gate gate;
         process_worker workers[2];
+        bool branch_succeeded[2]={false,false};
         cflow_process_retainer local[2]={{0},{0}};
         cflow_process_retainer *owners[2]={&local[0],&local[1]};
         cflow_process_retainer_token held={0};
@@ -576,7 +577,10 @@ spec("C11 multi-worker real Process and separate bounded recovery owners") {
         check(cflow_executor_control_shutdown(&control,CFLOW_EXECUTOR_SHUTDOWN_DRAIN));
         atomic_store(&gate.release,true);
         check(cflow_executor_control_wait_idle(&control)==CFLOW_EXECUTOR_WAIT_IDLE);
-        for(size_t i=0u;i<2u;++i)assert_worker(&workers[i],"1");
+        for(size_t i=0u;i<2u;++i) {
+            assert_worker(&workers[i],"1");
+            branch_succeeded[i]=workers[i].outcome==SALTS_BT_SUCCESS;
+        }
         check(root_lacks(&f.root,"left_count")&&root_lacks(&f.root,"right_count"));
         for(size_t i=0u;i<2u;++i) {
             const char *json=i?"{\"answer\":\"right\"}":"{\"answer\":\"left\"}";
@@ -594,7 +598,7 @@ spec("C11 multi-worker real Process and separate bounded recovery owners") {
          * reservation still prevents *both* typed/text publications. */
         check(cflow_process_retainer_reserve(&local[1],&held)==SALTS_OK);
         check(praktor_c11_workflow_parallel_commit_after_cflow_and_process_drains(
-            f.registry,updates,transactions,2u,&control,owners,2u,8u,
+            f.registry,updates,transactions,2u,branch_succeeded,&control,owners,2u,8u,
             &pending)==PRAKTOR_C11_PARALLEL_BUSY);
         check(pending==1u&&transactions[0].impl&&transactions[1].impl);
         check(root_lacks(&f.root,"left_count")&&root_lacks(&f.root,"right_count"));
@@ -603,7 +607,7 @@ spec("C11 multi-worker real Process and separate bounded recovery owners") {
             const uint64_t started=cmeta_hrtime();
             do {
                 status=praktor_c11_workflow_parallel_commit_after_cflow_and_process_drains(
-                    f.registry,updates,transactions,2u,&control,owners,2u,64u,
+                    f.registry,updates,transactions,2u,branch_succeeded,&control,owners,2u,64u,
                     &pending);
                 check(status==PRAKTOR_C11_PARALLEL_OK||
                       status==PRAKTOR_C11_PARALLEL_BUSY);
@@ -634,6 +638,7 @@ spec("C11 multi-worker real Process and separate bounded recovery owners") {
         process_fixture f;
         process_gate gate;
         process_worker workers[3];
+        const bool branch_succeeded[3]={false,false,false};
         cflow_process_retainer local[3]={{0},{0},{0}};
         cflow_process_retainer *owners[3]={&local[0],&local[1],&local[2]};
         cflow_executor executor={0};
@@ -699,7 +704,7 @@ spec("C11 multi-worker real Process and separate bounded recovery owners") {
                 "forbidden")==PRAKTOR_C11_VALUE_OK);
         }
         check(praktor_c11_workflow_parallel_commit_after_cflow_and_process_drains(
-            f.registry,updates,transactions,3u,&control,owners,3u,8u,
+            f.registry,updates,transactions,3u,branch_succeeded,&control,owners,3u,8u,
             &pending)==PRAKTOR_C11_PARALLEL_CANCELLED);
         check(pending==0u); /* cancellation cannot drive a retainer */
         check(root_lacks(&f.root,"first_result")&&
@@ -747,4 +752,102 @@ spec("C11 multi-worker real Process and separate bounded recovery owners") {
         json_free(typed);
         fixture_destroy(&f);
     }
+    it("fails closed when a worker Process retainer is saturated before spawn") {
+        process_fixture f;
+        process_gate gate;
+        process_worker workers[2];
+        bool branch_succeeded[2]={false,false};
+        cflow_process_retainer local[2]={{0},{0}};
+        cflow_process_retainer *owners[2]={&local[0],&local[1]};
+        cflow_process_retainer_token hold={0},overflow={0};
+        cflow_executor executor={0};
+        cflow_executor_control control={0};
+        praktor_c11_value_txn transactions[2]={{0},{0}};
+        const char *typed_json="{}";
+        json_value_t *typed=json_parse(typed_json,strlen(typed_json));
+        praktor_workflow_task_output_update updates[2]={{0u,typed},{1u,typed}};
+        size_t ids[3]={SIZE_MAX,SIZE_MAX,SIZE_MAX},count=0u,pending=SIZE_MAX,reaped=SIZE_MAX;
+        gate_init(&gate);
+        fixture_init(&f,multi_success_yaml,2u);
+        if(!f.snapshot){json_free(typed);return;}
+        check(typed!=NULL);
+        check(praktor_workflow_dag_claim_ready(f.dag,ids,3u,&count)==SALTS_OK);
+        check(count==2u&&ids[0]==0u&&ids[1]==1u);
+        for(size_t i=0u;i<2u;++i)
+            check(cflow_process_retainer_init(&local[i],1u)==SALTS_OK);
+        /* The first retainer is full BEFORE any Process starts. No fallback
+         * to another worker's free recovery owner or unowned native I/O. */
+        check(cflow_process_retainer_reserve(&local[0],&hold)==SALTS_OK);
+        check(cflow_process_retainer_reserve(&local[0],&overflow)==SALTS_ENOBUFS);
+        check(cflow_executor_worker_init_with_capacity(&executor,2u,2u));
+        check(cflow_executor_as_control(&executor,&control));
+        for(size_t i=0u;i<2u;++i) {
+            cflow_executor_task task;
+            prepare_worker(&workers[i],&f,i,2,&gate,"parsed_count",false);
+            workers[i].retainer=owners[i];
+            task=descriptor(&workers[i]);
+            check(cflow_executor_try_post_task(&executor,&task)==CFLOW_ADMISSION_ACCEPTED);
+        }
+        check(await_worker_count(&gate,2u));
+        check(praktor_c11_workflow_parallel_commit_after_cflow_and_process_drains(
+            f.registry,updates,transactions,2u,branch_succeeded,&control,owners,2u,8u,
+            &pending)==PRAKTOR_C11_PARALLEL_BUSY);
+        check(pending==0u); /* OPEN executor must not poll native recovery */
+        check(cflow_executor_control_shutdown(&control,CFLOW_EXECUTOR_SHUTDOWN_DRAIN));
+        atomic_store(&gate.release,true);
+        check(cflow_executor_control_wait_idle(&control)==CFLOW_EXECUTOR_WAIT_IDLE);
+        check(workers[0].init_status==SALTS_OK&&workers[0].tick_status==SALTS_OK);
+        check(workers[0].outcome==SALTS_BT_FAILURE);
+        check(workers[0].selected_status==PRAKTOR_C11_VALUE_ENOTFOUND);
+        check(workers[0].destroy_status==SALTS_OK);
+        assert_worker(&workers[1],"1");
+        for(size_t i=0u;i<2u;++i)
+            branch_succeeded[i]=workers[i].outcome==SALTS_BT_SUCCESS;
+        check(!branch_succeeded[0]&&branch_succeeded[1]);
+        for(size_t i=0u;i<2u;++i) {
+            check(praktor_c11_value_txn_begin(&transactions[i],&f.root)==
+                  PRAKTOR_C11_VALUE_OK);
+            check(praktor_c11_value_txn_set(&transactions[i],
+                  i?"right_count":"left_count",i?"1":"forbidden")==
+                  PRAKTOR_C11_VALUE_OK);
+        }
+        /* Even fabricated candidate outputs cannot be published once the
+         * real native Process leaf reported semantic failure. */
+        check(praktor_c11_workflow_parallel_commit_after_cflow_and_process_drains(
+            f.registry,updates,transactions,2u,branch_succeeded,&control,owners,2u,8u,
+            &pending)==PRAKTOR_C11_PARALLEL_FAILED);
+        check(pending==0u&&transactions[0].impl&&transactions[1].impl);
+        check(root_is(&f.root,"BASE","untouched"));
+        check(root_lacks(&f.root,"left_count")&&root_lacks(&f.root,"right_count"));
+        check_dag(&f,2u,0u,0u,PRAKTOR_WORKFLOW_DAG_CONTINUE,false);
+        check(cflow_process_retainer_release(&local[0],hold)==SALTS_OK);
+        check(praktor_c11_workflow_parallel_drain_process_retainers(
+            owners,2u,8u,&pending,&reaped)==PRAKTOR_C11_PARALLEL_OK);
+        check(pending==0u&&reaped==0u);
+        check(praktor_c11_workflow_parallel_commit_after_cflow_and_process_drains(
+            f.registry,updates,transactions,2u,branch_succeeded,&control,owners,2u,8u,
+            &pending)==PRAKTOR_C11_PARALLEL_FAILED);
+        for(size_t i=0u;i<2u;++i) {
+            praktor_c11_value_txn_abort(&transactions[i]);
+            check(transactions[i].impl==NULL);
+        }
+        check(praktor_workflow_dag_stop(f.dag,PRAKTOR_WORKFLOW_DAG_FAILED)==SALTS_OK);
+        for(size_t i=0u;i<2u;++i) {
+            check(praktor_workflow_task_registry_fail(
+                f.registry,i,vstr_from_cstr("parallel cohort failed"))==SALTS_OK);
+            check(praktor_workflow_dag_finish(f.dag,i,false)==SALTS_OK);
+        }
+        check_dag(&f,0u,2u,0u,PRAKTOR_WORKFLOW_DAG_FAILED,false);
+        count=SIZE_MAX;
+        check(praktor_workflow_dag_claim_ready(f.dag,ids,3u,&count)==SALTS_EBUSY);
+        check(count==0u);
+        cflow_executor_destroy(&executor);
+        for(size_t i=0u;i<2u;++i) {
+            release_worker(&workers[i]);
+            check(cflow_process_retainer_destroy(&local[i])==SALTS_OK);
+        }
+        json_free(typed);
+        fixture_destroy(&f);
+    }
+
 }
