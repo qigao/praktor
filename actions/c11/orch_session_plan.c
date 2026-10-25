@@ -19,6 +19,16 @@ static int fail(char *error,size_t cap,int code,const char *reason) {
     if(error&&cap)(void)snprintf(error,cap,"%s",reason);
     return code;
 }
+/* The Legacy AST bridge performs Mustache expansion before invoking native
+ * actions. Until a native equivalent is qualified, double-brace templates
+ * must fail closed rather than be interpreted as single-brace value lookups. */
+static bool contains_mustache(const char *text,size_t length) {
+    size_t i;
+    for(i=1u;i<length;++i)
+        if((text[i-1u]=='{'&&text[i]=='{')||
+           (text[i-1u]=='}'&&text[i]=='}'))return true;
+    return false;
+}
 static bool supported(praktor_orch_type type) {
     switch(type) {
     case PRAKTOR_ORCH_SEQUENCE:
@@ -149,6 +159,11 @@ int praktor_c11_orch_session_plan_create(
             if(view.value.len && memchr(view.value.data,'\0',view.value.len)) {
                 status=fail(error,cap,SALTS_ENOTSUP,
                     "Binary Orch parameter cannot enter native C11 leaf");
+                goto done;
+            }
+            if(view.value.len && contains_mustache(view.value.data,view.value.len)) {
+                status=fail(error,cap,SALTS_ENOTSUP,
+                    "Orch Mustache expansion not qualified for native C11 Session");
                 goto done;
             }
             if(plan->retained_bytes>=PRAKTOR_ORCH_MAX_BYTES||

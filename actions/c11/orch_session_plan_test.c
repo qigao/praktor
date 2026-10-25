@@ -14,7 +14,8 @@ static const char *native_workflow=
     "  - name: calculate\n"
     "    actions:\n"
     "      Sequence:\n"
-    "        - SetVariable: {key: answer, value: '7'}\n"
+    "        - set_variable: answer\n"
+    "          value: '7'\n"
     "        - CheckExitCode: {input_key: answer, expected: 7}\n";
 
 static const char *delayed_workflow=
@@ -23,7 +24,8 @@ static const char *delayed_workflow=
     "    actions:\n"
     "      Sequence:\n"
     "        - Sleep: {duration: 1s}\n"
-    "        - SetVariable: {key: late, value: visible}\n";
+    "        - set_variable: late\n"
+    "          value: visible\n";
 
 static praktor_workflow_snapshot *snapshot(const char *yaml) {
     praktor_workflow_snapshot *owner=NULL;
@@ -129,7 +131,7 @@ spec("C11 Orch AST to owned Session Plan and native leaf execution") {
         praktor_c11_native_host_destroy(&host);
     }
 
-    it("refuses Shell and embedded NUL without modifying a previously valid plan") {
+    it("refuses Shell, embedded NUL and Mustache without modifying a valid plan") {
         praktor_workflow_snapshot *input=snapshot(native_workflow);
         praktor_c11_orch_session_plan *saved=NULL,*out;
         praktor_orch_tree *shell=NULL,*binary=NULL;
@@ -169,10 +171,45 @@ spec("C11 Orch AST to owned Session Plan and native leaf execution") {
         check(out==saved);
         check(strstr(error,"Binary Orch parameter")!=NULL);
         check(praktor_c11_orch_session_plan_node_count(saved)==3u);
+        {
+            praktor_orch_tree *template_tree=NULL;
+            praktor_orch_input_param template_params[2]={
+                {vstr_from_cstr("key"),vstr_from_cstr("target")},
+                {vstr_from_cstr("value"),vstr_from_cstr("{{ answer }}")}
+            };
+            praktor_orch_flat_node template_leaf={
+                PRAKTOR_ORCH_SET_VARIABLE,PRAKTOR_ORCH_ROOT_PARENT,
+                template_params,2u
+            };
+            check(praktor_orch_from_flat_nodes(
+                &template_leaf,1u,&template_tree,NULL,0u)==SALTS_OK);
+            out=saved;
+            check(praktor_c11_orch_session_plan_create(
+                template_tree,&config.tree,&out,error,sizeof error)==SALTS_ENOTSUP);
+            check(out==saved);
+            check(strstr(error,"Mustache expansion")!=NULL);
+            praktor_orch_tree_destroy(template_tree);
+        }
         praktor_orch_tree_destroy(binary);
         praktor_orch_tree_destroy(shell);
         praktor_c11_orch_session_plan_destroy(saved);
         praktor_workflow_snapshot_destroy(input);
+    }
+
+    it("rejects retired named SetVariable YAML instead of reviving Legacy syntax") {
+        static const char *legacy=
+            "tasks:\n"
+            "  - name: bad\n"
+            "    actions:\n"
+            "      Sequence:\n"
+            "        - SetVariable: {key: answer, value: 7}\n"
+            "        - CheckExitCode: {input_key: answer, expected: 7}\n";
+        praktor_workflow_snapshot *input=NULL;
+        char error[256]={0};
+        check(praktor_workflow_snapshot_create_inline(
+            vstr_from_cstr(legacy),&input,error,sizeof error)!=SALTS_OK);
+        check(input==NULL);
+        check(strstr(error,"Legacy orchestration node type")!=NULL);
     }
 
     it("refuses too-small tree limits with no partial output owner") {
