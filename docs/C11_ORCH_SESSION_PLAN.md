@@ -341,4 +341,44 @@ ASan/UBSan and **mandatory complete-source TSan**, with actual instrumented
 CFlow/Salts DSO linkage checked separately. Consumer-only TSan against
 uninstrumented released CFlow is intentionally not used as race evidence.
 
+## WorkerExecutor real Shell/Process recovery transfer (source-only gate)
+
+`actions_c11_orch_worker_process_test` extends the earlier
+worker-local Session qualification to a **real native OS process** using
+the canonical `Sequence → Shell → ParseLines` admission or
+one explicitly admitted Shell root. The application Owner prepares immutable
+plans and isolated input snapshots. The CFlow worker alone initializes the
+NativeHost/Session, reserves/starts/ticks/cancels/closes the native Process and
+destroys the Session. No cross-thread Session tick/cancel/destroy is allowed.
+
+A single bounded `cflow_process_retainer` is used sequentially:
+the worker is its sole caller while the Process and NativeIO are active;
+only **after** CFlow admission is CLOSED and its run/cancel/finalize callbacks
+have all settled does the application Owner obtain exclusive recovery-driving
+rights. There is no concurrent reserve/adopt/run/destroy. The canonical driver
+detaches borrowed emit callbacks before adopting pending Process leases. The
+Owner cannot publish text/typed outputs or unblock dependent DAG tasks until
+CFlow and Process recovery each attest completion.
+
+A positive test runs a real `command: echo ready`, parses its count,
+deliberately adds a pending recovery reservation and requires the publication
+barrier to return BUSY without mutating the root or registry. After releasing
+the reservation and draining native Process recovery, the Owner commits a
+selected text/typed transaction and admits a separate worker-local successor.
+
+The negative test starts a real long-running Shell on one worker and queues
+a second CFlow callback. CANCEL_PENDING closes new admission and cancels the
+queued work. An atomic Owner request is consumed by the **same active worker**,
+which calls Session cancel first, closes the Process with zero synchronous
+drain budget and transfers active NativeIO to the retainer during Session
+destruction. After all callbacks finalize, the Owner must reap a real adopted
+Process and refuse even otherwise valid two-task typed/text publication.
+No cancelled task or dependent successor may become visible.
+
+This remains a tightly scoped **test-only single-retainer ownership handoff**.
+It does not qualify simultaneous multi-worker access to one retainer,
+worker-to-worker migration of live Sessions, general native Process
+affinity portability, dynamic/trigger scheduling, persistent crash recovery,
+or the production C++ WorkflowExecutor replacement.
+
 PR #79 stays **Draft / do not merge** until full cutover gates pass.
