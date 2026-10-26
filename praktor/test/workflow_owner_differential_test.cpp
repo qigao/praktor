@@ -15,6 +15,7 @@
 #include <json_parser.h>
 #include <vstr.h>
 #include <algorithm>
+#include <cstdint>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -131,7 +132,8 @@ struct OwnerExecutor {
     cflow_executor_control control{};
     bool initialized = false;
 
-    OwnerExecutor() {
+    OwnerExecutor() = default;
+    void init() {
         require(cflow_executor_manual_init_with_capacity(&executor, 1u),
                 "C11 CFlow ManualExecutor admission failed");
         initialized = true;
@@ -172,7 +174,10 @@ struct NativeOwner {
     cflow_process_retainer retainer{};
     bool root_ready = false, retainer_ready = false;
 
-    explicit NativeOwner(const std::string& source) {
+    NativeOwner() = default;
+    // Separate initialization from construction: exceptions preserve the
+    // cleanup owner, including a partially admitted Snapshot or retainer.
+    void init(const std::string& source) {
         char error[256]{};
         require(praktor_workflow_snapshot_create_inline(
                     vstr_from_cstr(source.c_str()), &snapshot,
@@ -256,6 +261,7 @@ struct NativeOwner {
             task.plan = nullptr;
 
             OwnerExecutor executor;
+            executor.init();
             OwnerCallback callback{};
             callback.task = &task;
             executor.run(callback);
@@ -293,10 +299,13 @@ struct NativeOwner {
                            (c >= 'A' && c <= 'Z') ||
                            (c >= '0' && c <= '9') || c == '_';
                 }), "Native output needs typed/escaped parity admission");
-            praktor_c11_value_txn transaction{};
+            struct TxnCleanup {
+                praktor_c11_value_txn value{};
+                ~TxnCleanup() { praktor_c11_value_txn_abort(&value); }
+            } transaction;
             const char *selected[] = {key.c_str()};
             require(praktor_c11_workflow_prepare_task_text_outputs(
-                        &root, task_values, selected, 1u, &transaction) ==
+                        &root, task_values, selected, 1u, &transaction.value) ==
                         PRAKTOR_C11_VALUE_OK, "C11 output txn preparation failed");
             const std::string json = "{\"" + key + "\":\"" + value + "\"}";
             json_value_t *typed = json_parse(json.c_str(), json.size());
@@ -307,7 +316,7 @@ struct NativeOwner {
             size_t pending = SIZE_MAX;
             const int commit =
                 praktor_c11_workflow_parallel_commit_after_cflow_and_process_drain(
-                    registry, &update, &transaction, 1u, &executor.control,
+                    registry, &update, &transaction.value, 1u, &executor.control,
                     &retainer, 8u, &pending);
             json_free(typed);
             require(commit == PRAKTOR_C11_PARALLEL_OK && pending == 0u,
@@ -364,7 +373,8 @@ spec("WorkflowRunner vs C11 Owner: identical YAML and input differential") {
     it("compares dependency order, selected string outputs and quiescent success") {
         const std::string yaml(kSuccessfulYaml);
         const auto legacy = runLegacy(yaml, false);
-        NativeOwner owner(yaml);
+        NativeOwner owner;
+        owner.init(yaml);
         const auto native = owner.run({"prepare", "verify"},
                                       {"observed", "finished"}, false);
         check(legacy.result.success);
@@ -387,7 +397,8 @@ spec("WorkflowRunner vs C11 Owner: identical YAML and input differential") {
     it("compares failure admission and blocks the dependent task") {
         const std::string yaml(kFailedYaml);
         const auto legacy = runLegacy(yaml, false);
-        NativeOwner owner(yaml);
+        NativeOwner owner;
+        owner.init(yaml);
         const auto native = owner.run({"reject", "downstream"}, {"", ""}, false);
         check(!legacy.result.success);
         check(legacyTerminal(legacy) == "failed");
@@ -405,7 +416,8 @@ spec("WorkflowRunner vs C11 Owner: identical YAML and input differential") {
     it("compares pre-start cancellation without running any leaf") {
         const std::string yaml(kSuccessfulYaml);
         const auto legacy = runLegacy(yaml, true);
-        NativeOwner owner(yaml);
+        NativeOwner owner;
+        owner.init(yaml);
         const auto native = owner.run({"prepare", "verify"},
                                       {"observed", "finished"}, true);
         check(!legacy.result.success);
