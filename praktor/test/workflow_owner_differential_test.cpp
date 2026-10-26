@@ -474,7 +474,13 @@ spec("WorkflowRunner vs C11 Owner: identical YAML and input differential") {
         for (const auto& name : names) {
             // Compare canonical JSON serialization so "7" never passes as 7
             // and structured/nested output never passes as an opaque string.
-            check((native.typed_outputs.at(name) == outputs.at(name).to_string()));
+            const auto& actual = native.typed_outputs.at(name);
+            const std::string expected = outputs.at(name).to_string();
+            if (actual != expected) {
+                info("Typed Owner differential: key=%s C11=%s Legacy=%s",
+                     name.c_str(), actual.c_str(), expected.c_str());
+            }
+            check((actual == expected));
         }
         check(outputs.at("plain").is_string());
         check(outputs.at("numeric_text").is_string());
