@@ -59,6 +59,8 @@ constexpr const char *kTypedYaml = R"(
 # Literal {..} in SetVariable.value has special Legacy {blackboard_key}
 # semantics and would NOT be an apples-to-apples JSON-output fixture.
 variables:
+  NUMERIC_INPUT_TEXT: '7'
+  BOOLEAN_INPUT_TEXT: 'false'
   JSON_OBJECT_TEXT: '{"count":7,"ok":true}'
   JSON_ARRAY_TEXT: '["ready",2,false]'
   INVALID_JSON_TEXT: '{invalid'
@@ -69,9 +71,9 @@ tasks:
         - set_variable: plain
           value: 'alpha beta'
         - set_variable: numeric_text
-          value: '7'
+          from: NUMERIC_INPUT_TEXT
         - set_variable: boolean_text
-          value: 'false'
+          from: BOOLEAN_INPUT_TEXT
         - set_variable: object_value
           from: JSON_OBJECT_TEXT
         - set_variable: array_value
