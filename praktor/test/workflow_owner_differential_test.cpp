@@ -135,7 +135,7 @@ struct ActiveShellFixture {
         std::error_code error;
         std::filesystem::remove_all(directory, error);
     }
-    std::string yaml() const {
+    std::string yaml(unsigned sleep_seconds = 30u) const {
         std::string command;
 #ifdef _WIN32
         std::string path = started.string();
@@ -145,10 +145,10 @@ struct ActiveShellFixture {
         command =
             "powershell.exe -NoProfile -NonInteractive -Command \""
             "[System.IO.File]::WriteAllText('" + path +
-            "', 'started'); Start-Sleep -Seconds 30\"";
+            "', 'started'); Start-Sleep -Seconds " + std::to_string(sleep_seconds) + "\"";
 #else
         command = "printf started > '" + started.string() +
-                  "'; exec sleep 30";
+                  "'; exec sleep " + std::to_string(sleep_seconds);
 #endif
         return "variables: {baseline: safe}\n"
                "tasks:\n"
@@ -171,9 +171,12 @@ struct LegacyTrace {
     WorkflowExecutionResult result;
     std::vector<std::string> started;
     std::vector<std::string> settled;
+    bool child_marker_observed = false;
+    std::chrono::milliseconds cancel_to_terminal{0};
 };
 
-LegacyTrace runLegacy(const std::string& source, StartCondition start) {
+LegacyTrace runLegacy(const std::string& source, StartCondition start,
+                      std::filesystem::path child_started = {}) {
     LegacyTrace trace;
     std::mutex mutex;
     auto observer = std::make_shared<Praktor::Execution::ExecutionObserver>(
@@ -195,8 +198,54 @@ LegacyTrace runLegacy(const std::string& source, StartCondition start) {
         : std::make_shared<Control>();
     if (start == StartCondition::PreCancelled) control->requestCancel();
     auto workflow = TaskParser::parseText(source, "c11-owner-differential.yml");
-    trace.result = WorkflowRunner(std::move(workflow), WorkflowInputs{})
-                       .executeObserved(control, observer, false, 1);
+    std::thread canceller;
+    std::atomic<bool> child_started_observed{false};
+    std::atomic<int64_t> requested_at_ns{0};
+    if (start == StartCondition::CancelActiveShell) {
+        require(!child_started.empty(), "Legacy mid-flight test requires a child marker");
+        canceller = std::thread([&, control] {
+            const auto deadline = std::chrono::steady_clock::now() +
+                                  std::chrono::seconds(7);
+            std::error_code error_code;
+            while (std::chrono::steady_clock::now() < deadline) {
+                if (std::filesystem::exists(child_started, error_code)) {
+                    child_started_observed.store(true, std::memory_order_release);
+                    break;
+                }
+                if (error_code) break;
+                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            }
+            // A failed marker observation must NOT prevent stopping or
+            // joining an active workflow on exceptional paths.
+            control->requestCancel();
+            requested_at_ns.store(
+                std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    Control::Clock::now().time_since_epoch()).count(),
+                std::memory_order_release);
+        });
+    }
+    try {
+        trace.result = WorkflowRunner(std::move(workflow), WorkflowInputs{})
+                           .executeObserved(control, observer, false, 1);
+    } catch (...) {
+        control->requestCancel();
+        if (canceller.joinable()) canceller.join();
+        throw;
+    }
+    const auto returned = Control::Clock::now();
+    if (canceller.joinable()) {
+        canceller.join();
+        trace.child_marker_observed =
+            child_started_observed.load(std::memory_order_acquire);
+        const int64_t requested = requested_at_ns.load(std::memory_order_acquire);
+        if (requested) {
+            const auto return_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                returned.time_since_epoch()).count();
+            if (return_ns > requested)
+                trace.cancel_to_terminal = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::nanoseconds(return_ns - requested));
+        }
+    }
     return trace;
 }
 
@@ -891,6 +940,68 @@ spec("WorkflowRunner vs C11 Owner: identical YAML and input differential") {
         check(praktor_workflow_task_registry_state(owner.registry, 1u,
                  &dependent) == SALTS_OK &&
               dependent == PRAKTOR_WORKFLOW_TASK_PENDING);
+    }
+
+    it("characterizes the same-YAML Legacy vs C11 running-Shell cancellation gap") {
+        // One identical YAML program is admitted twice, from a clean child
+        // marker in each attempt. Only the cancellation *request* is common:
+        // the accepted Legacy blocking Shell path is not transparently
+        // preempted by WorkflowRunner's ExecutionControl.
+        ActiveShellFixture source;
+        const std::string yaml = source.yaml(3u);
+        const auto legacy = runLegacy(
+            yaml, StartCondition::CancelActiveShell, source.started);
+        check(legacy.child_marker_observed);
+        check(!legacy.result.success);
+        check(legacyTerminal(legacy) == "cancelled");
+        check((legacy.started == std::vector<std::string>{"long_shell"}));
+        check(legacy.settled.size() == 1u);
+
+        // Reuse the SAME literal YAML without letting the earlier marker
+        // satisfy the second execution's real OS child admission test.
+        std::error_code error_code;
+        check(std::filesystem::remove(source.started, error_code));
+        check(!error_code);
+        NativeOwner owner;
+        owner.init(yaml);
+        const auto native = owner.run({"long_shell", "never_started"},
+                                      {{}, {}},
+                                      StartCondition::CancelActiveShell,
+                                      NativePlanMode::OneShellRoot,
+                                      source.started);
+        check(native.child_marker_observed);
+        check(native.terminal == "cancelled");
+        check((legacy.started == native.started));
+        check(native.completed == 1u);
+        check(native.callbacks == 1u && native.finalized == 1u);
+        check((native.settled ==
+            std::vector<std::string>{"long_shell:failed"}));
+        check(native.outputs.empty() && native.typed_outputs.empty());
+
+        const auto legacy_status = legacy.result.value.at("tasks")
+                                       .at("long_shell").at("status")
+                                       .as<std::string>();
+        // Only the explicitly observed Legacy success-after-cancel is an
+        // admitted state difference. Anything else must match the native
+        // failed-task state or fail this qualification. Do not fake parity.
+        const bool task_status_matches =
+            legacy_status == native.states.at("long_shell");
+        check(task_status_matches ||
+              (legacy_status == "success" &&
+               native.states.at("long_shell") == "failed"));
+        info("Running-Shell cancel differential: Legacy task=%s C11 task=%s, "
+             "Legacy request-to-workflow-return=%lld ms",
+             legacy_status.c_str(), native.states.at("long_shell").c_str(),
+             static_cast<long long>(legacy.cancel_to_terminal.count()));
+        check((legacy.result.value.at("tasks").size() == 1u));
+        praktor_workflow_task_state unstarted = PRAKTOR_WORKFLOW_TASK_SUCCESS;
+        check(praktor_workflow_task_registry_state(
+                  owner.registry, 1u, &unstarted) == SALTS_OK &&
+              unstarted == PRAKTOR_WORKFLOW_TASK_PENDING);
+        int forbidden = 1;
+        check(praktor_c11_value_store_contains(
+                  &owner.root, "forbidden", &forbidden) ==
+                  PRAKTOR_C11_VALUE_OK && forbidden == 0);
     }
 
     it("compares pre-start cancellation without running any leaf") {
