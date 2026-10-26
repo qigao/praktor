@@ -52,12 +52,3 @@ esac
 ctest --test-dir "$build_dir" \
   --no-tests=error --output-on-failure --parallel 1 --timeout 75 \
   -R "$test_regex"
-
-    ;;
-  thread)
-    test_regex='^(shell_executor_test|praktor_process_driver_test|praktor_process_worker_test|praktor_process_control_test|praktor_process_native_test|praktor_service_control_test|praktor_service_process_test|actions_c11_tree_executor_session_test|actions_c11_session_c_test|actions_c11_tree_plan_test|actions_c11_session_independent_test|actions_c11_native_host_test|actions_c11_regex_tre_test|workflow_dag_state_c_test|actions_c11_orch_session_plan_test|actions_c11_orch_dag_native_session_test)$'
-    ;;
-esac
-ctest --test-dir "$build_dir" \
-  --no-tests=error --output-on-failure --parallel 1 --timeout 75 \
-  -R "$test_regex"
