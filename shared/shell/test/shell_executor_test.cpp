@@ -31,6 +31,27 @@ constexpr int kProcessTreeTimeoutMs = 3000;
 constexpr std::size_t kDuplexPayloadSize = 256 * 1024;
 constexpr const char* kTailFragment = "tail_fragment";
 
+/* #81: bounded failure-only Legacy diagnostics. These record the exposed
+ * ProcessState/ShellResult evidence without a retry, sleeps, assertion
+ * weakening, or any change to the production Process implementation.
+ * Neither OS actor attribution nor native close ordering is inferred here. */
+void reportCancelFailure(const char *case_name, bool accepted,
+                         Praktor::Shell::ProcessState before,
+                         Praktor::Shell::ProcessState after_request,
+                         const Praktor::Shell::ShellResult& result,
+                         int observed_child_pid) {
+    if (accepted && result.state == Praktor::Shell::ProcessState::Cancelled)
+        return;
+    info("Legacy Shell #81 cancel mismatch %s: accepted=%d before=%s after=%s terminal=%s root_pid=%d child_pid=%d exit=%d signal=%d stdout_bytes=%zu stderr_bytes=%zu",
+         case_name, accepted ? 1 : 0,
+         Praktor::Shell::processStateName(before),
+         Praktor::Shell::processStateName(after_request),
+         Praktor::Shell::processStateName(result.state),
+         result.pid, observed_child_pid,
+         result.exit_code, result.termination_signal,
+         result.stdout_output.size(), result.stderr_output.size());
+}
+
 std::filesystem::path createTempDir()
 {
     auto now = std::chrono::system_clock::now().time_since_epoch().count();
@@ -667,8 +688,14 @@ spec("stream callback updates are synchronized with concurrent emission") {
     const int pid = readPidFile(pid_file);
     check((pid > 0));
     check((isProcessAlive(pid)));
-    check((process.cancel()));
-    check((process.wait().state == Praktor::Shell::ProcessState::Cancelled));
+    const auto before_cancel = process.state();
+    const bool accepted = process.cancel();
+    check((accepted));
+    const auto after_request = process.state();
+    const auto terminal = process.wait();
+    reportCancelFailure("owned process tree", accepted,
+                        before_cancel, after_request, terminal, pid);
+    check((terminal.state == Praktor::Shell::ProcessState::Cancelled));
     check((waitUntil([&]() { return !isProcessAlive(pid); }, 5000)));
     check((!(std::filesystem::exists(finished_file))));
 
@@ -771,8 +798,13 @@ spec("process executor pumps large stdin and stdout without deadlock") {
     check((!(process.waitFor(std::chrono::milliseconds(25)))));
     check((!(process.result().has_value())));
 
-    check((process.cancel()));
+    const auto before_cancel = process.state();
+    const bool accepted = process.cancel();
+    check((accepted));
+    const auto after_request = process.state();
     const auto result = process.wait();
+    reportCancelFailure("managed process bounded wait", accepted,
+                        before_cancel, after_request, result, -1);
     check((result.state == Praktor::Shell::ProcessState::Cancelled));
     check((!(result.success())));
     check((!(process.cancel())));
