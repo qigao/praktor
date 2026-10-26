@@ -274,3 +274,36 @@ scheduler/backend switch, implicit retry, persistent journal or crash
 atomicity is introduced. The C11 recovery cohort remains Owner-only and
 bounded, and Issue #81 continues to track the independent macOS Legacy
 Shell cancellation behavior.
+
+### Second-wave failure and cancellation after committed first-wave Process outputs
+
+An application Owner's earlier successful Parallel group is NOT a rollback
+target for later workflow failures. The source-only multi-worker conformance
+now explicitly runs two real Command+ParseLines Process workers in wave 1
+and commits their typed/text outputs using a fresh bounded pair of retainers.
+After `CLOSED` + finalizers + `wait_idle`, native recovery is driven on
+the Owner, both TaskRegistry rows are marked SUCCESS, and the dependent
+second-wave task(s) become ready.
+
+The second wave is then exercised on new worker-local Sessions, a new
+Executor, a new recovery cohort and independent fixed-capacity retainers.
+Two independent negative paths must hold:
+
+- **Real nonzero Shell exit.** Its CFlow run/finalize may settle cleanly,
+  but semantic outcome is FAILURE; typed/text candidates cannot publish.
+  The Owner must still drain native Process leases, abort the second-wave
+  candidate transaction, mark the failed DAG task, and refuse the third-wave
+  successor. Already-committed first-wave values and terminal TaskRegistry
+  rows stay intact.
+- **Real running Shell plus queued sibling cancellation.** With a bounded
+  one-worker Executor, the active worker starts a native Shell while the
+  second CFlow task remains queued. Owner selects CANCEL_PENDING, stops
+  DAG successor admission before releasing the running worker's cancel gate,
+  joins run/cancel/finalize callbacks, refuses the entire second-wave
+  transaction, then exclusively reaps the adopted Process and settles both
+  DAG reservations. No queued task creates a Session or publishes an output.
+
+These tests qualify an in-memory, application-Owner *lifecycle handoff*
+across two cohorts, not atomic rollback of a multi-wave workflow, durable
+restart recovery, or a production C++ WorkflowExecutor replacement.
+PR #79 remains Draft; macOS Legacy Shell cancellation #81 remains Open.
