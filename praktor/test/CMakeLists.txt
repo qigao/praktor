@@ -65,6 +65,12 @@ list(APPEND TEST_SOURCES
     trigger_dependency_once_test.cpp
 )
 
+# Same YAML independently exercises production C++ WorkflowRunner and
+# source-only C11 Snapshot/DAG/Session/CFlow Owner. No backend switch.
+if(PRAKTOR_ENABLE_C11_ACTIONS)
+    list(APPEND TEST_SOURCES workflow_owner_differential_test.cpp)
+endif()
+
 cmake_add_test(
     SOURCES ${TEST_SOURCES}
     LIBS praktor_test_support ${TARGET_NAME_LIB}
@@ -87,6 +93,19 @@ target_include_directories(orch_yaml_differential_test.${TARGET_NAME_LIB}
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../shared/process/include)
 target_compile_definitions(orch_yaml_differential_test.${TARGET_NAME_LIB} PRIVATE
     PRAKTOR_ORCH_CORPUS_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/../..")
+
+if(PRAKTOR_ENABLE_C11_ACTIONS)
+    target_link_libraries(workflow_owner_differential_test.${TARGET_NAME_LIB}
+        PRIVATE praktor_c11_orch_session_plan
+                praktor_workflow_snapshot
+                praktor_workflow_dag_state
+                praktor_workflow_task_registry
+                praktor_c11_workflow_snapshot_values
+                praktor_c11_workflow_parallel_process_guard
+                praktor_c11_native_host Salts::CFlow)
+    set_tests_properties(workflow_owner_differential_test.${TARGET_NAME_LIB}
+        PROPERTIES TIMEOUT 45)
+endif()
 
 target_include_directories(download_executor_test.${TARGET_NAME_LIB}
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../src)
