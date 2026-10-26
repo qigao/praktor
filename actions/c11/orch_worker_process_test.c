@@ -627,11 +627,99 @@ spec("C11 multi-worker real Process and separate bounded recovery owners") {
         check_dag(&f,0u,2u,1u,PRAKTOR_WORKFLOW_DAG_CONTINUE,false);
         check(praktor_workflow_dag_claim_ready(f.dag,ids,3u,&count)==SALTS_OK);
         check(count==1u&&ids[0]==2u);
+        check(recovery.sealed&&recovery.last_pending==0u);
+        /* Application Owner has finished the entire first cohort. No CFlow
+         * callback can borrow a Session, Host, Process, input or retainer
+         * after this point. The next dependent task will use new owners. */
         cflow_executor_destroy(&executor);
         for(size_t i=0u;i<2u;++i) {
             release_worker(&workers[i]);
             json_free(typed[i]);
             check(cflow_process_retainer_destroy(&local[i])==SALTS_OK);
+        }
+
+        /* Wave 2: actually run the DAG-unlocked successor, not just claim
+         * it. A fresh Executor/Worker callback/Session/retainer/recovery
+         * record reads ONLY the atomically committed root from wave 1.
+         * The old sealed recovery gate cannot authorize this new cohort. */
+        {
+            process_worker successor;
+            process_gate next_gate;
+            praktor_c11_process_cohort_recovery next_recovery={0};
+            cflow_process_retainer next_retainer={0};
+            cflow_process_retainer *next_owners[1]={&next_retainer};
+            cflow_process_retainer_token hold_next={0};
+            cflow_executor next={0};
+            cflow_executor_control next_control={0};
+            praktor_c11_value_txn last={0};
+            bool next_succeeded[1]={false};
+            const char *final_json="{\"wave\":2}";
+            json_value_t *final_typed=json_parse(final_json,strlen(final_json));
+            praktor_workflow_task_output_update final_output={2u,final_typed};
+            size_t next_pending=SIZE_MAX;
+
+            gate_init(&next_gate);
+            check(final_typed!=NULL);
+            check(praktor_c11_process_cohort_recovery_init(&next_recovery)==
+                  PRAKTOR_C11_PARALLEL_OK);
+            check(next_recovery.bound_count==0u&&next_recovery.last_pending==SIZE_MAX);
+            check(cflow_process_retainer_init(&next_retainer,1u)==SALTS_OK);
+            prepare_worker(&successor,&f,2u,0,&next_gate,"confirmed",false);
+            successor.retainer=&next_retainer;
+            check(cflow_executor_worker_init_with_capacity(&next,1u,1u));
+            check(cflow_executor_as_control(&next,&next_control));
+            {
+                cflow_executor_task task=descriptor(&successor);
+                check(cflow_executor_try_post_task(&next,&task)==CFLOW_ADMISSION_ACCEPTED);
+            }
+            check(await_worker(&next_gate));
+            check(root_lacks(&f.root,"confirmed"));
+            check_dag(&f,1u,2u,0u,PRAKTOR_WORKFLOW_DAG_CONTINUE,false);
+            /* No Owner Process poll, no typed/text publication, and no DAG
+             * finish while the successor callback is still admitted OPEN. */
+            check(praktor_c11_workflow_parallel_commit_after_cflow_and_process_drains(
+                f.registry,&final_output,&last,1u,next_succeeded,
+                &next_recovery,&next_control,next_owners,1u,8u,&next_pending)==
+                PRAKTOR_C11_PARALLEL_BUSY);
+            check(next_pending==SIZE_MAX&&next_recovery.bound_count==0u);
+            check(cflow_executor_control_shutdown(
+                &next_control,CFLOW_EXECUTOR_SHUTDOWN_DRAIN));
+            atomic_store(&next_gate.release,true);
+            check(cflow_executor_control_wait_idle(&next_control)==CFLOW_EXECUTOR_WAIT_IDLE);
+            assert_worker(&successor,"1");
+            next_succeeded[0]=successor.outcome==SALTS_BT_SUCCESS;
+            check(next_succeeded[0]);
+            check(praktor_c11_value_txn_begin(&last,&f.root)==PRAKTOR_C11_VALUE_OK);
+            check(praktor_c11_value_txn_set(&last,"confirmed",successor.selected)==
+                  PRAKTOR_C11_VALUE_OK);
+
+            /* Even the finished second cohort cannot publish while its
+             * independent native recovery owner has a live reservation. */
+            check(cflow_process_retainer_reserve(&next_retainer,&hold_next)==SALTS_OK);
+            check(praktor_c11_workflow_parallel_commit_after_cflow_and_process_drains(
+                f.registry,&final_output,&last,1u,next_succeeded,
+                &next_recovery,&next_control,next_owners,1u,8u,&next_pending)==
+                PRAKTOR_C11_PARALLEL_BUSY);
+            check(next_pending==1u&&last.impl!=NULL);
+            check(root_lacks(&f.root,"confirmed"));
+            check_dag(&f,1u,2u,0u,PRAKTOR_WORKFLOW_DAG_CONTINUE,false);
+            check(cflow_process_retainer_release(&next_retainer,hold_next)==SALTS_OK);
+            check(praktor_c11_workflow_parallel_commit_after_cflow_and_process_drains(
+                f.registry,&final_output,&last,1u,next_succeeded,
+                &next_recovery,&next_control,next_owners,1u,8u,&next_pending)==
+                PRAKTOR_C11_PARALLEL_OK);
+            check(next_pending==0u&&last.impl==NULL&&next_recovery.sealed);
+            check(next_recovery.bound_count==1u&&
+                  next_recovery.bound_owners[0]==&next_retainer);
+            check(root_is(&f.root,"confirmed","1"));
+            check(recovery.sealed&&recovery.bound_count==2u); /* wave 1 stays sealed */
+            check(praktor_workflow_task_registry_complete(f.registry,2u)==SALTS_OK);
+            check(praktor_workflow_dag_finish(f.dag,2u,true)==SALTS_OK);
+            check_dag(&f,0u,3u,0u,PRAKTOR_WORKFLOW_DAG_CONTINUE,true);
+            cflow_executor_destroy(&next);
+            release_worker(&successor);
+            check(cflow_process_retainer_destroy(&next_retainer)==SALTS_OK);
+            json_free(final_typed);
         }
         fixture_destroy(&f);
     }
