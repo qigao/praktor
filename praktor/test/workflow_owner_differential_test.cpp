@@ -139,28 +139,28 @@ struct ActiveShellFixture {
         std::string command;
 #ifdef _WIN32
         std::string path = started.string();
-        for (std::size_t i = 0u; (i = path.find('\\'', i)) != std::string::npos;
+        for (std::size_t i = 0u; (i = path.find('\'', i)) != std::string::npos;
              i += 2u)
-            path.insert(i, 1u, '\\'');
+            path.insert(i, 1u, '\'');
         command =
-            "powershell.exe -NoProfile -NonInteractive -Command \\""
+            "powershell.exe -NoProfile -NonInteractive -Command \""
             "[System.IO.File]::WriteAllText('" + path +
-            "', 'started'); Start-Sleep -Seconds 30\\"";
+            "', 'started'); Start-Sleep -Seconds 30\"";
 #else
         command = "printf started > '" + started.string() +
                   "'; exec sleep 30";
 #endif
-        return "variables: {baseline: safe}\\n"
-               "tasks:\\n"
-               "  - name: long_shell\\n"
-               "    shell:\\n"
-               "      cmd: |-\\n"
-               "        " + command + "\\n"
-               "      stream_output: false\\n"
-               "  - name: never_started\\n"
-               "    depends_on: [long_shell]\\n"
-               "    set_variable: forbidden\\n"
-               "    value: visible\\n";
+        return "variables: {baseline: safe}\n"
+               "tasks:\n"
+               "  - name: long_shell\n"
+               "    shell:\n"
+               "      cmd: |-\n"
+               "        " + command + "\n"
+               "      stream_output: false\n"
+               "  - name: never_started\n"
+               "    depends_on: [long_shell]\n"
+               "    set_variable: forbidden\n"
+               "    value: visible\n";
     }
 };
 
