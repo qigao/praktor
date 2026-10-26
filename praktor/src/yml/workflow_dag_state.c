@@ -76,6 +76,13 @@ int praktor_workflow_dag_claim_ready(praktor_workflow_dag_state *state,
     return SALTS_OK;
 }
 
+int praktor_workflow_dag_is_reserved(const praktor_workflow_dag_state *state,
+    size_t task_index,bool *out_reserved) {
+    if(!state||!out_reserved||task_index>=state->count)return SALTS_EINVAL;
+    *out_reserved=state->tasks[task_index].phase==DAG_TASK_RESERVED;
+    return SALTS_OK;
+}
+
 int praktor_workflow_dag_finish(praktor_workflow_dag_state *state,
     size_t task_index,bool success) {
     size_t i,edges;

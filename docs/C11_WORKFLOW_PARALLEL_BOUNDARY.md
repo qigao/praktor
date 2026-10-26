@@ -307,3 +307,36 @@ These tests qualify an in-memory, application-Owner *lifecycle handoff*
 across two cohorts, not atomic rollback of a multi-wave workflow, durable
 restart recovery, or a production C++ WorkflowExecutor replacement.
 PR #79 remains Draft; macOS Legacy Shell cancellation #81 remains Open.
+
+### Source-only Application Owner cohort settlement facade (candidate)
+
+The owner-settlement facade composes existing CFlow control, canonical
+per-branch Process retainers, typed TaskRegistry, optimistic text group
+commit and single-owner DAG readiness without implementing any new queue,
+scheduler, native Process state machine, persistent journal or SDK ABI.
+
+Before a success publication, the owner preflights every input task index:
+each must be uniquely RESERVED by the real DAG, have a nonterminal TaskRegistry
+slot and match its staged typed output index. This closes an incorrect-owner
+mapping hole that would otherwise commit typed/text state *before* discovering
+an unclaimed task at DAG_finish(). The settled owner then invokes the
+previously qualified CFlow CLOSED/idle + Process recovery + atomic
+typed/text group-commit guard. On success it marks TaskRegistry tasks SUCCESS
+and finishes DAG reservations without relinquishing its exclusive turn.
+
+A separate, nonblocking Owner close-admission entry point selects CFlow
+DRAIN or CANCEL_PENDING. For cancellation, it sets DAG CANCELLED first,
+before releasing pending worker callbacks. Owner abort settlement requires
+CFlow CLOSED+wait_idle and explicitly drains native retainers before
+aborting candidate transactions. Executed tasks become FAILED; accepted
+descriptors cancelled before run retain PENDING TaskRegistry state and have
+their reserved DAG tasks refused. Real NativeIO errors remain sticky and
+are never normalized into successful task publication. First-wave committed
+root values and typed results remain intact if a later cohort fails.
+
+The output transaction and subsequent DAG status transitions occur in one
+Owner turn but are NOT claimed to be a crash-atomic multi-wave transaction.
+An impossible post-commit status failure is reported as INVARIANT and closes
+DAG admission; no rollback or retried publication is fabricated. This is
+strictly source-only conformance. PR #79 remains Draft and production C++
+WorkflowExecutor remains unchanged; macOS Legacy Shell #81 is separate.

@@ -228,11 +228,14 @@ if(PRAKTOR_ENABLE_C11_ACTIONS)
     # a Process or invents completion when a lease is still active.
     add_library(praktor_c11_workflow_parallel_process_guard STATIC
         c11/workflow_parallel_process_guard.c
-        c11/workflow_parallel_process_guard.h)
+        c11/workflow_parallel_process_guard.h
+        c11/workflow_owner_settlement.c
+        c11/workflow_owner_settlement.h)
     target_include_directories(praktor_c11_workflow_parallel_process_guard PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/c11>)
     target_link_libraries(praktor_c11_workflow_parallel_process_guard PUBLIC
-        praktor_c11_workflow_parallel_commit Salts::Process Salts::CFlow)
+        praktor_c11_workflow_parallel_commit praktor_workflow_dag_state
+        Salts::Process Salts::CFlow)
     target_compile_features(praktor_c11_workflow_parallel_process_guard PUBLIC c_std_11)
     set_target_properties(praktor_c11_workflow_parallel_process_guard PROPERTIES
         C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF

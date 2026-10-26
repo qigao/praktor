@@ -58,6 +58,14 @@ void praktor_workflow_dag_state_destroy(praktor_workflow_dag_state *state);
 int praktor_workflow_dag_claim_ready(praktor_workflow_dag_state *state,
     size_t *out_indices, size_t capacity, size_t *out_count);
 
+/* Non-mutating, owner-only admission preflight. Returns true ONLY if an
+ * immutable DAG task is presently RESERVED by claim_ready. This permits
+ * publication adapters to reject an incorrect cohort/task mapping BEFORE
+ * committing typed/text outputs. Valid lookup SALTS_OK; invalid index or
+ * out pointer SALTS_EINVAL, leaving out unchanged on invalid arguments. */
+int praktor_workflow_dag_is_reserved(const praktor_workflow_dag_state *state,
+    size_t task_index, bool *out_reserved);
+
 /* One terminal callback settlement. SUCCESS decrements canonical outgoing
  * edges only when the overall run is still live; FAILURE closes admission.
  * Caller must settle CFlow's finalize BEFORE invoking this owner-side API. */
