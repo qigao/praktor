@@ -15,6 +15,7 @@
 #include <json_parser.h>
 #include <vstr.h>
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
 #include <map>
 #include <memory>
@@ -88,23 +89,35 @@ void require(bool value, const char *message) {
     if (!value) throw std::runtime_error(message);
 }
 
+enum class StartCondition { Normal, PreCancelled, ExpiredDeadline };
+
 struct LegacyTrace {
     WorkflowExecutionResult result;
     std::vector<std::string> started;
+    std::vector<std::string> settled;
 };
 
-LegacyTrace runLegacy(const std::string& source, bool precancel) {
+LegacyTrace runLegacy(const std::string& source, StartCondition start) {
     LegacyTrace trace;
     std::mutex mutex;
     auto observer = std::make_shared<Praktor::Execution::ExecutionObserver>(
         [&](const Praktor::Execution::ExecutionEvent& event) {
-            if (event.type == Praktor::Execution::ExecutionEventType::TaskStarted) {
+            if (event.type == Praktor::Execution::ExecutionEventType::TaskStarted ||
+                event.type == Praktor::Execution::ExecutionEventType::TaskCompleted ||
+                event.type == Praktor::Execution::ExecutionEventType::TaskFailed) {
                 std::lock_guard<std::mutex> lock(mutex);
-                trace.started.push_back(event.task_name);
+                if (event.type == Praktor::Execution::ExecutionEventType::TaskStarted)
+                    trace.started.push_back(event.task_name);
+                else
+                    trace.settled.push_back(event.task_name + ":" + event.status);
             }
         });
-    auto control = std::make_shared<Praktor::Execution::ExecutionControl>();
-    if (precancel) control->requestCancel();
+    using Control = Praktor::Execution::ExecutionControl;
+    auto control = start == StartCondition::ExpiredDeadline
+        ? std::make_shared<Control>(Control::Clock::now() -
+                                    std::chrono::milliseconds(1))
+        : std::make_shared<Control>();
+    if (start == StartCondition::PreCancelled) control->requestCancel();
     auto workflow = TaskParser::parseText(source, "c11-owner-differential.yml");
     trace.result = WorkflowRunner(std::move(workflow), WorkflowInputs{})
                        .executeObserved(control, observer, false, 1);
@@ -113,6 +126,7 @@ LegacyTrace runLegacy(const std::string& source, bool precancel) {
 
 struct NativeTrace {
     std::vector<std::string> started;
+    std::vector<std::string> settled;
     std::map<std::string, std::string> outputs;
     // Serialized values from the actual C11 TaskRegistry (not guessed
     // from private Host text). This records exact JSON types after commit.
@@ -241,15 +255,17 @@ struct NativeOwner {
 
     NativeTrace run(const std::vector<std::string>& names,
                     const std::vector<std::vector<std::string>>& output_keys,
-                    bool precancel) {
+                    StartCondition start) {
         require(names.size() == praktor_workflow_snapshot_task_count(snapshot),
                 "C11 task count differs from shared fixture");
         require(names.size() == output_keys.size(), "Invalid differential fixture");
         NativeTrace trace;
-        if (precancel)
+        if (start != StartCondition::Normal)
             require(praktor_workflow_dag_stop(
-                        dag, PRAKTOR_WORKFLOW_DAG_CANCELLED) == SALTS_OK,
-                    "C11 pre-start cancel failed");
+                        dag, start == StartCondition::PreCancelled
+                            ? PRAKTOR_WORKFLOW_DAG_CANCELLED
+                            : PRAKTOR_WORKFLOW_DAG_DEADLINE) == SALTS_OK,
+                    "C11 pre-start stop failed");
         for (;;) {
             size_t index = SIZE_MAX, count = 0u;
             const int claim = praktor_workflow_dag_claim_ready(
@@ -311,7 +327,12 @@ struct NativeOwner {
                             SALTS_OK, "C11 failed TaskRegistry settlement failed");
                 require(praktor_workflow_dag_finish(dag, index, false) == SALTS_OK,
                         "C11 failed DAG settlement failed");
+                const json_value_t *leaked_outputs = nullptr;
+                require(praktor_workflow_task_registry_get_outputs(
+                            registry, index, &leaked_outputs) == SALTS_ENOENT,
+                        "C11 failed task published an output");
                 trace.states[names[index]] = "failed";
+                trace.settled.push_back(names[index] + ":failed");
                 continue;
             }
 
@@ -394,6 +415,7 @@ struct NativeOwner {
                 trace.outputs[keys[n]] = values[n];
             }
             trace.states[names[index]] = "success";
+            trace.settled.push_back(names[index] + ":success");
         }
         size_t reaped = 0u, pending = SIZE_MAX;
         require(cflow_process_retainer_run_ready(
@@ -413,6 +435,8 @@ struct NativeOwner {
         trace.completed = stats.completed;
         if (stats.terminal == PRAKTOR_WORKFLOW_DAG_CANCELLED) {
             trace.terminal = "cancelled";
+        } else if (stats.terminal == PRAKTOR_WORKFLOW_DAG_DEADLINE) {
+            trace.terminal = "timed_out";
         } else if (stats.terminal == PRAKTOR_WORKFLOW_DAG_FAILED) {
             trace.terminal = "failed";
         } else if (stats.terminal == PRAKTOR_WORKFLOW_DAG_CONTINUE &&
@@ -434,15 +458,16 @@ std::string legacyTerminal(const LegacyTrace& trace) {
 spec("WorkflowRunner vs C11 Owner: identical YAML and input differential") {
     it("compares dependency order, selected string outputs and quiescent success") {
         const std::string yaml(kSuccessfulYaml);
-        const auto legacy = runLegacy(yaml, false);
+        const auto legacy = runLegacy(yaml, StartCondition::Normal);
         NativeOwner owner;
         owner.init(yaml);
         const auto native = owner.run({"prepare", "verify"},
-                                      {{"observed"}, {"finished"}}, false);
+                                      {{"observed"}, {"finished"}}, StartCondition::Normal);
         check(legacy.result.success);
         check(legacyTerminal(legacy) == "success");
         check(native.terminal == legacyTerminal(legacy));
         check((legacy.started == native.started));
+        check((legacy.settled == native.settled));
         check((native.started == std::vector<std::string>{"prepare", "verify"}));
         check(native.completed == 2u);
         for (const auto& entry : std::vector<std::pair<std::string, std::string>>{
@@ -458,17 +483,18 @@ spec("WorkflowRunner vs C11 Owner: identical YAML and input differential") {
 
     it("compares structured values, text scalars, invalid JSON and escaped output") {
         const std::string yaml(kTypedYaml);
-        const auto legacy = runLegacy(yaml, false);
+        const auto legacy = runLegacy(yaml, StartCondition::Normal);
         NativeOwner owner;
         owner.init(yaml);
         const std::vector<std::string> names{
             "plain", "numeric_text", "boolean_text", "object_value",
             "array_value", "malformed_json", "escaped_text"};
-        const auto native = owner.run({"typed"}, {names}, false);
+        const auto native = owner.run({"typed"}, {names}, StartCondition::Normal);
         check(legacy.result.success);
         check(legacyTerminal(legacy) == "success");
         check(native.terminal == legacyTerminal(legacy));
         check((legacy.started == native.started));
+        check((legacy.settled == native.settled));
         check((native.started == std::vector<std::string>{"typed"}));
         check(native.completed == 1u);
         const auto& outputs = legacy.result.value.at("tasks")
@@ -496,30 +522,39 @@ spec("WorkflowRunner vs C11 Owner: identical YAML and input differential") {
 
     it("compares failure admission and blocks the dependent task") {
         const std::string yaml(kFailedYaml);
-        const auto legacy = runLegacy(yaml, false);
+        const auto legacy = runLegacy(yaml, StartCondition::Normal);
         NativeOwner owner;
         owner.init(yaml);
-        const auto native = owner.run({"reject", "downstream"}, {{}, {}}, false);
+        const auto native = owner.run({"reject", "downstream"}, {{}, {}}, StartCondition::Normal);
         check(!legacy.result.success);
         check(legacyTerminal(legacy) == "failed");
         check(native.terminal == legacyTerminal(legacy));
         check((legacy.started == native.started));
+        check((legacy.settled == native.settled));
         check((native.started == std::vector<std::string>{"reject"}));
         check(native.states.at("reject") ==
               legacy.result.value.at("tasks").at("reject")
                   .at("status").as<std::string>());
         check(native.outputs.empty());
+        check(native.typed_outputs.empty());
+        int leaked = 0;
+        check(praktor_c11_value_store_contains(
+                  &owner.root, "should_not_publish", &leaked) ==
+                  PRAKTOR_C11_VALUE_OK && leaked == 0);
+        praktor_workflow_task_state blocked = PRAKTOR_WORKFLOW_TASK_SUCCESS;
+        check(praktor_workflow_task_registry_state(owner.registry, 1u, &blocked) ==
+                  SALTS_OK && blocked == PRAKTOR_WORKFLOW_TASK_PENDING);
         check(native.completed == 1u);
         check(!legacy.result.error_message.empty());
     }
 
     it("compares pre-start cancellation without running any leaf") {
         const std::string yaml(kSuccessfulYaml);
-        const auto legacy = runLegacy(yaml, true);
+        const auto legacy = runLegacy(yaml, StartCondition::PreCancelled);
         NativeOwner owner;
         owner.init(yaml);
         const auto native = owner.run({"prepare", "verify"},
-                                      {{"observed"}, {"finished"}}, true);
+                                      {{"observed"}, {"finished"}}, StartCondition::PreCancelled);
         check(!legacy.result.success);
         check(legacyTerminal(legacy) == "cancelled");
         check(native.terminal == legacyTerminal(legacy));
@@ -528,5 +563,32 @@ spec("WorkflowRunner vs C11 Owner: identical YAML and input differential") {
         check(native.outputs.empty());
         check(native.completed == 0u);
         check((legacy.result.value.at("tasks").size() == 0u));
+        praktor_workflow_task_state untouched = PRAKTOR_WORKFLOW_TASK_SUCCESS;
+        check(praktor_workflow_task_registry_state(owner.registry, 0u, &untouched) ==
+                  SALTS_OK && untouched == PRAKTOR_WORKFLOW_TASK_PENDING);
+    }
+
+    it("compares pre-expired deadline without task admission or publication") {
+        const std::string yaml(kSuccessfulYaml);
+        const auto legacy = runLegacy(yaml, StartCondition::ExpiredDeadline);
+        NativeOwner owner;
+        owner.init(yaml);
+        const auto native = owner.run({"prepare", "verify"},
+                                      {{"observed"}, {"finished"}},
+                                      StartCondition::ExpiredDeadline);
+        check(!legacy.result.success);
+        check(legacyTerminal(legacy) == "timed_out");
+        check(legacy.result.error_message == "Workflow execution timed out");
+        check(native.terminal == legacyTerminal(legacy));
+        check(legacy.started.empty());
+        check((legacy.settled == native.settled));
+        check(native.started.empty());
+        check(native.completed == 0u);
+        check(native.outputs.empty() && native.typed_outputs.empty());
+        check(native.callbacks == 0u && native.finalized == 0u);
+        check((legacy.result.value.at("tasks").size() == 0u));
+        praktor_workflow_task_state untouched = PRAKTOR_WORKFLOW_TASK_SUCCESS;
+        check(praktor_workflow_task_registry_state(owner.registry, 0u, &untouched) ==
+                  SALTS_OK && untouched == PRAKTOR_WORKFLOW_TASK_PENDING);
     }
 }
