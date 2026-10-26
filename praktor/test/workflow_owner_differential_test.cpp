@@ -154,6 +154,8 @@ struct NativeTrace {
     // from private Host text). This records exact JSON types after commit.
     std::map<std::string, std::string> typed_outputs;
     std::map<std::string, std::string> private_failure_ports;
+    std::map<std::string, std::string> typed_failure_outputs;
+    std::map<std::string, std::string> failure_diagnostics;
     std::map<std::string, std::string> states;
     std::string terminal;
     size_t completed = 0;
@@ -396,16 +398,47 @@ struct NativeOwner {
                             "C11 failed Shell lost its private exit status");
                     trace.private_failure_ports[names[index]] =
                         std::string(exit_text, exit_len);
+                    const char *detail = praktor_c11_session_error(&task.session);
+                    trace.failure_diagnostics[names[index]] =
+                        detail ? detail : "";
+                    // The production Legacy TaskResult publishes exit_code
+                    // even after an unsuccessful Shell. C11 must preserve
+                    // that typed task diagnostic but NEVER commit a failed
+                    // task's private text ports into the canonical root.
+                    json_value_t *typed_exit = json_create_string_n(
+                        exit_text, exit_len);
+                    require(typed_exit != nullptr,
+                            "C11 failure output allocation failed");
+                    const int set_status =
+                        praktor_workflow_task_registry_set_output(
+                            registry, index, vstr_from_cstr("exit_code"),
+                            typed_exit);
+                    json_free(typed_exit);
+                    require(set_status == SALTS_OK,
+                            "C11 failed Shell diagnostic publication failed");
                 }
                 require(praktor_workflow_task_registry_fail(
                             registry, index, vstr_from_cstr("Action execution failed")) ==
                             SALTS_OK, "C11 failed TaskRegistry settlement failed");
                 require(praktor_workflow_dag_finish(dag, index, false) == SALTS_OK,
                         "C11 failed DAG settlement failed");
-                const json_value_t *leaked_outputs = nullptr;
-                require(praktor_workflow_task_registry_get_outputs(
-                            registry, index, &leaked_outputs) == SALTS_ENOENT,
-                        "C11 failed task published an output");
+                if (mode == NativePlanMode::OneShellRoot) {
+                    const json_value_t *typed_exit = nullptr;
+                    require(praktor_workflow_task_registry_get_output(
+                                registry, index, vstr_from_cstr("exit_code"),
+                                &typed_exit) == SALTS_OK && typed_exit != nullptr,
+                            "C11 failed Shell lost its terminal TaskRegistry output");
+                    char *encoded = json_serialize(typed_exit, nullptr);
+                    require(encoded != nullptr,
+                            "C11 failed Shell output serialization failed");
+                    trace.typed_failure_outputs[names[index]] = encoded;
+                    json_serialize_free(encoded);
+                } else {
+                    const json_value_t *leaked_outputs = nullptr;
+                    require(praktor_workflow_task_registry_get_outputs(
+                                registry, index, &leaked_outputs) == SALTS_ENOENT,
+                            "Ordinary failed C11 task published an output");
+                }
                 trace.states[names[index]] = "failed";
                 trace.settled.push_back(names[index] + ":failed");
                 continue;
@@ -652,6 +685,7 @@ spec("WorkflowRunner vs C11 Owner: identical YAML and input differential") {
         check(native.completed == 1u);
         check(native.callbacks == 1u && native.finalized == 1u);
         check(native.private_failure_ports.at("fail_shell") == "7");
+        check(!native.failure_diagnostics.at("fail_shell").empty());
         check(native.outputs.empty() && native.typed_outputs.empty());
         int forbidden = 0;
         check(praktor_c11_value_store_contains(
@@ -667,6 +701,12 @@ spec("WorkflowRunner vs C11 Owner: identical YAML and input differential") {
                                          .at("fail_shell").at("outputs");
         check(legacy_outputs.at("exit_code").as<std::string>() ==
               native.private_failure_ports.at("fail_shell"));
+        check((legacy_outputs.at("exit_code").to_string() ==
+               native.typed_failure_outputs.at("fail_shell")));
+        int leaked_root_exit = 0;
+        check(praktor_c11_value_store_contains(
+                  &owner.root, "shell_exit_code", &leaked_root_exit) ==
+                  PRAKTOR_C11_VALUE_OK && leaked_root_exit == 0);
     }
 
     it("compares failure admission and blocks the dependent task") {
