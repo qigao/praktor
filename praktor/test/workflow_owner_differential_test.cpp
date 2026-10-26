@@ -22,6 +22,7 @@
 #include <mutex>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -53,6 +54,14 @@ tasks:
     depends_on: [reject]
     set_variable: should_not_publish
     value: forbidden
+)";
+
+constexpr const char *kRealShellYaml = R"(
+tasks:
+  - name: echo
+    shell:
+      cmd: echo c11-owner-differential
+      stream_output: false
 )";
 
 constexpr const char *kTypedYaml = R"(
@@ -90,6 +99,7 @@ void require(bool value, const char *message) {
 }
 
 enum class StartCondition { Normal, PreCancelled, ExpiredDeadline };
+enum class NativePlanMode { PlainLeaves, OneShellRoot };
 
 struct LegacyTrace {
     WorkflowExecutionResult result;
@@ -159,13 +169,22 @@ struct OwnerCallback {
     salts_bt_node_status outcome = SALTS_BT_FAILURE;
     int status = SALTS_EINVAL;
     unsigned ran = 0, cancelled = 0, finalized = 0;
+    bool drive_until_terminal = false;
 };
 
 void runNative(void *user) {
     auto& callback = *static_cast<OwnerCallback *>(user);
     ++callback.ran;
-    callback.status = praktor_c11_session_tick(
-        &callback.task->session, &callback.outcome);
+    const auto deadline = std::chrono::steady_clock::now() +
+                          std::chrono::seconds(8);
+    do {
+        callback.status = praktor_c11_session_tick(
+            &callback.task->session, &callback.outcome);
+        if (!callback.drive_until_terminal || callback.status != SALTS_OK ||
+            callback.outcome != SALTS_BT_RUNNING)
+            break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    } while (std::chrono::steady_clock::now() < deadline);
 }
 void cancelNative(void *user) {
     ++static_cast<OwnerCallback *>(user)->cancelled;
@@ -255,7 +274,8 @@ struct NativeOwner {
 
     NativeTrace run(const std::vector<std::string>& names,
                     const std::vector<std::vector<std::string>>& output_keys,
-                    StartCondition start) {
+                    StartCondition start,
+                    NativePlanMode mode = NativePlanMode::PlainLeaves) {
         require(names.size() == praktor_workflow_snapshot_task_count(snapshot),
                 "C11 task count differs from shared fixture");
         require(names.size() == output_keys.size(), "Invalid differential fixture");
@@ -297,11 +317,18 @@ struct NativeOwner {
                         PRAKTOR_C11_VALUE_OK, "C11 task scope admission failed");
             praktor_c11_session_config_init(&task.config);
             task.config.host = task.hooks;
+            if (mode == NativePlanMode::OneShellRoot)
+                task.config.retainer = &retainer;
             char error[256]{};
-            require(praktor_c11_orch_session_plan_create(
-                        praktor_workflow_snapshot_task_tree(snapshot, index),
-                        &task.config.tree, &task.plan, error, sizeof(error)) ==
-                        SALTS_OK, "C11 native leaf plan rejected parity input");
+            const int plan_status = mode == NativePlanMode::OneShellRoot
+                ? praktor_c11_orch_session_plan_create_native_shell(
+                      praktor_workflow_snapshot_task_tree(snapshot, index),
+                      &task.config.tree, &task.plan, error, sizeof(error))
+                : praktor_c11_orch_session_plan_create(
+                      praktor_workflow_snapshot_task_tree(snapshot, index),
+                      &task.config.tree, &task.plan, error, sizeof(error));
+            require(plan_status == SALTS_OK && task.plan != nullptr,
+                    "C11 native Session plan refused actual YAML");
             require(praktor_c11_orch_session_plan_init_session(
                         task.plan, &task.config, &task.session) == SALTS_OK,
                     "C11 Session init failed");
@@ -313,6 +340,7 @@ struct NativeOwner {
             executor.init();
             OwnerCallback callback{};
             callback.task = &task;
+            callback.drive_until_terminal = mode == NativePlanMode::OneShellRoot;
             executor.run(callback);
             ++trace.callbacks;
             trace.finalized += callback.finalized;
@@ -392,12 +420,22 @@ struct NativeOwner {
             update.task_index = index;
             update.updates = typed.get();
             size_t pending = SIZE_MAX;
-            const int commit =
-                praktor_c11_workflow_parallel_commit_after_cflow_and_process_drain(
-                    registry, &update, &transaction.value, 1u, &executor.control,
-                    &retainer, 8u, &pending);
+            int commit = PRAKTOR_C11_PARALLEL_BUSY;
+            const auto close_deadline = std::chrono::steady_clock::now() +
+                                        std::chrono::seconds(8);
+            // Recovery sweeps are permitted; this NEVER reruns the Shell
+            // action or retries a failed workflow. The same exclusive
+            // application Owner holds the transaction until all real leases
+            // are reaped. A native recovery error remains a hard failure.
+            do {
+                commit = praktor_c11_workflow_parallel_commit_after_cflow_and_process_drain(
+                    registry, &update, &transaction.value, 1u,
+                    &executor.control, &retainer, 64u, &pending);
+                if (commit != PRAKTOR_C11_PARALLEL_BUSY) break;
+                std::this_thread::sleep_for(std::chrono::milliseconds(2));
+            } while (std::chrono::steady_clock::now() < close_deadline);
             require(commit == PRAKTOR_C11_PARALLEL_OK && pending == 0u,
-                    "C11 publication without finalized CFlow/Process barriers");
+                    "C11 publication before full CFlow and native Process settlement");
             require(praktor_workflow_task_registry_complete(
                         registry, index) == SALTS_OK, "C11 registry complete failed");
             require(praktor_workflow_dag_finish(dag, index, true) == SALTS_OK,
@@ -518,6 +556,38 @@ spec("WorkflowRunner vs C11 Owner: identical YAML and input differential") {
         check(outputs.at("malformed_json").is_string());
         check(outputs.at("escaped_text").is_string());
         check(native.callbacks == 1u && native.finalized == 1u);
+    }
+
+    it("compares real Shell stdout, exit and close-before-publication") {
+        const std::string yaml(kRealShellYaml);
+        const auto legacy = runLegacy(yaml, StartCondition::Normal);
+        NativeOwner owner;
+        owner.init(yaml);
+        const auto native = owner.run({"echo"},
+                                     {{"shell_output", "shell_exit_code"}},
+                                     StartCondition::Normal,
+                                     NativePlanMode::OneShellRoot);
+        check(legacy.result.success);
+        check(legacyTerminal(legacy) == "success");
+        check(native.terminal == legacyTerminal(legacy));
+        check((legacy.started == native.started));
+        check((legacy.settled == native.settled));
+        check(native.completed == 1u);
+        check(native.callbacks == 1u && native.finalized == 1u);
+        const auto& legacy_outputs = legacy.result.value.at("tasks")
+                                         .at("echo").at("outputs");
+        const auto legacy_stdout = legacy_outputs.at("stdout").as<std::string>();
+        const auto legacy_exit = legacy_outputs.at("exit_code").as<std::string>();
+        if (native.outputs.at("shell_output") != legacy_stdout)
+            info("Shell stdout differential C11 bytes=%zu Legacy bytes=%zu",
+                 native.outputs.at("shell_output").size(), legacy_stdout.size());
+        check((native.outputs.at("shell_output") == legacy_stdout));
+        check((native.outputs.at("shell_exit_code") == legacy_exit));
+        check(native.outputs.at("shell_exit_code") == "0");
+        // The C11 output keys are explicit private Session ports, not a
+        // fabricated proof that the production WorkflowContext is replaced.
+        check((native.typed_outputs.at("shell_output") ==
+               legacy_outputs.at("stdout").to_string()));
     }
 
     it("compares failure admission and blocks the dependent task") {
