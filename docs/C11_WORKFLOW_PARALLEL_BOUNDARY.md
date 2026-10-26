@@ -256,3 +256,21 @@ calls with the same record fail INVALID before any Process poll or transaction
 mutation. New work must use a new bounded Executor/retainer cohort and gate.
 These are in-memory source-only checks, not crash/restart durability or a
 production C++ WorkflowExecutor replacement.
+
+### No synthetic zero pending on early owner-turn refusal
+
+The source-only multi-retainer API distinguishes an *unobserved* pending
+count from a real zero. Both commit and explicit recovery entry points
+return `SIZE_MAX` in `out_pending` until a full, bounded Owner sweep
+reports a concrete value. Early admission refusal (OPEN/CLOSING, cancelled
+callback, semantically failed Process, invalid owner count/identity,
+sealed cohort, etc.) returns the last completed sweep's count without
+touching a live retainer. This value is an observation, not proof of
+*current* quiescence; only a fresh completed recovery sweep can update it.
+Failed entries report `out_reaped=0` when no native Process was touched.
+
+The legacy single-retainer compatibility API is unchanged. No production
+scheduler/backend switch, implicit retry, persistent journal or crash
+atomicity is introduced. The C11 recovery cohort remains Owner-only and
+bounded, and Issue #81 continues to track the independent macOS Legacy
+Shell cancellation behavior.

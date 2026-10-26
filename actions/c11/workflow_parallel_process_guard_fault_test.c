@@ -292,3 +292,49 @@ spec("Completed Process cohort may publish exactly once") {
         praktor_workflow_task_registry_destroy(registry);
     }
 }
+
+spec("Multi-worker recovery pending is an observation, not a default ACK") {
+    it("reports UNKNOWN without a native sweep and preserves the last observation on invalid calls") {
+        praktor_c11_process_cohort_recovery recovery={0};
+        cflow_process_retainer owner={0};
+        cflow_process_retainer *owners[1]={&owner};
+        cflow_process_retainer *invalid[1]={NULL};
+        size_t pending=0u,reaped=SIZE_MAX;
+        calls=0u;override_owner=NULL;
+        injected_status=SALTS_EBUSY;injected_pending=2u;
+
+        /* Uninitialized cohort, missing retainer, zero native-work budget:
+         * none may be mistaken for a successful zero-pending observation. */
+        check(praktor_c11_workflow_parallel_drain_process_retainers(
+            &recovery,owners,1u,8u,&pending,&reaped)==PRAKTOR_C11_PARALLEL_INVALID);
+        check(pending==SIZE_MAX&&reaped==0u&&calls==0u);
+        check(praktor_c11_process_cohort_recovery_init(&recovery)==PRAKTOR_C11_PARALLEL_OK);
+        check(praktor_c11_workflow_parallel_drain_process_retainers(
+            &recovery,owners,1u,8u,&pending,&reaped)==PRAKTOR_C11_PARALLEL_INVALID);
+        check(pending==SIZE_MAX&&reaped==0u&&calls==0u);
+        check(cflow_process_retainer_init(&owner,2u)==SALTS_OK);
+        check(praktor_c11_workflow_parallel_drain_process_retainers(
+            &recovery,invalid,1u,8u,&pending,&reaped)==PRAKTOR_C11_PARALLEL_INVALID);
+        check(pending==SIZE_MAX&&calls==0u&&recovery.bound_count==0u);
+
+        /* Only a real completed retainer sweep provides the count. */
+        check(praktor_c11_workflow_parallel_drain_process_retainers(
+            &recovery,owners,1u,8u,&pending,&reaped)==PRAKTOR_C11_PARALLEL_BUSY);
+        check(pending==2u&&calls==1u&&recovery.last_pending==2u);
+        check(praktor_c11_workflow_parallel_drain_process_retainers(
+            &recovery,invalid,1u,8u,&pending,&reaped)==PRAKTOR_C11_PARALLEL_INVALID);
+        check(pending==2u&&calls==1u);
+        check(praktor_c11_workflow_parallel_drain_process_retainers(
+            &recovery,owners,0u,8u,&pending,&reaped)==PRAKTOR_C11_PARALLEL_INVALID);
+        check(pending==2u&&calls==1u);
+
+        injected_status=SALTS_OK;injected_pending=0u;
+        check(praktor_c11_workflow_parallel_drain_process_retainers(
+            &recovery,owners,1u,8u,&pending,&reaped)==PRAKTOR_C11_PARALLEL_OK);
+        check(pending==0u&&calls==2u&&recovery.last_pending==0u);
+        check(praktor_c11_workflow_parallel_drain_process_retainers(
+            &recovery,invalid,1u,8u,&pending,&reaped)==PRAKTOR_C11_PARALLEL_INVALID);
+        check(pending==0u&&calls==2u); /* last observed, not newly polled */
+        check(cflow_process_retainer_destroy(&owner)==SALTS_OK);
+    }
+}

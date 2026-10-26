@@ -145,7 +145,10 @@ int praktor_c11_workflow_parallel_drain_process_retainers(
     size_t *out_pending,size_t *out_reaped) {
     size_t pending_total=0u,reaped_total=0u;
     int result=PRAKTOR_C11_PARALLEL_OK;
-    if(out_pending)*out_pending=0u;
+    /* Rejection without a new retainer sweep must NEVER invent a zero
+     * pending acknowledgment. The last full sweep is the only observation;
+     * SIZE_MAX denotes an unobserved (unknown) count. */
+    if(out_pending)*out_pending=valid_cohort_gate(gate)?gate->last_pending:SIZE_MAX;
     if(out_reaped)*out_reaped=0u;
     if(!valid_cohort_gate(gate)||gate->sealed||
        validate_retainer_group(owners,count,max_steps)!=PRAKTOR_C11_PARALLEL_OK||
@@ -190,7 +193,10 @@ int praktor_c11_workflow_parallel_commit_after_cflow_and_process_drains(
     cflow_executor_protocol_stats stats={0};
     cflow_executor_wait_status waited;
     int drained;
-    if(out_pending)*out_pending=0u;
+    /* OPEN/CLOSING, cancelled or semantically failed worker groups must not
+     * probe live retainer state; reuse only the previous completed sweep.
+     * Before the first sweep, pending is UNKNOWN, not a synthetic zero. */
+    if(out_pending)*out_pending=valid_cohort_gate(gate)?gate->last_pending:SIZE_MAX;
     if(!registry||!task_outputs||!branch_values||!branch_count||
        !branch_succeeded||!valid_cohort_gate(gate)||gate->sealed||
        !control||branch_count!=count||
@@ -217,9 +223,9 @@ int praktor_c11_workflow_parallel_commit_after_cflow_and_process_drains(
     if(waited!=CFLOW_EXECUTOR_WAIT_IDLE)
         return PRAKTOR_C11_PARALLEL_INVALID;
     if(gate->first_native_error!=SALTS_OK) {
-        /* No new Process poll occurs here. Reuse only the LAST actually
-         * observed pending count; never invent a terminal zero. */
-        if(out_pending)*out_pending=gate->last_pending;
+        /* The entry's last-observed pending snapshot is preserved without
+         * performing new Process operations. Native recovery remains a
+         * distinct, explicitly driven Owner-only turn. */
         return PRAKTOR_C11_PARALLEL_RECOVERY;
     }
     /* CFlow callback completion is NOT a guarantee of successful Process.

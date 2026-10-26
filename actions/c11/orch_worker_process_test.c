@@ -710,7 +710,7 @@ spec("C11 multi-worker real Process and separate bounded recovery owners") {
         check(praktor_c11_workflow_parallel_commit_after_cflow_and_process_drains(
             f.registry,updates,transactions,3u,branch_succeeded,&recovery,&control,owners,3u,8u,
             &pending)==PRAKTOR_C11_PARALLEL_CANCELLED);
-        check(pending==0u); /* cancellation cannot drive a retainer */
+        check(pending==SIZE_MAX); /* cancellation has not sampled native recovery */
         check(root_lacks(&f.root,"first_result")&&
               root_lacks(&f.root,"second_result")&&
               root_lacks(&f.root,"queued_result"));
@@ -798,7 +798,7 @@ spec("C11 multi-worker real Process and separate bounded recovery owners") {
         check(praktor_c11_workflow_parallel_commit_after_cflow_and_process_drains(
             f.registry,updates,transactions,2u,branch_succeeded,&recovery,&control,owners,2u,8u,
             &pending)==PRAKTOR_C11_PARALLEL_BUSY);
-        check(pending==0u); /* OPEN executor must not poll native recovery */
+        check(pending==SIZE_MAX); /* OPEN executor has not sampled recovery */
         check(cflow_executor_control_shutdown(&control,CFLOW_EXECUTOR_SHUTDOWN_DRAIN));
         atomic_store(&gate.release,true);
         check(cflow_executor_control_wait_idle(&control)==CFLOW_EXECUTOR_WAIT_IDLE);
@@ -822,7 +822,7 @@ spec("C11 multi-worker real Process and separate bounded recovery owners") {
         check(praktor_c11_workflow_parallel_commit_after_cflow_and_process_drains(
             f.registry,updates,transactions,2u,branch_succeeded,&recovery,&control,owners,2u,8u,
             &pending)==PRAKTOR_C11_PARALLEL_FAILED);
-        check(pending==0u&&transactions[0].impl&&transactions[1].impl);
+        check(pending==SIZE_MAX&&transactions[0].impl&&transactions[1].impl);
         check(root_is(&f.root,"BASE","untouched"));
         check(root_lacks(&f.root,"left_count")&&root_lacks(&f.root,"right_count"));
         check_dag(&f,2u,0u,0u,PRAKTOR_WORKFLOW_DAG_CONTINUE,false);

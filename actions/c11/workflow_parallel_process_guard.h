@@ -121,7 +121,10 @@ int praktor_c11_process_cohort_recovery_init(
  * permanently binds all distinct retainer owner wrappers and impl identities,
  * including their order; later subset/swap/reinitialized impl attempts fail
  * INVALID before any native Process operation. Maximum 32 retainers.
- * Once successfully published, the cohort cannot be driven again. */
+ * Once successfully published, the cohort cannot be driven again.
+ * out_pending is initialized from the last complete sweep (SIZE_MAX if
+ * unknown) even on INVALID/sealed returns, never a fabricated zero.
+ * out_reaped starts at 0 and counts only this turn's actual native reaps. */
 int praktor_c11_workflow_parallel_drain_process_retainers(
     praktor_c11_process_cohort_recovery *gate,
     cflow_process_retainer *const *retainers, size_t retainer_count,
@@ -141,6 +144,11 @@ int praktor_c11_workflow_parallel_drain_process_retainers(
  * All DAG/registry changes happen afterward on the application Owner.
  * A successful typed/text commit seals this cohort: repeated commit/drain
  * is INVALID, with no additional native Process polling.
+ * out_pending is an OBSERVATION, not a completion flag. On any rejection
+ * before a retainer sweep (including OPEN/CLOSING, cancellation, semantic
+ * failure, invalid arguments/identities or a sealed cohort), it returns the
+ * last fully observed pending count or SIZE_MAX if no sweep ever occurred.
+ * Only a completed retainer sweep may turn unknown into a measured zero.
  * No shared retainer, C++ production backend change, or public SDK switch. */
 int praktor_c11_workflow_parallel_commit_after_cflow_and_process_drains(
     praktor_workflow_task_registry *registry,
