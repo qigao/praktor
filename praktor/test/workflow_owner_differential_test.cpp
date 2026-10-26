@@ -55,6 +55,13 @@ tasks:
 )";
 
 constexpr const char *kTypedYaml = R"(
+# Structured text is loaded through the canonical workflow variables owner.
+# Literal {..} in SetVariable.value has special Legacy {blackboard_key}
+# semantics and would NOT be an apples-to-apples JSON-output fixture.
+variables:
+  JSON_OBJECT_TEXT: '{"count":7,"ok":true}'
+  JSON_ARRAY_TEXT: '["ready",2,false]'
+  INVALID_JSON_TEXT: '{invalid'
 tasks:
   - name: typed
     actions:
@@ -66,11 +73,11 @@ tasks:
         - set_variable: boolean_text
           value: 'false'
         - set_variable: object_value
-          value: '{"count":7,"ok":true}'
+          from: JSON_OBJECT_TEXT
         - set_variable: array_value
-          value: '["ready",2,false]'
+          from: JSON_ARRAY_TEXT
         - set_variable: malformed_json
-          value: '{invalid'
+          from: INVALID_JSON_TEXT
         - set_variable: escaped_text
           value: 'say "hi"'
 )";
@@ -212,7 +219,7 @@ struct NativeOwner {
         require(praktor_workflow_dag_state_create(
                     praktor_workflow_snapshot_dependencies(snapshot),
                     1u, &dag) == SALTS_OK, "C11 DAG init failed");
-        require(praktor_c11_value_store_init(&root, 8u, 64u, 128u) ==
+        require(praktor_c11_value_store_init(&root, 24u, 64u, 128u) ==
                     PRAKTOR_C11_VALUE_OK, "C11 root init failed");
         root_ready = true;
         require(praktor_c11_workflow_seed_root_text_variables(snapshot, &root) ==
@@ -260,7 +267,7 @@ struct NativeOwner {
             trace.started.push_back(names[index]);
             NativeTask task;
             praktor_c11_native_host_config hc{};
-            praktor_c11_native_host_config_init(&hc, 8u, 64u, 128u);
+            praktor_c11_native_host_config_init(&hc, 24u, 64u, 128u);
             require(praktor_c11_native_host_init_with_config(
                         &task.host, &hc) == SALTS_OK, "C11 Host init failed");
             task.host_ready = true;
