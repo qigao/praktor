@@ -64,6 +64,18 @@ tasks:
       stream_output: false
 )";
 
+constexpr const char *kFailedShellYaml = R"(
+tasks:
+  - name: fail_shell
+    shell:
+      cmd: exit 7
+      stream_output: false
+  - name: forbidden
+    depends_on: [fail_shell]
+    set_variable: forbidden_output
+    value: never
+)";
+
 constexpr const char *kTypedYaml = R"(
 # Structured text is loaded through the canonical workflow variables owner.
 # Literal {..} in SetVariable.value has special Legacy {blackboard_key}
@@ -141,6 +153,7 @@ struct NativeTrace {
     // Serialized values from the actual C11 TaskRegistry (not guessed
     // from private Host text). This records exact JSON types after commit.
     std::map<std::string, std::string> typed_outputs;
+    std::map<std::string, std::string> private_failure_ports;
     std::map<std::string, std::string> states;
     std::string terminal;
     size_t completed = 0;
@@ -263,6 +276,25 @@ struct NativeOwner {
                 "C11 Process recovery retainer init failed");
         retainer_ready = true;
     }
+    void drainRetainerAfterFinalizers() {
+        require(retainer_ready, "C11 Process retainer missing");
+        const auto deadline = std::chrono::steady_clock::now() +
+                              std::chrono::seconds(8);
+        int status = SALTS_EBUSY;
+        size_t pending = SIZE_MAX;
+        do {
+            size_t reaped = 0u;
+            status = cflow_process_retainer_run_ready(
+                &retainer, 64u, &reaped, &pending);
+            require(status == SALTS_OK || status == SALTS_EBUSY,
+                    "C11 native Process recovery error");
+            if (status == SALTS_OK && pending == 0u) return;
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        } while (std::chrono::steady_clock::now() < deadline);
+        throw std::runtime_error(
+            "C11 native Process lease did not settle before owner terminal");
+    }
+
     ~NativeOwner() {
         if (retainer_ready)
             check(cflow_process_retainer_destroy(&retainer) == SALTS_OK);
@@ -350,6 +382,21 @@ struct NativeOwner {
             if (callback.outcome != SALTS_BT_SUCCESS) {
                 require(callback.outcome == SALTS_BT_FAILURE,
                         "C11 Session returned an unknown state");
+                // A failed callback may still have asynchronous Process close
+                // evidence. Do not finalize the app DAG or task registry
+                // while any native lease remains owned by the retainer.
+                drainRetainerAfterFinalizers();
+                if (mode == NativePlanMode::OneShellRoot) {
+                    char exit_text[64]{};
+                    size_t exit_len = 0u;
+                    require(praktor_c11_value_store_get(
+                                task_values, "shell_exit_code",
+                                exit_text, sizeof(exit_text), &exit_len) ==
+                                PRAKTOR_C11_VALUE_OK,
+                            "C11 failed Shell lost its private exit status");
+                    trace.private_failure_ports[names[index]] =
+                        std::string(exit_text, exit_len);
+                }
                 require(praktor_workflow_task_registry_fail(
                             registry, index, vstr_from_cstr("Action execution failed")) ==
                             SALTS_OK, "C11 failed TaskRegistry settlement failed");
@@ -455,11 +502,9 @@ struct NativeOwner {
             trace.states[names[index]] = "success";
             trace.settled.push_back(names[index] + ":success");
         }
-        size_t reaped = 0u, pending = SIZE_MAX;
-        require(cflow_process_retainer_run_ready(
-                    &retainer, 8u, &reaped, &pending) == SALTS_OK &&
-                    pending == 0u && reaped == 0u,
-                "C11 source-only run retained a native Process lease");
+        // Final quiescence check covers both successful and failed native
+        // tasks; failures never manufacture a completed close acknowledgment.
+        drainRetainerAfterFinalizers();
         praktor_workflow_dag_stats stats{};
         require(praktor_workflow_dag_get_stats(dag, &stats) == SALTS_OK,
                 "C11 DAG stats unavailable");
@@ -588,6 +633,40 @@ spec("WorkflowRunner vs C11 Owner: identical YAML and input differential") {
         // fabricated proof that the production WorkflowContext is replaced.
         check((native.typed_outputs.at("shell_output") ==
                legacy_outputs.at("stdout").to_string()));
+    }
+
+    it("compares real failed Shell exit code and suppresses successors") {
+        const std::string yaml(kFailedShellYaml);
+        const auto legacy = runLegacy(yaml, StartCondition::Normal);
+        NativeOwner owner;
+        owner.init(yaml);
+        const auto native = owner.run({"fail_shell", "forbidden"},
+                                     {{}, {}}, StartCondition::Normal,
+                                     NativePlanMode::OneShellRoot);
+        check(!legacy.result.success);
+        check(legacyTerminal(legacy) == "failed");
+        check(native.terminal == legacyTerminal(legacy));
+        check((legacy.started == native.started));
+        check((legacy.settled == native.settled));
+        check((native.started == std::vector<std::string>{"fail_shell"}));
+        check(native.completed == 1u);
+        check(native.callbacks == 1u && native.finalized == 1u);
+        check(native.private_failure_ports.at("fail_shell") == "7");
+        check(native.outputs.empty() && native.typed_outputs.empty());
+        int forbidden = 0;
+        check(praktor_c11_value_store_contains(
+                  &owner.root, "forbidden_output", &forbidden) ==
+                  PRAKTOR_C11_VALUE_OK && forbidden == 0);
+        praktor_workflow_task_state blocked = PRAKTOR_WORKFLOW_TASK_SUCCESS;
+        check(praktor_workflow_task_registry_state(
+                  owner.registry, 1u, &blocked) == SALTS_OK &&
+                  blocked == PRAKTOR_WORKFLOW_TASK_PENDING);
+        // The Legacy output is only read here; the C11 Owner has not yet
+        // qualified failure-output publication parity. Do not invent it.
+        const auto& legacy_outputs = legacy.result.value.at("tasks")
+                                         .at("fail_shell").at("outputs");
+        check(legacy_outputs.at("exit_code").as<std::string>() ==
+              native.private_failure_ports.at("fail_shell"));
     }
 
     it("compares failure admission and blocks the dependent task") {
