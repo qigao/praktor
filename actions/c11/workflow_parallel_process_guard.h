@@ -90,6 +90,9 @@ typedef struct praktor_c11_process_cohort_recovery {
      * same order; a changed subset or an impl replacement fails INVALID.
      * Only the single application Owner may read/write this record. */
     size_t bound_count;
+    /* Typed/text publication is terminal for this cohort. An exceptional
+     * post-text invariant failure also seals it against unsafe retries. */
+    bool sealed;
     cflow_process_retainer *bound_owners[PRAKTOR_C11_PROCESS_COHORT_MAX_RETAINERS];
     const void *bound_impls[PRAKTOR_C11_PROCESS_COHORT_MAX_RETAINERS];
 } praktor_c11_process_cohort_recovery;
@@ -117,7 +120,8 @@ int praktor_c11_process_cohort_recovery_init(
  * RECOVERY even if the current pending count reaches zero. The first sweep
  * permanently binds all distinct retainer owner wrappers and impl identities,
  * including their order; later subset/swap/reinitialized impl attempts fail
- * INVALID before any native Process operation. Maximum 32 retainers. */
+ * INVALID before any native Process operation. Maximum 32 retainers.
+ * Once successfully published, the cohort cannot be driven again. */
 int praktor_c11_workflow_parallel_drain_process_retainers(
     praktor_c11_process_cohort_recovery *gate,
     cflow_process_retainer *const *retainers, size_t retainer_count,
@@ -135,6 +139,8 @@ int praktor_c11_workflow_parallel_drain_process_retainers(
  * a previously latched NativeIO error returns RECOVERY even after a later
  * clean retainer sweep. Gate may never be reset to force publication.
  * All DAG/registry changes happen afterward on the application Owner.
+ * A successful typed/text commit seals this cohort: repeated commit/drain
+ * is INVALID, with no additional native Process polling.
  * No shared retainer, C++ production backend change, or public SDK switch. */
 int praktor_c11_workflow_parallel_commit_after_cflow_and_process_drains(
     praktor_workflow_task_registry *registry,

@@ -229,3 +229,66 @@ spec("NativeIO recovery poisoning survives a clean later Process drain") {
         check(cflow_process_retainer_destroy(&retainer)==SALTS_OK);
     }
 }
+
+spec("Completed Process cohort may publish exactly once") {
+    it("rejects second typed/text commit and native recovery after publication") {
+        praktor_workflow_task_registry *registry=create_registry();
+        praktor_c11_value_store root={0};
+        praktor_c11_value_txn first={0},second={0};
+        praktor_c11_process_cohort_recovery recovery={0};
+        cflow_process_retainer retainer={0};
+        cflow_process_retainer *owners[1]={&retainer};
+        cflow_executor executor={0};
+        cflow_executor_control control={0};
+        cflow_executor_task task={0};
+        unsigned callbacks=0u;
+        const bool succeeded[1]={true};
+        const char *data="{\"answer\":123}";
+        json_value_t *json=json_parse(data,strlen(data));
+        praktor_workflow_task_output_update update={0u,json};
+        size_t pending=SIZE_MAX,reaped=SIZE_MAX,length=0u;
+        char value[32]={0};
+        check(registry!=NULL&&json!=NULL);
+        check(praktor_c11_process_cohort_recovery_init(&recovery)==PRAKTOR_C11_PARALLEL_OK);
+        check(cflow_process_retainer_init(&retainer,1u)==SALTS_OK);
+        check(praktor_c11_value_store_init(&root,4u,32u,32u)==PRAKTOR_C11_VALUE_OK);
+        check(praktor_c11_value_txn_begin(&first,&root)==PRAKTOR_C11_VALUE_OK);
+        check(praktor_c11_value_txn_set(&first,"answer","original")==PRAKTOR_C11_VALUE_OK);
+        check(cflow_executor_manual_init_with_capacity(&executor,1u));
+        check(cflow_executor_as_control(&executor,&control));
+        task.run=completed_callback;task.finalize=completed_callback;task.user=&callbacks;
+        check(cflow_executor_try_post_task(&executor,&task)==CFLOW_ADMISSION_ACCEPTED);
+        check(cflow_executor_control_shutdown(&control,CFLOW_EXECUTOR_SHUTDOWN_DRAIN));
+        check(cflow_executor_run_ready(&executor)==1u);
+        check(cflow_executor_control_wait_idle(&control)==CFLOW_EXECUTOR_WAIT_IDLE);
+        check(callbacks==2u);
+        override_owner=NULL;
+        injected_status=SALTS_OK;injected_pending=0u;calls=0u;
+        check(praktor_c11_workflow_parallel_commit_after_cflow_and_process_drains(
+            registry,&update,&first,1u,succeeded,&recovery,&control,
+            owners,1u,8u,&pending)==PRAKTOR_C11_PARALLEL_OK);
+        check(first.impl==NULL&&recovery.sealed&&pending==0u&&calls==1u);
+        check(praktor_c11_value_store_get(
+            &root,"answer",value,sizeof value,&length)==PRAKTOR_C11_VALUE_OK);
+        check(length==8u&&strcmp(value,"original")==0);
+        check(praktor_c11_value_txn_begin(&second,&root)==PRAKTOR_C11_VALUE_OK);
+        check(praktor_c11_value_txn_set(&second,"retry","forbidden")==PRAKTOR_C11_VALUE_OK);
+        /* A second group would otherwise be silently re-admitted by the
+         * same CLOSED CFlow control and zero-pending retained Process owner. */
+        check(praktor_c11_workflow_parallel_commit_after_cflow_and_process_drains(
+            registry,&update,&second,1u,succeeded,&recovery,&control,
+            owners,1u,8u,&pending)==PRAKTOR_C11_PARALLEL_INVALID);
+        check(second.impl!=NULL&&calls==1u);
+        check(praktor_c11_workflow_parallel_drain_process_retainers(
+            &recovery,owners,1u,8u,&pending,&reaped)==PRAKTOR_C11_PARALLEL_INVALID);
+        check(calls==1u&&praktor_c11_value_store_size(&root)==1u);
+        check(praktor_c11_process_cohort_recovery_init(&recovery)==PRAKTOR_C11_PARALLEL_INVALID);
+        praktor_c11_value_txn_abort(&second);
+        check(praktor_workflow_task_registry_complete(registry,0u)==SALTS_OK);
+        cflow_executor_destroy(&executor);
+        check(cflow_process_retainer_destroy(&retainer)==SALTS_OK);
+        json_free(json);
+        praktor_c11_value_store_destroy(&root);
+        praktor_workflow_task_registry_destroy(registry);
+    }
+}

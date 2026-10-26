@@ -340,9 +340,16 @@ spec("C11 per-worker bounded Process retainer cohort barrier") {
         check(praktor_c11_workflow_parallel_commit_after_cflow_and_process_drains(
             f.registry,f.updates,f.branches,2u,branch_succeeded,&recovery,&control,owners,2u,8u,
             &pending)==PRAKTOR_C11_PARALLEL_OK);
-        check(pending==0u);
+        check(pending==0u&&recovery.last_pending==0u);
+        check(recovery.sealed);
         check(!f.branches[0].impl&&!f.branches[1].impl);
         check(stored(&f.root,"left","L")&&stored(&f.root,"right","R"));
+        check(praktor_c11_workflow_parallel_commit_after_cflow_and_process_drains(
+            f.registry,f.updates,f.branches,2u,branch_succeeded,&recovery,&control,owners,2u,8u,
+            &pending)==PRAKTOR_C11_PARALLEL_INVALID);
+        check(praktor_c11_workflow_parallel_drain_process_retainers(
+            &recovery,owners,2u,8u,&pending,&reaped)==PRAKTOR_C11_PARALLEL_INVALID);
+        check(praktor_c11_process_cohort_recovery_init(&recovery)==PRAKTOR_C11_PARALLEL_INVALID);
         /* Typed output reads are only admitted for terminal TaskRegistry
          * slots; the Owner must mark success AFTER atomic publication. */
         for(size_t i=0u;i<2u;++i)

@@ -83,6 +83,7 @@ int praktor_c11_process_cohort_recovery_init(
     if(!gate||gate->marker!=0u||gate->first_native_error!=SALTS_OK)
         return PRAKTOR_C11_PARALLEL_INVALID;
     gate->marker=PRAKTOR_C11_COHORT_GATE_MARKER;
+    gate->sealed=false;
     gate->last_pending=SIZE_MAX; /* not a synthetic zero-pending ACK */
     return PRAKTOR_C11_PARALLEL_OK;
 }
@@ -146,7 +147,7 @@ int praktor_c11_workflow_parallel_drain_process_retainers(
     int result=PRAKTOR_C11_PARALLEL_OK;
     if(out_pending)*out_pending=0u;
     if(out_reaped)*out_reaped=0u;
-    if(!valid_cohort_gate(gate)||
+    if(!valid_cohort_gate(gate)||gate->sealed||
        validate_retainer_group(owners,count,max_steps)!=PRAKTOR_C11_PARALLEL_OK||
        bind_cohort_owners(gate,owners,count)!=PRAKTOR_C11_PARALLEL_OK)
         return PRAKTOR_C11_PARALLEL_INVALID;
@@ -191,7 +192,8 @@ int praktor_c11_workflow_parallel_commit_after_cflow_and_process_drains(
     int drained;
     if(out_pending)*out_pending=0u;
     if(!registry||!task_outputs||!branch_values||!branch_count||
-       !branch_succeeded||!valid_cohort_gate(gate)||!control||branch_count!=count||
+       !branch_succeeded||!valid_cohort_gate(gate)||gate->sealed||
+       !control||branch_count!=count||
        validate_retainer_group(owners,count,max_steps)!=PRAKTOR_C11_PARALLEL_OK||
        validate_bound_owners(gate,owners,count)!=PRAKTOR_C11_PARALLEL_OK)
         return PRAKTOR_C11_PARALLEL_INVALID;
@@ -227,6 +229,14 @@ int praktor_c11_workflow_parallel_commit_after_cflow_and_process_drains(
     drained=praktor_c11_workflow_parallel_drain_process_retainers(
         gate,owners,count,max_steps,out_pending,NULL);
     if(drained!=PRAKTOR_C11_PARALLEL_OK)return drained;
-    return praktor_c11_workflow_parallel_commit(
-        registry,task_outputs,branch_values,branch_count);
+    {
+        const int status=praktor_c11_workflow_parallel_commit(
+            registry,task_outputs,branch_values,branch_count);
+        /* Successful publication has consumed the branch transactions.
+         * A post-text invariant error must likewise never be retried. */
+        if(status==PRAKTOR_C11_PARALLEL_OK||
+           status==PRAKTOR_C11_PARALLEL_INVARIANT)
+            gate->sealed=true;
+        return status;
+    }
 }

@@ -245,3 +245,14 @@ is refused before native recovery is polled, without allocating a fallback
 array or changing SaltsUtils' existing retainer ABI. CFlow closure, worker
 finalization, Owner exclusivity, NativeIO recovery, optimistic transaction
 commit and DAG successor admission remain separate boundaries.
+
+### Successful group publication permanently seals the recovery cohort
+
+The same Parallel cohort may execute multiple bounded recovery turns while
+NativeIO remains pending, but typed/text outputs can be published only once.
+After successful publication (or a post-text invariant failure), its
+owner-local recovery record becomes sealed. Subsequent commit or drain
+calls with the same record fail INVALID before any Process poll or transaction
+mutation. New work must use a new bounded Executor/retainer cohort and gate.
+These are in-memory source-only checks, not crash/restart durability or a
+production C++ WorkflowExecutor replacement.
