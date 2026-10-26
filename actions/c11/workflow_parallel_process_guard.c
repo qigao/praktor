@@ -97,13 +97,44 @@ static bool valid_cohort_gate(const praktor_c11_process_cohort_recovery *gate) {
  * recovery owners. Owner alone drives this bounded, single-threaded sweep. */
 static int validate_retainer_group(cflow_process_retainer *const *owners,
                                    size_t count,size_t max_steps) {
-    if(!owners||!count||!max_steps)return PRAKTOR_C11_PARALLEL_INVALID;
+    if(!owners||!count||!max_steps||
+       count>PRAKTOR_C11_PROCESS_COHORT_MAX_RETAINERS)
+        return PRAKTOR_C11_PARALLEL_INVALID;
     for(size_t i=0u;i<count;++i) {
         if(!owners[i]||!owners[i]->impl)return PRAKTOR_C11_PARALLEL_INVALID;
         for(size_t j=0u;j<i;++j)
             if(owners[i]==owners[j]||owners[i]->impl==owners[j]->impl)
                 return PRAKTOR_C11_PARALLEL_INVALID;
     }
+    return PRAKTOR_C11_PARALLEL_OK;
+}
+
+/* No native Process operation is permitted until cohort owner identity has
+ * been validated. Bind only on the first exclusive Owner drain turn; do not
+ * bind an OPEN executor's transient preflight. */
+static int validate_bound_owners(
+    const praktor_c11_process_cohort_recovery *gate,
+    cflow_process_retainer *const *owners,size_t count) {
+    if(!gate->bound_count)return PRAKTOR_C11_PARALLEL_OK;
+    if(count!=gate->bound_count)return PRAKTOR_C11_PARALLEL_INVALID;
+    for(size_t i=0u;i<count;++i)
+        if(owners[i]!=gate->bound_owners[i]||
+           owners[i]->impl!=gate->bound_impls[i])
+            return PRAKTOR_C11_PARALLEL_INVALID;
+    return PRAKTOR_C11_PARALLEL_OK;
+}
+
+static int bind_cohort_owners(
+    praktor_c11_process_cohort_recovery *gate,
+    cflow_process_retainer *const *owners,size_t count) {
+    if(validate_bound_owners(gate,owners,count)!=PRAKTOR_C11_PARALLEL_OK)
+        return PRAKTOR_C11_PARALLEL_INVALID;
+    if(gate->bound_count)return PRAKTOR_C11_PARALLEL_OK;
+    for(size_t i=0u;i<count;++i) {
+        gate->bound_owners[i]=owners[i];
+        gate->bound_impls[i]=owners[i]->impl;
+    }
+    gate->bound_count=count;
     return PRAKTOR_C11_PARALLEL_OK;
 }
 
@@ -116,7 +147,8 @@ int praktor_c11_workflow_parallel_drain_process_retainers(
     if(out_pending)*out_pending=0u;
     if(out_reaped)*out_reaped=0u;
     if(!valid_cohort_gate(gate)||
-       validate_retainer_group(owners,count,max_steps)!=PRAKTOR_C11_PARALLEL_OK)
+       validate_retainer_group(owners,count,max_steps)!=PRAKTOR_C11_PARALLEL_OK||
+       bind_cohort_owners(gate,owners,count)!=PRAKTOR_C11_PARALLEL_OK)
         return PRAKTOR_C11_PARALLEL_INVALID;
     for(size_t i=0u;i<count;++i) {
         size_t pending=0u,reaped=0u;
@@ -160,7 +192,8 @@ int praktor_c11_workflow_parallel_commit_after_cflow_and_process_drains(
     if(out_pending)*out_pending=0u;
     if(!registry||!task_outputs||!branch_values||!branch_count||
        !branch_succeeded||!valid_cohort_gate(gate)||!control||branch_count!=count||
-       validate_retainer_group(owners,count,max_steps)!=PRAKTOR_C11_PARALLEL_OK)
+       validate_retainer_group(owners,count,max_steps)!=PRAKTOR_C11_PARALLEL_OK||
+       validate_bound_owners(gate,owners,count)!=PRAKTOR_C11_PARALLEL_OK)
         return PRAKTOR_C11_PARALLEL_INVALID;
     if(!cflow_executor_control_get_stats(control,&stats))
         return PRAKTOR_C11_PARALLEL_INVALID;

@@ -74,12 +74,24 @@ int praktor_c11_workflow_parallel_commit_after_cflow_and_process_drain(
  * never grant permission to publish that cohort. There is NO implicit reset.
  * This state does not survive a process crash; no restart/durable journal or
  * production scheduler capability is being claimed. */
+/* Maximum number of distinct Process recovery owners per source-only
+ * Parallel cohort. Exceeding this fixed bound refuses admission; no
+ * overflow heap ownership, global fallback or second Process engine. */
+enum { PRAKTOR_C11_PROCESS_COHORT_MAX_RETAINERS = 32 };
+
 typedef struct praktor_c11_process_cohort_recovery {
     uint32_t marker;
     int first_native_error;
     /* Latest observed pending count. SIZE_MAX means not yet observed; zero
      * is authoritative only after a completed retainer sweep. */
     size_t last_pending;
+    /* Bound on the FIRST exclusive recovery sweep, never at worker spawn.
+     * Later sweeps and commits MUST use the same owner identities in the
+     * same order; a changed subset or an impl replacement fails INVALID.
+     * Only the single application Owner may read/write this record. */
+    size_t bound_count;
+    cflow_process_retainer *bound_owners[PRAKTOR_C11_PROCESS_COHORT_MAX_RETAINERS];
+    const void *bound_impls[PRAKTOR_C11_PROCESS_COHORT_MAX_RETAINERS];
 } praktor_c11_process_cohort_recovery;
 
 int praktor_c11_process_cohort_recovery_init(
@@ -102,7 +114,10 @@ int praktor_c11_process_cohort_recovery_init(
  * It does NOT prove CFlow quiescence itself; caller supplies that proof.
  * The state record is mandatory and latches the first NativeIO failure.
  * Recovery turns may continue to release leases after a latch, returning
- * RECOVERY even if the current pending count reaches zero. */
+ * RECOVERY even if the current pending count reaches zero. The first sweep
+ * permanently binds all distinct retainer owner wrappers and impl identities,
+ * including their order; later subset/swap/reinitialized impl attempts fail
+ * INVALID before any native Process operation. Maximum 32 retainers. */
 int praktor_c11_workflow_parallel_drain_process_retainers(
     praktor_c11_process_cohort_recovery *gate,
     cflow_process_retainer *const *retainers, size_t retainer_count,

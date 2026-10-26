@@ -228,3 +228,20 @@ without polling the retainer again. A previous pending=1 cannot be reported
 as zero merely because the commit took a fail-closed early return.
 An explicit later cleanup pass may observe actual pending=0, but the
 recovery error remains sticky and the typed/text group is never published.
+
+### Immutable Process-retainer cohort identity after first recovery sweep
+
+Even with a sticky error and last-observed pending count, a caller must not
+replace a cohort's retainer array on a later Owner turn and thereby skip
+the original worker's outstanding NativeIO leases. The source-only recovery
+state now binds each distinct owner wrapper AND its retainer impl pointer,
+in order, on the first exclusive Owner drain. Every later drain or commit
+validates exactly that cohort membership before any native Process step or
+text/typed publication. Subsets, reordered owners, wrapper aliases, or
+replaced impls fail closed with PARALLEL_INVALID.
+
+The source-only fixed cohort bound is 32 distinct retainers; a larger group
+is refused before native recovery is polled, without allocating a fallback
+array or changing SaltsUtils' existing retainer ABI. CFlow closure, worker
+finalization, Owner exclusivity, NativeIO recovery, optimistic transaction
+commit and DAG successor admission remain separate boundaries.

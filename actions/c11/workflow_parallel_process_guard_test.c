@@ -268,6 +268,10 @@ spec("C11 per-worker bounded Process retainer cohort barrier") {
         cflow_process_retainer local[2]={{0},{0}};
         cflow_process_retainer *owners[2]={&local[0],&local[1]};
         cflow_process_retainer *aliased[2]={&local[0],&local[0]};
+        cflow_process_retainer replacement={0},wrapper_alias={0};
+        cflow_process_retainer *swapped[2]={&local[0],&replacement};
+        cflow_process_retainer *wrapped[2]={&local[0],&wrapper_alias};
+        cflow_process_retainer *reordered[2]={&local[1],&local[0]};
         cflow_process_retainer_token held={0},overflow={0};
         cflow_executor executor={0};
         cflow_executor_control control={0};
@@ -279,6 +283,8 @@ spec("C11 per-worker bounded Process retainer cohort barrier") {
         check(praktor_c11_process_cohort_recovery_init(&recovery)==PRAKTOR_C11_PARALLEL_INVALID);
         for(size_t i=0u;i<2u;++i)
             check(cflow_process_retainer_init(&local[i],1u)==SALTS_OK);
+        check(cflow_process_retainer_init(&replacement,1u)==SALTS_OK);
+        wrapper_alias.impl=local[1].impl; /* borrowed only for identity check */
         check(cflow_executor_manual_init_with_capacity(&executor,2u));
         check(cflow_executor_as_control(&executor,&control));
         for(size_t i=0u;i<2u;++i) {
@@ -304,6 +310,30 @@ spec("C11 per-worker bounded Process retainer cohort barrier") {
             f.registry,f.updates,f.branches,2u,branch_succeeded,&recovery,&control,owners,2u,8u,
             &pending)==PRAKTOR_C11_PARALLEL_BUSY);
         check(pending==1u);
+        check(recovery.bound_count==2u);
+        check(recovery.bound_owners[0]==&local[0]&&recovery.bound_owners[1]==&local[1]);
+        check(recovery.bound_impls[0]==local[0].impl&&
+              recovery.bound_impls[1]==local[1].impl);
+        /* No later Owner turn may silently substitute an empty retainer,
+         * a fresh wrapper around the same impl, an incomplete subset,
+         * a reordered set, or a reinitialized impl under the same wrapper. */
+        check(praktor_c11_workflow_parallel_commit_after_cflow_and_process_drains(
+            f.registry,f.updates,f.branches,2u,branch_succeeded,&recovery,
+            &control,swapped,2u,8u,&pending)==PRAKTOR_C11_PARALLEL_INVALID);
+        check(praktor_c11_workflow_parallel_drain_process_retainers(
+            &recovery,wrapped,2u,8u,&pending,&reaped)==PRAKTOR_C11_PARALLEL_INVALID);
+        check(praktor_c11_workflow_parallel_drain_process_retainers(
+            &recovery,owners,1u,8u,&pending,&reaped)==PRAKTOR_C11_PARALLEL_INVALID);
+        check(praktor_c11_workflow_parallel_drain_process_retainers(
+            &recovery,reordered,2u,8u,&pending,&reaped)==PRAKTOR_C11_PARALLEL_INVALID);
+        {
+            void *const original=local[1].impl;
+            local[1].impl=replacement.impl; /* no NativeIO calls on invalid identity */
+            check(praktor_c11_workflow_parallel_drain_process_retainers(
+                &recovery,owners,2u,8u,&pending,&reaped)==PRAKTOR_C11_PARALLEL_INVALID);
+            local[1].impl=original;
+        }
+        check(recovery.last_pending==1u&&recovery.bound_count==2u);
         check(f.branches[0].impl&&f.branches[1].impl);
         check(praktor_c11_value_store_size(&f.root)==1u);
         check(cflow_process_retainer_release(&local[1],held)==SALTS_OK);
@@ -322,6 +352,8 @@ spec("C11 per-worker bounded Process retainer cohort barrier") {
         cflow_executor_destroy(&executor);
         for(size_t i=0u;i<2u;++i)
             check(cflow_process_retainer_destroy(&local[i])==SALTS_OK);
+        wrapper_alias.impl=NULL;
+        check(cflow_process_retainer_destroy(&replacement)==SALTS_OK);
         dispose(&f);
     }
     it("reports optimistic group conflict without publishing any typed or text output") {
@@ -455,5 +487,26 @@ spec("Semantic Worker Process failure blocks the entire Parallel group") {
         for(size_t i=0u;i<2u;++i)
             check(cflow_process_retainer_destroy(&local[i])==SALTS_OK);
         dispose(&f);
+    }
+}
+
+spec("Bounded Process recovery cohort owner admission") {
+    it("refuses a cohort larger than the fixed retainer owner budget") {
+        enum { EXCESS=PRAKTOR_C11_PROCESS_COHORT_MAX_RETAINERS+1 };
+        praktor_c11_process_cohort_recovery recovery={0};
+        cflow_process_retainer local[EXCESS]={{0}};
+        cflow_process_retainer *owners[EXCESS]={0};
+        size_t pending=SIZE_MAX,reaped=SIZE_MAX;
+        check(praktor_c11_process_cohort_recovery_init(&recovery)==PRAKTOR_C11_PARALLEL_OK);
+        for(size_t i=0u;i<EXCESS;++i) {
+            check(cflow_process_retainer_init(&local[i],1u)==SALTS_OK);
+            owners[i]=&local[i];
+        }
+        check(praktor_c11_workflow_parallel_drain_process_retainers(
+            &recovery,owners,EXCESS,1u,&pending,&reaped)==PRAKTOR_C11_PARALLEL_INVALID);
+        check(recovery.bound_count==0u&&recovery.last_pending==SIZE_MAX);
+        check(pending==0u&&reaped==0u); /* no Process was driven */
+        for(size_t i=0u;i<EXCESS;++i)
+            check(cflow_process_retainer_destroy(&local[i])==SALTS_OK);
     }
 }
