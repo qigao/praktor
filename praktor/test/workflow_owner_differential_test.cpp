@@ -54,6 +54,27 @@ tasks:
     value: forbidden
 )";
 
+constexpr const char *kTypedYaml = R"(
+tasks:
+  - name: typed
+    actions:
+      Sequence:
+        - set_variable: plain
+          value: 'alpha beta'
+        - set_variable: numeric_text
+          value: '7'
+        - set_variable: boolean_text
+          value: 'false'
+        - set_variable: object_value
+          value: '{"count":7,"ok":true}'
+        - set_variable: array_value
+          value: '["ready",2,false]'
+        - set_variable: malformed_json
+          value: '{invalid'
+        - set_variable: escaped_text
+          value: 'say "hi"'
+)";
+
 void require(bool value, const char *message) {
     if (!value) throw std::runtime_error(message);
 }
@@ -84,6 +105,9 @@ LegacyTrace runLegacy(const std::string& source, bool precancel) {
 struct NativeTrace {
     std::vector<std::string> started;
     std::map<std::string, std::string> outputs;
+    // Serialized values from the actual C11 TaskRegistry (not guessed
+    // from private Host text). This records exact JSON types after commit.
+    std::map<std::string, std::string> typed_outputs;
     std::map<std::string, std::string> states;
     std::string terminal;
     size_t completed = 0;
@@ -207,7 +231,7 @@ struct NativeOwner {
     }
 
     NativeTrace run(const std::vector<std::string>& names,
-                    const std::vector<std::string>& output_keys,
+                    const std::vector<std::vector<std::string>>& output_keys,
                     bool precancel) {
         require(names.size() == praktor_workflow_snapshot_task_count(snapshot),
                 "C11 task count differs from shared fixture");
@@ -282,56 +306,85 @@ struct NativeOwner {
                 continue;
             }
 
-            const std::string& key = output_keys[index];
-            require(!key.empty(), "Successful native case lacks selected output");
-            char buffer[256]{};
-            size_t length = 0u;
-            require(praktor_c11_value_store_get(
-                        task_values, key.c_str(), buffer, sizeof(buffer),
-                        &length) == PRAKTOR_C11_VALUE_OK,
-                    "C11 successful leaf did not produce selected output");
-            const std::string value(buffer, length);
-            // This first corpus admits only the unescaped ASCII word subset.
-            // Do not reinterpret arbitrary text/typed values as matching.
-            require(!value.empty() && std::all_of(value.begin(), value.end(),
-                [](unsigned char c) {
-                    return (c >= 'a' && c <= 'z') ||
-                           (c >= 'A' && c <= 'Z') ||
-                           (c >= '0' && c <= '9') || c == '_';
-                }), "Native output needs typed/escaped parity admission");
+            const auto& keys = output_keys[index];
+            require(!keys.empty(), "Successful native case lacks selected outputs");
+            std::vector<std::string> values;
+            std::vector<const char *> selected;
+            values.reserve(keys.size());
+            selected.reserve(keys.size());
+            // Every native text value originates from the actual Session Host;
+            // the adapter may not manufacture a success output or guess its
+            // type without the published typed JSON evidence.
+            for (const auto& key : keys) {
+                require(!key.empty(), "C11 selected output name is empty");
+                char buffer[256]{};
+                size_t length = 0u;
+                require(praktor_c11_value_store_get(
+                            task_values, key.c_str(), buffer, sizeof(buffer),
+                            &length) == PRAKTOR_C11_VALUE_OK,
+                        "C11 successful leaf did not produce selected output");
+                values.emplace_back(buffer, length);
+                selected.push_back(key.c_str());
+            }
+            struct JsonCleanup {
+                void operator()(json_value_t *value) const noexcept {
+                    json_free(value);
+                }
+            };
+            std::unique_ptr<json_value_t, JsonCleanup> typed(json_create_object());
+            require(typed != nullptr, "C11 output JSON owner allocation failed");
+            for (size_t n = 0u; n < keys.size(); ++n) {
+                const auto& raw = values[n];
+                // Match the established Legacy parseWorkflowValue() rule:
+                // only object/array prefixes attempt structured JSON; a
+                // failed parse, scalar JSON text, or an empty text is a string.
+                json_value_t *item = nullptr;
+                if (!raw.empty() && (raw.front() == '{' || raw.front() == '['))
+                    item = json_parse(raw.data(), raw.size());
+                if (!item)
+                    item = json_create_string_n(raw.data(), raw.size());
+                require(item != nullptr, "C11 typed output projection failed");
+                if (!json_object_add_n(typed.get(), keys[n].data(),
+                                       keys[n].size(), item)) {
+                    json_free(item);
+                    throw std::runtime_error("C11 typed output insertion failed");
+                }
+            }
             struct TxnCleanup {
                 praktor_c11_value_txn value{};
                 ~TxnCleanup() { praktor_c11_value_txn_abort(&value); }
             } transaction;
-            const char *selected[] = {key.c_str()};
             require(praktor_c11_workflow_prepare_task_text_outputs(
-                        &root, task_values, selected, 1u, &transaction.value) ==
-                        PRAKTOR_C11_VALUE_OK, "C11 output txn preparation failed");
-            const std::string json = "{\"" + key + "\":\"" + value + "\"}";
-            json_value_t *typed = json_parse(json.c_str(), json.size());
-            require(typed != nullptr, "C11 typed output construction failed");
+                        &root, task_values, selected.data(), selected.size(),
+                        &transaction.value) == PRAKTOR_C11_VALUE_OK,
+                    "C11 output txn preparation failed");
             praktor_workflow_task_output_update update{};
             update.task_index = index;
-            update.updates = typed;
+            update.updates = typed.get();
             size_t pending = SIZE_MAX;
             const int commit =
                 praktor_c11_workflow_parallel_commit_after_cflow_and_process_drain(
                     registry, &update, &transaction.value, 1u, &executor.control,
                     &retainer, 8u, &pending);
-            json_free(typed);
             require(commit == PRAKTOR_C11_PARALLEL_OK && pending == 0u,
                     "C11 publication without finalized CFlow/Process barriers");
             require(praktor_workflow_task_registry_complete(
                         registry, index) == SALTS_OK, "C11 registry complete failed");
             require(praktor_workflow_dag_finish(dag, index, true) == SALTS_OK,
                     "C11 DAG finish failed");
-            const json_value_t *published = nullptr;
-            require(praktor_workflow_task_registry_get_output(
-                        registry, index, vstr_from_cstr(key.c_str()),
-                        &published) == SALTS_OK && published != nullptr,
-                    "C11 typed output not published");
+            for (size_t n = 0u; n < keys.size(); ++n) {
+                const json_value_t *published = nullptr;
+                require(praktor_workflow_task_registry_get_output(
+                            registry, index, vstr_from_cstr(keys[n].c_str()),
+                            &published) == SALTS_OK && published != nullptr,
+                        "C11 typed output not published");
+                char *json_text = json_serialize(published, nullptr);
+                require(json_text != nullptr, "C11 published JSON could not serialize");
+                trace.typed_outputs[keys[n]] = json_text;
+                json_serialize_free(json_text);
+                trace.outputs[keys[n]] = values[n];
+            }
             trace.states[names[index]] = "success";
-            trace.outputs[key] = value;
         }
         size_t reaped = 0u, pending = SIZE_MAX;
         require(cflow_process_retainer_run_ready(
@@ -376,7 +429,7 @@ spec("WorkflowRunner vs C11 Owner: identical YAML and input differential") {
         NativeOwner owner;
         owner.init(yaml);
         const auto native = owner.run({"prepare", "verify"},
-                                      {"observed", "finished"}, false);
+                                      {{"observed"}, {"finished"}}, false);
         check(legacy.result.success);
         check(legacyTerminal(legacy) == "success");
         check(native.terminal == legacyTerminal(legacy));
@@ -394,12 +447,44 @@ spec("WorkflowRunner vs C11 Owner: identical YAML and input differential") {
         }
     }
 
+    it("compares structured values, text scalars, invalid JSON and escaped output") {
+        const std::string yaml(kTypedYaml);
+        const auto legacy = runLegacy(yaml, false);
+        NativeOwner owner;
+        owner.init(yaml);
+        const std::vector<std::string> names{
+            "plain", "numeric_text", "boolean_text", "object_value",
+            "array_value", "malformed_json", "escaped_text"};
+        const auto native = owner.run({"typed"}, {names}, false);
+        check(legacy.result.success);
+        check(legacyTerminal(legacy) == "success");
+        check(native.terminal == legacyTerminal(legacy));
+        check((legacy.started == native.started));
+        check((native.started == std::vector<std::string>{"typed"}));
+        check(native.completed == 1u);
+        const auto& outputs = legacy.result.value.at("tasks")
+                                  .at("typed").at("outputs");
+        for (const auto& name : names) {
+            // Compare canonical JSON serialization so "7" never passes as 7
+            // and structured/nested output never passes as an opaque string.
+            check((native.typed_outputs.at(name) == outputs.at(name).to_string()));
+        }
+        check(outputs.at("plain").is_string());
+        check(outputs.at("numeric_text").is_string());
+        check(outputs.at("boolean_text").is_string());
+        check(outputs.at("object_value").is_object());
+        check(outputs.at("array_value").is_array());
+        check(outputs.at("malformed_json").is_string());
+        check(outputs.at("escaped_text").is_string());
+        check(native.callbacks == 1u && native.finalized == 1u);
+    }
+
     it("compares failure admission and blocks the dependent task") {
         const std::string yaml(kFailedYaml);
         const auto legacy = runLegacy(yaml, false);
         NativeOwner owner;
         owner.init(yaml);
-        const auto native = owner.run({"reject", "downstream"}, {"", ""}, false);
+        const auto native = owner.run({"reject", "downstream"}, {{}, {}}, false);
         check(!legacy.result.success);
         check(legacyTerminal(legacy) == "failed");
         check(native.terminal == legacyTerminal(legacy));
@@ -419,7 +504,7 @@ spec("WorkflowRunner vs C11 Owner: identical YAML and input differential") {
         NativeOwner owner;
         owner.init(yaml);
         const auto native = owner.run({"prepare", "verify"},
-                                      {"observed", "finished"}, true);
+                                      {{"observed"}, {"finished"}}, true);
         check(!legacy.result.success);
         check(legacyTerminal(legacy) == "cancelled");
         check(native.terminal == legacyTerminal(legacy));
