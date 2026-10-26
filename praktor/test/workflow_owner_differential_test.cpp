@@ -15,7 +15,9 @@
 #include <json_parser.h>
 #include <vstr.h>
 #include <algorithm>
+#include <atomic>
 #include <chrono>
+#include <filesystem>
 #include <cstdint>
 #include <map>
 #include <memory>
@@ -110,7 +112,59 @@ void require(bool value, const char *message) {
     if (!value) throw std::runtime_error(message);
 }
 
-enum class StartCondition { Normal, PreCancelled, ExpiredDeadline };
+/* Independent source-only native admission: a real external Shell writes a
+ * marker before blocking. Waiting for the marker proves the child actually
+ * started, unlike a TaskStarted observer event or a successful CFlow callback.
+ * This fixture never switches the production WorkflowExecutor. */
+struct ActiveShellFixture {
+    std::filesystem::path directory;
+    std::filesystem::path started;
+
+    ActiveShellFixture() {
+        static std::atomic<unsigned> sequence{0u};
+        const auto tick = std::chrono::steady_clock::now()
+                              .time_since_epoch().count();
+        directory = std::filesystem::temp_directory_path() /
+            ("praktor-owner-cancel-" + std::to_string(tick) + "-" +
+             std::to_string(sequence.fetch_add(1u)));
+        require(std::filesystem::create_directory(directory),
+                "Could not create a unique running-Shell test directory");
+        started = directory / "child-started.txt";
+    }
+    ~ActiveShellFixture() {
+        std::error_code error;
+        std::filesystem::remove_all(directory, error);
+    }
+    std::string yaml() const {
+        std::string command;
+#ifdef _WIN32
+        std::string path = started.string();
+        for (std::size_t i = 0u; (i = path.find('\\'', i)) != std::string::npos;
+             i += 2u)
+            path.insert(i, 1u, '\\'');
+        command =
+            "powershell.exe -NoProfile -NonInteractive -Command \\""
+            "[System.IO.File]::WriteAllText('" + path +
+            "', 'started'); Start-Sleep -Seconds 30\\"";
+#else
+        command = "printf started > '" + started.string() +
+                  "'; exec sleep 30";
+#endif
+        return "variables: {baseline: safe}\\n"
+               "tasks:\\n"
+               "  - name: long_shell\\n"
+               "    shell:\\n"
+               "      cmd: |-\\n"
+               "        " + command + "\\n"
+               "      stream_output: false\\n"
+               "  - name: never_started\\n"
+               "    depends_on: [long_shell]\\n"
+               "    set_variable: forbidden\\n"
+               "    value: visible\\n";
+    }
+};
+
+enum class StartCondition { Normal, PreCancelled, ExpiredDeadline, CancelActiveShell };
 enum class NativePlanMode { PlainLeaves, OneShellRoot };
 
 struct LegacyTrace {
@@ -161,6 +215,8 @@ struct NativeTrace {
     size_t completed = 0;
     size_t callbacks = 0;
     size_t finalized = 0;
+    bool child_marker_observed = false;
+    int native_cancel_status = SALTS_EINVAL;
 };
 
 struct NativeTask {
@@ -309,12 +365,18 @@ struct NativeOwner {
     NativeTrace run(const std::vector<std::string>& names,
                     const std::vector<std::vector<std::string>>& output_keys,
                     StartCondition start,
-                    NativePlanMode mode = NativePlanMode::PlainLeaves) {
+                    NativePlanMode mode = NativePlanMode::PlainLeaves,
+                    std::filesystem::path active_marker = {}) {
         require(names.size() == praktor_workflow_snapshot_task_count(snapshot),
                 "C11 task count differs from shared fixture");
         require(names.size() == output_keys.size(), "Invalid differential fixture");
         NativeTrace trace;
-        if (start != StartCondition::Normal)
+        if (start == StartCondition::CancelActiveShell)
+            require(mode == NativePlanMode::OneShellRoot &&
+                    !active_marker.empty() && names.size() == 2u,
+                    "In-flight cancellation requires one Shell and a marker");
+        if (start == StartCondition::PreCancelled ||
+            start == StartCondition::ExpiredDeadline)
             require(praktor_workflow_dag_stop(
                         dag, start == StartCondition::PreCancelled
                             ? PRAKTOR_WORKFLOW_DAG_CANCELLED
@@ -353,6 +415,8 @@ struct NativeOwner {
             task.config.host = task.hooks;
             if (mode == NativePlanMode::OneShellRoot)
                 task.config.retainer = &retainer;
+            if (start == StartCondition::CancelActiveShell)
+                task.config.shell_close_budget_ms = 0u;
             char error[256]{};
             const int plan_status = mode == NativePlanMode::OneShellRoot
                 ? praktor_c11_orch_session_plan_create_native_shell(
@@ -374,10 +438,65 @@ struct NativeOwner {
             executor.init();
             OwnerCallback callback{};
             callback.task = &task;
-            callback.drive_until_terminal = mode == NativePlanMode::OneShellRoot;
+            callback.drive_until_terminal =
+                mode == NativePlanMode::OneShellRoot &&
+                start != StartCondition::CancelActiveShell;
             executor.run(callback);
             ++trace.callbacks;
             trace.finalized += callback.finalized;
+
+            if (start == StartCondition::CancelActiveShell) {
+                // The callback is FINALIZED but the actual native Process and
+                // Session remain RUNNING. No next task or output may publish.
+                require(callback.outcome == SALTS_BT_RUNNING,
+                        "Cancel probe did not admit a real RUNNING Shell");
+                int visible = 1;
+                require(praktor_c11_value_store_contains(
+                            &root, "shell_exit_code", &visible) ==
+                            PRAKTOR_C11_VALUE_OK && visible == 0,
+                        "C11 running Shell published an output prematurely");
+                const auto deadline = std::chrono::steady_clock::now() +
+                                      std::chrono::seconds(7);
+                std::error_code error_code;
+                while (std::chrono::steady_clock::now() < deadline) {
+                    if (std::filesystem::exists(active_marker, error_code)) {
+                        trace.child_marker_observed = true;
+                        break;
+                    }
+                    require(!error_code, "Could not inspect native child marker");
+                    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+                }
+                require(trace.child_marker_observed,
+                        "Real native Shell did not reach its child marker");
+
+                // Cancel-first application admission barrier: no dependent
+                // task can start after this owner turn is marked cancelled.
+                require(praktor_workflow_dag_stop(
+                            dag, PRAKTOR_WORKFLOW_DAG_CANCELLED) == SALTS_OK,
+                        "C11 cancellation failed to stop DAG admission");
+                trace.native_cancel_status =
+                    praktor_c11_session_cancel(&task.session);
+                require(trace.native_cancel_status == SALTS_OK ||
+                        trace.native_cancel_status == SALTS_EBUSY,
+                        "C11 Session rejected in-flight cancellation");
+
+                // Session destroy is the actual Process-lease transfer. It
+                // MUST happen before the sole Owner drives the retainer;
+                // callback settlement alone is not Process settlement.
+                require(praktor_c11_session_destroy(&task.session) == SALTS_OK,
+                        "C11 Session failed to hand off live Process owner");
+                task.session_ready = false;
+                drainRetainerAfterFinalizers();
+                require(praktor_workflow_task_registry_fail(
+                            registry, index, vstr_from_cstr("cancelled")) ==
+                            SALTS_OK, "C11 cancelled task finalization failed");
+                require(praktor_workflow_dag_finish(dag, index, false) ==
+                            SALTS_OK, "C11 cancelled DAG settlement failed");
+                trace.states[names[index]] = "failed";
+                trace.settled.push_back(names[index] + ":failed");
+                continue;
+            }
+
             // A completed CFlow callback does not imply a terminal Session.
             require(callback.outcome != SALTS_BT_RUNNING,
                     "C11 Session still running after one CFlow callback");
@@ -735,6 +854,43 @@ spec("WorkflowRunner vs C11 Owner: identical YAML and input differential") {
                   SALTS_OK && blocked == PRAKTOR_WORKFLOW_TASK_PENDING);
         check(native.completed == 1u);
         check(!legacy.result.error_message.empty());
+    }
+
+    it("cancels a genuinely running native Shell before DAG publication") {
+        // The Legacy WorkflowRunner's blocking ShellExecutor::execute() does
+        // not have an independently qualified in-flight control handoff.
+        // This is explicitly a C11 application Owner lifecycle gate, NOT
+        // a claim of Legacy application-level mid-flight cancellation parity.
+        ActiveShellFixture source;
+        NativeOwner owner;
+        owner.init(source.yaml());
+        const auto native = owner.run({"long_shell", "never_started"},
+                                      {{}, {}},
+                                      StartCondition::CancelActiveShell,
+                                      NativePlanMode::OneShellRoot,
+                                      source.started);
+        check(native.terminal == "cancelled");
+        check(native.child_marker_observed);
+        check(native.native_cancel_status == SALTS_OK ||
+              native.native_cancel_status == SALTS_EBUSY);
+        check((native.started == std::vector<std::string>{"long_shell"}));
+        check((native.settled == std::vector<std::string>{"long_shell:failed"}));
+        check(native.completed == 1u);
+        check(native.callbacks == 1u && native.finalized == 1u);
+        check(native.outputs.empty() && native.typed_outputs.empty() &&
+              native.typed_failure_outputs.empty());
+        int published = 1;
+        check(praktor_c11_value_store_contains(
+                  &owner.root, "forbidden", &published) ==
+                  PRAKTOR_C11_VALUE_OK && published == 0);
+        check(praktor_c11_value_store_contains(
+                  &owner.root, "baseline", &published) ==
+                  PRAKTOR_C11_VALUE_OK && published == 1);
+        praktor_workflow_task_state dependent =
+            PRAKTOR_WORKFLOW_TASK_SUCCESS;
+        check(praktor_workflow_task_registry_state(owner.registry, 1u,
+                 &dependent) == SALTS_OK &&
+              dependent == PRAKTOR_WORKFLOW_TASK_PENDING);
     }
 
     it("compares pre-start cancellation without running any leaf") {
