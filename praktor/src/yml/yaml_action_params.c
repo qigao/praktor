@@ -1,6 +1,5 @@
 #include "yml/yaml_action_params.h"
 #include "yaml_diagnostic_internal.h"
-#include <cstl/vec.h>
 #include <ctype.h>
 #include <fmt.h>
 #include <stdlib.h>
@@ -9,8 +8,8 @@
 struct praktor_yaml_action_params {
     praktor_yaml_action_kind kind;
     size_t retained_bytes;
-    /* Raw pointer storage only: this owner explicitly destroys each tstr. */
-    vec_t arguments;
+    /* Private bounded argument array; every tstr has exactly one owner. */
+    struct { tstr *items; size_t count, capacity; } arguments;
     union {
         struct { tstr url, path, sha256; bool overwrite; int timeout_ms; } download;
         struct { tstr name, profile; praktor_process_operation operation; int timeout_ms, poll_interval_ms; } service;
@@ -24,6 +23,30 @@ struct praktor_yaml_action_params {
     } value;
 };
 
+/* The native YAML Action owner stores only its own owned argument strings.
+ * This is not a generic container provider or CMeta shadow runtime. */
+static bool argument_push(praktor_yaml_action_params *owner,tstr value) {
+    size_t capacity;
+    tstr *items;
+    if (owner->arguments.count>=PRAKTOR_YAML_ACTION_MAX_ARGUMENTS)
+        return false;
+    if (owner->arguments.count==owner->arguments.capacity) {
+        capacity=owner->arguments.capacity?owner->arguments.capacity:4u;
+        while (capacity<=owner->arguments.count) {
+            if(capacity>PRAKTOR_YAML_ACTION_MAX_ARGUMENTS/2u) {
+                capacity=PRAKTOR_YAML_ACTION_MAX_ARGUMENTS;break;
+            }
+            capacity*=2u;
+        }
+        if(capacity>PRAKTOR_YAML_ACTION_MAX_ARGUMENTS ||
+           capacity>SIZE_MAX/sizeof(*items))return false;
+        items=(tstr *)realloc(owner->arguments.items,capacity*sizeof(*items));
+        if(!items)return false;
+        owner->arguments.items=items;owner->arguments.capacity=capacity;
+    }
+    owner->arguments.items[owner->arguments.count++]=value;
+    return true;
+}
 static int owned_failure(praktor_yaml_field_error *error, const char *message) {
     return praktor_yaml_field_fail(error, SALTS_ENOMEM, PRAKTOR_YAML_FAILURE_ALLOCATION,
         error ? tstr_dup(message) : NULL);
@@ -114,16 +137,18 @@ static int positive_integer(praktor_yaml_node parent, const char *key, const cha
     if (status != SALTS_OK) return status;
     return *out > 0 ? SALTS_OK : parameter_error_at(node, message, error);
 }
-/* Consumes text on every path. The raw vector copies the owned pointer only. */
+/* Consumes text on every path. A failed append retains no dangling owner. */
 static int append_argument(praktor_yaml_action_params *owner, praktor_yaml_node node,
     tstr text, praktor_yaml_field_error *error) {
-    stl_status stored;
     int status = retain_text(owner, node, text, &text, error);
     if (status != SALTS_OK) return status;
-    stored = vec_push(&owner->arguments, &text);
-    if (stored == STL_OK) return SALTS_OK;
+    if (owner->arguments.count>=PRAKTOR_YAML_ACTION_MAX_ARGUMENTS) {
+        tstr_free(text);
+        return invalid(error);
+    }
+    if (argument_push(owner,text))return SALTS_OK;
     tstr_free(text);
-    return stored == STL_OUT_OF_MEMORY ? owned_failure(error, "Failed to retain YAML action arguments") : invalid(error);
+    return owned_failure(error, "Failed to retain YAML action arguments");
 }
 static int arguments(praktor_yaml_action_params *owner, praktor_yaml_node parent,
     const char *shape_error, const char *entry_error, praktor_yaml_field_error *error) {
@@ -395,10 +420,10 @@ static int command_params(praktor_yaml_action_params *owner, praktor_yaml_node t
     if (owner->value.command.sequence) {
         status = scalar_list(owner, node, error);
         if (status != SALTS_OK) return status;
-        if (!vec_size(&owner->arguments)) return parameter_error_at(node, "command array must contain at least one entry", error);
+        if (!owner->arguments.count) return parameter_error_at(node, "command array must contain at least one entry", error);
         /* Old code decodes every entry before checking any empty command. */
-        for (index = 0; index < vec_size(&owner->arguments); ++index)
-            if (!tstr_len(*(const tstr *)vec_at_const(&owner->arguments, index)))
+        for (index = 0; index < owner->arguments.count; ++index)
+            if (!tstr_len(owner->arguments.items[index]))
                 return parameter_error_at(node, "command array entries cannot be empty", error);
     } else if (praktor_yaml_has_val(node)) {
         status = scalar_field(owner, task, "command", &owner->value.command.text, error);
@@ -438,8 +463,8 @@ static int program_params(praktor_yaml_action_params *owner, praktor_yaml_node t
 void praktor_yaml_action_params_destroy(praktor_yaml_action_params *owner) {
     size_t index;
     if (!owner) return;
-    for (index = 0; index < vec_size(&owner->arguments); ++index) tstr_free(*(const tstr *)vec_at_const(&owner->arguments, index));
-    vec_destroy(&owner->arguments);
+    for (index = 0; index < owner->arguments.count; ++index) tstr_free(owner->arguments.items[index]);
+    free(owner->arguments.items);
     switch (owner->kind) {
     case PRAKTOR_YAML_ACTION_DOWNLOAD:
         tstr_free(owner->value.download.url); tstr_free(owner->value.download.path); tstr_free(owner->value.download.sha256); break;
@@ -467,9 +492,6 @@ int praktor_yaml_action_params_create(praktor_yaml_node task, praktor_yaml_actio
     owner = (praktor_yaml_action_params *)calloc(1, sizeof(*owner));
     if (!owner) return owned_failure(error, "Failed to allocate YAML action parameters");
     owner->kind = kind;
-    if (vec_init_bytes(&owner->arguments, sizeof(tstr), _Alignof(tstr), PRAKTOR_YAML_ACTION_MAX_ARGUMENTS) != STL_OK) {
-        free(owner); return invalid(error);
-    }
     if (kind == PRAKTOR_YAML_ACTION_COMMAND) status = command_params(owner, task, error);
     else if (kind == PRAKTOR_YAML_ACTION_PROGRAM) status = program_params(owner, task, error);
     else {
@@ -498,22 +520,22 @@ int praktor_yaml_action_download(const praktor_yaml_action_params *owner, prakto
 int praktor_yaml_action_service(const praktor_yaml_action_params *owner, praktor_yaml_service_view *out) {
     if (!owner || !out || owner->kind != PRAKTOR_YAML_ACTION_SERVICE) return SALTS_EINVAL;
     *out = (praktor_yaml_service_view){owner->value.service.operation, text_view(owner->value.service.name),
-        owner->value.service.profile ? text_view(owner->value.service.profile) : vstr_from_cstr("windows_scm"), vec_size(&owner->arguments),
+        owner->value.service.profile ? text_view(owner->value.service.profile) : vstr_from_cstr("windows_scm"), owner->arguments.count,
         owner->value.service.timeout_ms, owner->value.service.poll_interval_ms};
     return SALTS_OK;
 }
 int praktor_yaml_action_managed_process(const praktor_yaml_action_params *owner, praktor_yaml_managed_process_view *out) {
     if (!owner || !out || owner->kind != PRAKTOR_YAML_ACTION_MANAGED_PROCESS) return SALTS_EINVAL;
     *out = (praktor_yaml_managed_process_view){owner->value.process.operation, text_view(owner->value.process.image_name),
-        text_view(owner->value.process.executable), text_view(owner->value.process.working_directory), vec_size(&owner->arguments),
+        text_view(owner->value.process.executable), text_view(owner->value.process.working_directory), owner->arguments.count,
         owner->value.process.startup_timeout_ms, owner->value.process.stop_timeout_ms, owner->value.process.force_terminate};
     return SALTS_OK;
 }
 int praktor_yaml_action_argument(const praktor_yaml_action_params *owner, size_t index, vstr *out) {
     const tstr *text;
     if (!owner || !out) return SALTS_EINVAL;
-    text = (const tstr *)vec_at_const(&owner->arguments, index);
-    if (!text) return SALTS_ENOENT;
+    if (index>=owner->arguments.count) return SALTS_ENOENT;
+    text = &owner->arguments.items[index];
     *out = text_view(*text);
     return SALTS_OK;
 }
@@ -521,7 +543,7 @@ int praktor_yaml_action_argument(const praktor_yaml_action_params *owner, size_t
 int praktor_yaml_action_program(const praktor_yaml_action_params *owner, praktor_yaml_program_view *out) {
     if (!owner || !out || owner->kind != PRAKTOR_YAML_ACTION_PROGRAM) return SALTS_EINVAL;
     *out = (praktor_yaml_program_view){text_view(owner->value.program.program), text_view(owner->value.program.input),
-        vec_size(&owner->arguments), owner->value.program.output_format};
+        owner->arguments.count, owner->value.program.output_format};
     return SALTS_OK;
 }
 int praktor_yaml_action_command(const praktor_yaml_action_params *owner, praktor_yaml_command_view *out) {
@@ -529,7 +551,7 @@ int praktor_yaml_action_command(const praktor_yaml_action_params *owner, praktor
     if (!owner || !out || owner->kind != PRAKTOR_YAML_ACTION_COMMAND) return SALTS_EINVAL;
     result.sequence = owner->value.command.sequence;
     result.command = text_view(owner->value.command.text);
-    result.command_count = vec_size(&owner->arguments);
+    result.command_count = owner->arguments.count;
     result.output_format = owner->value.command.output_format;
     result.postprocessor = owner->value.command.postprocessor;
     switch (result.postprocessor) {
