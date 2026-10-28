@@ -103,9 +103,27 @@ def main():
     if not (gmssl / "share" / "gmssl" / "GmSSLConfig.cmake").is_file():
         if not vcpkg.is_file():
             raise RuntimeError("Cannot provision canonical GmSSL: vcpkg executable absent")
-        run(vcpkg, "install", f"gmssl:{triplet}",
+        # The Crypto-only dependency must have its OWN manifest. Invoking
+        # 'vcpkg install gmssl:<triplet>' from the Praktor manifest is illegal
+        # and must not add a production GmSSL dependency to this repository.
+        import json
+        manifest_dir = BUILD / "crypto-gmssl-manifest"
+        manifest_dir.mkdir(parents=True, exist_ok=True)
+        manifest = {
+            "name": "praktor-crypto-gmssl-ci",
+            "version-string": "0.0.0",
+            "dependencies": ["gmssl"],
+            "builtin-baseline": "b1b19307e2d2ec1eefbdb7ea069de7d4bcd31f01",
+        }
+        (manifest_dir / "vcpkg.json").write_text(
+            json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+        run(vcpkg, "install",
+            "--x-manifest-root=" + str(manifest_dir),
+            "--triplet=" + triplet,
             "--overlay-ports=" + str(Path(env["VCPKG_CACHE_REPOSITORY_ROOT"]) / "ports"),
             "--x-install-root=" + str(installed_root), env=env)
+        if not (gmssl / "share" / "gmssl" / "GmSSLConfig.cmake").is_file():
+            raise RuntimeError("Canonical GmSSL port is absent after manifest installation")
     install_project("crypto", sources["crypto"], env,
                     ["-DCRYPTO_GMSSL_ROOT=" + str(gmssl)])
     env["CRYPTO_ROOT"] = str(installed("crypto"))
