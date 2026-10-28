@@ -129,7 +129,10 @@ def main():
     env["CRYPTO_ROOT"] = str(installed("crypto"))
 
     env["SALTS_UTILS_CI_BUILD_ROOT"] = str(BUILD / "build-salts-utils")
-    install_project("salts-utils", sources["salts-utils"], env)
+    install_project("salts-utils", sources["salts-utils"], env, [
+        "-DSALTS_UTILS_ENABLE_CAPTURE=OFF",
+        "-DSALTS_UTILS_ENABLE_CFLOW_USB=OFF",
+    ])
     env["SALTS_UTILS_ROOT"] = str(installed("salts-utils"))
 
     # All package identities are explicit. No CHttp, C++ compiler,
