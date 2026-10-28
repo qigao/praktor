@@ -1,0 +1,172 @@
+name: Praktor native C11 post-merge acceptance
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "CMakeLists.txt"
+      - "ProjectOptions.cmake"
+      - "vcpkg.json"
+      - "praktor/**"
+      - "actions/**"
+      - "sdk/**"
+      - "shared/**"
+      - "tools/**"
+      - "cmake/**"
+      - ".github/workflows/c11-post-merge.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: praktor-c11-master-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  source-policy:
+    name: Pure C11 repository policy
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Refuse all C++ source and headers after merge
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import subprocess
+          names=subprocess.check_output(["git","ls-files","-z"]).decode().split("\0")
+          bad=[s for s in names if s.endswith((".cpp",".cc",".cxx",".hpp",".hh",".hxx",".hpp.in"))]
+          if bad:
+              raise SystemExit("CPP files retained in C11 master: "+", ".join(bad))
+          print("C11-only tracked source tree; no C++ source/header files")
+          PY
+
+  native-c11:
+    name: ${{ matrix.rid }} / C11 runtime SDK CLI
+    needs: source-policy
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {runner: ubuntu-24.04, rid: linux-x64, triplet: x64-linux}
+          - {runner: windows-2025, rid: windows-x64, triplet: x64-windows}
+          - {runner: macos-15, rid: macos-arm64, triplet: arm64-osx}
+    env:
+      RID: ${{ matrix.rid }}
+      TRIPLET: ${{ matrix.triplet }}
+      HOST_TRIPLET: ${{ matrix.triplet }}
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      CCACHE_DIR: ${{ github.workspace }}/.cache/c11-postmerge
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: qigao/salts-core
+          ref: e84c79348217948255c4c2553edc1103c12a6a3b
+          path: build/upstream/salts-core
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: qigao/salts
+          ref: efbfa23e7a22e9e59c32abde987c06cc6e8e44f3
+          path: build/upstream/salts
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: qigao/crypto
+          ref: 57e03d9ebefc3b9348764edaddb834862e669a45
+          path: build/upstream/crypto
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: qigao/salts-utils
+          ref: 87857f45eddbb12430a2da3d1ed3d52683eb092a
+          path: build/upstream/salts-utils
+          persist-credentials: false
+      - uses: ./.github/actions/setup-native-ci
+      - name: Prepare Linux host tools
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y ninja-build ccache nasm pkg-config
+      - name: Prepare macOS host tools
+        if: runner.os == 'macOS'
+        shell: bash
+        run: brew install ninja ccache nasm pkg-config
+      - name: Prepare Windows host tools
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install ninja ccache nasm --yes --no-progress
+          if ($LASTEXITCODE -ne 0) { throw 'Host tools unavailable' }
+      - name: Build and test C11 after merge (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: python3 cmake/ci/accept_c11_after_merge.py
+      - name: Build and test C11 after merge (MSVC)
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: |
+          for /f "delims=" %%I in ('"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath') do set VSINSTALL=%%I
+          if not defined VSINSTALL exit /b 1
+          call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64
+          if errorlevel 1 exit /b 1
+          python cmake/ci/accept_c11_after_merge.py
+
+  full-source-tsan:
+    name: Fully instrumented C11 Core/CMeta/CFlow/Process TSan
+    needs: source-policy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    env:
+      RID: linux-x64
+      TRIPLET: x64-linux
+      HOST_TRIPLET: x64-linux
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      CCACHE_DIR: ${{ github.workspace }}/.cache/c11-tsan
+      TSAN_OPTIONS: halt_on_error=1:exitcode=66
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: qigao/salts-core
+          ref: e84c79348217948255c4c2553edc1103c12a6a3b
+          path: build/upstream/salts-core
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: qigao/salts
+          ref: efbfa23e7a22e9e59c32abde987c06cc6e8e44f3
+          path: build/upstream/salts
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: qigao/crypto
+          ref: 57e03d9ebefc3b9348764edaddb834862e669a45
+          path: build/upstream/crypto
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: qigao/salts-utils
+          ref: 87857f45eddbb12430a2da3d1ed3d52683eb092a
+          path: build/upstream/salts-utils
+          persist-credentials: false
+      - uses: ./.github/actions/setup-native-ci
+      - name: Prepare native tools
+        shell: bash
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y ninja-build ccache nasm pkg-config
+      - name: Build complete-source instrumented C11 chain
+        shell: bash
+        run: python3 cmake/ci/accept_c11_after_merge.py --sanitizer thread

@@ -5,7 +5,7 @@ set_target_properties(yaml_document_c_test PROPERTIES C_STANDARD 11
 add_test(NAME yaml_document_c_test COMMAND yaml_document_c_test)
 add_executable(yaml_document_fault_test ${CMAKE_CURRENT_LIST_DIR}/../../test/yaml_document_fault_test.c)
 target_include_directories(yaml_document_fault_test PRIVATE ${CMAKE_CURRENT_LIST_DIR}/../../include)
-target_link_libraries(yaml_document_fault_test PRIVATE Salts::YamlParser Salts::Core Salts::TinyTest)
+target_link_libraries(yaml_document_fault_test PRIVATE Salts::CYaml Salts::Core Salts::TinyTest)
 set_target_properties(yaml_document_fault_test PROPERTIES C_STANDARD 11
     C_STANDARD_REQUIRED ON C_EXTENSIONS OFF LINKER_LANGUAGE C)
 add_test(NAME yaml_document_fault_test COMMAND yaml_document_fault_test)
@@ -18,7 +18,7 @@ target_compile_definitions(yaml_fields_c_test PRIVATE
 add_test(NAME yaml_fields_c_test COMMAND yaml_fields_c_test)
 add_executable(yaml_fields_fault_test ${CMAKE_CURRENT_LIST_DIR}/../../test/yaml_fields_fault_test.c)
 target_include_directories(yaml_fields_fault_test PRIVATE ${CMAKE_CURRENT_LIST_DIR}/../../include)
-target_link_libraries(yaml_fields_fault_test PRIVATE Salts::YamlParser Salts::Core Salts::TinyTest)
+target_link_libraries(yaml_fields_fault_test PRIVATE Salts::CYaml Salts::Core Salts::TinyTest)
 set_target_properties(yaml_fields_fault_test PROPERTIES C_STANDARD 11
     C_STANDARD_REQUIRED ON C_EXTENSIONS OFF LINKER_LANGUAGE C)
 add_test(NAME yaml_fields_fault_test COMMAND yaml_fields_fault_test)
@@ -29,7 +29,7 @@ if(CMAKE_CXX_COMPILER_LOADED)
     add_library(yaml_document_fault_provider OBJECT ${CMAKE_CURRENT_LIST_DIR}/../../test/yaml_document_fault_test.c)
     target_compile_definitions(yaml_document_fault_provider PRIVATE PRAKTOR_YAML_FAULT_PROVIDER)
     target_include_directories(yaml_document_fault_provider PRIVATE ${CMAKE_CURRENT_LIST_DIR}/../../include)
-    target_link_libraries(yaml_document_fault_provider PRIVATE Salts::YamlParser Salts::Core)
+    target_link_libraries(yaml_document_fault_provider PRIVATE Salts::CYaml Salts::Core)
     set_target_properties(yaml_document_fault_provider PROPERTIES C_STANDARD 11
         C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
     add_library(orch_tree_fault_provider OBJECT ${CMAKE_CURRENT_LIST_DIR}/../../test/orch_tree_fault_test.c)
@@ -53,7 +53,7 @@ if(CMAKE_CXX_COMPILER_LOADED)
         $<TARGET_OBJECTS:orch_tree_fault_provider>)
     target_compile_definitions(yaml_document_legacy_fault_test PRIVATE PRAKTOR_YAML_FAULT_TEST PRAKTOR_ORCH_FAULT_TEST)
     target_link_libraries(yaml_document_legacy_fault_test PRIVATE praktor_test_support
-        praktor_document_query praktor_workflow_value Salts::YamlParser Salts::Core Salts::CSTL)
+        praktor_document_query praktor_workflow_value Salts::CYaml Salts::Core Salts::CSTL)
     target_include_directories(yaml_document_legacy_fault_test PRIVATE ${CMAKE_CURRENT_LIST_DIR}/../../../shared/process/include)
     target_compile_features(yaml_document_legacy_fault_test PRIVATE cxx_std_17)
     set_target_properties(yaml_document_legacy_fault_test PROPERTIES C_STANDARD 11
