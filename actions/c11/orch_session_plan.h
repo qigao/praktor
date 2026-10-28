@@ -1,0 +1,110 @@
+#ifndef PRAKTOR_C11_ORCH_SESSION_PLAN_H
+#define PRAKTOR_C11_ORCH_SESSION_PLAN_H
+
+#include "session.h"
+#include "yml/orch_tree.h"
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/* Qualification-only, C11-owned bridge from the canonical immutable Orch
+ * AST to the already-existing C11 Session compiler. No second YAML parser,
+ * scheduler, Process owner, C++ runtime or fallback.
+ *
+ * Initial admitted subset: Sequence, Fallback/Selector, Inverter, ForceSuccess,
+ * ForceFailure, SetVariable, CheckExitCode, ParseKeyValue, ParseRegex,
+ * ParseLines, Sleep. Shell/Parallel/SubTree, dynamic scheduler nodes and
+ * all other unqualified operations explicitly return SALTS_ENOTSUP.
+ *
+ * All parameter text and sizes are copied; the result borrows neither the
+ * Orch owner nor the input YAML. Input may be destroyed after create().
+ * Session init deep-copies descriptors; plan may then be destroyed before
+ * the first tick. Its tree shape remains the already-qualified preorder.
+ *
+ * Strong failure: caller's *out remains unchanged. One owner controls create,
+ * Session init and destruction. Retain bounds from the canonical Orch owner
+ * (4098 nodes, 8 parameters/node, 1 MiB aggregate parameter values) plus
+ * salts_bt_tree_config max_nodes/max_depth. No recursive traversal.
+ *
+ * Returns SALTS_OK, SALTS_EINVAL, SALTS_ENOTSUP or SALTS_ENOMEM.
+ */
+typedef struct praktor_c11_orch_session_plan praktor_c11_orch_session_plan;
+
+int praktor_c11_orch_session_plan_create(
+    const praktor_orch_tree *tree, const salts_bt_tree_config *limits,
+    praktor_c11_orch_session_plan **out,
+    char *error, size_t error_capacity);
+/* Explicit, qualification-only native Process admission for EXACTLY one
+ * canonical Orch Shell root (not a composite tree or an automatic fallback).
+ * The default create() above still refuses Shell.
+ * The plan records its Process-owner requirement; init_session refuses
+ * a missing/uninitialized retainer before touching the destination Session.
+ * Actual start/close/transfer is exclusively done by the canonical
+ * C11 Session + Salts::Process driver. This API is not installed as SDK ABI. */
+int praktor_c11_orch_session_plan_create_native_shell(
+    const praktor_orch_tree *tree,const salts_bt_tree_config *limits,
+    praktor_c11_orch_session_plan **out,
+    char *error,size_t error_capacity);
+
+/* Explicit opt-in for the canonical command lowering ONLY when it yields
+ * Sequence -> one Shell child, with no parser/postprocessor or extra command.
+ * Requires a real initialized Process retainer at Session admission.
+ * Other commands and default create() remain fail-closed. Test-only API. */
+int praktor_c11_orch_session_plan_create_native_command(
+    const praktor_orch_tree *tree,const salts_bt_tree_config *limits,
+    praktor_c11_orch_session_plan **out,
+    char *error,size_t error_capacity);
+/* Explicit C11 qualification for canonical single-command JSON postprocessing:
+ * Sequence -> one Shell -> one ParseJson, with the canonical stdout handoff.
+ * Other parser combinations, multi-command flows and ordinary create()
+ * remain fail-closed. Requires an initialized Process retainer. Test-only. */
+int praktor_c11_orch_session_plan_create_native_command_json(
+    const praktor_orch_tree *tree,const salts_bt_tree_config *limits,
+    praktor_c11_orch_session_plan **out,
+    char *error,size_t error_capacity);
+/* Explicit opt-in for one canonical command followed by ParseKeyValue.
+ * Admits precisely Sequence -> Shell -> ParseKeyValue with the same canonical
+ * stdout binding used by command lowering. Native key/value parsing reuses
+ * the existing C11 output scanner; no fallback, extra Shell or multi-command.
+ * Requires a real initialized Process retainer. Not installed in the SDK. */
+int praktor_c11_orch_session_plan_create_native_command_keyvalue(
+    const praktor_orch_tree *tree,const salts_bt_tree_config *limits,
+    praktor_c11_orch_session_plan **out,
+    char *error,size_t error_capacity);
+/* Explicit source-only native command+regex qualification. Admits only
+ * canonical Sequence -> one Shell -> one ParseRegex with matching 'stdout'
+ * port names. Uses the existing bounded NativeHost regex implementation,
+ * no Legacy fallback, and a mandatory initialized Process retainer.
+ * Unsupported regex constructs still fail closed at native execution. */
+int praktor_c11_orch_session_plan_create_native_command_regex(
+    const praktor_orch_tree *tree,const salts_bt_tree_config *limits,
+    praktor_c11_orch_session_plan **out,
+    char *error,size_t error_capacity);
+/* Explicit source-only native command+lines qualification. Only one
+ * canonical Sequence -> Shell -> ParseLines with matching stdout ports and
+ * an initialized Process retainer. ParseLines uses the existing bounded
+ * NativeHost line scanner; its text and *_count remain task-local until the
+ * application Owner explicitly selects and publishes output keys.
+ * Default plan, noncanonical ports, multi-command and Legacy fallback
+ * remain rejected. */
+int praktor_c11_orch_session_plan_create_native_command_lines(
+    const praktor_orch_tree *tree,const salts_bt_tree_config *limits,
+    praktor_c11_orch_session_plan **out,
+    char *error,size_t error_capacity);
+void praktor_c11_orch_session_plan_destroy(
+    praktor_c11_orch_session_plan *plan);
+size_t praktor_c11_orch_session_plan_node_count(
+    const praktor_c11_orch_session_plan *plan);
+
+/* Does not consume the plan. Session is caller-owned and must be initially
+ * empty. The C11 Session clones descriptors/typed parameters on success.
+ * No implicit Host selection, Process reservation or execution occurs here. */
+int praktor_c11_orch_session_plan_init_session(
+    const praktor_c11_orch_session_plan *plan,
+    const praktor_c11_session_config *config,
+    praktor_c11_session *session);
+
+#ifdef __cplusplus
+}
+#endif
+#endif

@@ -1,0 +1,5 @@
+add_library(praktor_orch_yaml STATIC ${CMAKE_CURRENT_LIST_DIR}/orch_yaml.c)
+target_include_directories(praktor_orch_yaml PUBLIC ${CMAKE_CURRENT_LIST_DIR}/../../include)
+target_link_libraries(praktor_orch_yaml PUBLIC praktor_orch_tree praktor_yaml_document)
+target_compile_features(praktor_orch_yaml PUBLIC c_std_11)
+set_target_properties(praktor_orch_yaml PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF POSITION_INDEPENDENT_CODE ON)

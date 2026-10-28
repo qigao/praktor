@@ -5,6 +5,7 @@ Praktor first-party code is licensed under the Apache License 2.0.
 | Component | Repository path | Upstream license | Notes |
 | --- | --- | --- | --- |
 | SQLite Lemon parser generator | `tools/lemon/` | Public-domain dedication | The source headers explicitly disclaim copyright. |
+| TRE regular-expression library | vcpkg dependency `tre` | BSD-2-Clause | Linked as an external dependency; source is not bundled. |
 
 Dependencies resolved through vcpkg or system package managers are not bundled
 as Praktor source and remain governed by their respective upstream licenses.

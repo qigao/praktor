@@ -1072,8 +1072,8 @@ parse_json:
 
 **Parameters**:
 - `input_key` (required) - Blackboard key containing text
-- `pattern` (required) - Regex pattern
-- `capture_group` (default: 0) - Capture group index
+- `pattern` (required) - Regex pattern (POSIX extended syntax on the C11 backend)
+- `capture_group` (default: 1) - Capture group index; valid values are 1..N
 - `output_key` (default: "parsed_output") - Result storage key
 
 **Returns**:
@@ -1084,7 +1084,7 @@ parse_json:
 ```yaml
 parse_regex:
   input_key: build_output
-  pattern: "Built target (\\w+)"
+  pattern: "Built target ([[:alnum:]_]+)"
   capture_group: 1
   output_key: target_name
 ```
@@ -1097,7 +1097,7 @@ parse_regex:
 
 **Parameters**:
 - `input_key` (required) - Blackboard key containing text
-- `filter` (optional) - Regular expression searched within each line; Legacy ignores invalid expressions
+- `filter` (optional) - Regular expression searched within each line; invalid expressions disable filtering
 - `output_key` (default: "parsed_lines") - Result storage key
 
 **Returns**:

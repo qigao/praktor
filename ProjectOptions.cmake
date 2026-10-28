@@ -1,11 +1,8 @@
-include(CMakeDependentOption)
-
-set(CMAKE_COLOR_DIAGNOSTICS ON)
-
-# building the tests
-option(ENABLE_TESTS "Enable the tests" OFF)
-option(ENABLE_SCRIPT_ENGINE "Enable the TurboScript-backed workflow script engine" ON)
-
-set_property(GLOBAL PROPERTY USE_FOLDERS ON)
-
+option(ENABLE_TESTS "Enable native C11 tests" OFF)
+option(ENABLE_SCRIPT_ENGINE "Removed C++ TurboScript backend (unsupported)" OFF)
+option(PRAKTOR_ENABLE_C11_ACTIONS "Native C11 action plan (mandatory)" ON)
+if(NOT PRAKTOR_ENABLE_C11_ACTIONS)
+    message(FATAL_ERROR "There is no Legacy action backend")
+endif()
 find_package(Threads REQUIRED)
+set_property(GLOBAL PROPERTY USE_FOLDERS ON)

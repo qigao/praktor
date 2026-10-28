@@ -1,0 +1,53 @@
+#include "yml/yaml_task_metadata.h"
+#include <string.h>
+#include <tinytest.h>
+static praktor_yaml_document *doc_for(const char *yaml){praktor_yaml_document *d=NULL;check(praktor_yaml_document_create(vstr_from_cstr(yaml),&d,NULL)==SALTS_OK);return d;}
+static void json_eq(const json_value_t *v,const char *expected){char *s=json_serialize(v,NULL);check(s&&strcmp(s,expected)==0);json_serialize_free(s);}
+spec("C task metadata parser"){
+ it("projects scalar, list and map metadata"){praktor_yaml_document *d=doc_for("name: build\ndescription: Compile\ndepends_on: [configure]\nvars: {MODE: fast}\nenv: {CI: '1'}\ndotEnv: .env\nwhen: ready\nworking_dir: src\nsources: [a.c, b.c]\ngenerates: out.o\ntimeout: 15s\nretries: {count: 2}\nsilent: true\nfinally: cleanup\n");json_value_t *v=NULL;praktor_yaml_field_error e={0};check(praktor_yaml_task_metadata_create(praktor_yaml_root(d),&v,&e)==SALTS_OK);json_eq(v,"{\"name\":\"build\",\"description\":\"Compile\",\"depends_on\":[\"configure\"],\"vars\":{\"MODE\":\"fast\"},\"env\":{\"CI\":\"1\"},\"dot_env\":[\".env\"],\"when\":\"ready\",\"timeout\":\"15s\",\"retry_count\":2,\"working_dir\":\"src\",\"silent\":true,\"sources\":[\"a.c\",\"b.c\"],\"generates\":[\"out.o\"],\"finally\":\"cleanup\"}");json_free(v);praktor_yaml_field_error_dispose(&e);praktor_yaml_document_destroy(d);}
+ it("rejects missing or empty names and unknown keys"){const char *bad[]={"description: no name\n","name: ''\n","name: ok\nunknown: 1\n"};size_t i;for(i=0;i<3;++i){praktor_yaml_document *d=doc_for(bad[i]);json_value_t *v=NULL;praktor_yaml_field_error e={0};check(praktor_yaml_task_metadata_create(praktor_yaml_root(d),&v,&e)!=SALTS_OK);check(v==NULL);praktor_yaml_field_error_dispose(&e);praktor_yaml_document_destroy(d);}}
+ it("projects each items and trigger action lists to owned JSON"){praktor_yaml_document *d=doc_for("name: loop\neach: {items: [a, b], as: item_name, index_variable: i}\ntriggers: {on_success: [done], on_complete: [cleanup]}\n");json_value_t *v=NULL;praktor_yaml_field_error e={0};check(praktor_yaml_task_metadata_create(praktor_yaml_root(d),&v,&e)==SALTS_OK);json_eq(v,"{\"name\":\"loop\",\"each\":{\"items\":[\"a\",\"b\"],\"matrix\":{},\"as\":\"item_name\",\"index_variable\":\"i\"},\"triggers\":{\"on_success\":[\"done\"],\"on_failure\":[],\"on_complete\":[\"cleanup\"]}}");json_free(v);praktor_yaml_field_error_dispose(&e);praktor_yaml_document_destroy(d);}
+ it("projects each matrix with the default item name"){praktor_yaml_document *d=doc_for("name: matrix\neach: {matrix: {region: [us, eu]}}\n");json_value_t *v=NULL;check(praktor_yaml_task_metadata_create(praktor_yaml_root(d),&v,NULL)==SALTS_OK);json_eq(v,"{\"name\":\"matrix\",\"each\":{\"items\":[],\"matrix\":{\"region\":[\"us\",\"eu\"]},\"as\":\"item\",\"index_variable\":\"\"}}");json_free(v);praktor_yaml_document_destroy(d);}
+ it("validates retry count shape, range and decimal syntax"){const char *bad[]={"name: x\nretries: []\n","name: x\nretries: {}\n","name: x\nretries: {count: -1}\n","name: x\nretries: {count: 1025}\n","name: x\nretries: {count: 1.5}\n","name: x\nretries: {count: 1, extra: 2}\n"};size_t i;for(i=0;i<sizeof(bad)/sizeof(bad[0]);++i){praktor_yaml_document *d=doc_for(bad[i]);json_value_t *v=NULL;praktor_yaml_field_error e={0};check(praktor_yaml_task_metadata_create(praktor_yaml_root(d),&v,&e)!=SALTS_OK);check(v==NULL);praktor_yaml_field_error_dispose(&e);praktor_yaml_document_destroy(d);}}
+ it("reads optional script through the C API"){
+    praktor_yaml_document *d=doc_for("name: script_task\nscript: echo hello\n");
+    bool present=false;tstr text=NULL;praktor_yaml_field_error e={0};
+    check(praktor_yaml_task_script_read(praktor_yaml_root(d),&present,&text,&e)==SALTS_OK);
+    check(present&&text&&tstr_len(text)==10&&memcmp(text,"echo hello",10)==0);
+    tstr_free(text);praktor_yaml_field_error_dispose(&e);praktor_yaml_document_destroy(d);
+    d=doc_for("name: no_script\n");present=true;text=(tstr)1;
+    check(praktor_yaml_task_script_read(praktor_yaml_root(d),&present,&text,&e)==SALTS_OK);
+    check(!present&&text==NULL);
+    praktor_yaml_field_error_dispose(&e);praktor_yaml_document_destroy(d);
+ }
+ it("rejects malformed and empty scripts in C"){
+    const char *bad[]={"name: x\nscript: [echo]\n","name: x\nscript: ''\n"};
+    size_t i;
+    for(i=0;i<2;++i){
+        praktor_yaml_document *d=doc_for(bad[i]);bool present=false;tstr text=NULL;praktor_yaml_field_error e={0};
+        check(praktor_yaml_task_script_read(praktor_yaml_root(d),&present,&text,&e)!=SALTS_OK);
+        check(!present&&text==NULL);
+        praktor_yaml_field_error_dispose(&e);praktor_yaml_document_destroy(d);
+    }
+ }
+ it("selects the first runner and counts later runner candidates"){
+    praktor_yaml_document *d=doc_for("name: x\ncommand: echo\nprogram: tool\n");
+    json_value_t *v=NULL;praktor_yaml_field_error e={0};
+    check(praktor_yaml_task_metadata_create(praktor_yaml_root(d),&v,&e)==SALTS_OK);
+    json_eq(v,"{\"name\":\"x\",\"runner_count\":2,\"runner_kind\":\"command\"}");
+    json_free(v);praktor_yaml_field_error_dispose(&e);praktor_yaml_document_destroy(d);
+ }
+ it("does not count command postprocessors as separate runners"){
+    praktor_yaml_document *d=doc_for("name: x\ncommand: echo\nparse_json: {path: $.name}\n");
+    json_value_t *v=NULL;check(praktor_yaml_task_metadata_create(praktor_yaml_root(d),&v,NULL)==SALTS_OK);
+    json_eq(v,"{\"name\":\"x\",\"runner_count\":1,\"runner_kind\":\"command\"}");
+    json_free(v);praktor_yaml_document_destroy(d);
+ }
+ it("uses established control-node precedence for flat orchestration"){
+    praktor_yaml_document *d=doc_for("name: x\nparallel: []\nsequence: []\n");
+    json_value_t *v=NULL;check(praktor_yaml_task_metadata_create(praktor_yaml_root(d),&v,NULL)==SALTS_OK);
+    json_eq(v,"{\"name\":\"x\",\"runner_count\":2,\"runner_kind\":\"orch_root\",\"orch_node_type\":\"sequence\"}");
+    json_free(v);praktor_yaml_document_destroy(d);
+ }
+ it("rejects with without tool"){praktor_yaml_document *d=doc_for("name: build\nwith: {x: 1}\n");json_value_t *v=NULL;praktor_yaml_field_error e={0};check(praktor_yaml_task_metadata_create(praktor_yaml_root(d),&v,&e)!=SALTS_OK);check(v==NULL);praktor_yaml_field_error_dispose(&e);praktor_yaml_document_destroy(d);}
+}

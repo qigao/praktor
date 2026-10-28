@@ -25,7 +25,7 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
         "ENABLE_TESTS": true,
-        "ENABLE_SCRIPT_ENGINE": true,
+        "ENABLE_SCRIPT_ENGINE": false,
         "ENABLE_SANITIZER_ADDRESS": false,
         "VCPKG_MANIFEST_MODE": true,
         "VCPKG_INSTALLED_DIR": "$env{VCPKG_INSTALLED_DIR}",

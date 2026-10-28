@@ -1,81 +1,32 @@
-set(TARGET_NAME_SDK Praktor)
-
-# Build the stable Praktor C SDK as a shared library
-add_library(${TARGET_NAME_SDK} SHARED
-    api/praktor_api.cpp
-)
-
-# Include directories
-# The public API is the installed praktor.h header.
-target_include_directories(
-    ${TARGET_NAME_SDK}
-    PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/api>
-           $<INSTALL_INTERFACE:include>
-)
-
-# Link to praktor_lib to get WorkflowRunner, etc.
-target_link_libraries(
-    ${TARGET_NAME_SDK}
-    PRIVATE praktor_lib
-    INTERFACE
-        $<LINK_ONLY:Threads::Threads>
-        $<LINK_ONLY:Salts::Core>
-        $<LINK_ONLY:Salts::JsonParser>
-        $<LINK_ONLY:Salts::YamlParser>
-        $<LINK_ONLY:Salts::CYamlJsonAdapter>
-        $<LINK_ONLY:Salts::XmlParser>
-        $<LINK_ONLY:Salts::CsvParser>
-        $<LINK_ONLY:Salts::Mustache>
-        $<LINK_ONLY:CHttp::Client>
-        $<LINK_ONLY:Salts::CNet>
-        $<LINK_ONLY:CHttp::S3>
-)
-if(ENABLE_SCRIPT_ENGINE)
-    target_link_libraries(
-        ${TARGET_NAME_SDK}
-        INTERFACE $<LINK_ONLY:TurboScript::TurboScript>
-    )
-endif()
-if(UNIX AND NOT APPLE)
-    target_link_libraries(
-        ${TARGET_NAME_SDK}
-        INTERFACE $<LINK_ONLY:${CMAKE_DL_LIBS}>
-    )
-endif()
-
-# Only the producer needs an explicit marker. Consumers import by default.
-target_compile_definitions(${TARGET_NAME_SDK}
-    PRIVATE PRAKTOR_BUILD_SHARED
-)
-
-if(MSVC)
-    # praktor.exe and Praktor.dll otherwise contend for the same case-insensitive
-    # bin/praktor.{ilk,pdb} paths when Ninja links Debug targets in parallel.
-    set_target_properties(${TARGET_NAME_SDK} PROPERTIES
-        PDB_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
-    )
-    target_link_options(${TARGET_NAME_SDK} PRIVATE
-        "/ILK:${CMAKE_CURRENT_BINARY_DIR}/${TARGET_NAME_SDK}.ilk"
-    )
-endif()
-
-cmake_config_target(${TARGET_NAME_SDK} NO_INSTALL NO_VERSION FOLDER "sdk")
-
-install(
-    TARGETS ${TARGET_NAME_SDK}
-    EXPORT PraktorTargets
-    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
-    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-    INCLUDES
-    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
-)
-
-install(
-    FILES api/praktor.h api/praktor_export.h
-    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
-)
-
+# Breaking C ABI v3: no praktor_lib, C++ ExecutionContext or fallback.
+add_library(Praktor SHARED api/praktor_api.c)
+target_include_directories(Praktor PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/api>
+    $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/praktor/include>
+    $<INSTALL_INTERFACE:include>)
+target_link_libraries(Praktor PUBLIC Salts::CMeta PRIVATE praktor_runtime)
+target_compile_features(Praktor PUBLIC c_std_11)
+set_target_properties(Praktor PROPERTIES
+    C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF
+    POSITION_INDEPENDENT_CODE ON
+    C_VISIBILITY_PRESET hidden OUTPUT_NAME Praktor)
+target_compile_definitions(Praktor PRIVATE PRAKTOR_BUILD_SHARED=1)
+install(TARGETS Praktor EXPORT PraktorTargets
+    RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
+    LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+    ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+    INCLUDES DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
+install(FILES api/praktor.h
+    DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
+install(FILES "${PROJECT_SOURCE_DIR}/praktor/include/praktor/runtime.h"
+    DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/praktor")
+add_executable(praktor "${PROJECT_SOURCE_DIR}/praktor/main.c")
+target_link_libraries(praktor PRIVATE Praktor)
+target_compile_features(praktor PRIVATE c_std_11)
+install(TARGETS praktor EXPORT PraktorTargets
+    RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
 if(ENABLE_TESTS)
-    add_subdirectory(test)
+    add_executable(praktor_c_api_test test/praktor_c_api_test.c)
+    target_link_libraries(praktor_c_api_test PRIVATE Praktor Salts::TinyTest)
+    add_test(NAME praktor_c_api_test COMMAND praktor_c_api_test)
 endif()

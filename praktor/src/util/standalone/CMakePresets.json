@@ -1,0 +1,15 @@
+{
+  "version": 6,
+  "configurePresets": [
+    {"name": "util-c-release", "generator": "Ninja", "binaryDir": "${sourceDir}/../../../../build/util-c-release", "cacheVariables": {"CMAKE_BUILD_TYPE": "Release", "CMAKE_EXPORT_COMPILE_COMMANDS": true}},
+    {"name": "util-c-asan", "inherits": "util-c-release", "binaryDir": "${sourceDir}/../../../../build/util-c-asan", "condition": {"type": "equals", "lhs": "${hostSystemName}", "rhs": "Linux"}, "cacheVariables": {"CMAKE_BUILD_TYPE": "Debug", "CMAKE_C_FLAGS": "-fsanitize=address,undefined,float-cast-overflow -fno-omit-frame-pointer -g", "CMAKE_EXE_LINKER_FLAGS": "-fsanitize=address,undefined,float-cast-overflow"}}
+  ],
+  "buildPresets": [
+    {"name": "util-c-release", "configurePreset": "util-c-release", "jobs": 2},
+    {"name": "util-c-asan", "configurePreset": "util-c-asan", "jobs": 2}
+  ],
+  "testPresets": [
+    {"name": "util-c-release", "configurePreset": "util-c-release", "output": {"outputOnFailure": true}, "execution": {"noTestsAction": "error"}},
+    {"name": "util-c-asan", "configurePreset": "util-c-asan", "output": {"outputOnFailure": true}, "execution": {"noTestsAction": "error"}}
+  ]
+}

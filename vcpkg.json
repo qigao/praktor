@@ -1,14 +1,9 @@
 {
-    "name": "vcpkg-example",
-    "version-semver": "0.4.8",
+    "name": "praktor",
+    "version-semver": "0.5.0",
     "dependencies": [
-        "gmssl",
         {
-            "name": "xxhash",
-            "version>=": "0.8.3"
-        },
-        {
-            "name": "cxxopts"
+            "name": "tre"
         }
     ],
     "builtin-baseline": "b1b19307e2d2ec1eefbdb7ea069de7d4bcd31f01"
