@@ -130,6 +130,9 @@ def main():
 
     env["SALTS_UTILS_CI_BUILD_ROOT"] = str(BUILD / "build-salts-utils")
     install_project("salts-utils", sources["salts-utils"], env, [
+        # Select only the canonical native C11 source graph. Unrelated legacy
+        # Utils modules must not demand the removed CSTL/URI target families.
+        "-DSALTS_UTILS_NATIVE_C11_WORKFLOW_SUBSET=ON",
         "-DSALTS_UTILS_ENABLE_CAPTURE=OFF",
         "-DSALTS_UTILS_ENABLE_CFLOW_USB=OFF",
     ])
