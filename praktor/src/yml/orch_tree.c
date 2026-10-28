@@ -1,5 +1,4 @@
 #include "yml/orch_tree.h"
-#include <cstl/vec.h>
 #include <ctype.h>
 #include <fmt.h>
 #include <salts/error_codes.h>
@@ -39,11 +38,57 @@ int praktor_orch_find_type(vstr name, praktor_orch_type *out) {
 }
 
 typedef struct orch_owned_param { const char *key; tstr value; } orch_owned_param;
-struct praktor_orch_node { praktor_orch_type type; vec_t params, children; };
-/* Raw pointer vector owns separately allocated nodes; no vec owner is copied or
- * invalidated by vector relocation. Children borrow those nodes. Teardown walks
- * the owner vector, never recursively follows borrowed child pointers. */
-struct praktor_orch_tree { vec_t nodes; size_t retained_bytes; };
+typedef struct orch_param_items {
+    orch_owned_param *values;
+    size_t count, capacity;
+} orch_param_items;
+typedef struct orch_node_items {
+    struct praktor_orch_node **values;
+    size_t count, capacity;
+} orch_node_items;
+struct praktor_orch_node {
+    praktor_orch_type type;
+    orch_param_items params;
+    orch_node_items children;
+};
+/* Canonical Orch owns node pointers; child edges borrow them. No generic STL
+ * provider or second container engine survives this private C11 representation. */
+struct praktor_orch_tree { orch_node_items nodes; size_t retained_bytes; };
+
+static bool orch_reserve(void **storage,size_t *capacity,
+                         size_t need,size_t element,size_t limit) {
+    size_t next;
+    void *fresh;
+    if (need>limit || !element || need>SIZE_MAX/element) return false;
+    if (need<=*capacity) return true;
+    next=*capacity?*capacity:4u;
+    while (next<need) {
+        if (next>limit/2u) { next=limit; break; }
+        next*=2u;
+    }
+    if (next>limit) next=limit;
+    if (next<need || next>SIZE_MAX/element) return false;
+    fresh=realloc(*storage,next*element);
+    if (!fresh) return false;
+    *storage=fresh;
+    *capacity=next;
+    return true;
+}
+static bool orch_param_append(orch_param_items *items,orch_owned_param value) {
+    if (!orch_reserve((void **)&items->values,&items->capacity,
+                      items->count+1u,sizeof(*items->values),
+                      PRAKTOR_ORCH_MAX_PARAMS)) return false;
+    items->values[items->count++]=value;
+    return true;
+}
+static bool orch_node_append(orch_node_items *items,
+                             struct praktor_orch_node *value,size_t limit) {
+    if (!orch_reserve((void **)&items->values,&items->capacity,
+                      items->count+1u,sizeof(*items->values),limit))
+        return false;
+    items->values[items->count++]=value;
+    return true;
+}
 typedef struct orch_build { praktor_orch_tree *tree; char *error; size_t capacity; } orch_build;
 static int orch_fail(orch_build *build, int status, const char *message) {
     if (build->error && build->capacity) (void)fmt(build->error, build->capacity, "{}", message);
@@ -53,27 +98,25 @@ static int orch_oom(orch_build *build) { return orch_fail(build, SALTS_ENOMEM, "
 static void orch_node_destroy(praktor_orch_node *node) {
     size_t index;
     if (!node) return;
-    for (index = 0; index < vec_size(&node->params); ++index)
-        tstr_free(((orch_owned_param *)vec_at(&node->params, index))->value);
-    vec_destroy(&node->params); vec_destroy(&node->children); free(node);
+    for (index = 0; index < node->params.count; ++index)
+        tstr_free(node->params.values[index].value);
+    free(node->params.values); free(node->children.values); free(node);
 }
 void praktor_orch_tree_destroy(praktor_orch_tree *tree) {
     size_t index;
     if (!tree) return;
-    for (index = 0; index < vec_size(&tree->nodes); ++index)
-        orch_node_destroy(*(praktor_orch_node **)vec_at(&tree->nodes, index));
-    vec_destroy(&tree->nodes); free(tree);
+    for (index = 0; index < tree->nodes.count; ++index)
+        orch_node_destroy(tree->nodes.values[index]);
+    free(tree->nodes.values); free(tree);
 }
 static int orch_add_node(orch_build *build, praktor_orch_type type, praktor_orch_node **out) {
     praktor_orch_node *node;
-    if (vec_size(&build->tree->nodes) == PRAKTOR_ORCH_MAX_NODES)
+    if (build->tree->nodes.count == PRAKTOR_ORCH_MAX_NODES)
         return orch_fail(build, SALTS_EINVAL, "Orchestration tree exceeds maximum node count");
     node = (praktor_orch_node *)calloc(1, sizeof(*node));
     if (!node) return orch_oom(build);
     node->type = type;
-    vec_init_bytes(&node->params, sizeof(orch_owned_param), _Alignof(orch_owned_param), PRAKTOR_ORCH_MAX_PARAMS);
-    vec_init_bytes(&node->children, sizeof(praktor_orch_node *), _Alignof(praktor_orch_node *), PRAKTOR_ORCH_MAX_COMMANDS + 1u);
-    if (vec_push(&build->tree->nodes, &node) != STL_OK) { orch_node_destroy(node); return orch_oom(build); }
+    if (!orch_node_append(&build->tree->nodes,node,PRAKTOR_ORCH_MAX_NODES)) { orch_node_destroy(node); return orch_oom(build); }
     *out = node; return SALTS_OK;
 }
 static int orch_add_param(orch_build *build, praktor_orch_node *node, const char *key, vstr value) {
@@ -81,18 +124,18 @@ static int orch_add_param(orch_build *build, praktor_orch_node *node, const char
     if (!vstr_is_valid(value)) return orch_fail(build, SALTS_EINVAL, "Invalid orchestration parameter view");
     if (value.len >= PRAKTOR_ORCH_MAX_BYTES - build->tree->retained_bytes)
         return orch_fail(build, SALTS_EINVAL, "Orchestration retained text exceeds maximum of 1048576 bytes");
-    if (vec_size(&node->params) == PRAKTOR_ORCH_MAX_PARAMS)
+    if (node->params.count == PRAKTOR_ORCH_MAX_PARAMS)
         return orch_fail(build, SALTS_EINVAL, "Orchestration node exceeds maximum parameter count");
     param.value = tstr_from_v(value);
     if (!param.value) return orch_oom(build);
-    if (vec_push(&node->params, &param) != STL_OK) { tstr_free(param.value); return orch_oom(build); }
+    if (!orch_param_append(&node->params,param)) { tstr_free(param.value); return orch_oom(build); }
     build->tree->retained_bytes += value.len + 1u; return SALTS_OK;
 }
 static int orch_literal(orch_build *build, praktor_orch_node *node, const char *key, const char *value) {
     return orch_add_param(build, node, key, vstr_from_cstr(value));
 }
 static int orch_append(orch_build *build, praktor_orch_node *parent, praktor_orch_node *child) {
-    return vec_push(&parent->children, &child) == STL_OK ? SALTS_OK : orch_oom(build);
+    return orch_node_append(&parent->children,child,PRAKTOR_ORCH_MAX_COMMANDS+1u) ? SALTS_OK : orch_oom(build);
 }
 static int orch_postprocessor(orch_build *build, const praktor_orch_command *input, praktor_orch_node *root) {
     praktor_orch_node *node = NULL;
@@ -144,7 +187,6 @@ int praktor_orch_from_command(const praktor_orch_command *input, praktor_orch_tr
         return orch_fail(&build, SALTS_EINVAL, "Invalid orchestration command list or maximum of 4096 exceeded");
     build.tree = (praktor_orch_tree *)calloc(1, sizeof(*build.tree));
     if (!build.tree) return orch_oom(&build);
-    vec_init_bytes(&build.tree->nodes, sizeof(praktor_orch_node *), _Alignof(praktor_orch_node *), PRAKTOR_ORCH_MAX_NODES);
     status = orch_add_node(&build, PRAKTOR_ORCH_SEQUENCE, &root);
     count = input->sequence ? input->command_count : 1u;
     for (index = 0; status == SALTS_OK && index < count; ++index) {
@@ -169,8 +211,8 @@ static const char *orch_param_key(const praktor_orch_spec *spec, vstr key) {
 }
 static bool orch_has_param(const praktor_orch_node *node,const char *key) {
     size_t i;
-    for(i=0;i<vec_size(&node->params);++i) {
-        const orch_owned_param *param=(const orch_owned_param *)vec_at_const(&node->params,i);
+    for(i=0;i<node->params.count;++i) {
+        const orch_owned_param *param=&node->params.values[i];
         if(strcmp(param->key,key)==0) return true;
     }
     return false;
@@ -196,8 +238,6 @@ int praktor_orch_from_flat_nodes(const praktor_orch_flat_node *inputs,size_t cou
         return orch_fail(&build,SALTS_EINVAL,"Invalid orchestration flat-node input or node limit");
     build.tree=(praktor_orch_tree *)calloc(1,sizeof(*build.tree));
     if(!build.tree) return orch_oom(&build);
-    vec_init_bytes(&build.tree->nodes,sizeof(praktor_orch_node *),
-        _Alignof(praktor_orch_node *),PRAKTOR_ORCH_MAX_NODES);
     for(i=0;i<count;++i) {
         const praktor_orch_flat_node *input=&inputs[i];
         const praktor_orch_spec *spec=praktor_orch_spec_for(input->type);
@@ -226,7 +266,7 @@ int praktor_orch_from_flat_nodes(const praktor_orch_flat_node *inputs,size_t cou
         }
         if(status!=SALTS_OK) break;
         if(i>0) {
-            praktor_orch_node *parent=*(praktor_orch_node **)vec_at(&build.tree->nodes,input->parent_index);
+            praktor_orch_node *parent=build.tree->nodes.values[input->parent_index];
             if(!praktor_orch_spec_for(parent->type)->allows_children) {
                 status=orch_fail(&build,SALTS_EINVAL,"Leaf orchestration node cannot have children");break;
             }
@@ -235,9 +275,9 @@ int praktor_orch_from_flat_nodes(const praktor_orch_flat_node *inputs,size_t cou
         }
     }
     for(i=0;status==SALTS_OK&&i<count;++i) {
-        const praktor_orch_node *node=*(praktor_orch_node * const *)vec_at_const(&build.tree->nodes,i);
+        const praktor_orch_node *node=build.tree->nodes.values[i];
         const praktor_orch_spec *spec=praktor_orch_spec_for(node->type);
-        size_t children=vec_size(&node->children);
+        size_t children=node->children.count;
         for(j=0;j<sizeof(spec->required)/sizeof(spec->required[0]);++j)
             if(spec->required[j]&&!orch_has_param(node,spec->required[j])) {
                 status=orch_fail(&build,SALTS_EINVAL,"Missing required orchestration parameter");break;
@@ -266,21 +306,21 @@ int praktor_orch_from_flat_nodes(const praktor_orch_flat_node *inputs,size_t cou
 }
 
 const praktor_orch_node *praktor_orch_tree_root(const praktor_orch_tree *tree) {
-    return tree && vec_size(&tree->nodes) ? *(praktor_orch_node * const *)vec_at_const(&tree->nodes, 0) : NULL;
+    return tree && tree->nodes.count ? tree->nodes.values[0] : NULL;
 }
-size_t praktor_orch_tree_size(const praktor_orch_tree *tree) { return tree ? vec_size(&tree->nodes) : 0u; }
+size_t praktor_orch_tree_size(const praktor_orch_tree *tree) { return tree ? tree->nodes.count : 0u; }
 praktor_orch_type praktor_orch_node_type(const praktor_orch_node *node) { return node ? node->type : PRAKTOR_ORCH_TYPE_COUNT; }
-size_t praktor_orch_child_count(const praktor_orch_node *node) { return node ? vec_size(&node->children) : 0u; }
-size_t praktor_orch_param_count(const praktor_orch_node *node) { return node ? vec_size(&node->params) : 0u; }
+size_t praktor_orch_child_count(const praktor_orch_node *node) { return node ? node->children.count : 0u; }
+size_t praktor_orch_param_count(const praktor_orch_node *node) { return node ? node->params.count : 0u; }
 int praktor_orch_child_at(const praktor_orch_node *node, size_t index, const praktor_orch_node **out) {
     if (!node || !out) return SALTS_EINVAL;
-    if (index >= vec_size(&node->children)) return SALTS_ENOENT;
-    *out = *(praktor_orch_node * const *)vec_at_const(&node->children, index); return SALTS_OK;
+    if (index >= node->children.count) return SALTS_ENOENT;
+    *out = node->children.values[index]; return SALTS_OK;
 }
 int praktor_orch_param_at(const praktor_orch_node *node, size_t index, praktor_orch_param *out) {
     const orch_owned_param *param;
     if (!node || !out) return SALTS_EINVAL;
-    if (index >= vec_size(&node->params)) return SALTS_ENOENT;
-    param = (const orch_owned_param *)vec_at_const(&node->params, index);
+    if (index >= node->params.count) return SALTS_ENOENT;
+    param = &node->params.values[index];
     *out = (praktor_orch_param){vstr_from_cstr(param->key), tstr_to_v(param->value)}; return SALTS_OK;
 }
