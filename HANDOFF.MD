@@ -257,3 +257,16 @@ CTest 70/70 通过，install 成功；本次为增量构建。临时 runner 已�
   prepare/configure/build/test/install 全部成功。根文件已把公共配置移到
   defaults，只保留任务特有时限；日志为 `build/logs/defaults-local-build-yml.*`
   和 `build/logs/{configure,build,test,install}.log`。仅验证 Windows x64。
+
+## 2026-11-13：0.1.0 发布前 SDK 依赖核对
+
+- 安装导出的 `PraktorTargets-release.cmake` 在
+  `IMPORTED_LINK_DEPENDENT_LIBRARIES_RELEASE` 中引用 PCRE2 的 shared target，
+  而原 `PraktorConfig.cmake` 仅加载 SaltsBase/CMeta。配置中补入
+  `find_dependency(PCRE2 10.46 CONFIG COMPONENTS 8BIT)`，使导出 target 的
+  依赖由 SDK 自己声明；不依赖消费方提前手动导入 PCRE2。
+- 通过独立已构建 Praktor 执行根 `build.yml --task install`：完整 configure、
+  build、71/71 CTest、install 通过；安装后的 Config 已包含该依赖查找。
+  未创建 consumer/smoke 等独立验证工程，未验证其他平台。
+- 0.1.0 原生包使用 CMake 正式安装布局，不捆绑外部 SDK 或第三方 runtime
+  DLL；消费方仍需匹配的 SaltsBase、CMeta、vcpkg-cache 及运行时路径。

@@ -71,6 +71,11 @@ Shared modules retain their own CMake entrypoints. Common helpers stay in
 
 ## Building and qualification
 
+The installed CMake SDK exports `Praktor::Praktor` and loads its required
+SaltsBase, CMeta and PCRE2 (10.46 or newer, 8-bit) packages. Supply the matching
+shared vcpkg-cache prefix through the consumer's CMake dependency search paths.
+The SDK archive does not bundle those external SDKs or their runtime DLLs.
+
 The complete build consumes installed **SaltsBase**, **CMeta** and **SaltsUtils** packages from explicit `SALTS_BASE_ROOT`, `CMETA_ROOT` and `SALTS_UTILS_ROOT` environment variables. SaltsBase supplies Core, NativeIO and parsers; CMeta exports `CMeta::CMeta`, `CMeta::CSTL` and `CMeta::CFlow`; SaltsUtils supplies IDL and Schema. The shared/behavior-tree implementation lives in this repository. Configure consumes these installed dependencies without copying or rebuilding them.
 
 Select the compiler-matched shared vcpkg-cache installation with `VCPKG_INSTALLED_DIR`. The Windows x64 LLVM-MinGW preset selects `qigao-x64-windows-llvm-mingw`; package discovery and runtime PATH use that tree. `vcpkg.json` remains the production dependency declaration. The cache checkout (`VCPKG_CACHE_REPOSITORY_ROOT`), restored installation and first-party SDK roots have separate roles; sharing the checkout does not establish ABI compatibility. Import the values described in [.env.example](.env.example) into the parent environment before invoking CMake; CMake does not load `.env`.
