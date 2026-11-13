@@ -1,7 +1,7 @@
 /* Native Orch AST -> C11 Session parity qualification. No C++ bridge,
  * implicit Legacy action fallback, dynamic scheduler, or external Process. */
-#include "orch_session_plan.h"
-#include "native_host.h"
+#include "actions/orch_session_plan.h"
+#include "actions/native_host.h"
 #include "yml/workflow_snapshot.h"
 #include <core/error_codes.h>
 #include <stdint.h>
@@ -36,12 +36,12 @@ static praktor_workflow_snapshot *snapshot(const char *yaml) {
     check(status==SALTS_OK);
     return owner;
 }
-static bool value_is(const praktor_c11_value_store *store,
+static bool value_is(const praktor_value_store *store,
                      const char *key,const char *expected) {
     char text[128]={0};
     size_t length=0u;
-    return praktor_c11_value_store_get(store,key,text,sizeof text,&length)==
-        PRAKTOR_C11_VALUE_OK&&length==strlen(expected)&&
+    return praktor_value_store_get(store,key,text,sizeof text,&length)==
+        PRAKTOR_VALUE_OK&&length==strlen(expected)&&
         strcmp(text,expected)==0;
 }
 static uint64_t fake_time(void *user) {
@@ -51,92 +51,92 @@ static uint64_t fake_time(void *user) {
 spec("C11 Orch AST to owned Session Plan and native leaf execution") {
     it("compiles actual YAML AST, survives source teardown, executes SetVariable/CheckExitCode") {
         praktor_workflow_snapshot *input=snapshot(native_workflow);
-        praktor_c11_orch_session_plan *plan=NULL;
-        praktor_c11_native_host host={0};
-        praktor_c11_bt_host hooks={0};
-        praktor_c11_session session={0};
-        praktor_c11_session_config config={0};
+        praktor_orch_session_plan *plan=NULL;
+        praktor_native_host host={0};
+        praktor_bt_host hooks={0};
+        praktor_session session={0};
+        praktor_session_config config={0};
         salts_bt_node_status outcome=SALTS_BT_RUNNING;
         char reason[256]={0};
         if(!input)return;
-        check(praktor_c11_native_host_init(&host,8u,64u,128u)==SALTS_OK);
-        check(praktor_c11_native_host_bind(&host,&hooks)==SALTS_OK);
-        praktor_c11_session_config_init(&config);
+        check(praktor_native_host_init(&host,8u,64u,128u)==SALTS_OK);
+        check(praktor_native_host_bind(&host,&hooks)==SALTS_OK);
+        praktor_session_config_init(&config);
         config.host=hooks;
-        check(praktor_c11_orch_session_plan_create(
+        check(praktor_orch_session_plan_create(
             praktor_workflow_snapshot_task_tree(input,0u),&config.tree,
             &plan,reason,sizeof reason)==SALTS_OK);
         if(!plan) {
             info("Session Plan error: %s",reason);
             praktor_workflow_snapshot_destroy(input);
-            praktor_c11_native_host_destroy(&host);
+            praktor_native_host_destroy(&host);
             return;
         }
-        check(praktor_c11_orch_session_plan_node_count(plan)==3u);
+        check(praktor_orch_session_plan_node_count(plan)==3u);
         /* The plan copies strings and topology; the Session copies the plan. */
         praktor_workflow_snapshot_destroy(input);
-        check(praktor_c11_orch_session_plan_init_session(
+        check(praktor_orch_session_plan_init_session(
             plan,&config,&session)==SALTS_OK);
-        praktor_c11_orch_session_plan_destroy(plan);
-        check(praktor_c11_session_tick(&session,&outcome)==SALTS_OK);
+        praktor_orch_session_plan_destroy(plan);
+        check(praktor_session_tick(&session,&outcome)==SALTS_OK);
         check(outcome==SALTS_BT_SUCCESS);
-        check(value_is(praktor_c11_native_host_values(&host),"answer","7"));
-        check(praktor_c11_session_destroy(&session)==SALTS_OK);
-        praktor_c11_native_host_destroy(&host);
+        check(value_is(praktor_native_host_values(&host),"answer","7"));
+        check(praktor_session_destroy(&session)==SALTS_OK);
+        praktor_native_host_destroy(&host);
     }
 
     it("cancels a real running C11 Sleep before any downstream SetVariable effect") {
         praktor_workflow_snapshot *input=snapshot(delayed_workflow);
-        praktor_c11_orch_session_plan *plan=NULL;
-        praktor_c11_native_host host={0};
-        praktor_c11_native_host_config host_config;
-        praktor_c11_bt_host hooks={0};
-        praktor_c11_session session={0};
-        praktor_c11_session_config config={0};
+        praktor_orch_session_plan *plan=NULL;
+        praktor_native_host host={0};
+        praktor_native_host_config host_config;
+        praktor_bt_host hooks={0};
+        praktor_session session={0};
+        praktor_session_config config={0};
         salts_bt_node_status outcome=SALTS_BT_FAILURE;
         uint64_t now=0u;
         char error[256]={0};
         if(!input)return;
-        praktor_c11_native_host_config_init(&host_config,8u,64u,128u);
+        praktor_native_host_config_init(&host_config,8u,64u,128u);
         host_config.max_running_leaves=1u;
         host_config.now_ns=fake_time;
         host_config.clock_user=&now;
-        check(praktor_c11_native_host_init_with_config(
+        check(praktor_native_host_init_with_config(
             &host,&host_config)==SALTS_OK);
-        check(praktor_c11_native_host_bind(&host,&hooks)==SALTS_OK);
-        check(praktor_c11_value_store_set(
-            praktor_c11_native_host_values(&host),"late","original")==
-            PRAKTOR_C11_VALUE_OK);
-        praktor_c11_session_config_init(&config);
+        check(praktor_native_host_bind(&host,&hooks)==SALTS_OK);
+        check(praktor_value_store_set(
+            praktor_native_host_values(&host),"late","original")==
+            PRAKTOR_VALUE_OK);
+        praktor_session_config_init(&config);
         config.host=hooks;
-        check(praktor_c11_orch_session_plan_create(
+        check(praktor_orch_session_plan_create(
             praktor_workflow_snapshot_task_tree(input,0u),&config.tree,
             &plan,error,sizeof error)==SALTS_OK);
         if(!plan) {
             info("Sleep plan: %s",error);
             praktor_workflow_snapshot_destroy(input);
-            praktor_c11_native_host_destroy(&host);
+            praktor_native_host_destroy(&host);
             return;
         }
         praktor_workflow_snapshot_destroy(input);
-        check(praktor_c11_orch_session_plan_init_session(
+        check(praktor_orch_session_plan_init_session(
             plan,&config,&session)==SALTS_OK);
-        praktor_c11_orch_session_plan_destroy(plan);
-        check(praktor_c11_session_tick(&session,&outcome)==SALTS_OK);
+        praktor_orch_session_plan_destroy(plan);
+        check(praktor_session_tick(&session,&outcome)==SALTS_OK);
         check(outcome==SALTS_BT_RUNNING);
-        check(value_is(praktor_c11_native_host_values(&host),"late","original"));
-        check(praktor_c11_session_cancel(&session)==SALTS_OK);
-        check(value_is(praktor_c11_native_host_values(&host),"late","original"));
-        check(praktor_c11_session_destroy(&session)==SALTS_OK);
-        praktor_c11_native_host_destroy(&host);
+        check(value_is(praktor_native_host_values(&host),"late","original"));
+        check(praktor_session_cancel(&session)==SALTS_OK);
+        check(value_is(praktor_native_host_values(&host),"late","original"));
+        check(praktor_session_destroy(&session)==SALTS_OK);
+        praktor_native_host_destroy(&host);
     }
 
     it("refuses Shell, embedded NUL and Mustache without modifying a valid plan") {
         praktor_workflow_snapshot *input=snapshot(native_workflow);
-        praktor_c11_orch_session_plan *saved=NULL,*out;
+        praktor_orch_session_plan *saved=NULL,*out;
         praktor_orch_tree *shell=NULL,*binary=NULL;
         praktor_orch_command command={0};
-        praktor_c11_session_config config={0};
+        praktor_session_config config={0};
         const char encoded[]={'a','\0','b'};
         praktor_orch_input_param params[2]={
             {vstr_from_cstr("key"),vstr_from_cstr("target")},
@@ -147,8 +147,8 @@ spec("C11 Orch AST to owned Session Plan and native leaf execution") {
         };
         char error[256]={0};
         if(!input)return;
-        praktor_c11_session_config_init(&config);
-        check(praktor_c11_orch_session_plan_create(
+        praktor_session_config_init(&config);
+        check(praktor_orch_session_plan_create(
             praktor_workflow_snapshot_task_tree(input,0u),&config.tree,
             &saved,error,sizeof error)==SALTS_OK);
         check(saved!=NULL);
@@ -159,18 +159,18 @@ spec("C11 Orch AST to owned Session Plan and native leaf execution") {
         command.command=vstr_from_cstr("echo do-not-run");
         check(praktor_orch_from_command(&command,&shell,NULL,0u)==SALTS_OK);
         out=saved;
-        check(praktor_c11_orch_session_plan_create(
+        check(praktor_orch_session_plan_create(
             shell,&config.tree,&out,error,sizeof error)==SALTS_ENOTSUP);
         check(out==saved);
         check(strstr(error,"no Legacy fallback")!=NULL);
         check(praktor_orch_from_flat_nodes(
             &leaf,1u,&binary,NULL,0u)==SALTS_OK);
         out=saved;
-        check(praktor_c11_orch_session_plan_create(
+        check(praktor_orch_session_plan_create(
             binary,&config.tree,&out,error,sizeof error)==SALTS_ENOTSUP);
         check(out==saved);
         check(strstr(error,"Binary Orch parameter")!=NULL);
-        check(praktor_c11_orch_session_plan_node_count(saved)==3u);
+        check(praktor_orch_session_plan_node_count(saved)==3u);
         {
             praktor_orch_tree *template_tree=NULL;
             praktor_orch_input_param template_params[2]={
@@ -184,7 +184,7 @@ spec("C11 Orch AST to owned Session Plan and native leaf execution") {
             check(praktor_orch_from_flat_nodes(
                 &template_leaf,1u,&template_tree,NULL,0u)==SALTS_OK);
             out=saved;
-            check(praktor_c11_orch_session_plan_create(
+            check(praktor_orch_session_plan_create(
                 template_tree,&config.tree,&out,error,sizeof error)==SALTS_ENOTSUP);
             check(out==saved);
             check(strstr(error,"Mustache expansion")!=NULL);
@@ -192,7 +192,7 @@ spec("C11 Orch AST to owned Session Plan and native leaf execution") {
         }
         praktor_orch_tree_destroy(binary);
         praktor_orch_tree_destroy(shell);
-        praktor_c11_orch_session_plan_destroy(saved);
+        praktor_orch_session_plan_destroy(saved);
         praktor_workflow_snapshot_destroy(input);
     }
 
@@ -214,8 +214,8 @@ spec("C11 Orch AST to owned Session Plan and native leaf execution") {
 
     it("rejects noncanonical stdout bindings for command KeyValue without losing prior plan") {
         praktor_workflow_snapshot *input=snapshot(native_workflow);
-        praktor_c11_orch_session_plan *saved=NULL,*out;
-        praktor_c11_session_config config={0};
+        praktor_orch_session_plan *saved=NULL,*out;
+        praktor_session_config config={0};
         char error[256]={0};
         const praktor_orch_input_param shell_ports[]={
             {vstr_from_cstr("cmd"),vstr_from_cstr("echo KEY=42")},
@@ -232,28 +232,28 @@ spec("C11 Orch AST to owned Session Plan and native leaf execution") {
         };
         praktor_orch_tree *tree=NULL;
         if(!input)return;
-        praktor_c11_session_config_init(&config);
-        check(praktor_c11_orch_session_plan_create(
+        praktor_session_config_init(&config);
+        check(praktor_orch_session_plan_create(
             praktor_workflow_snapshot_task_tree(input,0u),&config.tree,
             &saved,error,sizeof error)==SALTS_OK);
         if(!saved){praktor_workflow_snapshot_destroy(input);return;}
         check(praktor_orch_from_flat_nodes(
             nodes,3u,&tree,NULL,0u)==SALTS_OK);
         out=saved;
-        check(praktor_c11_orch_session_plan_create_native_command_keyvalue(
+        check(praktor_orch_session_plan_create_native_command_keyvalue(
             tree,&config.tree,&out,error,sizeof error)==SALTS_ENOTSUP);
         check(out==saved);
         check(strstr(error,"canonical stdout port binding")!=NULL);
         praktor_orch_tree_destroy(tree);
-        check(praktor_c11_orch_session_plan_node_count(saved)==3u);
-        praktor_c11_orch_session_plan_destroy(saved);
+        check(praktor_orch_session_plan_node_count(saved)==3u);
+        praktor_orch_session_plan_destroy(saved);
         praktor_workflow_snapshot_destroy(input);
     }
 
     it("rejects noncanonical stdout bindings for command Regex without losing prior plan") {
         praktor_workflow_snapshot *input=snapshot(native_workflow);
-        praktor_c11_orch_session_plan *saved=NULL,*out;
-        praktor_c11_session_config config={0};
+        praktor_orch_session_plan *saved=NULL,*out;
+        praktor_session_config config={0};
         char error[256]={0};
         const praktor_orch_input_param shell_ports[]={
             {vstr_from_cstr("cmd"),vstr_from_cstr("echo native-command")},
@@ -271,28 +271,28 @@ spec("C11 Orch AST to owned Session Plan and native leaf execution") {
         };
         praktor_orch_tree *tree=NULL;
         if(!input)return;
-        praktor_c11_session_config_init(&config);
-        check(praktor_c11_orch_session_plan_create(
+        praktor_session_config_init(&config);
+        check(praktor_orch_session_plan_create(
             praktor_workflow_snapshot_task_tree(input,0u),&config.tree,
             &saved,error,sizeof error)==SALTS_OK);
         if(!saved){praktor_workflow_snapshot_destroy(input);return;}
         check(praktor_orch_from_flat_nodes(
             nodes,3u,&tree,NULL,0u)==SALTS_OK);
         out=saved;
-        check(praktor_c11_orch_session_plan_create_native_command_regex(
+        check(praktor_orch_session_plan_create_native_command_regex(
             tree,&config.tree,&out,error,sizeof error)==SALTS_ENOTSUP);
         check(out==saved);
         check(strstr(error,"canonical stdout port binding")!=NULL);
         praktor_orch_tree_destroy(tree);
-        check(praktor_c11_orch_session_plan_node_count(saved)==3u);
-        praktor_c11_orch_session_plan_destroy(saved);
+        check(praktor_orch_session_plan_node_count(saved)==3u);
+        praktor_orch_session_plan_destroy(saved);
         praktor_workflow_snapshot_destroy(input);
     }
 
     it("rejects noncanonical stdout bindings for command Lines without losing prior plan") {
         praktor_workflow_snapshot *input=snapshot(native_workflow);
-        praktor_c11_orch_session_plan *saved=NULL,*out;
-        praktor_c11_session_config config={0};
+        praktor_orch_session_plan *saved=NULL,*out;
+        praktor_session_config config={0};
         char error[256]={0};
         const praktor_orch_input_param shell_ports[]={
             {vstr_from_cstr("cmd"),vstr_from_cstr("echo ready")},
@@ -309,33 +309,33 @@ spec("C11 Orch AST to owned Session Plan and native leaf execution") {
         };
         praktor_orch_tree *tree=NULL;
         if(!input)return;
-        praktor_c11_session_config_init(&config);
-        check(praktor_c11_orch_session_plan_create(
+        praktor_session_config_init(&config);
+        check(praktor_orch_session_plan_create(
             praktor_workflow_snapshot_task_tree(input,0u),&config.tree,
             &saved,error,sizeof error)==SALTS_OK);
         if(!saved){praktor_workflow_snapshot_destroy(input);return;}
         check(praktor_orch_from_flat_nodes(
             nodes,3u,&tree,NULL,0u)==SALTS_OK);
         out=saved;
-        check(praktor_c11_orch_session_plan_create_native_command_lines(
+        check(praktor_orch_session_plan_create_native_command_lines(
             tree,&config.tree,&out,error,sizeof error)==SALTS_ENOTSUP);
         check(out==saved);
         check(strstr(error,"canonical stdout port binding")!=NULL);
         praktor_orch_tree_destroy(tree);
-        check(praktor_c11_orch_session_plan_node_count(saved)==3u);
-        praktor_c11_orch_session_plan_destroy(saved);
+        check(praktor_orch_session_plan_node_count(saved)==3u);
+        praktor_orch_session_plan_destroy(saved);
         praktor_workflow_snapshot_destroy(input);
     }
 
     it("refuses too-small tree limits with no partial output owner") {
         praktor_workflow_snapshot *input=snapshot(native_workflow);
-        praktor_c11_session_config config={0};
-        praktor_c11_orch_session_plan *plan=NULL;
+        praktor_session_config config={0};
+        praktor_orch_session_plan *plan=NULL;
         char error[128]={0};
         if(!input)return;
-        praktor_c11_session_config_init(&config);
+        praktor_session_config_init(&config);
         config.tree.max_nodes=2u;
-        check(praktor_c11_orch_session_plan_create(
+        check(praktor_orch_session_plan_create(
             praktor_workflow_snapshot_task_tree(input,0u),&config.tree,
             &plan,error,sizeof error)==SALTS_EINVAL);
         check(plan==NULL);

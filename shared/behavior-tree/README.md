@@ -1,8 +1,8 @@
 # C11 Behavior Tree
 
-This repository owns the bounded C11 shared/behavior-tree implementation. The build
+This directory owns the bounded C11 behavior-tree implementation. The build
 alias is `Salts::BehaviorTree`; the installed Praktor package exports
-`Praktor::BehaviorTree`. The public header is `salts/behavior_tree.h`.
+`Praktor::BehaviorTree`. The public header is `behavior_tree.h`.
 
 ## Execution contract
 
@@ -28,7 +28,7 @@ and ConsumeQueue likewise use explicit host lifecycle hooks.
 Values, YAML parsing, workflow DAG state, processes and scheduling belong to
 their owning Praktor or SDK modules. The tree creates no threads or processes.
 The application's admitted workflow subset remains narrower than the internal
-node API; see [the runtime contract](../docs/C11_RUNTIME_RESET.md).
+node API; see [the runtime contract](../../docs/RUNTIME_RESET.md).
 
 ## Build and validation
 
@@ -41,4 +41,4 @@ find_package(Praktor CONFIG REQUIRED)
 target_link_libraries(app PRIVATE Praktor::BehaviorTree)
 ```
 
-Dependency setup and CTest commands are in [the root build guide](../README.md#building-and-qualification).
+Dependency setup and CTest commands are in [the root build guide](../../README.md#building-and-qualification).

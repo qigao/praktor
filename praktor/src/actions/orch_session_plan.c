@@ -39,6 +39,7 @@ static bool supported(praktor_orch_type type) {
     case PRAKTOR_ORCH_FORCE_SUCCESS:
     case PRAKTOR_ORCH_FORCE_FAILURE:
     case PRAKTOR_ORCH_SET_VARIABLE:
+    case PRAKTOR_ORCH_DOWNLOAD:
     case PRAKTOR_ORCH_CHECK_EXIT_CODE:
     case PRAKTOR_ORCH_PARSE_JSON:
     case PRAKTOR_ORCH_PARSE_KEY_VALUE:

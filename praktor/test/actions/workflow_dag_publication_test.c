@@ -6,8 +6,8 @@
  * are deterministic test callbacks, not an end-to-end NativeHost claim.
  * The installed runtime's native leaf dispatch is covered separately.
  * Neither worker calls DAG/TaskRegistry/root publication. */
-#include "workflow_parallel_process_guard.h"
-#include "workflow_snapshot_values.h"
+#include "actions/workflow_parallel_process_guard.h"
+#include "actions/workflow_snapshot_values.h"
 #include "yml/workflow_dag_state.h"
 
 #include <stdatomic.h>
@@ -31,21 +31,21 @@ typedef struct owner_fixture {
     praktor_workflow_snapshot *snapshot;
     praktor_workflow_dag_state *dag;
     praktor_workflow_task_registry *registry;
-    praktor_c11_value_store root;
+    praktor_value_store root;
     praktor_process_retainer retainer;
     cflow_executor executor;
     cflow_executor_control control;
 } owner_fixture;
 
 typedef struct owner_branch {
-    praktor_c11_value_txn *txn;
+    praktor_value_txn *txn;
     const char *key,*value;
     bool force_failure;
     atomic_uint ran,cancelled,finalized;
     atomic_int outcome; /* 1 success; -1 failure; -2 cancellation; 0 pending */
 } owner_branch;
 
-static void branch_init(owner_branch *branch,praktor_c11_value_txn *txn,
+static void branch_init(owner_branch *branch,praktor_value_txn *txn,
                         const char *key,const char *value,bool fail) {
     memset(branch,0,sizeof(*branch));
     branch->txn=txn;branch->key=key;branch->value=value;branch->force_failure=fail;
@@ -56,11 +56,11 @@ static void branch_init(owner_branch *branch,praktor_c11_value_txn *txn,
 }
 static void branch_run(void *user) {
     owner_branch *branch=(owner_branch *)user;
-    const int result=praktor_c11_value_txn_set(
+    const int result=praktor_value_txn_set(
         branch->txn,branch->key,branch->value);
     atomic_fetch_add(&branch->ran,1u);
     atomic_store(&branch->outcome,
-        branch->force_failure||result!=PRAKTOR_C11_VALUE_OK?-1:1);
+        branch->force_failure||result!=PRAKTOR_VALUE_OK?-1:1);
 }
 static void branch_cancel(void *user) {
     owner_branch *branch=(owner_branch *)user;
@@ -84,12 +84,12 @@ static json_value_t *parse_json(const char *source) {
     check(json!=NULL);
     return json;
 }
-static bool root_equals(const praktor_c11_value_store *root,
+static bool root_equals(const praktor_value_store *root,
                         const char *key,const char *expected) {
     char copied[80]={0};
     size_t count=0u;
-    return praktor_c11_value_store_get(root,key,copied,sizeof copied,&count)==
-        PRAKTOR_C11_VALUE_OK&&count==strlen(expected)&&
+    return praktor_value_store_get(root,key,copied,sizeof copied,&count)==
+        PRAKTOR_VALUE_OK&&count==strlen(expected)&&
         strcmp(copied,expected)==0;
 }
 static bool output_equals(const praktor_workflow_task_registry *registry,
@@ -119,12 +119,12 @@ static void fixture_init(owner_fixture *f) {
     check(praktor_workflow_snapshot_task_count(f->snapshot)==ALL_TASKS);
     check(praktor_workflow_task_registry_create(f->snapshot,&f->registry)==SALTS_OK);
     check(praktor_workflow_dag_state_create(graph,2u,&f->dag)==SALTS_OK);
-    check(praktor_c11_value_store_init(&f->root,8u,64u,64u)==
-        PRAKTOR_C11_VALUE_OK);
-    check(praktor_c11_value_store_set(&f->root,"system_value","before")==
-        PRAKTOR_C11_VALUE_OK);
-    check(praktor_c11_workflow_seed_root_text_variables(
-        f->snapshot,&f->root)==PRAKTOR_C11_VALUE_OK);
+    check(praktor_value_store_init(&f->root,8u,64u,64u)==
+        PRAKTOR_VALUE_OK);
+    check(praktor_value_store_set(&f->root,"system_value","before")==
+        PRAKTOR_VALUE_OK);
+    check(praktor_workflow_seed_root_text_variables(
+        f->snapshot,&f->root)==PRAKTOR_VALUE_OK);
     check(root_equals(&f->root,"source_label","from_yaml"));
     check(root_equals(&f->root,"system_value","before"));
     check(praktor_process_retainer_init(&f->retainer,2u)==SALTS_OK);
@@ -145,7 +145,7 @@ static void executor_finish(owner_fixture *f) {
 }
 static void fixture_destroy(owner_fixture *f) {
     check(praktor_process_retainer_destroy(&f->retainer)==SALTS_OK);
-    praktor_c11_value_store_destroy(&f->root);
+    praktor_value_store_destroy(&f->root);
     praktor_workflow_dag_state_destroy(f->dag);
     praktor_workflow_task_registry_destroy(f->registry);
     praktor_workflow_snapshot_destroy(f->snapshot);
@@ -187,8 +187,8 @@ spec("C11 YAML DAG owner-turn CFlow + Process + typed output publication") {
     it("withholds both text and typed output until callbacks and Process leases settle") {
         owner_fixture f;
         praktor_process_retainer_token token={0};
-        praktor_c11_value_txn root_txns[ROOT_TASKS]={{0},{0}};
-        praktor_c11_value_txn publish_txn={0};
+        praktor_value_txn root_txns[ROOT_TASKS]={{0},{0}};
+        praktor_value_txn publish_txn={0};
         owner_branch roots[ROOT_TASKS],last;
         json_value_t *root_json[ROOT_TASKS]={
             parse_json("{\"stamp\":{\"id\":1}}"),
@@ -206,8 +206,8 @@ spec("C11 YAML DAG owner-turn CFlow + Process + typed output publication") {
             f.dag,ids,ROOT_TASKS,&count)==SALTS_OK);
         check(count==ROOT_TASKS&&ids[0]==0u&&ids[1]==1u);
         for(size_t i=0u;i<ROOT_TASKS;++i)
-            check(praktor_c11_value_txn_begin(
-                &root_txns[i],&f.root)==PRAKTOR_C11_VALUE_OK);
+            check(praktor_value_txn_begin(
+                &root_txns[i],&f.root)==PRAKTOR_VALUE_OK);
         branch_init(&roots[0],&root_txns[0],"prepare_done","yes",false);
         branch_init(&roots[1],&root_txns[1],"inspect_done","yes",false);
         check(praktor_process_retainer_reserve(&f.retainer,&token)==SALTS_OK);
@@ -215,21 +215,21 @@ spec("C11 YAML DAG owner-turn CFlow + Process + typed output publication") {
         for(size_t i=0u;i<ROOT_TASKS;++i)post(&f,&roots[i]);
         /* The worker may execute now, but the owner has published nothing. */
         assert_dag(&f,2u,0u,0u,PRAKTOR_WORKFLOW_DAG_CONTINUE,false);
-        check(praktor_c11_value_store_size(&f.root)==2u);
+        check(praktor_value_store_size(&f.root)==2u);
         assert_task_state(&f,0u,PRAKTOR_WORKFLOW_TASK_PENDING);
         assert_task_state(&f,1u,PRAKTOR_WORKFLOW_TASK_PENDING);
         executor_drain(&f);
         assert_done(&roots[0],1);assert_done(&roots[1],1);
-        check(praktor_c11_workflow_parallel_commit_after_cflow_and_process_drain(
+        check(praktor_workflow_parallel_commit_after_cflow_and_process_drain(
             f.registry,updates,root_txns,ROOT_TASKS,&f.control,&f.retainer,
-            8u,&pending)==PRAKTOR_C11_PARALLEL_BUSY);
+            8u,&pending)==PRAKTOR_PARALLEL_BUSY);
         check(pending==1u);
         check(root_txns[0].impl&&root_txns[1].impl);
-        check(praktor_c11_value_store_size(&f.root)==2u);
+        check(praktor_value_store_size(&f.root)==2u);
         check(praktor_process_retainer_release(&f.retainer,token)==SALTS_OK);
-        check(praktor_c11_workflow_parallel_commit_after_cflow_and_process_drain(
+        check(praktor_workflow_parallel_commit_after_cflow_and_process_drain(
             f.registry,updates,root_txns,ROOT_TASKS,&f.control,&f.retainer,
-            8u,&pending)==PRAKTOR_C11_PARALLEL_OK);
+            8u,&pending)==PRAKTOR_PARALLEL_OK);
         check(pending==0u);
         check(root_txns[0].impl==NULL&&root_txns[1].impl==NULL);
         for(size_t i=0u;i<ROOT_TASKS;++i) {
@@ -251,8 +251,8 @@ spec("C11 YAML DAG owner-turn CFlow + Process + typed output publication") {
         check(praktor_workflow_dag_claim_ready(
             f.dag,ids,ROOT_TASKS,&count)==SALTS_OK);
         check(count==1u&&ids[0]==2u);
-        check(praktor_c11_value_txn_begin(
-            &publish_txn,&f.root)==PRAKTOR_C11_VALUE_OK);
+        check(praktor_value_txn_begin(
+            &publish_txn,&f.root)==PRAKTOR_VALUE_OK);
         branch_init(&last,&publish_txn,"publish_done","yes",false);
         last_json=parse_json("{\"stamp\":{\"id\":3}}");
         last_update.task_index=2u;
@@ -261,9 +261,9 @@ spec("C11 YAML DAG owner-turn CFlow + Process + typed output publication") {
         post(&f,&last);
         executor_drain(&f);
         assert_done(&last,1);
-        check(praktor_c11_workflow_parallel_commit_after_cflow_and_process_drain(
+        check(praktor_workflow_parallel_commit_after_cflow_and_process_drain(
             f.registry,&last_update,&publish_txn,1u,&f.control,&f.retainer,
-            8u,&pending)==PRAKTOR_C11_PARALLEL_OK);
+            8u,&pending)==PRAKTOR_PARALLEL_OK);
         check(praktor_workflow_task_registry_complete(f.registry,2u)==SALTS_OK);
         check(praktor_workflow_dag_finish(f.dag,2u,true)==SALTS_OK);
         json_free(last_json);
@@ -276,7 +276,7 @@ spec("C11 YAML DAG owner-turn CFlow + Process + typed output publication") {
 
     it("aborts all branch transactions and suppresses descendants on a failed callback") {
         owner_fixture f;
-        praktor_c11_value_txn txns[ROOT_TASKS]={{0},{0}};
+        praktor_value_txn txns[ROOT_TASKS]={{0},{0}};
         owner_branch roots[ROOT_TASKS];
         json_value_t *a=parse_json("{\"stamp\":1}");
         json_value_t *b=parse_json("{\"stamp\":2}");
@@ -288,8 +288,8 @@ spec("C11 YAML DAG owner-turn CFlow + Process + typed output publication") {
             f.dag,ids,ROOT_TASKS,&count)==SALTS_OK);
         check(count==ROOT_TASKS&&ids[0]==0u&&ids[1]==1u);
         for(size_t i=0u;i<ROOT_TASKS;++i)
-            check(praktor_c11_value_txn_begin(
-                &txns[i],&f.root)==PRAKTOR_C11_VALUE_OK);
+            check(praktor_value_txn_begin(
+                &txns[i],&f.root)==PRAKTOR_VALUE_OK);
         branch_init(&roots[0],&txns[0],"prepare_done","yes",true);
         branch_init(&roots[1],&txns[1],"inspect_done","yes",false);
         /* Stage both typed objects before execution, without publishing.
@@ -305,7 +305,7 @@ spec("C11 YAML DAG owner-turn CFlow + Process + typed output publication") {
          * transaction or typed TaskRegistry group is committed. */
         praktor_workflow_task_registry_discard_output_group(prepared);
         for(size_t i=0u;i<ROOT_TASKS;++i)
-            praktor_c11_value_txn_abort(&txns[i]);
+            praktor_value_txn_abort(&txns[i]);
         check(praktor_workflow_task_registry_fail(
             f.registry,ids[0],vstr_from_cstr("injected branch failure"))==SALTS_OK);
         check(praktor_workflow_dag_finish(f.dag,ids[0],false)==SALTS_OK);
@@ -314,7 +314,7 @@ spec("C11 YAML DAG owner-turn CFlow + Process + typed output publication") {
         check(praktor_workflow_dag_claim_ready(
             f.dag,ids,ROOT_TASKS,&count)==SALTS_EBUSY);
         check(count==0u);
-        check(praktor_c11_value_store_size(&f.root)==2u);
+        check(praktor_value_store_size(&f.root)==2u);
         assert_task_state(&f,0u,PRAKTOR_WORKFLOW_TASK_FAILED);
         assert_task_state(&f,1u,PRAKTOR_WORKFLOW_TASK_PENDING);
         assert_task_state(&f,2u,PRAKTOR_WORKFLOW_TASK_PENDING);

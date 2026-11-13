@@ -5,10 +5,10 @@
  * owner thread, as required by Session and NativeHost lifetime contracts.
  * WorkerExecutor migration, dynamic triggers, file-based plans and real Shell
  * Process leases remain separate qualification gates. */
-#include "orch_session_plan.h"
-#include "workflow_parallel_process_guard.h"
-#include "workflow_snapshot_values.h"
-#include "native_host.h"
+#include "actions/orch_session_plan.h"
+#include "actions/workflow_parallel_process_guard.h"
+#include "actions/workflow_snapshot_values.h"
+#include "actions/native_host.h"
 #include "yml/workflow_dag_state.h"
 #include <cflow/executor.h>
 #include <praktor/process_retainer.h>
@@ -50,14 +50,14 @@ typedef struct native_dag_fixture {
     praktor_workflow_snapshot *snapshot;
     praktor_workflow_dag_state *dag;
     praktor_workflow_task_registry *registry;
-    praktor_c11_value_store root;
+    praktor_value_store root;
     praktor_process_retainer retainer;
 } native_dag_fixture;
 typedef struct native_task {
-    praktor_c11_native_host host;
-    praktor_c11_bt_host hooks;
-    praktor_c11_session_config config;
-    praktor_c11_session session;
+    praktor_native_host host;
+    praktor_bt_host hooks;
+    praktor_session_config config;
+    praktor_session session;
     uint64_t now_ns;
     int tick_status;
     salts_bt_node_status outcome;
@@ -74,14 +74,14 @@ static void fixture_init(native_dag_fixture *f,const char *source) {
         f->snapshot,&f->registry)==SALTS_OK);
     check(praktor_workflow_dag_state_create(
         praktor_workflow_snapshot_dependencies(f->snapshot),1u,&f->dag)==SALTS_OK);
-    check(praktor_c11_value_store_init(&f->root,8u,64u,128u)==PRAKTOR_C11_VALUE_OK);
-    check(praktor_c11_workflow_seed_root_text_variables(
-        f->snapshot,&f->root)==PRAKTOR_C11_VALUE_OK);
+    check(praktor_value_store_init(&f->root,8u,64u,128u)==PRAKTOR_VALUE_OK);
+    check(praktor_workflow_seed_root_text_variables(
+        f->snapshot,&f->root)==PRAKTOR_VALUE_OK);
     check(praktor_process_retainer_init(&f->retainer,2u)==SALTS_OK);
 }
 static void fixture_destroy(native_dag_fixture *f) {
     check(praktor_process_retainer_destroy(&f->retainer)==SALTS_OK);
-    praktor_c11_value_store_destroy(&f->root);
+    praktor_value_store_destroy(&f->root);
     praktor_workflow_dag_state_destroy(f->dag);
     praktor_workflow_task_registry_destroy(f->registry);
     praktor_workflow_snapshot_destroy(f->snapshot);
@@ -90,38 +90,38 @@ static uint64_t clock_ns(void *user) {
     return *(const uint64_t *)user;
 }
 static void task_init(native_dag_fixture *f,native_task *task,size_t index) {
-    praktor_c11_native_host_config host_config={0};
-    praktor_c11_orch_session_plan *plan=NULL;
+    praktor_native_host_config host_config={0};
+    praktor_orch_session_plan *plan=NULL;
     char error[256]={0};
     memset(task,0,sizeof(*task));
-    praktor_c11_native_host_config_init(&host_config,8u,64u,128u);
+    praktor_native_host_config_init(&host_config,8u,64u,128u);
     host_config.max_running_leaves=1u;
     host_config.now_ns=clock_ns;host_config.clock_user=&task->now_ns;
-    check(praktor_c11_native_host_init_with_config(
+    check(praktor_native_host_init_with_config(
         &task->host,&host_config)==SALTS_OK);
-    check(praktor_c11_native_host_bind(&task->host,&task->hooks)==SALTS_OK);
-    check(praktor_c11_workflow_load_task_text_scope(
+    check(praktor_native_host_bind(&task->host,&task->hooks)==SALTS_OK);
+    check(praktor_workflow_load_task_text_scope(
         f->snapshot,index,&f->root,
-        praktor_c11_native_host_values(&task->host))==
-        PRAKTOR_C11_VALUE_OK);
-    praktor_c11_session_config_init(&task->config);
+        praktor_native_host_values(&task->host))==
+        PRAKTOR_VALUE_OK);
+    praktor_session_config_init(&task->config);
     task->config.host=task->hooks;
-    check(praktor_c11_orch_session_plan_create(
+    check(praktor_orch_session_plan_create(
         praktor_workflow_snapshot_task_tree(f->snapshot,index),
         &task->config.tree,&plan,error,sizeof error)==SALTS_OK);
     if(!plan) {info("C11 Orch Session Plan: %s",error);return;}
-    check(praktor_c11_orch_session_plan_init_session(
+    check(praktor_orch_session_plan_init_session(
         plan,&task->config,&task->session)==SALTS_OK);
-    praktor_c11_orch_session_plan_destroy(plan);
+    praktor_orch_session_plan_destroy(plan);
 }
 static void task_destroy(native_task *task) {
-    check(praktor_c11_session_destroy(&task->session)==SALTS_OK);
-    praktor_c11_native_host_destroy(&task->host);
+    check(praktor_session_destroy(&task->session)==SALTS_OK);
+    praktor_native_host_destroy(&task->host);
 }
 static void task_run(void *user) {
     native_task *task=(native_task *)user;
     ++task->ran;
-    task->tick_status=praktor_c11_session_tick(&task->session,&task->outcome);
+    task->tick_status=praktor_session_tick(&task->session,&task->outcome);
 }
 static void task_cancel(void *user) {
     native_task *task=(native_task *)user;
@@ -151,13 +151,13 @@ static void owner_execute(cflow_executor *executor,
     check(task->ran==1u&&task->cancelled==0u&&task->finalized==1u);
     check(task->tick_status==SALTS_OK);
 }
-static bool get_text(const praktor_c11_value_store *store,
+static bool get_text(const praktor_value_store *store,
                      const char *key,char *buffer,size_t capacity) {
     size_t size=0u;
-    return praktor_c11_value_store_get(store,key,buffer,capacity,&size)==
-        PRAKTOR_C11_VALUE_OK;
+    return praktor_value_store_get(store,key,buffer,capacity,&size)==
+        PRAKTOR_VALUE_OK;
 }
-static bool text_is(const praktor_c11_value_store *store,
+static bool text_is(const praktor_value_store *store,
                     const char *key,const char *expected) {
     char buffer[128]={0};
     return get_text(store,key,buffer,sizeof buffer)&&
@@ -178,7 +178,7 @@ spec("Real native C11 Session leaves driven by DAG owner and CFlow") {
         native_task first,second;
         cflow_executor executor={0};
         cflow_executor_control control={0};
-        praktor_c11_value_txn txn={0};
+        praktor_value_txn txn={0};
         praktor_workflow_task_output_update update={0};
         json_value_t *output=NULL;
         size_t ids[2]={SIZE_MAX,SIZE_MAX},count=0u,pending=SIZE_MAX;
@@ -190,7 +190,7 @@ spec("Real native C11 Session leaves driven by DAG owner and CFlow") {
         task_init(&f,&first,0u);
         owner_execute(&executor,&control,&first);
         check(first.outcome==SALTS_BT_SUCCESS);
-        check(get_text(praktor_c11_native_host_values(&first.host),
+        check(get_text(praktor_native_host_values(&first.host),
                        "answer",answer,sizeof answer));
         check(strcmp(answer,"7")==0);
         check(!text_is(&f.root,"answer","7"));
@@ -199,17 +199,17 @@ spec("Real native C11 Session leaves driven by DAG owner and CFlow") {
          * closed CFlow admission and Process-retainer quiescence. */
         {
             const char *outputs[]={"answer"};
-            check(praktor_c11_workflow_prepare_task_text_outputs(
-                &f.root,praktor_c11_native_host_values(&first.host),
-                outputs,1u,&txn)==PRAKTOR_C11_VALUE_OK);
+            check(praktor_workflow_prepare_task_text_outputs(
+                &f.root,praktor_native_host_values(&first.host),
+                outputs,1u,&txn)==PRAKTOR_VALUE_OK);
         }
         output=json_parse("{\"answer\":\"7\"}",14u);
         check(output!=NULL);
         update.task_index=0u;
         update.updates=output;
-        check(praktor_c11_workflow_parallel_commit_after_cflow_and_process_drain(
+        check(praktor_workflow_parallel_commit_after_cflow_and_process_drain(
             f.registry,&update,&txn,1u,&control,&f.retainer,8u,&pending)==
-            PRAKTOR_C11_PARALLEL_OK);
+            PRAKTOR_PARALLEL_OK);
         check(pending==0u);
         check(praktor_workflow_task_registry_complete(f.registry,0u)==SALTS_OK);
         check(praktor_workflow_dag_finish(f.dag,0u,true)==SALTS_OK);
@@ -225,9 +225,9 @@ spec("Real native C11 Session leaves driven by DAG owner and CFlow") {
         task_init(&f,&second,1u);
         /* The dependent Host is atomically forked from the updated root:
          * no hand-written answer injection and no wholesale local merge. */
-        check(text_is(praktor_c11_native_host_values(&second.host),
+        check(text_is(praktor_native_host_values(&second.host),
                       "answer","7"));
-        check(text_is(praktor_c11_native_host_values(&second.host),
+        check(text_is(praktor_native_host_values(&second.host),
                       "seed","9"));
         executor=(cflow_executor){0};control=(cflow_executor_control){0};
         owner_execute(&executor,&control,&second);
@@ -254,10 +254,10 @@ spec("Real native C11 Session leaves driven by DAG owner and CFlow") {
         check(waiting.outcome==SALTS_BT_RUNNING);
         check_dag(&f,1u,0u,0u,PRAKTOR_WORKFLOW_DAG_CONTINUE,false);
         check(text_is(&f.root,"late","original"));
-        check(text_is(praktor_c11_native_host_values(&waiting.host),
+        check(text_is(praktor_native_host_values(&waiting.host),
                       "late","task-local"));
         /* CFlow finalized the tick, NOT the still-running Session. */
-        check(praktor_c11_session_cancel(&waiting.session)==SALTS_OK);
+        check(praktor_session_cancel(&waiting.session)==SALTS_OK);
         check(praktor_workflow_dag_stop(
             f.dag,PRAKTOR_WORKFLOW_DAG_CANCELLED)==SALTS_OK);
         check(praktor_workflow_task_registry_fail(

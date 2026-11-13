@@ -1,7 +1,7 @@
 /* Test-only simulated NativeIO/ack faults. The actual C11 Parallel transaction
  * and typed registry remain linked; only Process recovery progress is injected.
  * Native close failures cannot be normalized into BUSY or false success. */
-#include "workflow_parallel_process_guard.h"
+#include "actions/workflow_parallel_process_guard.h"
 #include <string.h>
 #include <tinytest.h>
 
@@ -24,7 +24,7 @@ static int fault_retainer_ready(praktor_process_retainer *owner,size_t steps,
     return injected_status;
 }
 #define praktor_process_retainer_run_ready fault_retainer_ready
-#include "workflow_parallel_process_guard.c"
+#include "../../src/actions/workflow_parallel_process_guard.c"
 #undef praktor_process_retainer_run_ready
 
 static praktor_workflow_task_registry *create_registry(void) {
@@ -42,8 +42,8 @@ static praktor_workflow_task_registry *create_registry(void) {
 spec("Parallel native Process recovery errors are fail-closed") {
     it("preserves the first NativeIO error even when leases remain active") {
         praktor_workflow_task_registry *registry=create_registry();
-        praktor_c11_value_store root={0};
-        praktor_c11_value_txn branch={0};
+        praktor_value_store root={0};
+        praktor_value_txn branch={0};
         praktor_process_retainer retainer={0};
         const char *json_text="{\"answer\":123}";
         json_value_t *json=json_parse(json_text,strlen(json_text));
@@ -52,69 +52,69 @@ spec("Parallel native Process recovery errors are fail-closed") {
         praktor_workflow_task_state state=PRAKTOR_WORKFLOW_TASK_RUNNING;
         check(json!=NULL);
         check(praktor_process_retainer_init(&retainer,1u)==SALTS_OK);
-        check(praktor_c11_value_store_init(&root,2u,32u,32u)==PRAKTOR_C11_VALUE_OK);
-        check(praktor_c11_value_txn_begin(&branch,&root)==PRAKTOR_C11_VALUE_OK);
-        check(praktor_c11_value_txn_set(&branch,"answer","value")==PRAKTOR_C11_VALUE_OK);
+        check(praktor_value_store_init(&root,2u,32u,32u)==PRAKTOR_VALUE_OK);
+        check(praktor_value_txn_begin(&branch,&root)==PRAKTOR_VALUE_OK);
+        check(praktor_value_txn_set(&branch,"answer","value")==PRAKTOR_VALUE_OK);
         injected_status=SALTS_EIO;
         injected_pending=1u;
         calls=0u;
-        check(praktor_c11_workflow_parallel_commit_after_process_drain(
+        check(praktor_workflow_parallel_commit_after_process_drain(
             registry,&update,&branch,1u,&retainer,8u,&pending)==
-            PRAKTOR_C11_PARALLEL_RECOVERY);
+            PRAKTOR_PARALLEL_RECOVERY);
         check(pending==1u&&calls==1u);
         check(branch.impl!=NULL);
-        check(praktor_c11_value_store_size(&root)==0u);
+        check(praktor_value_store_size(&root)==0u);
         check(praktor_workflow_task_registry_state(registry,0u,&state)==SALTS_OK);
         check(state==PRAKTOR_WORKFLOW_TASK_PENDING);
         injected_pending=0u; /* Error is still real even if no pending. */
-        check(praktor_c11_workflow_parallel_commit_after_process_drain(
+        check(praktor_workflow_parallel_commit_after_process_drain(
             registry,&update,&branch,1u,&retainer,8u,&pending)==
-            PRAKTOR_C11_PARALLEL_RECOVERY);
+            PRAKTOR_PARALLEL_RECOVERY);
         check(pending==0u&&branch.impl!=NULL);
         injected_status=SALTS_OK;
         injected_pending=1u; /* Some provider returned OK but count is live. */
-        check(praktor_c11_workflow_parallel_commit_after_process_drain(
+        check(praktor_workflow_parallel_commit_after_process_drain(
             registry,&update,&branch,1u,&retainer,8u,&pending)==
-            PRAKTOR_C11_PARALLEL_BUSY);
+            PRAKTOR_PARALLEL_BUSY);
         check(pending==1u&&branch.impl!=NULL);
         injected_pending=0u;
-        check(praktor_c11_workflow_parallel_commit_after_process_drain(
+        check(praktor_workflow_parallel_commit_after_process_drain(
             registry,&update,&branch,1u,&retainer,8u,&pending)==
-            PRAKTOR_C11_PARALLEL_OK);
+            PRAKTOR_PARALLEL_OK);
         check(pending==0u&&!branch.impl);
         json_free(json);
-        praktor_c11_value_store_destroy(&root);
+        praktor_value_store_destroy(&root);
         check(praktor_process_retainer_destroy(&retainer)==SALTS_OK);
         praktor_workflow_task_registry_destroy(registry);
     }
 }
 spec("Independent Process recovery failures remain fail-closed") {
     it("does not hide one worker's NativeIO error behind another drained retainer") {
-        praktor_c11_process_cohort_recovery recovery={0};
+        praktor_process_cohort_recovery recovery={0};
         praktor_process_retainer local[2]={{0},{0}};
         praktor_process_retainer *owners[2]={&local[0],&local[1]};
         size_t pending=SIZE_MAX,reaped=SIZE_MAX;
-        check(praktor_c11_process_cohort_recovery_init(&recovery)==PRAKTOR_C11_PARALLEL_OK);
+        check(praktor_process_cohort_recovery_init(&recovery)==PRAKTOR_PARALLEL_OK);
         for(size_t i=0u;i<2u;++i)
             check(praktor_process_retainer_init(&local[i],1u)==SALTS_OK);
         injected_status=SALTS_OK;injected_pending=0u;
         override_owner=&local[1];override_status=SALTS_EIO;override_pending=1u;
         calls=0u;
-        check(praktor_c11_workflow_parallel_drain_process_retainers(
-            &recovery,owners,2u,8u,&pending,&reaped)==PRAKTOR_C11_PARALLEL_RECOVERY);
+        check(praktor_workflow_parallel_drain_process_retainers(
+            &recovery,owners,2u,8u,&pending,&reaped)==PRAKTOR_PARALLEL_RECOVERY);
         check(pending==1u&&reaped==0u&&calls==2u);
         check(recovery.first_native_error==SALTS_EIO);
         override_pending=0u;
-        check(praktor_c11_workflow_parallel_drain_process_retainers(
-            &recovery,owners,2u,8u,&pending,&reaped)==PRAKTOR_C11_PARALLEL_RECOVERY);
+        check(praktor_workflow_parallel_drain_process_retainers(
+            &recovery,owners,2u,8u,&pending,&reaped)==PRAKTOR_PARALLEL_RECOVERY);
         check(pending==0u);
         override_status=SALTS_EBUSY;override_pending=1u;
-        check(praktor_c11_workflow_parallel_drain_process_retainers(
-            &recovery,owners,2u,8u,&pending,&reaped)==PRAKTOR_C11_PARALLEL_RECOVERY);
+        check(praktor_workflow_parallel_drain_process_retainers(
+            &recovery,owners,2u,8u,&pending,&reaped)==PRAKTOR_PARALLEL_RECOVERY);
         check(pending==1u);
         override_status=SALTS_OK;override_pending=0u;
-        check(praktor_c11_workflow_parallel_drain_process_retainers(
-            &recovery,owners,2u,8u,&pending,&reaped)==PRAKTOR_C11_PARALLEL_RECOVERY);
+        check(praktor_workflow_parallel_drain_process_retainers(
+            &recovery,owners,2u,8u,&pending,&reaped)==PRAKTOR_PARALLEL_RECOVERY);
         check(pending==0u&&recovery.first_native_error==SALTS_EIO);
         override_owner=NULL;
         for(size_t i=0u;i<2u;++i)
@@ -132,9 +132,9 @@ static void completed_callback(void *user) {
 spec("NativeIO recovery poisoning survives a clean later Process drain") {
     it("never publishes committed typed/text outputs after a transient native error") {
         praktor_workflow_task_registry *registry=create_registry();
-        praktor_c11_value_store root={0};
-        praktor_c11_value_txn branch={0};
-        praktor_c11_process_cohort_recovery recovery={0};
+        praktor_value_store root={0};
+        praktor_value_txn branch={0};
+        praktor_process_cohort_recovery recovery={0};
         praktor_process_retainer retainer={0};
         praktor_process_retainer *owners[1]={&retainer};
         cflow_executor executor={0};
@@ -148,13 +148,13 @@ spec("NativeIO recovery poisoning survives a clean later Process drain") {
         size_t pending=SIZE_MAX,reaped=SIZE_MAX,prior_calls=0u;
         cflow_executor_task task={0};
         check(registry!=NULL&&json!=NULL);
-        check(praktor_c11_process_cohort_recovery_init(&recovery)==
-              PRAKTOR_C11_PARALLEL_OK);
+        check(praktor_process_cohort_recovery_init(&recovery)==
+              PRAKTOR_PARALLEL_OK);
         check(recovery.last_pending==SIZE_MAX); /* not yet observed */
         check(praktor_process_retainer_init(&retainer,1u)==SALTS_OK);
-        check(praktor_c11_value_store_init(&root,2u,32u,32u)==PRAKTOR_C11_VALUE_OK);
-        check(praktor_c11_value_txn_begin(&branch,&root)==PRAKTOR_C11_VALUE_OK);
-        check(praktor_c11_value_txn_set(&branch,"answer","value")==PRAKTOR_C11_VALUE_OK);
+        check(praktor_value_store_init(&root,2u,32u,32u)==PRAKTOR_VALUE_OK);
+        check(praktor_value_txn_begin(&branch,&root)==PRAKTOR_VALUE_OK);
+        check(praktor_value_txn_set(&branch,"answer","value")==PRAKTOR_VALUE_OK);
         check(cflow_executor_manual_init_with_capacity(&executor,1u));
         check(cflow_executor_as_control(&executor,&control));
         task.run=completed_callback;task.finalize=completed_callback;task.user=&callbacks;
@@ -166,9 +166,9 @@ spec("NativeIO recovery poisoning survives a clean later Process drain") {
         injected_status=SALTS_OK;injected_pending=0u;
         override_owner=&retainer;override_status=SALTS_EIO;override_pending=1u;
         calls=0u;
-        check(praktor_c11_workflow_parallel_commit_after_cflow_and_process_drains(
+        check(praktor_workflow_parallel_commit_after_cflow_and_process_drains(
             registry,&update,&branch,1u,succeeded,&recovery,&control,
-            owners,1u,8u,&pending)==PRAKTOR_C11_PARALLEL_RECOVERY);
+            owners,1u,8u,&pending)==PRAKTOR_PARALLEL_RECOVERY);
         check(pending==1u&&calls==1u);
         check(recovery.first_native_error==SALTS_EIO&&branch.impl!=NULL);
         check(recovery.last_pending==1u);
@@ -176,55 +176,55 @@ spec("NativeIO recovery poisoning survives a clean later Process drain") {
          * zero just because it deliberately skipped the native poll. */
         prior_calls=calls;
         pending=SIZE_MAX;
-        check(praktor_c11_workflow_parallel_commit_after_cflow_and_process_drains(
+        check(praktor_workflow_parallel_commit_after_cflow_and_process_drains(
             registry,&update,&branch,1u,succeeded,&recovery,&control,
-            owners,1u,8u,&pending)==PRAKTOR_C11_PARALLEL_RECOVERY);
+            owners,1u,8u,&pending)==PRAKTOR_PARALLEL_RECOVERY);
         check(pending==1u&&calls==prior_calls);
-        check(praktor_c11_value_store_size(&root)==0u);
+        check(praktor_value_store_size(&root)==0u);
         check(praktor_workflow_task_registry_state(registry,0u,&state)==SALTS_OK);
         check(state==PRAKTOR_WORKFLOW_TASK_PENDING);
 
         /* A later OK with zero pending may be a genuine cleanup result, but
          * can never undo the first observed provider failure. */
         override_status=SALTS_OK;override_pending=0u;
-        check(praktor_c11_workflow_parallel_drain_process_retainers(
-            &recovery,owners,1u,8u,&pending,&reaped)==PRAKTOR_C11_PARALLEL_RECOVERY);
+        check(praktor_workflow_parallel_drain_process_retainers(
+            &recovery,owners,1u,8u,&pending,&reaped)==PRAKTOR_PARALLEL_RECOVERY);
         check(pending==0u&&reaped==0u&&recovery.first_native_error==SALTS_EIO);
         check(recovery.last_pending==0u); /* explicit cleanup did observe zero */
         prior_calls=calls;
-        check(praktor_c11_workflow_parallel_commit_after_cflow_and_process_drains(
+        check(praktor_workflow_parallel_commit_after_cflow_and_process_drains(
             registry,&update,&branch,1u,succeeded,&recovery,&control,
-            owners,1u,8u,&pending)==PRAKTOR_C11_PARALLEL_RECOVERY);
+            owners,1u,8u,&pending)==PRAKTOR_PARALLEL_RECOVERY);
         check(pending==0u&&calls==prior_calls); /* no repeated native operations */
-        check(praktor_c11_process_cohort_recovery_init(&recovery)==
-              PRAKTOR_C11_PARALLEL_INVALID); /* poisoned cohort cannot reset */
-        check(praktor_c11_value_store_size(&root)==0u&&branch.impl!=NULL);
+        check(praktor_process_cohort_recovery_init(&recovery)==
+              PRAKTOR_PARALLEL_INVALID); /* poisoned cohort cannot reset */
+        check(praktor_value_store_size(&root)==0u&&branch.impl!=NULL);
         check(praktor_workflow_task_registry_state(registry,0u,&state)==SALTS_OK);
         check(state==PRAKTOR_WORKFLOW_TASK_PENDING);
-        praktor_c11_value_txn_abort(&branch);
+        praktor_value_txn_abort(&branch);
         check(branch.impl==NULL);
         override_owner=NULL;
         cflow_executor_destroy(&executor);
         check(praktor_process_retainer_destroy(&retainer)==SALTS_OK);
         json_free(json);
-        praktor_c11_value_store_destroy(&root);
+        praktor_value_store_destroy(&root);
         praktor_workflow_task_registry_destroy(registry);
     }
     it("allows BUSY then clean recovery when no provider error ever occurred") {
-        praktor_c11_process_cohort_recovery recovery={0};
+        praktor_process_cohort_recovery recovery={0};
         praktor_process_retainer retainer={0};
         praktor_process_retainer *owners[1]={&retainer};
         size_t pending=SIZE_MAX,reaped=SIZE_MAX;
-        check(praktor_c11_process_cohort_recovery_init(&recovery)==PRAKTOR_C11_PARALLEL_OK);
+        check(praktor_process_cohort_recovery_init(&recovery)==PRAKTOR_PARALLEL_OK);
         check(praktor_process_retainer_init(&retainer,1u)==SALTS_OK);
         injected_status=SALTS_EBUSY;injected_pending=1u;
         override_owner=NULL;calls=0u;
-        check(praktor_c11_workflow_parallel_drain_process_retainers(
-            &recovery,owners,1u,8u,&pending,&reaped)==PRAKTOR_C11_PARALLEL_BUSY);
+        check(praktor_workflow_parallel_drain_process_retainers(
+            &recovery,owners,1u,8u,&pending,&reaped)==PRAKTOR_PARALLEL_BUSY);
         check(pending==1u&&recovery.first_native_error==SALTS_OK);
         injected_status=SALTS_OK;injected_pending=0u;
-        check(praktor_c11_workflow_parallel_drain_process_retainers(
-            &recovery,owners,1u,8u,&pending,&reaped)==PRAKTOR_C11_PARALLEL_OK);
+        check(praktor_workflow_parallel_drain_process_retainers(
+            &recovery,owners,1u,8u,&pending,&reaped)==PRAKTOR_PARALLEL_OK);
         check(pending==0u&&recovery.first_native_error==SALTS_OK&&calls==2u);
         check(praktor_process_retainer_destroy(&retainer)==SALTS_OK);
     }
@@ -233,9 +233,9 @@ spec("NativeIO recovery poisoning survives a clean later Process drain") {
 spec("Completed Process cohort may publish exactly once") {
     it("rejects second typed/text commit and native recovery after publication") {
         praktor_workflow_task_registry *registry=create_registry();
-        praktor_c11_value_store root={0};
-        praktor_c11_value_txn first={0},second={0};
-        praktor_c11_process_cohort_recovery recovery={0};
+        praktor_value_store root={0};
+        praktor_value_txn first={0},second={0};
+        praktor_process_cohort_recovery recovery={0};
         praktor_process_retainer retainer={0};
         praktor_process_retainer *owners[1]={&retainer};
         cflow_executor executor={0};
@@ -249,11 +249,11 @@ spec("Completed Process cohort may publish exactly once") {
         size_t pending=SIZE_MAX,reaped=SIZE_MAX,length=0u;
         char value[32]={0};
         check(registry!=NULL&&json!=NULL);
-        check(praktor_c11_process_cohort_recovery_init(&recovery)==PRAKTOR_C11_PARALLEL_OK);
+        check(praktor_process_cohort_recovery_init(&recovery)==PRAKTOR_PARALLEL_OK);
         check(praktor_process_retainer_init(&retainer,1u)==SALTS_OK);
-        check(praktor_c11_value_store_init(&root,4u,32u,32u)==PRAKTOR_C11_VALUE_OK);
-        check(praktor_c11_value_txn_begin(&first,&root)==PRAKTOR_C11_VALUE_OK);
-        check(praktor_c11_value_txn_set(&first,"answer","original")==PRAKTOR_C11_VALUE_OK);
+        check(praktor_value_store_init(&root,4u,32u,32u)==PRAKTOR_VALUE_OK);
+        check(praktor_value_txn_begin(&first,&root)==PRAKTOR_VALUE_OK);
+        check(praktor_value_txn_set(&first,"answer","original")==PRAKTOR_VALUE_OK);
         check(cflow_executor_manual_init_with_capacity(&executor,1u));
         check(cflow_executor_as_control(&executor,&control));
         task.run=completed_callback;task.finalize=completed_callback;task.user=&callbacks;
@@ -264,38 +264,38 @@ spec("Completed Process cohort may publish exactly once") {
         check(callbacks==2u);
         override_owner=NULL;
         injected_status=SALTS_OK;injected_pending=0u;calls=0u;
-        check(praktor_c11_workflow_parallel_commit_after_cflow_and_process_drains(
+        check(praktor_workflow_parallel_commit_after_cflow_and_process_drains(
             registry,&update,&first,1u,succeeded,&recovery,&control,
-            owners,1u,8u,&pending)==PRAKTOR_C11_PARALLEL_OK);
+            owners,1u,8u,&pending)==PRAKTOR_PARALLEL_OK);
         check(first.impl==NULL&&recovery.sealed&&pending==0u&&calls==1u);
-        check(praktor_c11_value_store_get(
-            &root,"answer",value,sizeof value,&length)==PRAKTOR_C11_VALUE_OK);
+        check(praktor_value_store_get(
+            &root,"answer",value,sizeof value,&length)==PRAKTOR_VALUE_OK);
         check(length==8u&&strcmp(value,"original")==0);
-        check(praktor_c11_value_txn_begin(&second,&root)==PRAKTOR_C11_VALUE_OK);
-        check(praktor_c11_value_txn_set(&second,"retry","forbidden")==PRAKTOR_C11_VALUE_OK);
+        check(praktor_value_txn_begin(&second,&root)==PRAKTOR_VALUE_OK);
+        check(praktor_value_txn_set(&second,"retry","forbidden")==PRAKTOR_VALUE_OK);
         /* A second group would otherwise be silently re-admitted by the
          * same CLOSED CFlow control and zero-pending retained Process owner. */
-        check(praktor_c11_workflow_parallel_commit_after_cflow_and_process_drains(
+        check(praktor_workflow_parallel_commit_after_cflow_and_process_drains(
             registry,&update,&second,1u,succeeded,&recovery,&control,
-            owners,1u,8u,&pending)==PRAKTOR_C11_PARALLEL_INVALID);
+            owners,1u,8u,&pending)==PRAKTOR_PARALLEL_INVALID);
         check(second.impl!=NULL&&calls==1u);
-        check(praktor_c11_workflow_parallel_drain_process_retainers(
-            &recovery,owners,1u,8u,&pending,&reaped)==PRAKTOR_C11_PARALLEL_INVALID);
-        check(calls==1u&&praktor_c11_value_store_size(&root)==1u);
-        check(praktor_c11_process_cohort_recovery_init(&recovery)==PRAKTOR_C11_PARALLEL_INVALID);
-        praktor_c11_value_txn_abort(&second);
+        check(praktor_workflow_parallel_drain_process_retainers(
+            &recovery,owners,1u,8u,&pending,&reaped)==PRAKTOR_PARALLEL_INVALID);
+        check(calls==1u&&praktor_value_store_size(&root)==1u);
+        check(praktor_process_cohort_recovery_init(&recovery)==PRAKTOR_PARALLEL_INVALID);
+        praktor_value_txn_abort(&second);
         check(praktor_workflow_task_registry_complete(registry,0u)==SALTS_OK);
         cflow_executor_destroy(&executor);
         check(praktor_process_retainer_destroy(&retainer)==SALTS_OK);
         json_free(json);
-        praktor_c11_value_store_destroy(&root);
+        praktor_value_store_destroy(&root);
         praktor_workflow_task_registry_destroy(registry);
     }
 }
 
 spec("Multi-worker recovery pending is an observation, not a default ACK") {
     it("reports UNKNOWN without a native sweep and preserves the last observation on invalid calls") {
-        praktor_c11_process_cohort_recovery recovery={0};
+        praktor_process_cohort_recovery recovery={0};
         praktor_process_retainer owner={0};
         praktor_process_retainer *owners[1]={&owner};
         praktor_process_retainer *invalid[1]={NULL};
@@ -305,35 +305,35 @@ spec("Multi-worker recovery pending is an observation, not a default ACK") {
 
         /* Uninitialized cohort, missing retainer, zero native-work budget:
          * none may be mistaken for a successful zero-pending observation. */
-        check(praktor_c11_workflow_parallel_drain_process_retainers(
-            &recovery,owners,1u,8u,&pending,&reaped)==PRAKTOR_C11_PARALLEL_INVALID);
+        check(praktor_workflow_parallel_drain_process_retainers(
+            &recovery,owners,1u,8u,&pending,&reaped)==PRAKTOR_PARALLEL_INVALID);
         check(pending==SIZE_MAX&&reaped==0u&&calls==0u);
-        check(praktor_c11_process_cohort_recovery_init(&recovery)==PRAKTOR_C11_PARALLEL_OK);
-        check(praktor_c11_workflow_parallel_drain_process_retainers(
-            &recovery,owners,1u,8u,&pending,&reaped)==PRAKTOR_C11_PARALLEL_INVALID);
+        check(praktor_process_cohort_recovery_init(&recovery)==PRAKTOR_PARALLEL_OK);
+        check(praktor_workflow_parallel_drain_process_retainers(
+            &recovery,owners,1u,8u,&pending,&reaped)==PRAKTOR_PARALLEL_INVALID);
         check(pending==SIZE_MAX&&reaped==0u&&calls==0u);
         check(praktor_process_retainer_init(&owner,2u)==SALTS_OK);
-        check(praktor_c11_workflow_parallel_drain_process_retainers(
-            &recovery,invalid,1u,8u,&pending,&reaped)==PRAKTOR_C11_PARALLEL_INVALID);
+        check(praktor_workflow_parallel_drain_process_retainers(
+            &recovery,invalid,1u,8u,&pending,&reaped)==PRAKTOR_PARALLEL_INVALID);
         check(pending==SIZE_MAX&&calls==0u&&recovery.bound_count==0u);
 
         /* Only a real completed retainer sweep provides the count. */
-        check(praktor_c11_workflow_parallel_drain_process_retainers(
-            &recovery,owners,1u,8u,&pending,&reaped)==PRAKTOR_C11_PARALLEL_BUSY);
+        check(praktor_workflow_parallel_drain_process_retainers(
+            &recovery,owners,1u,8u,&pending,&reaped)==PRAKTOR_PARALLEL_BUSY);
         check(pending==2u&&calls==1u&&recovery.last_pending==2u);
-        check(praktor_c11_workflow_parallel_drain_process_retainers(
-            &recovery,invalid,1u,8u,&pending,&reaped)==PRAKTOR_C11_PARALLEL_INVALID);
+        check(praktor_workflow_parallel_drain_process_retainers(
+            &recovery,invalid,1u,8u,&pending,&reaped)==PRAKTOR_PARALLEL_INVALID);
         check(pending==2u&&calls==1u);
-        check(praktor_c11_workflow_parallel_drain_process_retainers(
-            &recovery,owners,0u,8u,&pending,&reaped)==PRAKTOR_C11_PARALLEL_INVALID);
+        check(praktor_workflow_parallel_drain_process_retainers(
+            &recovery,owners,0u,8u,&pending,&reaped)==PRAKTOR_PARALLEL_INVALID);
         check(pending==2u&&calls==1u);
 
         injected_status=SALTS_OK;injected_pending=0u;
-        check(praktor_c11_workflow_parallel_drain_process_retainers(
-            &recovery,owners,1u,8u,&pending,&reaped)==PRAKTOR_C11_PARALLEL_OK);
+        check(praktor_workflow_parallel_drain_process_retainers(
+            &recovery,owners,1u,8u,&pending,&reaped)==PRAKTOR_PARALLEL_OK);
         check(pending==0u&&calls==2u&&recovery.last_pending==0u);
-        check(praktor_c11_workflow_parallel_drain_process_retainers(
-            &recovery,invalid,1u,8u,&pending,&reaped)==PRAKTOR_C11_PARALLEL_INVALID);
+        check(praktor_workflow_parallel_drain_process_retainers(
+            &recovery,invalid,1u,8u,&pending,&reaped)==PRAKTOR_PARALLEL_INVALID);
         check(pending==0u&&calls==2u); /* last observed, not newly polled */
         check(praktor_process_retainer_destroy(&owner)==SALTS_OK);
     }

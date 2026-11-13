@@ -26,6 +26,14 @@ spec("C11 Praktor SDK ABI v3") {
         praktor_release_result(&result);
         check(result.json==NULL);
     }
+    it("loads environment through the public dynamic-library entrypoint without executing tasks") {
+        const char yaml[]="tasks:\n  - name: unused\n    command: exit 7\n";
+        const char invalid[]="dotEnv: ['']\ntasks: []\n";
+        check(praktor_load_environment(yaml,sizeof(yaml)-1u)==PRAKTOR_RUNTIME_OK);
+        check(praktor_load_environment(NULL,1u)==PRAKTOR_RUNTIME_INVALID);
+        check(praktor_load_environment(yaml,0u)==PRAKTOR_RUNTIME_INVALID);
+        check(praktor_load_environment(invalid,sizeof(invalid)-1u)==PRAKTOR_RUNTIME_INVALID);
+    }
     it("publishes real shell output through the shared-library API after native drain") {
         const char yaml[] = "tasks:\n  - name: shell\n    command: echo sdk-shell\n";
         praktor_execute_request request = {0};

@@ -1,4 +1,4 @@
-#include "regex_tre.h"
+#include "actions/regex_tre.h"
 
 #include <tinytest.h>
 

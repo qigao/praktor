@@ -7,10 +7,10 @@
  * is NOT equivalent to terminal Shell/NativeIO cleanup. The application owner
  * alone publishes root values and TaskRegistry outputs after CFlow settles and
  * the existing Process retainer reports zero outstanding work. */
-#include "orch_session_plan.h"
-#include "native_host.h"
-#include "workflow_parallel_process_guard.h"
-#include "workflow_snapshot_values.h"
+#include "actions/orch_session_plan.h"
+#include "actions/native_host.h"
+#include "actions/workflow_parallel_process_guard.h"
+#include "actions/workflow_snapshot_values.h"
 #include "yml/workflow_dag_state.h"
 #include <cflow/executor.h>
 #include <core/clock.h>
@@ -120,15 +120,15 @@ typedef struct shell_fixture {
     praktor_workflow_snapshot *snapshot;
     praktor_workflow_dag_state *dag;
     praktor_workflow_task_registry *registry;
-    praktor_c11_value_store root;
+    praktor_value_store root;
     praktor_process_retainer retainer;
 } shell_fixture;
 
 typedef struct shell_owner_task {
-    praktor_c11_native_host host;
-    praktor_c11_bt_host hooks;
-    praktor_c11_session session;
-    praktor_c11_session_config config;
+    praktor_native_host host;
+    praktor_bt_host hooks;
+    praktor_session session;
+    praktor_session_config config;
     salts_bt_node_status outcome;
     int tick_status;
     bool until_terminal;
@@ -146,10 +146,10 @@ static void fixture_init(shell_fixture *f,const char *yaml) {
     check(praktor_workflow_dag_state_create(
         praktor_workflow_snapshot_dependencies(f->snapshot),
         1u,&f->dag)==SALTS_OK);
-    check(praktor_c11_value_store_init(
-        &f->root,10u,64u,512u)==PRAKTOR_C11_VALUE_OK);
-    check(praktor_c11_workflow_seed_root_text_variables(
-        f->snapshot,&f->root)==PRAKTOR_C11_VALUE_OK);
+    check(praktor_value_store_init(
+        &f->root,10u,64u,512u)==PRAKTOR_VALUE_OK);
+    check(praktor_workflow_seed_root_text_variables(
+        f->snapshot,&f->root)==PRAKTOR_VALUE_OK);
     check(praktor_process_retainer_init(&f->retainer,2u)==SALTS_OK);
 }
 static void drain_retainer(praktor_process_retainer *retainer) {
@@ -168,63 +168,63 @@ static void drain_retainer(praktor_process_retainer *retainer) {
 static void fixture_destroy(shell_fixture *f) {
     drain_retainer(&f->retainer);
     check(praktor_process_retainer_destroy(&f->retainer)==SALTS_OK);
-    praktor_c11_value_store_destroy(&f->root);
+    praktor_value_store_destroy(&f->root);
     praktor_workflow_dag_state_destroy(f->dag);
     praktor_workflow_task_registry_destroy(f->registry);
     praktor_workflow_snapshot_destroy(f->snapshot);
 }
-static bool root_is(const praktor_c11_value_store *store,
+static bool root_is(const praktor_value_store *store,
                     const char *key,const char *expected) {
     char text[96]={0};size_t n=0u;
-    return praktor_c11_value_store_get(
-        store,key,text,sizeof text,&n)==PRAKTOR_C11_VALUE_OK&&
+    return praktor_value_store_get(
+        store,key,text,sizeof text,&n)==PRAKTOR_VALUE_OK&&
         n==strlen(expected)&&strcmp(text,expected)==0;
 }
 static void session_init(shell_fixture *f,shell_owner_task *owner,
                          size_t task_index,int plan_mode,bool immediate_close) {
-    praktor_c11_orch_session_plan *plan=NULL;
-    praktor_c11_native_host_config config={0};
+    praktor_orch_session_plan *plan=NULL;
+    praktor_native_host_config config={0};
     char error[256]={0};
     int status;
     memset(owner,0,sizeof(*owner));
-    praktor_c11_native_host_config_init(&config,10u,64u,512u);
+    praktor_native_host_config_init(&config,10u,64u,512u);
     config.max_running_leaves=1u;
-    check(praktor_c11_native_host_init_with_config(
+    check(praktor_native_host_init_with_config(
         &owner->host,&config)==SALTS_OK);
-    check(praktor_c11_workflow_load_task_text_scope(
+    check(praktor_workflow_load_task_text_scope(
         f->snapshot,task_index,&f->root,
-        praktor_c11_native_host_values(&owner->host))==PRAKTOR_C11_VALUE_OK);
-    check(praktor_c11_native_host_bind(&owner->host,&owner->hooks)==SALTS_OK);
-    praktor_c11_session_config_init(&owner->config);
+        praktor_native_host_values(&owner->host))==PRAKTOR_VALUE_OK);
+    check(praktor_native_host_bind(&owner->host,&owner->hooks)==SALTS_OK);
+    praktor_session_config_init(&owner->config);
     owner->config.host=owner->hooks;
     owner->config.retainer=&f->retainer;
     if(immediate_close)owner->config.shell_close_budget_ms=0u;
     if(plan_mode==1)
-        status=praktor_c11_orch_session_plan_create_native_shell(
+        status=praktor_orch_session_plan_create_native_shell(
             praktor_workflow_snapshot_task_tree(f->snapshot,task_index),
             &owner->config.tree,&plan,error,sizeof error);
     else if(plan_mode==2)
-        status=praktor_c11_orch_session_plan_create_native_command(
+        status=praktor_orch_session_plan_create_native_command(
             praktor_workflow_snapshot_task_tree(f->snapshot,task_index),
             &owner->config.tree,&plan,error,sizeof error);
     else if(plan_mode==3)
-        status=praktor_c11_orch_session_plan_create_native_command_json(
+        status=praktor_orch_session_plan_create_native_command_json(
             praktor_workflow_snapshot_task_tree(f->snapshot,task_index),
             &owner->config.tree,&plan,error,sizeof error);
     else if(plan_mode==4)
-        status=praktor_c11_orch_session_plan_create_native_command_keyvalue(
+        status=praktor_orch_session_plan_create_native_command_keyvalue(
             praktor_workflow_snapshot_task_tree(f->snapshot,task_index),
             &owner->config.tree,&plan,error,sizeof error);
     else if(plan_mode==5)
-        status=praktor_c11_orch_session_plan_create_native_command_regex(
+        status=praktor_orch_session_plan_create_native_command_regex(
             praktor_workflow_snapshot_task_tree(f->snapshot,task_index),
             &owner->config.tree,&plan,error,sizeof error);
     else if(plan_mode==6)
-        status=praktor_c11_orch_session_plan_create_native_command_lines(
+        status=praktor_orch_session_plan_create_native_command_lines(
             praktor_workflow_snapshot_task_tree(f->snapshot,task_index),
             &owner->config.tree,&plan,error,sizeof error);
     else
-        status=praktor_c11_orch_session_plan_create(
+        status=praktor_orch_session_plan_create(
             praktor_workflow_snapshot_task_tree(f->snapshot,task_index),
             &owner->config.tree,&plan,error,sizeof error);
     check(status==SALTS_OK);
@@ -232,13 +232,13 @@ static void session_init(shell_fixture *f,shell_owner_task *owner,
         info("Orch Shell plan: %s",error);
         return;
     }
-    check(praktor_c11_orch_session_plan_init_session(
+    check(praktor_orch_session_plan_init_session(
         plan,&owner->config,&owner->session)==SALTS_OK);
-    praktor_c11_orch_session_plan_destroy(plan);
+    praktor_orch_session_plan_destroy(plan);
 }
 static void session_destroy(shell_owner_task *owner) {
-    check(praktor_c11_session_destroy(&owner->session)==SALTS_OK);
-    praktor_c11_native_host_destroy(&owner->host);
+    check(praktor_session_destroy(&owner->session)==SALTS_OK);
+    praktor_native_host_destroy(&owner->host);
 }
 static void tick_cflow(void *user) {
     shell_owner_task *owner=(shell_owner_task *)user;
@@ -247,7 +247,7 @@ static void tick_cflow(void *user) {
     owner->tick_status=SALTS_OK;
     const uint64_t started=hrtime();
     do {
-        owner->tick_status=praktor_c11_session_tick(
+        owner->tick_status=praktor_session_tick(
             &owner->session,&owner->outcome);
         if(owner->tick_status!=SALTS_OK||!owner->until_terminal||
            owner->outcome!=SALTS_BT_RUNNING)break;
@@ -290,32 +290,32 @@ static void assert_dag(shell_fixture *f,size_t active,size_t completed,
 spec("Native Shell Process ownership through C11 DAG and CFlow ManualExecutor") {
     it("requires an explicit retainer and preserves default fail-closed Shell admission") {
         shell_fixture f;
-        praktor_c11_session_config config={0};
-        praktor_c11_orch_session_plan *plan=NULL;
-        praktor_c11_session session={0};
+        praktor_session_config config={0};
+        praktor_orch_session_plan *plan=NULL;
+        praktor_session session={0};
         char error[256]={0};
         fixture_init(&f,success_yaml);
         if(!f.snapshot)return;
-        praktor_c11_session_config_init(&config);
-        check(praktor_c11_orch_session_plan_create(
+        praktor_session_config_init(&config);
+        check(praktor_orch_session_plan_create(
             praktor_workflow_snapshot_task_tree(f.snapshot,0u),
             &config.tree,&plan,error,sizeof error)==SALTS_ENOTSUP);
         check(plan==NULL);
         check(strstr(error,"no Legacy fallback")!=NULL);
-        check(praktor_c11_orch_session_plan_create_native_shell(
+        check(praktor_orch_session_plan_create_native_shell(
             praktor_workflow_snapshot_task_tree(f.snapshot,1u),
             &config.tree,&plan,error,sizeof error)==SALTS_ENOTSUP);
         check(plan==NULL); /* a CheckExitCode, not a Shell */
-        check(praktor_c11_orch_session_plan_create_native_shell(
+        check(praktor_orch_session_plan_create_native_shell(
             praktor_workflow_snapshot_task_tree(f.snapshot,0u),
             &config.tree,&plan,error,sizeof error)==SALTS_OK);
         check(plan!=NULL);
         if(plan) {
-            check(praktor_c11_orch_session_plan_node_count(plan)==1u);
-            check(praktor_c11_orch_session_plan_init_session(
+            check(praktor_orch_session_plan_node_count(plan)==1u);
+            check(praktor_orch_session_plan_init_session(
                 plan,&config,&session)==SALTS_ENOTSUP);
             check(session.impl==NULL);
-            praktor_c11_orch_session_plan_destroy(plan);
+            praktor_orch_session_plan_destroy(plan);
         }
         fixture_destroy(&f);
     }
@@ -325,7 +325,7 @@ spec("Native Shell Process ownership through C11 DAG and CFlow ManualExecutor") 
         shell_owner_task first,second;
         cflow_executor executor={0},successor={0};
         cflow_executor_control control={0},successor_control={0};
-        praktor_c11_value_txn staged={0};
+        praktor_value_txn staged={0};
         praktor_workflow_task_output_update update={0};
         json_value_t *json=NULL;
         size_t chosen[2]={SIZE_MAX,SIZE_MAX},count=0u,pending=SIZE_MAX;
@@ -342,31 +342,31 @@ spec("Native Shell Process ownership through C11 DAG and CFlow ManualExecutor") 
         dispatch_one(&executor,&control,&first);
         check(first.outcome==SALTS_BT_SUCCESS);
         check(hrtime()-started<UINT64_C(10000000000));
-        check(root_is(praktor_c11_native_host_values(&first.host),
+        check(root_is(praktor_native_host_values(&first.host),
                       "shell_exit_code","0"));
         check(root_is(&f.root,"BASE","untouched"));
         assert_dag(&f,1u,0u,0u,PRAKTOR_WORKFLOW_DAG_CONTINUE,false);
         {
             int present=1;
-            check(praktor_c11_value_store_contains(&f.root,"shell_exit_code",
-                &present)==PRAKTOR_C11_VALUE_OK&&present==0);
+            check(praktor_value_store_contains(&f.root,"shell_exit_code",
+                &present)==PRAKTOR_VALUE_OK&&present==0);
         }
-        check(praktor_c11_workflow_prepare_task_text_outputs(
-            &f.root,praktor_c11_native_host_values(&first.host),
-            outputs,1u,&staged)==PRAKTOR_C11_VALUE_OK);
+        check(praktor_workflow_prepare_task_text_outputs(
+            &f.root,praktor_native_host_values(&first.host),
+            outputs,1u,&staged)==PRAKTOR_VALUE_OK);
         json=json_parse("{\"exit\":0}",10u);
         check(json!=NULL);
         update.task_index=0u;update.updates=json;
         do {
-            commit_status=praktor_c11_workflow_parallel_commit_after_cflow_and_process_drain(
+            commit_status=praktor_workflow_parallel_commit_after_cflow_and_process_drain(
                 f.registry,&update,&staged,1u,&control,&f.retainer,
                 64u,&pending);
-            check(commit_status==PRAKTOR_C11_PARALLEL_OK||
-                  commit_status==PRAKTOR_C11_PARALLEL_BUSY);
-            if(commit_status==PRAKTOR_C11_PARALLEL_BUSY)sleep_ms(2u);
-        } while(commit_status==PRAKTOR_C11_PARALLEL_BUSY&&
+            check(commit_status==PRAKTOR_PARALLEL_OK||
+                  commit_status==PRAKTOR_PARALLEL_BUSY);
+            if(commit_status==PRAKTOR_PARALLEL_BUSY)sleep_ms(2u);
+        } while(commit_status==PRAKTOR_PARALLEL_BUSY&&
                 hrtime()-started<UINT64_C(10000000000));
-        check(commit_status==PRAKTOR_C11_PARALLEL_OK);
+        check(commit_status==PRAKTOR_PARALLEL_OK);
         check(pending==0u);
         check(staged.impl==NULL);
         check(praktor_workflow_task_registry_complete(f.registry,0u)==SALTS_OK);
@@ -381,7 +381,7 @@ spec("Native Shell Process ownership through C11 DAG and CFlow ManualExecutor") 
             f.dag,chosen,2u,&count)==SALTS_OK);
         check(count==1u&&chosen[0]==1u);
         session_init(&f,&second,1u,0,false);
-        check(root_is(praktor_c11_native_host_values(&second.host),
+        check(root_is(praktor_native_host_values(&second.host),
                       "shell_exit_code","0"));
         dispatch_one(&successor,&successor_control,&second);
         check(second.outcome==SALTS_BT_SUCCESS);
@@ -398,11 +398,11 @@ spec("Native Shell Process ownership through C11 DAG and CFlow ManualExecutor") 
         shell_owner_task first,second;
         cflow_executor executor={0},successor={0};
         cflow_executor_control control={0},successor_control={0};
-        praktor_c11_orch_session_plan *plan=NULL;
-        praktor_c11_session_config plan_config={0};
-        praktor_c11_session empty={0};
+        praktor_orch_session_plan *plan=NULL;
+        praktor_session_config plan_config={0};
+        praktor_session empty={0};
         praktor_workflow_snapshot_task_kind kind=PRAKTOR_WORKFLOW_SNAPSHOT_ORCHESTRATION;
-        praktor_c11_value_txn txn={0};
+        praktor_value_txn txn={0};
         praktor_workflow_task_output_update update={0};
         json_value_t *json=NULL;
         size_t ids[2]={SIZE_MAX,SIZE_MAX},count=0u,pending=SIZE_MAX;
@@ -413,25 +413,25 @@ spec("Native Shell Process ownership through C11 DAG and CFlow ManualExecutor") 
         if(!f.snapshot)return;
         check(praktor_workflow_snapshot_task_kind_at(f.snapshot,0u,&kind)==SALTS_OK);
         check(kind==PRAKTOR_WORKFLOW_SNAPSHOT_COMMAND);
-        praktor_c11_session_config_init(&plan_config);
-        check(praktor_c11_orch_session_plan_create(
+        praktor_session_config_init(&plan_config);
+        check(praktor_orch_session_plan_create(
             praktor_workflow_snapshot_task_tree(f.snapshot,0u),
             &plan_config.tree,&plan,error,sizeof error)==SALTS_ENOTSUP);
         check(plan==NULL);
-        check(praktor_c11_orch_session_plan_create_native_shell(
+        check(praktor_orch_session_plan_create_native_shell(
             praktor_workflow_snapshot_task_tree(f.snapshot,0u),
             &plan_config.tree,&plan,error,sizeof error)==SALTS_ENOTSUP);
         check(plan==NULL);
-        check(praktor_c11_orch_session_plan_create_native_command(
+        check(praktor_orch_session_plan_create_native_command(
             praktor_workflow_snapshot_task_tree(f.snapshot,0u),
             &plan_config.tree,&plan,error,sizeof error)==SALTS_OK);
         check(plan!=NULL);
         if(plan) {
-            check(praktor_c11_orch_session_plan_node_count(plan)==2u);
-            check(praktor_c11_orch_session_plan_init_session(
+            check(praktor_orch_session_plan_node_count(plan)==2u);
+            check(praktor_orch_session_plan_init_session(
                 plan,&plan_config,&empty)==SALTS_ENOTSUP);
             check(empty.impl==NULL);
-            praktor_c11_orch_session_plan_destroy(plan);
+            praktor_orch_session_plan_destroy(plan);
             plan=NULL;
         }
         check(praktor_workflow_dag_claim_ready(f.dag,ids,2u,&count)==SALTS_OK);
@@ -440,27 +440,27 @@ spec("Native Shell Process ownership through C11 DAG and CFlow ManualExecutor") 
         first.until_terminal=true;
         dispatch_one(&executor,&control,&first);
         check(first.outcome==SALTS_BT_SUCCESS);
-        check(root_is(praktor_c11_native_host_values(&first.host),
+        check(root_is(praktor_native_host_values(&first.host),
                       "shell_exit_code","0"));
         assert_dag(&f,1u,0u,0u,PRAKTOR_WORKFLOW_DAG_CONTINUE,false);
-        check(praktor_c11_workflow_prepare_task_text_outputs(
-            &f.root,praktor_c11_native_host_values(&first.host),
-            selected,1u,&txn)==PRAKTOR_C11_VALUE_OK);
+        check(praktor_workflow_prepare_task_text_outputs(
+            &f.root,praktor_native_host_values(&first.host),
+            selected,1u,&txn)==PRAKTOR_VALUE_OK);
         json=json_parse("{\"exit\":0}",10u);
         check(json!=NULL);
         update.task_index=0u;update.updates=json;
         {
             const uint64_t started=hrtime();
             do {
-                publication=praktor_c11_workflow_parallel_commit_after_cflow_and_process_drain(
+                publication=praktor_workflow_parallel_commit_after_cflow_and_process_drain(
                     f.registry,&update,&txn,1u,&control,&f.retainer,64u,&pending);
-                check(publication==PRAKTOR_C11_PARALLEL_OK||
-                      publication==PRAKTOR_C11_PARALLEL_BUSY);
-                if(publication==PRAKTOR_C11_PARALLEL_BUSY)sleep_ms(2u);
-            } while(publication==PRAKTOR_C11_PARALLEL_BUSY&&
+                check(publication==PRAKTOR_PARALLEL_OK||
+                      publication==PRAKTOR_PARALLEL_BUSY);
+                if(publication==PRAKTOR_PARALLEL_BUSY)sleep_ms(2u);
+            } while(publication==PRAKTOR_PARALLEL_BUSY&&
                     hrtime()-started<UINT64_C(8000000000));
         }
-        check(publication==PRAKTOR_C11_PARALLEL_OK);
+        check(publication==PRAKTOR_PARALLEL_OK);
         check(pending==0u&&txn.impl==NULL);
         check(praktor_workflow_task_registry_complete(f.registry,0u)==SALTS_OK);
         check(praktor_workflow_dag_finish(f.dag,0u,true)==SALTS_OK);
@@ -484,7 +484,7 @@ spec("Native Shell Process ownership through C11 DAG and CFlow ManualExecutor") 
          * Sequence, which is NOT admitted by this narrow Process profile. */
         fixture_init(&unsupported,command_with_parser_yaml);
         if(unsupported.snapshot) {
-            check(praktor_c11_orch_session_plan_create_native_command(
+            check(praktor_orch_session_plan_create_native_command(
                 praktor_workflow_snapshot_task_tree(unsupported.snapshot,0u),
                 &plan_config.tree,&plan,error,sizeof error)==SALTS_ENOTSUP);
             check(plan==NULL);
@@ -498,37 +498,37 @@ spec("Native Shell Process ownership through C11 DAG and CFlow ManualExecutor") 
         shell_owner_task first,second;
         cflow_executor executor={0},next={0};
         cflow_executor_control control={0},next_control={0};
-        praktor_c11_orch_session_plan *plan=NULL;
-        praktor_c11_session_config config={0};
-        praktor_c11_session unadmitted={0};
-        praktor_c11_value_txn transaction={0};
+        praktor_orch_session_plan *plan=NULL;
+        praktor_session_config config={0};
+        praktor_session unadmitted={0};
+        praktor_value_txn transaction={0};
         praktor_workflow_task_output_update update={0};
         json_value_t *typed=NULL;
         const char *selected[]={"parsed"};
         size_t ids[2]={SIZE_MAX,SIZE_MAX},count=0u,pending=SIZE_MAX;
         char reason[256]={0};
-        int publication=PRAKTOR_C11_PARALLEL_BUSY;
+        int publication=PRAKTOR_PARALLEL_BUSY;
         fixture_init(&f,command_json_yaml);
         if(!f.snapshot)return;
-        praktor_c11_session_config_init(&config);
-        check(praktor_c11_orch_session_plan_create(
+        praktor_session_config_init(&config);
+        check(praktor_orch_session_plan_create(
             praktor_workflow_snapshot_task_tree(f.snapshot,0u),
             &config.tree,&plan,reason,sizeof reason)==SALTS_ENOTSUP);
         check(plan==NULL);
-        check(praktor_c11_orch_session_plan_create_native_command(
+        check(praktor_orch_session_plan_create_native_command(
             praktor_workflow_snapshot_task_tree(f.snapshot,0u),
             &config.tree,&plan,reason,sizeof reason)==SALTS_ENOTSUP);
         check(plan==NULL);
-        check(praktor_c11_orch_session_plan_create_native_command_json(
+        check(praktor_orch_session_plan_create_native_command_json(
             praktor_workflow_snapshot_task_tree(f.snapshot,0u),
             &config.tree,&plan,reason,sizeof reason)==SALTS_OK);
         check(plan!=NULL);
         if(plan) {
-            check(praktor_c11_orch_session_plan_node_count(plan)==3u);
-            check(praktor_c11_orch_session_plan_init_session(
+            check(praktor_orch_session_plan_node_count(plan)==3u);
+            check(praktor_orch_session_plan_init_session(
                 plan,&config,&unadmitted)==SALTS_ENOTSUP);
             check(unadmitted.impl==NULL);
-            praktor_c11_orch_session_plan_destroy(plan);
+            praktor_orch_session_plan_destroy(plan);
             plan=NULL;
         }
         check(praktor_workflow_dag_claim_ready(f.dag,ids,2u,&count)==SALTS_OK);
@@ -537,31 +537,31 @@ spec("Native Shell Process ownership through C11 DAG and CFlow ManualExecutor") 
         first.until_terminal=true;
         dispatch_one(&executor,&control,&first);
         check(first.outcome==SALTS_BT_SUCCESS);
-        check(root_is(praktor_c11_native_host_values(&first.host),"parsed","7"));
+        check(root_is(praktor_native_host_values(&first.host),"parsed","7"));
         {
             int present=1;
-            check(praktor_c11_value_store_contains(
-                &f.root,"parsed",&present)==PRAKTOR_C11_VALUE_OK&&present==0);
+            check(praktor_value_store_contains(
+                &f.root,"parsed",&present)==PRAKTOR_VALUE_OK&&present==0);
         }
         assert_dag(&f,1u,0u,0u,PRAKTOR_WORKFLOW_DAG_CONTINUE,false);
-        check(praktor_c11_workflow_prepare_task_text_outputs(
-            &f.root,praktor_c11_native_host_values(&first.host),
-            selected,1u,&transaction)==PRAKTOR_C11_VALUE_OK);
+        check(praktor_workflow_prepare_task_text_outputs(
+            &f.root,praktor_native_host_values(&first.host),
+            selected,1u,&transaction)==PRAKTOR_VALUE_OK);
         typed=json_parse("{\"json\":7}",10u);
         check(typed!=NULL);
         update.task_index=0u;update.updates=typed;
         {
             const uint64_t started=hrtime();
             do {
-                publication=praktor_c11_workflow_parallel_commit_after_cflow_and_process_drain(
+                publication=praktor_workflow_parallel_commit_after_cflow_and_process_drain(
                     f.registry,&update,&transaction,1u,&control,&f.retainer,64u,&pending);
-                check(publication==PRAKTOR_C11_PARALLEL_BUSY||
-                      publication==PRAKTOR_C11_PARALLEL_OK);
-                if(publication==PRAKTOR_C11_PARALLEL_BUSY)sleep_ms(2u);
-            } while(publication==PRAKTOR_C11_PARALLEL_BUSY&&
+                check(publication==PRAKTOR_PARALLEL_BUSY||
+                      publication==PRAKTOR_PARALLEL_OK);
+                if(publication==PRAKTOR_PARALLEL_BUSY)sleep_ms(2u);
+            } while(publication==PRAKTOR_PARALLEL_BUSY&&
                     hrtime()-started<UINT64_C(8000000000));
         }
-        check(publication==PRAKTOR_C11_PARALLEL_OK);
+        check(publication==PRAKTOR_PARALLEL_OK);
         check(pending==0u&&transaction.impl==NULL);
         check(praktor_workflow_task_registry_complete(f.registry,0u)==SALTS_OK);
         check(praktor_workflow_dag_finish(f.dag,0u,true)==SALTS_OK);
@@ -573,7 +573,7 @@ spec("Native Shell Process ownership through C11 DAG and CFlow ManualExecutor") 
         check(praktor_workflow_dag_claim_ready(f.dag,ids,2u,&count)==SALTS_OK);
         check(count==1u&&ids[0]==1u);
         session_init(&f,&second,1u,0,false);
-        check(root_is(praktor_c11_native_host_values(&second.host),"parsed","7"));
+        check(root_is(praktor_native_host_values(&second.host),"parsed","7"));
         dispatch_one(&next,&next_control,&second);
         check(second.outcome==SALTS_BT_SUCCESS);
         check(praktor_workflow_task_registry_complete(f.registry,1u)==SALTS_OK);
@@ -589,42 +589,42 @@ spec("Native Shell Process ownership through C11 DAG and CFlow ManualExecutor") 
         shell_owner_task first,second;
         cflow_executor executor={0},next={0};
         cflow_executor_control control={0},next_control={0};
-        praktor_c11_orch_session_plan *plan=NULL;
-        praktor_c11_session_config plan_config={0};
-        praktor_c11_session unadmitted={0};
-        praktor_c11_value_txn transaction={0};
+        praktor_orch_session_plan *plan=NULL;
+        praktor_session_config plan_config={0};
+        praktor_session unadmitted={0};
+        praktor_value_txn transaction={0};
         praktor_workflow_task_output_update update={0};
         json_value_t *typed=NULL;
         const char *selected[]={"parsed"};
         const char *wanted="{\"KEY\":\"42\"}";
         size_t ids[2]={SIZE_MAX,SIZE_MAX},count=0u,pending=SIZE_MAX;
         char error[256]={0};
-        int publication=PRAKTOR_C11_PARALLEL_BUSY;
+        int publication=PRAKTOR_PARALLEL_BUSY;
         fixture_init(&f,command_keyvalue_yaml);
         if(!f.snapshot)return;
-        praktor_c11_session_config_init(&plan_config);
-        check(praktor_c11_orch_session_plan_create(
+        praktor_session_config_init(&plan_config);
+        check(praktor_orch_session_plan_create(
             praktor_workflow_snapshot_task_tree(f.snapshot,0u),
             &plan_config.tree,&plan,error,sizeof error)==SALTS_ENOTSUP);
         check(plan==NULL);
-        check(praktor_c11_orch_session_plan_create_native_command(
+        check(praktor_orch_session_plan_create_native_command(
             praktor_workflow_snapshot_task_tree(f.snapshot,0u),
             &plan_config.tree,&plan,error,sizeof error)==SALTS_ENOTSUP);
         check(plan==NULL);
-        check(praktor_c11_orch_session_plan_create_native_command_json(
+        check(praktor_orch_session_plan_create_native_command_json(
             praktor_workflow_snapshot_task_tree(f.snapshot,0u),
             &plan_config.tree,&plan,error,sizeof error)==SALTS_ENOTSUP);
         check(plan==NULL);
-        check(praktor_c11_orch_session_plan_create_native_command_keyvalue(
+        check(praktor_orch_session_plan_create_native_command_keyvalue(
             praktor_workflow_snapshot_task_tree(f.snapshot,0u),
             &plan_config.tree,&plan,error,sizeof error)==SALTS_OK);
         check(plan!=NULL);
         if(plan) {
-            check(praktor_c11_orch_session_plan_node_count(plan)==3u);
-            check(praktor_c11_orch_session_plan_init_session(
+            check(praktor_orch_session_plan_node_count(plan)==3u);
+            check(praktor_orch_session_plan_init_session(
                 plan,&plan_config,&unadmitted)==SALTS_ENOTSUP);
             check(unadmitted.impl==NULL);
-            praktor_c11_orch_session_plan_destroy(plan);
+            praktor_orch_session_plan_destroy(plan);
             plan=NULL;
         }
         check(praktor_workflow_dag_claim_ready(f.dag,ids,2u,&count)==SALTS_OK);
@@ -633,31 +633,31 @@ spec("Native Shell Process ownership through C11 DAG and CFlow ManualExecutor") 
         first.until_terminal=true;
         dispatch_one(&executor,&control,&first);
         check(first.outcome==SALTS_BT_SUCCESS);
-        check(root_is(praktor_c11_native_host_values(&first.host),"parsed",wanted));
+        check(root_is(praktor_native_host_values(&first.host),"parsed",wanted));
         {
             int visible=1;
-            check(praktor_c11_value_store_contains(
-                &f.root,"parsed",&visible)==PRAKTOR_C11_VALUE_OK&&visible==0);
+            check(praktor_value_store_contains(
+                &f.root,"parsed",&visible)==PRAKTOR_VALUE_OK&&visible==0);
         }
         assert_dag(&f,1u,0u,0u,PRAKTOR_WORKFLOW_DAG_CONTINUE,false);
-        check(praktor_c11_workflow_prepare_task_text_outputs(
-            &f.root,praktor_c11_native_host_values(&first.host),
-            selected,1u,&transaction)==PRAKTOR_C11_VALUE_OK);
+        check(praktor_workflow_prepare_task_text_outputs(
+            &f.root,praktor_native_host_values(&first.host),
+            selected,1u,&transaction)==PRAKTOR_VALUE_OK);
         typed=json_parse("{\"kv\":\"ready\"}",14u);
         check(typed!=NULL);
         update.task_index=0u;update.updates=typed;
         {
             const uint64_t started=hrtime();
             do {
-                publication=praktor_c11_workflow_parallel_commit_after_cflow_and_process_drain(
+                publication=praktor_workflow_parallel_commit_after_cflow_and_process_drain(
                     f.registry,&update,&transaction,1u,&control,&f.retainer,64u,&pending);
-                check(publication==PRAKTOR_C11_PARALLEL_BUSY||
-                      publication==PRAKTOR_C11_PARALLEL_OK);
-                if(publication==PRAKTOR_C11_PARALLEL_BUSY)sleep_ms(2u);
-            } while(publication==PRAKTOR_C11_PARALLEL_BUSY&&
+                check(publication==PRAKTOR_PARALLEL_BUSY||
+                      publication==PRAKTOR_PARALLEL_OK);
+                if(publication==PRAKTOR_PARALLEL_BUSY)sleep_ms(2u);
+            } while(publication==PRAKTOR_PARALLEL_BUSY&&
                     hrtime()-started<UINT64_C(8000000000));
         }
-        check(publication==PRAKTOR_C11_PARALLEL_OK);
+        check(publication==PRAKTOR_PARALLEL_OK);
         check(pending==0u&&transaction.impl==NULL);
         check(praktor_workflow_task_registry_complete(f.registry,0u)==SALTS_OK);
         check(praktor_workflow_dag_finish(f.dag,0u,true)==SALTS_OK);
@@ -670,10 +670,10 @@ spec("Native Shell Process ownership through C11 DAG and CFlow ManualExecutor") 
         check(praktor_workflow_dag_claim_ready(f.dag,ids,2u,&count)==SALTS_OK);
         check(count==1u&&ids[0]==1u);
         session_init(&f,&second,1u,0,false);
-        check(root_is(praktor_c11_native_host_values(&second.host),"parsed",wanted));
+        check(root_is(praktor_native_host_values(&second.host),"parsed",wanted));
         dispatch_one(&next,&next_control,&second);
         check(second.outcome==SALTS_BT_SUCCESS);
-        check(root_is(praktor_c11_native_host_values(&second.host),"confirmed",wanted));
+        check(root_is(praktor_native_host_values(&second.host),"confirmed",wanted));
         check(praktor_workflow_task_registry_complete(f.registry,1u)==SALTS_OK);
         check(praktor_workflow_dag_finish(f.dag,1u,true)==SALTS_OK);
         assert_dag(&f,0u,2u,0u,PRAKTOR_WORKFLOW_DAG_CONTINUE,true);
@@ -687,46 +687,46 @@ spec("Native Shell Process ownership through C11 DAG and CFlow ManualExecutor") 
         shell_owner_task first,second;
         cflow_executor executor={0},next={0};
         cflow_executor_control control={0},next_control={0};
-        praktor_c11_orch_session_plan *plan=NULL;
-        praktor_c11_session_config plan_config={0};
-        praktor_c11_session unadmitted={0};
-        praktor_c11_value_txn transaction={0};
+        praktor_orch_session_plan *plan=NULL;
+        praktor_session_config plan_config={0};
+        praktor_session unadmitted={0};
+        praktor_value_txn transaction={0};
         praktor_workflow_task_output_update update={0};
         json_value_t *typed=NULL;
         const char *selected[]={"parsed"};
         const char *wanted="native";
         size_t ids[2]={SIZE_MAX,SIZE_MAX},count=0u,pending=SIZE_MAX;
         char error[256]={0};
-        int publication=PRAKTOR_C11_PARALLEL_BUSY;
+        int publication=PRAKTOR_PARALLEL_BUSY;
         fixture_init(&f,command_regex_yaml);
         if(!f.snapshot)return;
-        praktor_c11_session_config_init(&plan_config);
-        check(praktor_c11_orch_session_plan_create(
+        praktor_session_config_init(&plan_config);
+        check(praktor_orch_session_plan_create(
             praktor_workflow_snapshot_task_tree(f.snapshot,0u),
             &plan_config.tree,&plan,error,sizeof error)==SALTS_ENOTSUP);
         check(plan==NULL);
-        check(praktor_c11_orch_session_plan_create_native_command(
+        check(praktor_orch_session_plan_create_native_command(
             praktor_workflow_snapshot_task_tree(f.snapshot,0u),
             &plan_config.tree,&plan,error,sizeof error)==SALTS_ENOTSUP);
         check(plan==NULL);
-        check(praktor_c11_orch_session_plan_create_native_command_json(
+        check(praktor_orch_session_plan_create_native_command_json(
             praktor_workflow_snapshot_task_tree(f.snapshot,0u),
             &plan_config.tree,&plan,error,sizeof error)==SALTS_ENOTSUP);
         check(plan==NULL);
-        check(praktor_c11_orch_session_plan_create_native_command_keyvalue(
+        check(praktor_orch_session_plan_create_native_command_keyvalue(
             praktor_workflow_snapshot_task_tree(f.snapshot,0u),
             &plan_config.tree,&plan,error,sizeof error)==SALTS_ENOTSUP);
         check(plan==NULL);
-        check(praktor_c11_orch_session_plan_create_native_command_regex(
+        check(praktor_orch_session_plan_create_native_command_regex(
             praktor_workflow_snapshot_task_tree(f.snapshot,0u),
             &plan_config.tree,&plan,error,sizeof error)==SALTS_OK);
         check(plan!=NULL);
         if(plan) {
-            check(praktor_c11_orch_session_plan_node_count(plan)==3u);
-            check(praktor_c11_orch_session_plan_init_session(
+            check(praktor_orch_session_plan_node_count(plan)==3u);
+            check(praktor_orch_session_plan_init_session(
                 plan,&plan_config,&unadmitted)==SALTS_ENOTSUP);
             check(unadmitted.impl==NULL);
-            praktor_c11_orch_session_plan_destroy(plan);
+            praktor_orch_session_plan_destroy(plan);
             plan=NULL;
         }
         check(praktor_workflow_dag_claim_ready(f.dag,ids,2u,&count)==SALTS_OK);
@@ -735,16 +735,16 @@ spec("Native Shell Process ownership through C11 DAG and CFlow ManualExecutor") 
         first.until_terminal=true;
         dispatch_one(&executor,&control,&first);
         check(first.outcome==SALTS_BT_SUCCESS);
-        check(root_is(praktor_c11_native_host_values(&first.host),"parsed",wanted));
+        check(root_is(praktor_native_host_values(&first.host),"parsed",wanted));
         {
             int visible=1;
-            check(praktor_c11_value_store_contains(
-                &f.root,"parsed",&visible)==PRAKTOR_C11_VALUE_OK&&visible==0);
+            check(praktor_value_store_contains(
+                &f.root,"parsed",&visible)==PRAKTOR_VALUE_OK&&visible==0);
         }
         assert_dag(&f,1u,0u,0u,PRAKTOR_WORKFLOW_DAG_CONTINUE,false);
-        check(praktor_c11_workflow_prepare_task_text_outputs(
-            &f.root,praktor_c11_native_host_values(&first.host),
-            selected,1u,&transaction)==PRAKTOR_C11_VALUE_OK);
+        check(praktor_workflow_prepare_task_text_outputs(
+            &f.root,praktor_native_host_values(&first.host),
+            selected,1u,&transaction)==PRAKTOR_VALUE_OK);
         {
             const char *typed_text="{\"regex\":\"ready\"}";
             typed=json_parse(typed_text,strlen(typed_text));
@@ -754,15 +754,15 @@ spec("Native Shell Process ownership through C11 DAG and CFlow ManualExecutor") 
         {
             const uint64_t started=hrtime();
             do {
-                publication=praktor_c11_workflow_parallel_commit_after_cflow_and_process_drain(
+                publication=praktor_workflow_parallel_commit_after_cflow_and_process_drain(
                     f.registry,&update,&transaction,1u,&control,&f.retainer,64u,&pending);
-                check(publication==PRAKTOR_C11_PARALLEL_BUSY||
-                      publication==PRAKTOR_C11_PARALLEL_OK);
-                if(publication==PRAKTOR_C11_PARALLEL_BUSY)sleep_ms(2u);
-            } while(publication==PRAKTOR_C11_PARALLEL_BUSY&&
+                check(publication==PRAKTOR_PARALLEL_BUSY||
+                      publication==PRAKTOR_PARALLEL_OK);
+                if(publication==PRAKTOR_PARALLEL_BUSY)sleep_ms(2u);
+            } while(publication==PRAKTOR_PARALLEL_BUSY&&
                     hrtime()-started<UINT64_C(8000000000));
         }
-        check(publication==PRAKTOR_C11_PARALLEL_OK);
+        check(publication==PRAKTOR_PARALLEL_OK);
         check(pending==0u&&transaction.impl==NULL);
         check(praktor_workflow_task_registry_complete(f.registry,0u)==SALTS_OK);
         check(praktor_workflow_dag_finish(f.dag,0u,true)==SALTS_OK);
@@ -775,10 +775,10 @@ spec("Native Shell Process ownership through C11 DAG and CFlow ManualExecutor") 
         check(praktor_workflow_dag_claim_ready(f.dag,ids,2u,&count)==SALTS_OK);
         check(count==1u&&ids[0]==1u);
         session_init(&f,&second,1u,0,false);
-        check(root_is(praktor_c11_native_host_values(&second.host),"parsed",wanted));
+        check(root_is(praktor_native_host_values(&second.host),"parsed",wanted));
         dispatch_one(&next,&next_control,&second);
         check(second.outcome==SALTS_BT_SUCCESS);
-        check(root_is(praktor_c11_native_host_values(&second.host),"confirmed",wanted));
+        check(root_is(praktor_native_host_values(&second.host),"confirmed",wanted));
         check(praktor_workflow_task_registry_complete(f.registry,1u)==SALTS_OK);
         check(praktor_workflow_dag_finish(f.dag,1u,true)==SALTS_OK);
         assert_dag(&f,0u,2u,0u,PRAKTOR_WORKFLOW_DAG_CONTINUE,true);
@@ -792,50 +792,50 @@ spec("Native Shell Process ownership through C11 DAG and CFlow ManualExecutor") 
         shell_owner_task first,second;
         cflow_executor executor={0},next={0};
         cflow_executor_control control={0},next_control={0};
-        praktor_c11_orch_session_plan *plan=NULL;
-        praktor_c11_session_config plan_config={0};
-        praktor_c11_session unadmitted={0};
-        praktor_c11_value_txn transaction={0};
+        praktor_orch_session_plan *plan=NULL;
+        praktor_session_config plan_config={0};
+        praktor_session unadmitted={0};
+        praktor_value_txn transaction={0};
         praktor_workflow_task_output_update update={0};
         json_value_t *typed=NULL;
         const char *selected[]={"parsed_count"};
         const char *wanted="1";
         size_t ids[2]={SIZE_MAX,SIZE_MAX},count=0u,pending=SIZE_MAX;
         char error[256]={0};
-        int publication=PRAKTOR_C11_PARALLEL_BUSY;
+        int publication=PRAKTOR_PARALLEL_BUSY;
         fixture_init(&f,command_lines_yaml);
         if(!f.snapshot)return;
-        praktor_c11_session_config_init(&plan_config);
-        check(praktor_c11_orch_session_plan_create(
+        praktor_session_config_init(&plan_config);
+        check(praktor_orch_session_plan_create(
             praktor_workflow_snapshot_task_tree(f.snapshot,0u),
             &plan_config.tree,&plan,error,sizeof error)==SALTS_ENOTSUP);
         check(plan==NULL);
-        check(praktor_c11_orch_session_plan_create_native_command(
+        check(praktor_orch_session_plan_create_native_command(
             praktor_workflow_snapshot_task_tree(f.snapshot,0u),
             &plan_config.tree,&plan,error,sizeof error)==SALTS_ENOTSUP);
         check(plan==NULL);
-        check(praktor_c11_orch_session_plan_create_native_command_json(
+        check(praktor_orch_session_plan_create_native_command_json(
             praktor_workflow_snapshot_task_tree(f.snapshot,0u),
             &plan_config.tree,&plan,error,sizeof error)==SALTS_ENOTSUP);
         check(plan==NULL);
-        check(praktor_c11_orch_session_plan_create_native_command_keyvalue(
+        check(praktor_orch_session_plan_create_native_command_keyvalue(
             praktor_workflow_snapshot_task_tree(f.snapshot,0u),
             &plan_config.tree,&plan,error,sizeof error)==SALTS_ENOTSUP);
         check(plan==NULL);
-        check(praktor_c11_orch_session_plan_create_native_command_regex(
+        check(praktor_orch_session_plan_create_native_command_regex(
             praktor_workflow_snapshot_task_tree(f.snapshot,0u),
             &plan_config.tree,&plan,error,sizeof error)==SALTS_ENOTSUP);
         check(plan==NULL);
-        check(praktor_c11_orch_session_plan_create_native_command_lines(
+        check(praktor_orch_session_plan_create_native_command_lines(
             praktor_workflow_snapshot_task_tree(f.snapshot,0u),
             &plan_config.tree,&plan,error,sizeof error)==SALTS_OK);
         check(plan!=NULL);
         if(plan) {
-            check(praktor_c11_orch_session_plan_node_count(plan)==3u);
-            check(praktor_c11_orch_session_plan_init_session(
+            check(praktor_orch_session_plan_node_count(plan)==3u);
+            check(praktor_orch_session_plan_init_session(
                 plan,&plan_config,&unadmitted)==SALTS_ENOTSUP);
             check(unadmitted.impl==NULL);
-            praktor_c11_orch_session_plan_destroy(plan);
+            praktor_orch_session_plan_destroy(plan);
             plan=NULL;
         }
         check(praktor_workflow_dag_claim_ready(f.dag,ids,2u,&count)==SALTS_OK);
@@ -844,23 +844,23 @@ spec("Native Shell Process ownership through C11 DAG and CFlow ManualExecutor") 
         first.until_terminal=true;
         dispatch_one(&executor,&control,&first);
         check(first.outcome==SALTS_BT_SUCCESS);
-        check(root_is(praktor_c11_native_host_values(&first.host),"parsed_count",wanted));
+        check(root_is(praktor_native_host_values(&first.host),"parsed_count",wanted));
         {
             int private_present=0;
-            check(praktor_c11_value_store_contains(
-                praktor_c11_native_host_values(&first.host),
-                "parsed",&private_present)==PRAKTOR_C11_VALUE_OK&&
+            check(praktor_value_store_contains(
+                praktor_native_host_values(&first.host),
+                "parsed",&private_present)==PRAKTOR_VALUE_OK&&
                 private_present==1);
         }
         {
             int visible=1;
-            check(praktor_c11_value_store_contains(
-                &f.root,"parsed",&visible)==PRAKTOR_C11_VALUE_OK&&visible==0);
+            check(praktor_value_store_contains(
+                &f.root,"parsed",&visible)==PRAKTOR_VALUE_OK&&visible==0);
         }
         assert_dag(&f,1u,0u,0u,PRAKTOR_WORKFLOW_DAG_CONTINUE,false);
-        check(praktor_c11_workflow_prepare_task_text_outputs(
-            &f.root,praktor_c11_native_host_values(&first.host),
-            selected,1u,&transaction)==PRAKTOR_C11_VALUE_OK);
+        check(praktor_workflow_prepare_task_text_outputs(
+            &f.root,praktor_native_host_values(&first.host),
+            selected,1u,&transaction)==PRAKTOR_VALUE_OK);
         {
             const char *typed_text="{\"lines\":\"ready\"}";
             typed=json_parse(typed_text,strlen(typed_text));
@@ -870,15 +870,15 @@ spec("Native Shell Process ownership through C11 DAG and CFlow ManualExecutor") 
         {
             const uint64_t started=hrtime();
             do {
-                publication=praktor_c11_workflow_parallel_commit_after_cflow_and_process_drain(
+                publication=praktor_workflow_parallel_commit_after_cflow_and_process_drain(
                     f.registry,&update,&transaction,1u,&control,&f.retainer,64u,&pending);
-                check(publication==PRAKTOR_C11_PARALLEL_BUSY||
-                      publication==PRAKTOR_C11_PARALLEL_OK);
-                if(publication==PRAKTOR_C11_PARALLEL_BUSY)sleep_ms(2u);
-            } while(publication==PRAKTOR_C11_PARALLEL_BUSY&&
+                check(publication==PRAKTOR_PARALLEL_BUSY||
+                      publication==PRAKTOR_PARALLEL_OK);
+                if(publication==PRAKTOR_PARALLEL_BUSY)sleep_ms(2u);
+            } while(publication==PRAKTOR_PARALLEL_BUSY&&
                     hrtime()-started<UINT64_C(8000000000));
         }
-        check(publication==PRAKTOR_C11_PARALLEL_OK);
+        check(publication==PRAKTOR_PARALLEL_OK);
         check(pending==0u&&transaction.impl==NULL);
         check(praktor_workflow_task_registry_complete(f.registry,0u)==SALTS_OK);
         check(praktor_workflow_dag_finish(f.dag,0u,true)==SALTS_OK);
@@ -886,8 +886,8 @@ spec("Native Shell Process ownership through C11 DAG and CFlow ManualExecutor") 
         check(root_is(&f.root,"parsed_count",wanted));
         {
             int leaked=1;
-            check(praktor_c11_value_store_contains(&f.root,"parsed",&leaked)==
-                  PRAKTOR_C11_VALUE_OK&&leaked==0);
+            check(praktor_value_store_contains(&f.root,"parsed",&leaked)==
+                  PRAKTOR_VALUE_OK&&leaked==0);
         }
         json_free(typed);
         cflow_executor_destroy(&executor);
@@ -896,10 +896,10 @@ spec("Native Shell Process ownership through C11 DAG and CFlow ManualExecutor") 
         check(praktor_workflow_dag_claim_ready(f.dag,ids,2u,&count)==SALTS_OK);
         check(count==1u&&ids[0]==1u);
         session_init(&f,&second,1u,0,false);
-        check(root_is(praktor_c11_native_host_values(&second.host),"parsed_count",wanted));
+        check(root_is(praktor_native_host_values(&second.host),"parsed_count",wanted));
         dispatch_one(&next,&next_control,&second);
         check(second.outcome==SALTS_BT_SUCCESS);
-        check(root_is(praktor_c11_native_host_values(&second.host),"confirmed",wanted));
+        check(root_is(praktor_native_host_values(&second.host),"confirmed",wanted));
         check(praktor_workflow_task_registry_complete(f.registry,1u)==SALTS_OK);
         check(praktor_workflow_dag_finish(f.dag,1u,true)==SALTS_OK);
         assert_dag(&f,0u,2u,0u,PRAKTOR_WORKFLOW_DAG_CONTINUE,true);
@@ -925,12 +925,12 @@ spec("Native Shell Process ownership through C11 DAG and CFlow ManualExecutor") 
         dispatch_one(&executor,&control,&first);
         /* The child process succeeded, but the ParseRegex leaf did not. */
         check(first.outcome==SALTS_BT_FAILURE);
-        check(root_is(praktor_c11_native_host_values(&first.host),"shell_exit_code","0"));
-        check(praktor_c11_value_store_contains(
-            praktor_c11_native_host_values(&first.host),"parsed",&present)==
-            PRAKTOR_C11_VALUE_OK&&present==0);
-        check(praktor_c11_value_store_contains(&f.root,"parsed",&present)==
-              PRAKTOR_C11_VALUE_OK&&present==0);
+        check(root_is(praktor_native_host_values(&first.host),"shell_exit_code","0"));
+        check(praktor_value_store_contains(
+            praktor_native_host_values(&first.host),"parsed",&present)==
+            PRAKTOR_VALUE_OK&&present==0);
+        check(praktor_value_store_contains(&f.root,"parsed",&present)==
+              PRAKTOR_VALUE_OK&&present==0);
         check(root_is(&f.root,"BASE","untouched"));
         check(praktor_workflow_task_registry_state(f.registry,0u,&state)==SALTS_OK);
         check(state==PRAKTOR_WORKFLOW_TASK_PENDING);
@@ -951,7 +951,7 @@ spec("Native Shell Process ownership through C11 DAG and CFlow ManualExecutor") 
         shell_owner_task first;
         cflow_executor executor={0};
         cflow_executor_control control={0};
-        praktor_c11_value_txn transaction={0};
+        praktor_value_txn transaction={0};
         praktor_workflow_task_output_update update={0};
         json_value_t *typed=NULL;
         const char *selected[]={"parsed_count"};
@@ -959,7 +959,7 @@ spec("Native Shell Process ownership through C11 DAG and CFlow ManualExecutor") 
         const json_value_t *borrowed=NULL;
         praktor_workflow_task_state state=PRAKTOR_WORKFLOW_TASK_PENDING;
         size_t ids[2]={SIZE_MAX,SIZE_MAX},count=0u,pending=SIZE_MAX;
-        int publication=PRAKTOR_C11_PARALLEL_BUSY;
+        int publication=PRAKTOR_PARALLEL_BUSY;
         int present=1;
         fixture_init(&f,command_lines_yaml);
         if(!f.snapshot)return;
@@ -969,40 +969,40 @@ spec("Native Shell Process ownership through C11 DAG and CFlow ManualExecutor") 
         first.until_terminal=true;
         dispatch_one(&executor,&control,&first);
         check(first.outcome==SALTS_BT_SUCCESS);
-        check(root_is(praktor_c11_native_host_values(&first.host),"parsed_count","1"));
-        check(praktor_c11_workflow_prepare_task_text_outputs(
-            &f.root,praktor_c11_native_host_values(&first.host),
-            selected,1u,&transaction)==PRAKTOR_C11_VALUE_OK);
+        check(root_is(praktor_native_host_values(&first.host),"parsed_count","1"));
+        check(praktor_workflow_prepare_task_text_outputs(
+            &f.root,praktor_native_host_values(&first.host),
+            selected,1u,&transaction)==PRAKTOR_VALUE_OK);
         /* A competing owner write occurs AFTER staging but BEFORE commit:
          * there must be no typed publication despite a completed Process. */
-        check(praktor_c11_value_store_set(
-            &f.root,"parsed_count","interloper")==PRAKTOR_C11_VALUE_OK);
+        check(praktor_value_store_set(
+            &f.root,"parsed_count","interloper")==PRAKTOR_VALUE_OK);
         typed=json_parse(typed_text,strlen(typed_text));
         check(typed!=NULL);
         update.task_index=0u;update.updates=typed;
         {
             const uint64_t started=hrtime();
             do {
-                publication=praktor_c11_workflow_parallel_commit_after_cflow_and_process_drain(
+                publication=praktor_workflow_parallel_commit_after_cflow_and_process_drain(
                     f.registry,&update,&transaction,1u,&control,&f.retainer,64u,&pending);
-                check(publication==PRAKTOR_C11_PARALLEL_BUSY||
-                      publication==PRAKTOR_C11_PARALLEL_CONFLICT);
-                if(publication==PRAKTOR_C11_PARALLEL_BUSY)sleep_ms(2u);
-            } while(publication==PRAKTOR_C11_PARALLEL_BUSY&&
+                check(publication==PRAKTOR_PARALLEL_BUSY||
+                      publication==PRAKTOR_PARALLEL_CONFLICT);
+                if(publication==PRAKTOR_PARALLEL_BUSY)sleep_ms(2u);
+            } while(publication==PRAKTOR_PARALLEL_BUSY&&
                     hrtime()-started<UINT64_C(8000000000));
         }
-        check(publication==PRAKTOR_C11_PARALLEL_CONFLICT);
+        check(publication==PRAKTOR_PARALLEL_CONFLICT);
         check(pending==0u&&transaction.impl!=NULL);
         check(root_is(&f.root,"parsed_count","interloper"));
-        check(praktor_c11_value_store_contains(&f.root,"parsed",&present)==
-              PRAKTOR_C11_VALUE_OK&&present==0);
+        check(praktor_value_store_contains(&f.root,"parsed",&present)==
+              PRAKTOR_VALUE_OK&&present==0);
         check(praktor_workflow_task_registry_state(f.registry,0u,&state)==SALTS_OK);
         check(state==PRAKTOR_WORKFLOW_TASK_PENDING);
         borrowed=(const json_value_t *)f.registry;
         check(praktor_workflow_task_registry_get_output(
             f.registry,0u,vstr_from_cstr("lines"),&borrowed)==SALTS_EBUSY);
         check(borrowed==(const json_value_t *)f.registry);
-        praktor_c11_value_txn_abort(&transaction);
+        praktor_value_txn_abort(&transaction);
         check(transaction.impl==NULL);
         check(praktor_workflow_task_registry_fail(
             f.registry,0u,vstr_from_cstr("publication conflict"))==SALTS_OK);
@@ -1035,7 +1035,7 @@ spec("Native Shell Process ownership through C11 DAG and CFlow ManualExecutor") 
         dispatch_one(&executor,&control,&first);
         check(first.outcome==SALTS_BT_RUNNING);
         assert_dag(&f,1u,0u,0u,PRAKTOR_WORKFLOW_DAG_CONTINUE,false);
-        status=praktor_c11_session_cancel(&first.session);
+        status=praktor_session_cancel(&first.session);
         check(status==SALTS_OK||status==SALTS_EBUSY);
         check(praktor_workflow_dag_stop(
             f.dag,PRAKTOR_WORKFLOW_DAG_CANCELLED)==SALTS_OK);
@@ -1050,8 +1050,8 @@ spec("Native Shell Process ownership through C11 DAG and CFlow ManualExecutor") 
         check(root_is(&f.root,"BASE","untouched"));
         {
             int present=1;
-            check(praktor_c11_value_store_contains(&f.root,"shell_exit_code",
-                &present)==PRAKTOR_C11_VALUE_OK&&present==0);
+            check(praktor_value_store_contains(&f.root,"shell_exit_code",
+                &present)==PRAKTOR_VALUE_OK&&present==0);
         }
         cflow_executor_destroy(&executor);
         session_destroy(&first); /* canonical Process owner adopts live leases */

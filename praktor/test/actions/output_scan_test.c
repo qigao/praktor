@@ -1,4 +1,4 @@
-#include "output_scan.h"
+#include "actions/output_scan.h"
 #include <string.h>
 #include <tinytest.h>
 

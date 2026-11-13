@@ -3,7 +3,7 @@
  * This is the same C Process driver/retainer route used by the C11 Session,
  * never a synthetic "worker done therefore I/O done" shortcut.
  */
-#include "workflow_parallel_process_guard.h"
+#include "actions/workflow_parallel_process_guard.h"
 #include "praktor/process_driver.h"
 #include <core/clock.h>
 #include <threads/threads.h>
@@ -13,18 +13,18 @@
 static const char *workflow=
     "tasks:\n"
     "  - {name: shell, command: echo ready}\n";
-static bool root_is(const praktor_c11_value_store *root,
+static bool root_is(const praktor_value_store *root,
                     const char *key,const char *expected) {
     char text[64]={0};size_t n=0;
-    return praktor_c11_value_store_get(root,key,text,sizeof text,&n)==
-        PRAKTOR_C11_VALUE_OK&&n==strlen(expected)&&strcmp(text,expected)==0;
+    return praktor_value_store_get(root,key,text,sizeof text,&n)==
+        PRAKTOR_VALUE_OK&&n==strlen(expected)&&strcmp(text,expected)==0;
 }
 spec("C11 Parallel real Process close and retainer acknowledgment barrier") {
     it("holds typed and text output until a closing child is truly reaped") {
         praktor_workflow_snapshot *snapshot=NULL;
         praktor_workflow_task_registry *registry=NULL;
-        praktor_c11_value_store root={0};
-        praktor_c11_value_txn branch={0};
+        praktor_value_store root={0};
+        praktor_value_txn branch={0};
         praktor_process_retainer retainer={0};
         praktor_process_retainer_token hold={0};
         praktor_process_driver driver={0};
@@ -42,10 +42,10 @@ spec("C11 Parallel real Process close and retainer acknowledgment barrier") {
             &snapshot,NULL,0)==SALTS_OK);
         check(praktor_workflow_task_registry_create(snapshot,&registry)==SALTS_OK);
         praktor_workflow_snapshot_destroy(snapshot);
-        check(praktor_c11_value_store_init(&root,2u,32u,32u)==PRAKTOR_C11_VALUE_OK);
-        check(praktor_c11_value_store_set(&root,"seed","base")==PRAKTOR_C11_VALUE_OK);
-        check(praktor_c11_value_txn_begin(&branch,&root)==PRAKTOR_C11_VALUE_OK);
-        check(praktor_c11_value_txn_set(&branch,"done","yes")==PRAKTOR_C11_VALUE_OK);
+        check(praktor_value_store_init(&root,2u,32u,32u)==PRAKTOR_VALUE_OK);
+        check(praktor_value_store_set(&root,"seed","base")==PRAKTOR_VALUE_OK);
+        check(praktor_value_txn_begin(&branch,&root)==PRAKTOR_VALUE_OK);
+        check(praktor_value_txn_set(&branch,"done","yes")==PRAKTOR_VALUE_OK);
         check(praktor_process_retainer_init(&retainer,2u)==SALTS_OK);
         process_options_init(&options);
 #if defined(_WIN32)
@@ -69,26 +69,26 @@ spec("C11 Parallel real Process close and retainer acknowledgment barrier") {
          * The real adopted Process remains under the retainer, never in a
          * temporary global worker or user callback after driver release. */
         check(praktor_process_retainer_reserve(&retainer,&hold)==SALTS_OK);
-        commit_status=praktor_c11_workflow_parallel_commit_after_process_drain(
+        commit_status=praktor_workflow_parallel_commit_after_process_drain(
             registry,&update,&branch,1u,&retainer,8u,&pending);
-        check(commit_status==PRAKTOR_C11_PARALLEL_BUSY);
+        check(commit_status==PRAKTOR_PARALLEL_BUSY);
         check(pending>=1u);
         check(branch.impl!=NULL);
-        check(praktor_c11_value_store_size(&root)==1u);
+        check(praktor_value_store_size(&root)==1u);
         check(root_is(&root,"seed","base"));
         check(praktor_workflow_task_registry_state(registry,0u,&state)==SALTS_OK);
         check(state==PRAKTOR_WORKFLOW_TASK_PENDING);
         check(praktor_process_retainer_release(&retainer,hold)==SALTS_OK);
         started=hrtime();
         do {
-            commit_status=praktor_c11_workflow_parallel_commit_after_process_drain(
+            commit_status=praktor_workflow_parallel_commit_after_process_drain(
                 registry,&update,&branch,1u,&retainer,64u,&pending);
-            check(commit_status==PRAKTOR_C11_PARALLEL_BUSY||
-                  commit_status==PRAKTOR_C11_PARALLEL_OK);
-            if(commit_status==PRAKTOR_C11_PARALLEL_BUSY)sleep_ms(2u);
-        } while(commit_status==PRAKTOR_C11_PARALLEL_BUSY&&
+            check(commit_status==PRAKTOR_PARALLEL_BUSY||
+                  commit_status==PRAKTOR_PARALLEL_OK);
+            if(commit_status==PRAKTOR_PARALLEL_BUSY)sleep_ms(2u);
+        } while(commit_status==PRAKTOR_PARALLEL_BUSY&&
                 hrtime()-started<UINT64_C(7000000000));
-        check(commit_status==PRAKTOR_C11_PARALLEL_OK);
+        check(commit_status==PRAKTOR_PARALLEL_OK);
         check(pending==0u);
         check(branch.impl==NULL);
         check(praktor_process_driver_release(&driver)==SALTS_EINVAL);
@@ -102,8 +102,8 @@ spec("C11 Parallel real Process close and retainer acknowledgment barrier") {
         }
         check(praktor_process_retainer_destroy(&retainer)==SALTS_OK);
         json_free(json);
-        praktor_c11_value_txn_abort(&branch);
-        praktor_c11_value_store_destroy(&root);
+        praktor_value_txn_abort(&branch);
+        praktor_value_store_destroy(&root);
         praktor_workflow_task_registry_destroy(registry);
     }
 }
