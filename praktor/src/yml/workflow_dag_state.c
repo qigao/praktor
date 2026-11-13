@@ -1,11 +1,13 @@
 #include "yml/workflow_dag_state.h"
 #include <stdlib.h>
+#include <string.h>
 
 typedef enum dag_task_phase {
     DAG_TASK_PENDING = 0,
     DAG_TASK_RESERVED,
     DAG_TASK_FINISHED,
-    DAG_TASK_REFUSED
+    DAG_TASK_REFUSED,
+    DAG_TASK_SKIPPED
 } dag_task_phase;
 
 typedef struct dag_task_entry {
@@ -54,6 +56,49 @@ void praktor_workflow_dag_state_destroy(praktor_workflow_dag_state *state) {
     if(!state)return;
     free(state->tasks);
     free(state);
+}
+
+int praktor_workflow_dag_state_create_task(
+    const praktor_workflow_dependencies *graph,size_t max_active,const char *task,
+    praktor_workflow_dag_state **out) {
+    praktor_workflow_dag_state *state=NULL;
+    if(!out||(task&&!*task))return SALTS_EINVAL;
+    int rc=praktor_workflow_dag_state_create(graph,max_active,&state);
+    if(rc!=SALTS_OK)return rc;
+    if(task) {
+        size_t selected=state->count;
+        for(size_t i=0u;i<state->count;++i) {
+            vstr name={0};
+            if(praktor_workflow_dependencies_task_name(graph,i,&name)!=SALTS_OK) {
+                praktor_workflow_dag_state_destroy(state);return SALTS_EINVAL;
+            }
+            state->tasks[i].phase=DAG_TASK_SKIPPED;
+            if(vstr_eq(name,vstr_from_cstr(task)))selected=i;
+        }
+        if(selected==state->count){praktor_workflow_dag_state_destroy(state);return SALTS_EINVAL;}
+        state->tasks[selected].phase=DAG_TASK_PENDING;
+        bool changed;
+        do {
+            changed=false;
+            for(size_t i=0u;i<praktor_workflow_dependencies_edge_count(graph);++i) {
+                size_t from=0u,to=0u;
+                if(praktor_workflow_dependencies_edge_at(graph,i,&from,&to)!=SALTS_OK) {
+                    praktor_workflow_dag_state_destroy(state);return SALTS_EINVAL;
+                }
+                if(state->tasks[to].phase==DAG_TASK_PENDING&&state->tasks[from].phase==DAG_TASK_SKIPPED) {
+                    state->tasks[from].phase=DAG_TASK_PENDING;changed=true;
+                }
+            }
+        }while(changed);
+    }
+    *out=state;return SALTS_OK;
+}
+
+int praktor_workflow_dag_is_selected(const praktor_workflow_dag_state *state,
+    size_t task_index,bool *out_selected) {
+    if(!state||!out_selected||task_index>=state->count)return SALTS_EINVAL;
+    *out_selected=state->tasks[task_index].phase!=DAG_TASK_SKIPPED;
+    return SALTS_OK;
 }
 
 int praktor_workflow_dag_claim_ready(praktor_workflow_dag_state *state,
@@ -105,6 +150,7 @@ int praktor_workflow_dag_finish(praktor_workflow_dag_state *state,
            from>=state->count||to>=state->count)
             return SALTS_EINVAL;
         if(from==task_index) {
+            if(state->tasks[to].phase==DAG_TASK_SKIPPED)continue;
             if(!state->tasks[to].remaining)return SALTS_EINVAL;
             --state->tasks[to].remaining;
         }
@@ -135,8 +181,10 @@ int praktor_workflow_dag_stop(praktor_workflow_dag_state *state,
 
 int praktor_workflow_dag_get_stats(const praktor_workflow_dag_state *state,
     praktor_workflow_dag_stats *out) {
-    size_t i,ready=0u;
+    size_t i,ready=0u,selected=0u;
     if(!state||!out)return SALTS_EINVAL;
+    for(i=0u;i<state->count;++i)
+        if(state->tasks[i].phase!=DAG_TASK_SKIPPED)++selected;
     if(state->terminal==PRAKTOR_WORKFLOW_DAG_CONTINUE)
         for(i=0u;i<state->count;++i)
             if(state->tasks[i].phase==DAG_TASK_PENDING&&
@@ -148,8 +196,8 @@ int praktor_workflow_dag_get_stats(const praktor_workflow_dag_state *state,
     out->terminal=state->terminal;
     out->quiescent=state->active==0u&&
         (state->terminal!=PRAKTOR_WORKFLOW_DAG_CONTINUE||
-         state->completed==state->count);
+         state->completed==selected);
     out->all_succeeded=state->terminal==PRAKTOR_WORKFLOW_DAG_CONTINUE&&
-                       state->completed==state->count&&state->active==0u;
+                       state->completed==selected&&state->active==0u;
     return SALTS_OK;
 }

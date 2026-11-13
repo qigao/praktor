@@ -2,7 +2,7 @@
 
 Praktor is a **C11** YAML workflow runtime with a shared SDK exposing **C ABI v3**. The CLI and embedded API use the same bounded runtime, CMeta component lifecycle and SaltsBase process I/O.
 
-**Current qualification:** the Windows x64 LLVM-MinGW full build, 70 CTest entries and installation have passed locally. Cross-platform and sanitizer qualification remains separate. Build and test commands below are the current entrypoints.
+**Current qualification:** the Windows x64 LLVM-MinGW full build, 71 CTest entries and installation have passed locally. Cross-platform and sanitizer qualification remains separate. Build and test commands below are the current entrypoints.
 
 ## Runtime architecture
 
@@ -21,7 +21,7 @@ The initial runtime is a bounded **single-owner** executor (maximum 64 tasks). I
 ## CLI
 
 ```sh
-praktor workflow.yml
+praktor --config workflow.yml --task build
 ```
 
 The C-only CLI reads one YAML file, executes the admitted subset and returns canonical JSON with workflow/task states. This is not the former subcommand-based CLI.
@@ -51,6 +51,10 @@ is built by `app/CMakeLists.txt`, and links only that shared library. Tests and 
 live in `praktor/test`, and runnable workflows live in `examples`.
 Actions headers and implementations live in `praktor/include/actions` and
 `praktor/src/actions`; see [the Actions guide](docs/ACTIONS.md).
+Reusable `tool` tasks reference independent service YAML files through the root
+`services` map. Configurator shares one generic execution instance per name;
+executable selection and argv templates belong to YAML. See [the user guide](USER_GUIDE.md)
+and [the curl service declaration](examples/services/download.yml).
 
 Each module adds its own `test` or `tests` directory when `BUILD_TESTS` is
 enabled. Actions tests live in `praktor/test/actions`, process tests in
@@ -88,7 +92,7 @@ After loading the SDK/cache environment and entering the Windows developer
 environment described above, run it from the repository root:
 
 ```sh
-praktor build.yml --timeout-ms 3600000
+praktor --config build.yml --task install --timeout-ms 3600000
 ```
 
 Use an independent Praktor installation outside this checkout's build and
@@ -101,11 +105,13 @@ codes and stopping dependent tasks on failure. Redirecting full logs to files
 keeps them outside the runtime's bounded task-output capture. The CLI option
 sets a one-hour workflow budget; each Shell stage also has an explicit timeout.
 
-Restore the root manifest's TRE dependency into `PRAKTOR_VCPKG_INSTALLED_DIR` (the user preset defaults to this repository's `vcpkg_installed`). Keep this writable product installation separate from the shared restored SDK payload. With the shared compiler setup's `LLVM_MINGW_HOST_DEPENDENCY_TOOLCHAIN_FILE` and cache environment loaded, its Windows restore command is:
-
-```powershell
-& "$env:VCPKG_ROOT/vcpkg.exe" install --triplet=qigao-x64-windows-llvm-mingw --host-triplet=qigao-x64-windows-llvm-mingw "--overlay-triplets=$env:VCPKG_CACHE_REPOSITORY_ROOT/triplets" "--x-install-root=$PWD/vcpkg_installed"
-```
+The root manifest declares `pcre2`. The compiler-matched shared vcpkg-cache
+selected by `VCPKG_INSTALLED_DIR` already supplies PCRE2 10.46; configure consumes
+its `PCRE2::8BIT` target through the existing preset prefixes. Praktor does not
+copy or rebuild that package. The existing writable product installation
+`PRAKTOR_VCPKG_INSTALLED_DIR` remains separate from the shared SDK payload.
+Regex actions use native PCRE2 syntax and leftmost-first matching; see
+[the runtime contract](docs/ACTIONS_RUNTIME.md) for capture and resource limits.
 
 The presets retain writable local binary caching and a read-only shared feed through [the NuGet configuration](cmake/vcpkg-cache.nuget.config); authentication comes from the parent `GITHUB_TOKEN`. Missing cached packages follow vcpkg's manifest source-build path. Runtime PATH includes both installation trees without copying DLLs. Installation writes to `build/<preset>/stage`. Windows x64 tests cover real process I/O, failed admission, capacity and stale reservations, callback detachment, CFlow/cohort drain gates, the public SDK and CLI Shell output. Other platforms, sanitizers and release packaging require their own qualification.
 

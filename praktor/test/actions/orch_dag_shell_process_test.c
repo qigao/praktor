@@ -48,7 +48,7 @@ static const char *command_keyvalue_yaml=
     "    depends_on: [parsed_command]\n"
     "    set_variable: confirmed\n"
     "    from: parsed\n";
-/* Native POSIX-ERE group 1 must select "native" from the OS child output. */
+/* Native PCRE2 group 1 must select "native" from the OS child output. */
 static const char *command_regex_yaml=
     "variables: {BASE: untouched}\n"
     "tasks:\n"

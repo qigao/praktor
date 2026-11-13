@@ -1,0 +1,5 @@
+provider:
+  kind: wasm
+  path: not-loaded.wasm
+config:
+  args: []

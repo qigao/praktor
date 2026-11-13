@@ -1,0 +1,6 @@
+dotEnv: ['@CMAKE_CURRENT_SOURCE_DIR@/data/cli-invalid-defaults.env']
+defaults:
+  timeout: 5000
+tasks:
+  - name: unused
+    command: exit 7

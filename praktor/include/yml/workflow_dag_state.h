@@ -36,13 +36,13 @@ typedef enum praktor_workflow_dag_terminal {
 } praktor_workflow_dag_terminal;
 
 typedef struct praktor_workflow_dag_stats {
-    size_t task_count;
+    size_t task_count; /* Original graph size; task indices retain this domain. */
     size_t active;
     size_t completed;
     size_t ready;
     praktor_workflow_dag_terminal terminal;
     bool quiescent;
-    bool all_succeeded;
+    bool all_succeeded; /* All selected tasks succeeded; others are skipped. */
 } praktor_workflow_dag_stats;
 
 /* No partial owner on failure; *out remains unchanged. Returns SALTS_OK,
@@ -50,6 +50,14 @@ typedef struct praktor_workflow_dag_stats {
 int praktor_workflow_dag_state_create(
     const praktor_workflow_dependencies *graph, size_t max_active,
     praktor_workflow_dag_state **out);
+/* Select one task and its transitive depends_on predecessors. Other tasks
+ * remain in the immutable graph but are never reserved. Unknown/empty names
+ * return EINVAL without publishing a state. NULL selects the complete graph. */
+int praktor_workflow_dag_state_create_task(
+    const praktor_workflow_dependencies *graph,size_t max_active,const char *task,
+    praktor_workflow_dag_state **out);
+int praktor_workflow_dag_is_selected(const praktor_workflow_dag_state *state,
+    size_t task_index,bool *out_selected);
 void praktor_workflow_dag_state_destroy(praktor_workflow_dag_state *state);
 
 /* Caller receives only RESERVED indices. A capacity of zero is invalid.

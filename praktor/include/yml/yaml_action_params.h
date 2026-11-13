@@ -52,7 +52,6 @@ typedef struct praktor_yaml_download_view {
     vstr url, path, sha256;
     bool overwrite;
     int timeout_ms;
-    vstr service;
 } praktor_yaml_download_view;
 typedef struct praktor_yaml_service_view {
     praktor_process_operation operation;

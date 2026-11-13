@@ -10,7 +10,7 @@ extern "C" {
  * through canonical SaltsUtils JSONPath, ParseRegex, filtered ParseLines,
  * and ParseKeyValue (sorted JSON, last duplicate wins).
  * No legacy objects. Regex cache misses compile within fixed slot/pattern bounds;
- * hits and all non-regex leaves allocate nothing per tick. Borrow hooks only
+ * hits reuse compiled code and bounded PCRE2 match data. Borrow hooks only
  * until destroy.
  * Parallel-branch requests and unsupported actions return ENOTSUP; there is no implicit legacy dispatch. */
 typedef struct praktor_native_host { void *impl; } praktor_native_host;
@@ -26,7 +26,8 @@ typedef struct praktor_native_host_config {
   void *clock_user;
   /* Zero selects the bounded defaults: eight cached expressions and at most
    * 64 capture groups per expression.  Compiled expressions live until Host
-   * destruction; no regex compilation or heap allocation occurs on a hit. */
+   * destruction. Hits avoid compilation; PCRE2 may allocate/grow cached heap
+   * frames within the adapter's explicit match/depth/heap limits. */
   size_t regex_cache_capacity;
   size_t max_regex_captures;
 } praktor_native_host_config;

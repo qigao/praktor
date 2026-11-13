@@ -1,0 +1,17 @@
+# curl owns the operation. Praktor binds whole argv entries from task inputs.
+provider:
+  kind: exe
+  path: curl
+config:
+  args:
+    - --disable
+    - --fail
+    - --location
+    - --globoff
+    - --silent
+    - --show-error
+    - --output
+    - '{path}'
+    - --url
+    - '{url}'
+  timeout_ms: 300000

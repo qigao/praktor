@@ -75,6 +75,7 @@
 ## 构建与验证
 
 - Praktor 工作流的 `.env` 加载和 `variables`/`vars` 求值由 Praktor 原生能力负责；不得调用 Python、PowerShell 或其他外部脚本解释器实现环境加载、变量替换、包同步或构建编排，也不得用 CMake 包装这些解释器绕过。CMake/vcpkg 保持其原生构建和依赖管理职责。
+- 工作流根级 `inputs` / `input_policy` 不是 Praktor 规范键，不得新增输入契约或 `--input` / `--var` 通道。规范 CLI 为 `praktor --config build.yml --task build`；`--task` 选择任务及依赖，外部变量来自 `.env`/继承环境。任务 `vars`、根 `variables` 的显式值优先于环境读取。
 - 远程发布元数据和包的网络下载统一使用 curl；CMake 只负责配置、编译、测试、安装等构建工作，不承接远程包下载或环境脚本职责。
 
 遵循当前仓库的构建指引和 CMake presets 执行构建、测试、安装与打包；使用 `tinytest` 编写或修改 C/C++ 测试、benchmark 和 Mock。现有脚本测试沿用所属模块的正式测试入口。准确的 preset、target、测试名及 helper 签名以当前 checkout 为准。
@@ -90,6 +91,7 @@
 - Praktor 模块保留两个 CMake 入口：`praktor/CMakeLists.txt` 声明生产目标，`praktor/test/CMakeLists.txt` 独立声明本模块所有测试目标；前者通过 `BUILD_TESTS` 添加后者。其他下级目录不保留 CMakeLists 或 `.cmake` 碎片。测试源码、数据和 fixture 继续留在原所属目录，其他模块保持各自的 CMake 入口。
 - Praktor 的生产 CMake 只创建 `Praktor` 一个 SHARED target，公共入口仅安装 `praktor/include/praktor.h`；不创建内部 STATIC/OBJECT 替代 target。CLI 的 `praktor` executable 归 `app/CMakeLists.txt`，源码为 `app/main.c`，只链接 `Praktor`。白盒测试直接编译所需私有实现，公共接口测试链接动态库。
 - Actions 头文件归 `praktor/include/actions`，实现归 `praktor/src/actions`，测试归 `praktor/test/actions`；源码通过 `actions/<header>.h` 引用，不在内部文件、类型、函数或宏名中附加 `c11` 标签。C11 语言标准配置保持不变。
+- 服务通过独立 YAML 文件声明，工作流 `services` 按名称引用，任务沿用 `tool`/`with` 调用。Configurator 和 Praktor 只处理通用执行契约、绑定与生命周期；下载、解压等业务含义及工具参数保留在 YAML，不添加专用下载/解压 provider 或内置命令目录。
 - 复用正式测试覆盖行为、ownership、ABI、状态和失败路径；先最小相关测试，再相邻回归，按风险决定是否扩大。
 - CI 的 configure 决定完整 build graph；`cmake --build` 构建该 graph，不在 workflow 中用 `--target` 或点名 target 缩减范围。
 - CI 的测试和 benchmark 统一通过 CTest 执行，不直接运行 CMake 生成的 executable；用 CTest 名称、标签和过滤器选择执行范围，Debug/Release 和 sanitizer 由现有 presets 选择，不为此新增功能开关。

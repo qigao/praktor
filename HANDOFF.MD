@@ -170,3 +170,90 @@ CTest 70/70 通过，install 成功；本次为增量构建。临时 runner 已�
   其余架构文档去掉文件名中的 `C11_`，同步修正引用。
 - `llvm-mingw-x64-release-user` 完整 configure/build、70/70 CTest、
   install 通过。构建与测试日志位于 `build/logs/actions-*.log`。
+
+## 2026-11-13：独立 YAML 服务与通用执行复用
+
+- 工作流 `services` 将名称映射到独立 YAML 文件；任务沿用 `tool`/`with`。
+  服务文件仅声明执行器、路径、argv 模板、超时及工作目录，下载等业务含义
+  留在 YAML。新增运行链路没有 Download/Curl 专用接口或命令目录。
+- 复用 CMeta Interface/DataDesc、Configurator 的显式 provider selection、
+  process driver、原生值存储和 TaskRegistry；每次工作流/服务名对应一个
+  实例，每次任务激活持有独立 job。声明与绑定预检完成后才允许任务副作用；
+  取消必须完成 IO 排空和 job release，再停止服务和释放声明。
+- Snapshot 只保留服务文件引用；执行时读取普通服务文件，路径相对调用方
+  当前工作目录。最多 16 个服务，每个文件 1 MiB；argv 最多 256 项、
+  合计 1 MiB，job stdout/stderr 合计最多 4096 字节且拒绝嵌入 NUL。
+  当前只接纳 exe，DLL/嵌入式 TurboScript/WASM 均明确拒绝。
+- 原生 argv 模式必须将 `process_options_init` 默认的同步 capture flags
+  清零；它们与 `process_async` 自有 stdio 管道冲突，会使 admission 立即
+  返回 EINVAL。测试需确认真实进程准入，避免将准入失败误当超时或取消通过。
+- 正式 `praktor_service_test` 包含 13 个用例，覆盖共享实例、独立 job、
+  真实 curl 的两个本地 file:// 传输、dotenv/vars、失败预检、取消、超时及
+  输出边界。取消测试使用独立长预算，避免被短超时用例抢先终止。
+- Windows x64 完整 configure/build、71/71 CTest、schema 生成、install
+  通过，DLL 仍仅导出原 5 个公开函数。日志为 `build/logs/provider-*.log`。
+  远程发布包恢复及 `build.yml` 包同步尚未接入，其他平台未验证。
+
+## 2026-11-13：TRE 替换为共享 PCRE2
+
+- 根 manifest 和共享 registry 已选择 `pcre2`；Praktor 改为必需查找
+  `PCRE2 10.46` 的 `8BIT` component，直接链接 `PCRE2::8BIT`。实际
+  `PCRE2_DIR` 来自共享 vcpkg-cache 的 LLVM-MinGW triplet，没有复制、
+  重编译依赖，也未修改用户的依赖版本选择。
+- 适配层及测试更名为 `regex_pcre2.*`，`praktor_regex_*` 函数、状态和
+  span 入口保持。按用户确认使用 PCRE2 原生 leftmost-first 语义，支持
+  lookaround、lazy quantifier 和 backreference，不实现 POSIX 兼容路径。
+- 每个表达式限制 64 个捕获、64 KiB 模式文本、1 MiB 编译代码；解释匹配
+  限制为 match 100000、depth 256、heap 1024 KiB。三类运行时耗尽统一
+  映射为既有 LIMIT/ENOBUFS，保持 Native Host 的失败输出原子性。
+- match-data 缓存属于表达式 owner，同一 handle 的匹配和销毁需串行。
+  PCRE2 可在匹配时分配/增长有界 heap frames，因此不再声称 cache hit
+  完全无分配；没有启用 JIT。显式长度、嵌入 NUL 和 byte span 均有测试。
+- 新正则套件 10 个用例及 Native Host 测试覆盖原生语义、可选捕获重用、
+  UTF byte offsets、资源限额及失败输出保持。Windows x64 完整 build、
+  71/71 CTest、install 通过；DLL 直接导入 `libpcre2-8.dll`，不导入 TRE。
+  日志为 `build/logs/pcre2-*.log`。其他平台与 sanitizer 未验证。
+
+## 2026-11-13：显式任务选择与环境变量入口
+
+- 规范 CLI 为 `praktor --config build.yml --task build`；选择目标任务及其
+  传递依赖，其余任务保留原始索引并输出 `skipped`。未知任务和无效参数
+  在启动任务前失败；原位置参数形式仍保留已有全任务行为。
+- 根级 `inputs` / `input_policy` 从元数据允许列表、Schema 和文档移除；
+  不提供 `--input` / `--var`。动作读取变量时按任务、根、环境的顺序查询，
+  环境值不写回 mutable value store；dotenv 仍由调用方显式加载。
+- DAG 的 `task_count` 必须始终是原图大小，作为 Registry 和 owner settlement
+  的索引域；完成与静止判定只统计选中任务，不能用选中数量替换索引域。
+  正式 DAG 测试覆盖重复依赖边、非连续选中索引和未知任务的输出保持。
+- 新增公开 `praktor_execute_task`，复用原执行路径与 request/result 布局；
+  原 `praktor_execute` 保留全任务语义。当前 DLL 有 6 个公开入口，未增加
+  版本化结构或并行调度器。
+- TurboAgent 的本地 `build.yml` 同步改为规范任务结构；阶段命令与 PRESET
+  放入 `.env` / `.env.example`，复用已有开发环境包装器。已有机器配置和
+  凭据保留；`sdk-build.yml` 与共享旧工作流尚未迁移，文档已标明边界。
+- Windows x64 完整 build、71/71 CTest、install 通过，日志为
+  `build/logs/task-*.log`。当前 CLI 对 TurboAgent 的 `--task prepare` 实测
+  成功，其余任务均为 skipped；未执行 TurboAgent 本体 configure/build。
+
+## 2026-11-13：Shell/Command 默认配置逐字段继承
+
+- 每次执行在启动 provider/任务前解析默认配置：Session 内置值
+  （30000 毫秒、stream_output=true）→ 继承环境的 `PRAKTOR_TIMEOUT_MS` /
+  `PRAKTOR_STREAM_OUTPUT` → 文档 `defaults`。Session 中的显式 Shell 参数
+  逐字段覆盖结果；缺失才继承，false 不表示缺失。Command 降低后的 Shell
+  也使用相同配置，不向可变值存储或共享 provider 实例写入默认值。
+- 所有已提供的环境/文档值都需有效，即使会被后续层覆盖。timeout 采用
+  1..2147483647 整数毫秒；环境开关只接受 true/false。此前仅解析而未使用
+  的 `defaults.timeout: 30s` 需改成 30000，Schema 和迁移说明已同步。
+  resolver 是显式输入的纯覆盖函数，失败保留原输出；环境仍由 Praktor
+  原生 dotenv 加载，执行层只读取。公开 request/result/limits 布局未改。
+- 工作流总 deadline、独立服务 YAML 的 `config.timeout_ms` 保持各自契约。
+  stream_output 控制已有 emission hook，不影响捕获 stdout/stderr；回调
+  包含命令提示及输出块，启用时不能断言固定调用次数。CLI 仍输出最终 JSON。
+- 正式测试覆盖环境/文档/节点超时优先级、独立总 deadline、显式 false、
+  开关继承、关闭回调后保留输出、无效/溢出输入及 CLI 原生 dotenv 失败。
+  7/7 定向 CTest、71/71 完整 CTest 通过；Schema 已通过正式生成目标更新。
+- 用独立已构建 CLI 实测根 `build.yml --task install --timeout-ms 3600000`，
+  prepare/configure/build/test/install 全部成功。根文件已把公共配置移到
+  defaults，只保留任务特有时限；日志为 `build/logs/defaults-local-build-yml.*`
+  和 `build/logs/{configure,build,test,install}.log`。仅验证 Windows x64。

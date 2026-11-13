@@ -26,6 +26,9 @@ typedef struct praktor_session_config {
   salts_bt_tree_config tree;
   size_t max_plan_bytes, max_value_bytes, max_state_bytes, max_parameters_per_node;
   uint32_t shell_close_budget_ms;
+  /* Per-command defaults; explicit Shell parameters override each field. */
+  int shell_timeout_ms;
+  bool shell_stream_output;
   struct praktor_process_retainer *retainer;
   praktor_bt_host host;
   int (*environment)(void *user, const char *const **entries);

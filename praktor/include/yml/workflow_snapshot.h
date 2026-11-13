@@ -13,10 +13,11 @@ extern "C" {
 /* Immutable in-memory C11 workflow aggregate. Composes canonical C11 workflow
  * metadata, task metadata, command desugaring, named/flat Orch AST and graph.
  *
- * Admission currently requires every task to be a Command or Orchestration
+ * Admission currently requires every task to be a Command, Tool or Orchestration
  * runner; unsupported runner and script forms are explicitly rejected, never
  * admitted with an absent execution body. No includes, file IO, script engine,
- * executable workflow plan identity, source provenance, or scheduler.
+ * executable workflow plan identity, source provenance, or scheduler. Service
+ * file references stay immutable metadata; execution loads their declarations.
  *
  * Unique owner. Copies/owns all task metadata JSON and Orchestration AST nodes.
  * The embedded graph copies task names/edges; borrowed input YAML and all

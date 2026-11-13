@@ -1,15 +1,16 @@
 dotEnv: ['@CMAKE_CURRENT_SOURCE_DIR@/data/cli.env']
+defaults:
+  timeout: 5000
+  stream_output: false
 variables:
   command: echo root-scope
 tasks:
   - name: root
     shell:
       cmd: '{command}'
-      stream_output: false
   - name: overlay
     depends_on: [root]
     vars:
       command: @PRAKTOR_CLI_ENV_COMMAND@
     shell:
       cmd: '{command}'
-      stream_output: false

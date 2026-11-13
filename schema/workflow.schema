@@ -4,13 +4,6 @@ schema PraktorWorkflow [version(1)];
 message Workflow {
     optional string name;
     optional string description;
-    optional string input_policy default "allow_extra";
-}
-
-message workflowInputField {
-    [name("type")] string type_field;
-    optional [name("required")] bool required_field default false;
-    optional string description;
 }
 
 message workflowOutputField {

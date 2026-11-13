@@ -214,7 +214,11 @@ static void parse_regex(void) {
   check(praktor_value_store_set(values, "regex", "[") == PRAKTOR_VALUE_OK);
   check(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_OK && status == SALTS_BT_FAILURE);
   check(praktor_value_store_set(values, "regex", "(a)\\1") == PRAKTOR_VALUE_OK);
-  check(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_ENOTSUP);
+  params[2].kind = PRAKTOR_LEAF_NUMBER;
+  params[2].number = 1.0;
+  check(praktor_value_store_set(values, "source", "aa") == PRAKTOR_VALUE_OK);
+  check(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_OK && status == SALTS_BT_SUCCESS);
+  check(praktor_value_store_get(values, "capture", text, sizeof(text), &size) == PRAKTOR_VALUE_OK && strcmp(text, "a") == 0);
   check(praktor_value_store_set(values, "regex", "(no)") == PRAKTOR_VALUE_OK);
   params[2].kind = PRAKTOR_LEAF_NUMBER;
   params[2].number = 0.0;
@@ -291,7 +295,7 @@ static void parse_lines_atomic_failure(void) {
 
 
 /* A completed regex match is not authority to overwrite another port when
- * the value store is full. Parse/no-match/unsupported failures are similarly
+ * the value store is full. Parse/no-match/resource failures are similarly
  * forbidden from modifying a prior output. */
 static void parse_regex_atomic_failures(void) {
   praktor_native_host host = {0};
@@ -328,8 +332,8 @@ static void parse_regex_atomic_failures(void) {
   ports[0].text = "[";
   check(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_OK &&
         status == SALTS_BT_FAILURE);
-  ports[0].text = "(f)\\1";
-  check(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_ENOTSUP);
+  ports[0].text = "(*LIMIT_HEAP=0)(fresh)";
+  check(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_ENOBUFS);
   ports[0].text = "(fresh)";
   check(praktor_value_store_erase(values, "shell_output") == PRAKTOR_VALUE_OK);
   check(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_OK &&
@@ -339,15 +343,15 @@ static void parse_regex_atomic_failures(void) {
   praktor_native_host_destroy(&host);
 }
 
-/* Legacy ignores malformed optional line filters, but native-only unsupported
- * regex features must fail closed without replacing either paired output. */
+/* Legacy ignores malformed optional line filters. Runtime regex exhaustion
+ * must fail closed without replacing either paired output. */
 static void parse_lines_filter_atomic_failures(void) {
   praktor_native_host host = {0};
   praktor_bt_host hooks = {0};
   praktor_value_store *values;
   praktor_leaf_parameter ports[2] = {
       {"output_key", PRAKTOR_LEAF_STRING, "parsed", 0.0, false},
-      {"filter", PRAKTOR_LEAF_STRING, "(o)\\1", 0.0, false}};
+      {"filter", PRAKTOR_LEAF_STRING, "(*LIMIT_HEAP=0)o", 0.0, false}};
   praktor_leaf_request request = {0u, "ParseLines", ports, 2u, false, NULL};
   salts_bt_node_status status = SALTS_BT_FAILURE;
   char text[65] = {0};
@@ -359,11 +363,14 @@ static void parse_lines_filter_atomic_failures(void) {
         PRAKTOR_VALUE_OK);
   check(praktor_value_store_set(values, "parsed", "prior") == PRAKTOR_VALUE_OK);
   check(praktor_value_store_set(values, "parsed_count", "9") == PRAKTOR_VALUE_OK);
-  check(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_ENOTSUP);
+  check(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_ENOBUFS);
   check(praktor_value_store_get(values, "parsed", text, sizeof text, &size) ==
         PRAKTOR_VALUE_OK && strcmp(text, "prior") == 0);
   check(praktor_value_store_get(values, "parsed_count", text, sizeof text, &size) ==
         PRAKTOR_VALUE_OK && strcmp(text, "9") == 0);
+  ports[1].text = "(o)\\1"; /* Valid native backreference; neither line matches. */
+  check(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_OK && status == SALTS_BT_SUCCESS);
+  check(praktor_value_store_get(values, "parsed_count", text, sizeof text, &size) == PRAKTOR_VALUE_OK && strcmp(text, "0") == 0);
   ports[1].text = "["; /* invalid Legacy-style filter means no filter */
   check(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_OK &&
         status == SALTS_BT_SUCCESS);
@@ -499,14 +506,28 @@ static void parse_json_native(void) {
 }
 
 spec("C11 Native Host") {
+  it("reads bounded inherited variables without copying them into task state") {
+    praktor_native_host host={0};praktor_bt_host hooks={0};char text[64]="prior";size_t size=0u;int present=0;
+    check(praktor_native_host_init(&host,4u,64u,16u)==SALTS_OK);
+    check(praktor_native_host_bind(&host,&hooks)==SALTS_OK);
+    check(hooks.value_get(hooks.value_user,"PRAKTOR_TEST_ENV_VALUE",NULL,0u,&size)==PRAKTOR_BT_VALUE_BUFFER_TOO_SMALL&&size==9u);
+    check(hooks.value_get(hooks.value_user,"PRAKTOR_TEST_ENV_VALUE",text,sizeof text,&size)==PRAKTOR_BT_VALUE_OK&&strcmp(text,"env-value")==0);
+    check(hooks.value_contains(hooks.value_user,"PRAKTOR_TEST_ENV_VALUE",&present)==PRAKTOR_BT_VALUE_OK&&present==1);
+    check(praktor_value_store_contains(praktor_native_host_values(&host),"PRAKTOR_TEST_ENV_VALUE",&present)==PRAKTOR_VALUE_OK&&present==0);
+    check(praktor_value_store_set(praktor_native_host_values(&host),"PRAKTOR_TEST_ENV_VALUE","task-value")==PRAKTOR_VALUE_OK);
+    check(hooks.value_get(hooks.value_user,"PRAKTOR_TEST_ENV_VALUE",text,sizeof text,&size)==PRAKTOR_BT_VALUE_OK&&strcmp(text,"task-value")==0);
+    check(hooks.value_get(hooks.value_user,"PRAKTOR_TEST_ENV_LONG",text,sizeof text,&size)==PRAKTOR_BT_VALUE_BUFFER_TOO_SMALL);
+    check(strcmp(text,"task-value")==0);
+    praktor_native_host_destroy(&host);
+  }
   it("dispatches bounded typed values and fails closed") { stateless_leaves(); }
   it("owns cooperative Sleep activations per Session") { sleep_leaves(); }
   it("selects canonical JSONPath values without partial C11 output publication") { parse_json_native(); }
   it("parses lines with Legacy newline and parameter semantics") { parse_lines(); }
-  it("extracts bounded POSIX capture groups without the C++ Executor") { parse_regex(); }
+  it("extracts bounded PCRE2 capture groups without the C++ Executor") { parse_regex(); }
   it("fails closed at configured regex cache and capture bounds") { parse_regex_bounds(); }
   it("publishes line content and count atomically within bounds") { parse_lines_atomic_failure(); }
-  it("preserves prior regex output across no-match, unsupported and capacity failures") { parse_regex_atomic_failures(); }
+  it("preserves prior regex output across no-match, resource and capacity failures") { parse_regex_atomic_failures(); }
   it("keeps ParseLines paired outputs intact across unsupported filters") { parse_lines_filter_atomic_failures(); }
   it("encodes sorted key/value JSON without allocating or partial publication") { parse_key_value(); }
 }

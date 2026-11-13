@@ -1,0 +1,24 @@
+# Run from the repository root after building. Replace URLs for real packages.
+dotEnv: [.env]
+variables:
+  first_url: https://example.com/
+  first_path: build/service-first.html
+  second_url: https://example.com/
+  second_path: build/service-second.html
+services:
+  packages: examples/services/download.yml
+tasks:
+  - name: first
+    tool: packages
+    with:
+      url: '{first_url}'
+      path: '{first_path}'
+  - name: second
+    tool: packages
+    with:
+      url: '{second_url}'
+      path: '{second_path}'
+  - name: all
+    depends_on: [first, second]
+    set_variable: downloads_complete
+    value: ready

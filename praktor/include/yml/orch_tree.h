@@ -23,7 +23,7 @@ typedef enum praktor_orch_type {
 typedef struct praktor_orch_spec {
     const char *name;
     bool control, allows_children;
-    const char *required[4], *optional[7]; /* NULL terminated, immutable. */
+    const char *required[3], *optional[7]; /* NULL terminated, immutable. */
 } praktor_orch_spec;
 const praktor_orch_spec *praktor_orch_spec_for(praktor_orch_type type);
 int praktor_orch_find_type(vstr name, praktor_orch_type *out);

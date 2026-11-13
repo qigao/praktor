@@ -5,6 +5,35 @@ callbacks and typed leaf request are declared in `actions/tree_adapter.h`.
 `actions/native_host.h` provides the bounded
 native implementation used by the application runtime.
 
+## Regular expressions
+
+The adapter in `praktor/src/actions/regex_pcre2.c` consumes the shared
+vcpkg-cache's PCRE2 10.46 through `PCRE2::8BIT`. The neutral `praktor_regex_*`
+functions and capture-span/status contract stay unchanged; PCRE2 types remain
+private. Existing cache slots reuse compiled code and match data. A handle's
+search/destruction operations require one driver; independent handles may run
+concurrently.
+
+Patterns now use native PCRE2 syntax and leftmost-first matching, including
+lookaround, lazy quantifiers and backreferences. For example, `(a|ab)(c)?` on
+`abc` matches `a`; the former POSIX longest-match result was `abc`. Review
+overlapping alternatives when migrating patterns. No POSIX compatibility matcher
+or automatic fallback is provided. Patterns and subjects use explicit byte
+lengths and spans, including embedded NUL at the adapter boundary. UTF is opt-in
+through native pattern syntax and spans remain byte offsets.
+
+Each expression admits at most 64 captures, 64 KiB of pattern text and 1 MiB of
+compiled code. Interpretive matching uses a match limit of 100000, depth limit
+256 and heap-frame limit of 1024 KiB. Pattern directives may lower these budgets;
+they cannot raise the host limits. Resource exhaustion returns the existing
+`PRAKTOR_REGEX_LIMIT`, mapped to `SALTS_ENOBUFS` by native actions before publishing
+outputs. These limits control work and memory, rather than wall-clock deadlines.
+
+PCRE2 may allocate or grow cached heap frames during search; cache hits avoid
+recompilation and do not promise allocation-free matching. The implementation
+does not enable JIT. See the [PCRE2 10.46 API contract](https://github.com/PCRE2Project/pcre2/blob/pcre2-10.46/doc/pcre2api.3)
+and [matching memory behavior](https://www.pcre2.org/doc/pcre2perform/).
+
 ## Construction and ownership
 
 Initialize a zero-state Session with `praktor_session_init`. Configuration

@@ -60,7 +60,12 @@ spec("C schema projection") {
         check(number_is(get(actual, "$['$defs'].taskDefinition.properties.tool.minLength"), "1"));
         check(string_is(get(actual, "$['$defs'].taskDefinition.dependencies.with[0]"), "tool"));
         check(string_is(get(actual, "$['$defs'].taskDefinition.properties.with.type"), "object"));
-        check(json_object_size(get(actual, "$['$defs'].workflowInputField.properties.default")) == 0);
+        check(json_object_get(json_object_get(actual,"properties"),"inputs")==NULL);
+        check(json_object_get(json_object_get(actual,"properties"),"input_policy")==NULL);
+        check(string_is(get(actual,"$.properties.defaults.properties.timeout.type"),"integer"));
+        check(number_is(get(actual,"$.properties.defaults.properties.timeout.minimum"),"1"));
+        check(number_is(get(actual,"$.properties.defaults.properties.timeout.maximum"),"2147483647"));
+        check(string_is(get(actual,"$.properties.defaults.properties.stream_output.type"),"boolean"));
         check(number_is(get(actual, "$['$defs'].eachBlock.properties.items.oneOf[0].minLength"), "1"));
         check(fs_read_file(PRAKTOR_SCHEMA_GENERATED_PATH, &generated) == 0);
         check(generated.len > 0 && generated.base[generated.len - 1] == '\n');

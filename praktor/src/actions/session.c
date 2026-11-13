@@ -66,7 +66,7 @@ static int start_process(session_impl *s, size_t node) {
   const char *const *environment = NULL;
   session_text command, input, cwd, text;
   const praktor_leaf_parameter *stream;
-  bool emit = true;
+  bool emit = s->config.shell_stream_output;
   int timeout, r;
   size_t i;
   static const struct { size_t slot; const char *name, *fallback; bool key; } ports[] = {
@@ -96,7 +96,7 @@ static int start_process(session_impl *s, size_t node) {
       else return session_error(s, SALTS_EINVAL, "Shell stream_output must be true or false");
     }
   }
-  r = session_integer(s, node, "timeout", 30000, &timeout);
+  r = session_integer(s, node, "timeout", s->config.shell_timeout_ms, &timeout);
   if (r != SALTS_OK || timeout <= 0) return session_error(s, SALTS_EINVAL, "Shell timeout must be positive and an integer");
   if (!s->config.retainer) return session_error(s, SALTS_ENOTSUP, "C11 Shell requires an explicit Process recovery owner");
   if (s->config.environment) {
@@ -264,6 +264,7 @@ void praktor_session_config_init(praktor_session_config *config) {
   memset(config,0,sizeof(*config)); salts_bt_tree_config_init(&config->tree);
   config->max_plan_bytes = config->max_value_bytes = config->max_state_bytes = 16u*1024u*1024u;
   config->max_parameters_per_node = 64; config->shell_close_budget_ms = 3000;
+  config->shell_timeout_ms = 30000; config->shell_stream_output = true;
 }
 static int add_bytes(size_t *used, size_t count, size_t width, size_t limit) {
   if (count > (limit - *used)/width) return SALTS_ENOBUFS;
@@ -288,7 +289,8 @@ int praktor_session_init(praktor_session *session, const praktor_session_config 
   int r = SALTS_OK;
   if (!session || session->impl || !config || !nodes || !count || count > config->tree.max_nodes ||
       !config->max_plan_bytes || config->max_plan_bytes == SIZE_MAX || !config->max_value_bytes || !config->max_state_bytes ||
-      config->max_value_bytes == SIZE_MAX || config->max_state_bytes == SIZE_MAX || !config->max_parameters_per_node)
+      config->max_value_bytes == SIZE_MAX || config->max_state_bytes == SIZE_MAX || !config->max_parameters_per_node ||
+      config->shell_timeout_ms <= 0)
     return SALTS_EINVAL;
   if (count > SIZE_MAX / SESSION_SLOTS / sizeof(session_slot)) return SALTS_ENOBUFS;
   if (add_bytes(&used,count,sizeof(*nodes),config->max_plan_bytes) != SALTS_OK) return SALTS_ENOBUFS;

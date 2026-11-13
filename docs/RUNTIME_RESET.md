@@ -9,7 +9,7 @@ ABI v3 is intentionally incompatible with the former C++ WorkflowExecutor, Actio
 - Canonical native YAML Snapshot/DAG/TaskRegistry, Orch and Session/BehaviorTree implement workflow and actions; SaltsBase Process/NativeIO is the only subprocess provider.
 - SDK ABI v3 and CLI are C-only. Previous C++ workflow plan, TurboScript execution, old ABI v2, global registries and implicit adapters are removed without emulation.
 
-Initial feature gate: bounded serial Owner, finite inline YAML, native SetVariable-root and Shell/Command-root, 64 tasks maximum. Unsupported node compositions, unqualified output projection, scripts, includes, dynamic workflow plans, multi-worker/Parallel application execution and dynamic Plugin reload fail closed.
+Current feature gate: bounded serial Owner, finite inline YAML, native SetVariable-root, Shell/Command-root and named Tool-root, 64 tasks maximum. Tool services load explicitly referenced YAML declarations and use generic executable providers. Unsupported node compositions, unqualified output projection, scripts, includes, dynamic workflow plans, multi-worker/Parallel application execution and dynamic Plugin reload fail closed.
 
 ## Split SDK composition
 

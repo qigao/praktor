@@ -14,10 +14,14 @@ typedef struct fixture {
   praktor_session_config config;
   praktor_session session;
   uint64_t now;
-  size_t calls, halts;
+  size_t calls, halts, emissions;
   bool decline, fail, running, reenter;
 } fixture;
 static uint64_t now_ns(void *user) { return ((fixture *)user)->now; }
+static int emit(void *user,const char *line,size_t size) {
+  fixture *f=user;
+  check(size>0u&&line!=NULL);++f->emissions;return SALTS_OK;
+}
 static praktor_value_store *values(fixture *f) { return praktor_native_host_values(&f->native); }
 static void set(fixture *f, const char *key, const char *value) {
   check(praktor_value_store_set(values(f),key,value) == PRAKTOR_VALUE_OK);
@@ -336,6 +340,34 @@ spec("C11 Session without a C++ compiler or runtime") {
     started = hrtime();
     while (status == SALTS_BT_RUNNING && hrtime()-started < UINT64_C(6000000000)) { status = drive(&f); if (status == SALTS_BT_RUNNING) sleep_ms(1); }
     check(status == SALTS_BT_SUCCESS); expect(&f,"shell_exit_code","0"); destroy(&f); drain(&retainer);
+  }
+  it("inherits stream defaults while explicit true and false override them without disabling captured output") {
+    const struct { bool inherited;const char *override;bool expected; } cases[]={
+      {false,NULL,false},{true,NULL,true},{true,"false",false},{false,"true",true}};
+    for(size_t i=0u;i<sizeof cases/sizeof cases[0];++i) {
+      fixture f;praktor_process_retainer retainer={0};
+      praktor_leaf_parameter p[]={text("cmd","echo stream-defaults"),text("stream_output",cases[i].override)};
+      praktor_session_node n=node("Shell",SALTS_BT_NODE_LEAF,PRAKTOR_BT_NO_PARENT);
+      salts_bt_node_status status=SALTS_BT_RUNNING;
+      init(&f);check(praktor_process_retainer_init(&retainer,1)==SALTS_OK);
+      f.config.retainer=&retainer;f.config.emit=emit;f.config.process_user=&f;
+      f.config.shell_stream_output=cases[i].inherited;
+      if(cases[i].override&&!strcmp(cases[i].override,"false")) {
+        p[1].kind=PRAKTOR_LEAF_BOOLEAN;p[1].boolean=false;
+      }
+      n.parameters=p;n.parameter_count=cases[i].override?2u:1u;
+      check(praktor_session_init(&f.session,&f.config,&n,1)==SALTS_OK);
+      uint64_t started=hrtime();
+      while(status==SALTS_BT_RUNNING&&hrtime()-started<UINT64_C(6000000000)) {
+        status=drive(&f);if(status==SALTS_BT_RUNNING)sleep_ms(1);
+      }
+      check_equal(status,SALTS_BT_SUCCESS);
+      if(cases[i].expected)check_greater(f.emissions,0u);
+      else check_equal(f.emissions,0u);
+      char output[128];size_t length=0u;
+      check(praktor_value_store_get(values(&f),"shell_output",output,sizeof output,&length)==PRAKTOR_VALUE_OK);
+      check_contains(output,"stream-defaults");destroy(&f);drain(&retainer);
+    }
   }
   it("detaches destroyed Host state before a zero-budget Process retainer transfer") {
     fixture *f = calloc(1,sizeof(*f)); praktor_process_retainer retainer = {0};

@@ -31,4 +31,4 @@ PRAKTOR_ORCH_NODE(WAIT_EVENT, "WaitEvent", false, false, ORCH_PARAMS("event"), O
 PRAKTOR_ORCH_NODE(SLEEP, "Sleep", false, false, ORCH_PARAMS("duration"), ORCH_PARAMS(NULL))
 PRAKTOR_ORCH_NODE(FILE_EXISTS, "FileExists", false, false, ORCH_PARAMS("path"), ORCH_PARAMS("output_key", "fail_if_missing"))
 PRAKTOR_ORCH_NODE(SET_VARIABLE, "SetVariable", false, false, ORCH_PARAMS("key"), ORCH_PARAMS("value", "from"))
-PRAKTOR_ORCH_NODE(DOWNLOAD, "Download", false, false, ORCH_PARAMS("service", "url", "path"), ORCH_PARAMS("sha256", "overwrite", "timeout_ms"))
+PRAKTOR_ORCH_NODE(TOOL, "Tool", false, false, ORCH_PARAMS("service"), ORCH_PARAMS(NULL))

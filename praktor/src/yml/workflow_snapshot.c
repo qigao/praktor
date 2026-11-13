@@ -5,7 +5,6 @@
 #include "yml/yaml_action_params.h"
 #include "yml/orch_yaml.h"
 #include <core/error_codes.h>
-#include <core/fmt.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -130,39 +129,6 @@ done:
     return status;
 }
 
-static int download_tree(praktor_yaml_node task,praktor_orch_tree **out,
-                         char *error,size_t capacity) {
-    praktor_yaml_action_params *owner=NULL;
-    praktor_yaml_download_view view={0};
-    praktor_yaml_field_error field={0};
-    praktor_yaml_node block={0};
-    praktor_orch_input_param params[6];
-    size_t count=0u;
-    char timeout[32];
-    int rc=praktor_yaml_action_params_create(task,PRAKTOR_YAML_ACTION_DOWNLOAD,&owner,&field);
-    if(rc!=SALTS_OK)return field_failure(rc,&field,error,capacity);
-    praktor_yaml_field_error_dispose(&field);
-    rc=praktor_yaml_action_download(owner,&view);
-    if(rc!=SALTS_OK)goto done;
-    if(!view.service.len) {rc=snapshot_fail(error,capacity,SALTS_EINVAL,"download requires a nonempty service reference");goto done;}
-    params[count++]=(praktor_orch_input_param){vstr_from_cstr("service"),view.service};
-    params[count++]=(praktor_orch_input_param){vstr_from_cstr("url"),view.url};
-    params[count++]=(praktor_orch_input_param){vstr_from_cstr("path"),view.path};
-    params[count++]=(praktor_orch_input_param){vstr_from_cstr("overwrite"),vstr_from_cstr(view.overwrite?"true":"false")};
-    if(view.sha256.len)params[count++]=(praktor_orch_input_param){vstr_from_cstr("sha256"),view.sha256};
-    rc=praktor_yaml_get(task,"download",&block,NULL);if(rc!=SALTS_OK)goto done;
-    if(praktor_yaml_has(block,"timeout_ms")) {
-        int n=fmt(timeout,sizeof timeout,"{}",view.timeout_ms);
-        if(n<=0||(size_t)n>=sizeof timeout){rc=SALTS_EINVAL;goto done;}
-        params[count++]=(praktor_orch_input_param){vstr_from_cstr("timeout_ms"),vstr_from_cstr(timeout)};
-    }
-    praktor_orch_flat_node node={PRAKTOR_ORCH_DOWNLOAD,PRAKTOR_ORCH_ROOT_PARENT,params,count};
-    rc=praktor_orch_from_flat_nodes(&node,1u,out,error,capacity);
-done:
-    praktor_yaml_action_params_destroy(owner);
-    return rc;
-}
-
 static int task_tree(praktor_yaml_node task,const json_value_t *metadata,
                      praktor_orch_tree **out,
                      praktor_workflow_snapshot_task_kind *kind,
@@ -191,9 +157,13 @@ static int task_tree(praktor_yaml_node task,const json_value_t *metadata,
         *kind=PRAKTOR_WORKFLOW_SNAPSHOT_COMMAND;
         return command_tree(task,out,error,capacity);
     }
-    if(strcmp(runner_name,"download")==0) {
+    if(strcmp(runner_name,"tool")==0) {
+        const char *service=json_get_string(metadata,"tool");
+        if(!service||!*service)return snapshot_fail(error,capacity,SALTS_EINVAL,"tool must name a service");
+        praktor_orch_input_param parameter={vstr_from_cstr("service"),vstr_from_cstr(service)};
+        praktor_orch_flat_node node={PRAKTOR_ORCH_TOOL,PRAKTOR_ORCH_ROOT_PARENT,&parameter,1u};
         *kind=PRAKTOR_WORKFLOW_SNAPSHOT_ORCHESTRATION;
-        return download_tree(task,out,error,capacity);
+        return praktor_orch_from_flat_nodes(&node,1u,out,error,capacity);
     }
     if(strcmp(runner_name,"actions")==0) {
         praktor_yaml_node branch={0};

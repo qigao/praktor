@@ -17,9 +17,9 @@ target_sources(actions_workflow_snapshot_values_test PRIVATE
     ${PROJECT_SOURCE_DIR}/praktor/src/actions/native_host.c
     ${PROJECT_SOURCE_DIR}/praktor/src/actions/tree_adapter.c
     ${PROJECT_SOURCE_DIR}/praktor/src/actions/output_scan.c
-    ${PROJECT_SOURCE_DIR}/praktor/src/actions/regex_tre.c)
+    ${PROJECT_SOURCE_DIR}/praktor/src/actions/regex_pcre2.c)
 target_link_libraries(actions_workflow_snapshot_values_test PRIVATE
-    Salts::CYaml Salts::Core CMeta::CSTL Salts::JsonParser Salts::BehaviorTree unofficial::tre::tre Salts::TinyTest)
+    Salts::CYaml Salts::Core CMeta::CSTL Salts::JsonParser Salts::BehaviorTree PCRE2::8BIT Salts::TinyTest)
 set_target_properties(actions_workflow_snapshot_values_test PROPERTIES
     C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF
     LINKER_LANGUAGE C FOLDER "praktor/test/actions")
@@ -311,9 +311,9 @@ target_sources(actions_orch_session_plan_test PRIVATE
     ${PROJECT_SOURCE_DIR}/praktor/src/actions/native_host.c
     ${PROJECT_SOURCE_DIR}/praktor/src/actions/value_store.c
     ${PROJECT_SOURCE_DIR}/praktor/src/actions/output_scan.c
-    ${PROJECT_SOURCE_DIR}/praktor/src/actions/regex_tre.c)
+    ${PROJECT_SOURCE_DIR}/praktor/src/actions/regex_pcre2.c)
 target_link_libraries(actions_orch_session_plan_test PRIVATE
-    Salts::BehaviorTree praktor_process_driver Salts::JsonParser Salts::Core Salts::CYaml CMeta::CSTL unofficial::tre::tre Salts::TinyTest)
+    Salts::BehaviorTree praktor_process_driver Salts::JsonParser Salts::Core Salts::CYaml CMeta::CSTL PCRE2::8BIT Salts::TinyTest)
 set_target_properties(actions_orch_session_plan_test PROPERTIES
     C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF
     LINKER_LANGUAGE C FOLDER "praktor/test/actions")
@@ -352,9 +352,9 @@ target_sources(actions_orch_dag_native_session_test PRIVATE
     ${PROJECT_SOURCE_DIR}/praktor/src/actions/workflow_parallel_commit.c
     ${PROJECT_SOURCE_DIR}/praktor/src/actions/native_host.c
     ${PROJECT_SOURCE_DIR}/praktor/src/actions/output_scan.c
-    ${PROJECT_SOURCE_DIR}/praktor/src/actions/regex_tre.c)
+    ${PROJECT_SOURCE_DIR}/praktor/src/actions/regex_pcre2.c)
 target_link_libraries(actions_orch_dag_native_session_test PRIVATE
-    Salts::BehaviorTree praktor_process_driver Salts::JsonParser Salts::Core Salts::CYaml CMeta::CSTL praktor_process_retainer CMeta::CFlow unofficial::tre::tre Salts::TinyTest)
+    Salts::BehaviorTree praktor_process_driver Salts::JsonParser Salts::Core Salts::CYaml CMeta::CSTL praktor_process_retainer CMeta::CFlow PCRE2::8BIT Salts::TinyTest)
 set_target_properties(actions_orch_dag_native_session_test PROPERTIES
     C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF
     LINKER_LANGUAGE C FOLDER "praktor/test/actions")
@@ -394,9 +394,9 @@ target_sources(actions_orch_worker_session_test PRIVATE
     ${PROJECT_SOURCE_DIR}/praktor/src/actions/workflow_parallel_commit.c
     ${PROJECT_SOURCE_DIR}/praktor/src/actions/native_host.c
     ${PROJECT_SOURCE_DIR}/praktor/src/actions/output_scan.c
-    ${PROJECT_SOURCE_DIR}/praktor/src/actions/regex_tre.c)
+    ${PROJECT_SOURCE_DIR}/praktor/src/actions/regex_pcre2.c)
 target_link_libraries(actions_orch_worker_session_test PRIVATE
-    Salts::BehaviorTree praktor_process_driver Salts::JsonParser Salts::Core Salts::CYaml CMeta::CSTL praktor_process_retainer CMeta::CFlow unofficial::tre::tre Salts::TinyTest)
+    Salts::BehaviorTree praktor_process_driver Salts::JsonParser Salts::Core Salts::CYaml CMeta::CSTL praktor_process_retainer CMeta::CFlow PCRE2::8BIT Salts::TinyTest)
 set_target_properties(actions_orch_worker_session_test PROPERTIES
     C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF
     LINKER_LANGUAGE C FOLDER "praktor/test/actions")
@@ -436,9 +436,9 @@ target_sources(actions_orch_worker_process_test PRIVATE
     ${PROJECT_SOURCE_DIR}/praktor/src/actions/workflow_parallel_commit.c
     ${PROJECT_SOURCE_DIR}/praktor/src/actions/native_host.c
     ${PROJECT_SOURCE_DIR}/praktor/src/actions/output_scan.c
-    ${PROJECT_SOURCE_DIR}/praktor/src/actions/regex_tre.c)
+    ${PROJECT_SOURCE_DIR}/praktor/src/actions/regex_pcre2.c)
 target_link_libraries(actions_orch_worker_process_test PRIVATE
-    Salts::BehaviorTree praktor_process_driver Salts::JsonParser Salts::Core Salts::CYaml CMeta::CSTL praktor_process_retainer CMeta::CFlow unofficial::tre::tre Salts::TinyTest)
+    Salts::BehaviorTree praktor_process_driver Salts::JsonParser Salts::Core Salts::CYaml CMeta::CSTL praktor_process_retainer CMeta::CFlow PCRE2::8BIT Salts::TinyTest)
 set_target_properties(actions_orch_worker_process_test PROPERTIES
     C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF
     LINKER_LANGUAGE C FOLDER "praktor/test/actions")
@@ -477,9 +477,9 @@ target_sources(actions_orch_dag_shell_process_test PRIVATE
     ${PROJECT_SOURCE_DIR}/praktor/src/actions/workflow_parallel_commit.c
     ${PROJECT_SOURCE_DIR}/praktor/src/actions/native_host.c
     ${PROJECT_SOURCE_DIR}/praktor/src/actions/output_scan.c
-    ${PROJECT_SOURCE_DIR}/praktor/src/actions/regex_tre.c)
+    ${PROJECT_SOURCE_DIR}/praktor/src/actions/regex_pcre2.c)
 target_link_libraries(actions_orch_dag_shell_process_test PRIVATE
-    Salts::BehaviorTree praktor_process_driver Salts::JsonParser Salts::Core Salts::CYaml CMeta::CSTL praktor_process_retainer CMeta::CFlow unofficial::tre::tre Salts::TinyTest)
+    Salts::BehaviorTree praktor_process_driver Salts::JsonParser Salts::Core Salts::CYaml CMeta::CSTL praktor_process_retainer CMeta::CFlow PCRE2::8BIT Salts::TinyTest)
 set_target_properties(actions_orch_dag_shell_process_test PROPERTIES
     C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF
     LINKER_LANGUAGE C FOLDER "praktor/test/actions")
@@ -498,9 +498,9 @@ target_sources(actions_session_c_test PRIVATE
     ${PROJECT_SOURCE_DIR}/praktor/src/actions/native_host.c
     ${PROJECT_SOURCE_DIR}/praktor/src/actions/value_store.c
     ${PROJECT_SOURCE_DIR}/praktor/src/actions/output_scan.c
-    ${PROJECT_SOURCE_DIR}/praktor/src/actions/regex_tre.c)
+    ${PROJECT_SOURCE_DIR}/praktor/src/actions/regex_pcre2.c)
 target_link_libraries(actions_session_c_test PRIVATE
-    Salts::BehaviorTree praktor_process_driver Salts::JsonParser Salts::Core unofficial::tre::tre Salts::TinyTest)
+    Salts::BehaviorTree praktor_process_driver Salts::JsonParser Salts::Core PCRE2::8BIT Salts::TinyTest)
 set_target_properties(actions_session_c_test PROPERTIES FOLDER "praktor/tests")
 add_test(NAME actions_session_c_test COMMAND actions_session_c_test)
 add_executable(actions_native_host_test ${CMAKE_CURRENT_SOURCE_DIR}/actions/native_host_test.c)
@@ -509,11 +509,13 @@ target_sources(actions_native_host_test PRIVATE
     ${PROJECT_SOURCE_DIR}/praktor/src/actions/value_store.c
     ${PROJECT_SOURCE_DIR}/praktor/src/actions/tree_adapter.c
     ${PROJECT_SOURCE_DIR}/praktor/src/actions/output_scan.c
-    ${PROJECT_SOURCE_DIR}/praktor/src/actions/regex_tre.c)
+    ${PROJECT_SOURCE_DIR}/praktor/src/actions/regex_pcre2.c)
 target_link_libraries(actions_native_host_test PRIVATE
-    Salts::BehaviorTree Salts::Core Salts::JsonParser unofficial::tre::tre Salts::TinyTest)
+    Salts::BehaviorTree Salts::Core Salts::JsonParser PCRE2::8BIT Salts::TinyTest)
 set_target_properties(actions_native_host_test PROPERTIES FOLDER "praktor/tests")
 add_test(NAME actions_native_host_test COMMAND actions_native_host_test)
+set_tests_properties(actions_native_host_test PROPERTIES ENVIRONMENT
+    "PRAKTOR_TEST_ENV_VALUE=env-value;PRAKTOR_TEST_ENV_LONG=abcdefghijklmnopqrstuvwxyz012345")
 add_executable(actions_value_store_test ${CMAKE_CURRENT_SOURCE_DIR}/actions/value_store_test.c)
 target_sources(actions_value_store_test PRIVATE
     ${PROJECT_SOURCE_DIR}/praktor/src/actions/value_store.c)
@@ -521,13 +523,13 @@ target_link_libraries(actions_value_store_test PRIVATE
     Salts::TinyTest)
 set_target_properties(actions_value_store_test PROPERTIES FOLDER "praktor/tests")
 add_test(NAME actions_value_store_test COMMAND actions_value_store_test)
-add_executable(actions_regex_tre_test ${CMAKE_CURRENT_SOURCE_DIR}/actions/regex_tre_test.c)
-target_sources(actions_regex_tre_test PRIVATE
-    ${PROJECT_SOURCE_DIR}/praktor/src/actions/regex_tre.c)
-target_link_libraries(actions_regex_tre_test PRIVATE
-    unofficial::tre::tre Salts::TinyTest)
-set_target_properties(actions_regex_tre_test PROPERTIES FOLDER "praktor/tests")
-add_test(NAME actions_regex_tre_test COMMAND actions_regex_tre_test)
+add_executable(actions_regex_pcre2_test ${CMAKE_CURRENT_SOURCE_DIR}/actions/regex_pcre2_test.c)
+target_sources(actions_regex_pcre2_test PRIVATE
+    ${PROJECT_SOURCE_DIR}/praktor/src/actions/regex_pcre2.c)
+target_link_libraries(actions_regex_pcre2_test PRIVATE
+    PCRE2::8BIT Salts::TinyTest)
+set_target_properties(actions_regex_pcre2_test PROPERTIES FOLDER "praktor/tests")
+add_test(NAME actions_regex_pcre2_test COMMAND actions_regex_pcre2_test)
 add_executable(actions_tree_adapter_test ${CMAKE_CURRENT_SOURCE_DIR}/actions/tree_adapter_test.c)
 target_sources(actions_tree_adapter_test PRIVATE
     ${PROJECT_SOURCE_DIR}/praktor/src/actions/tree_adapter.c)
@@ -930,6 +932,9 @@ add_test(NAME praktor_init_c_test COMMAND praktor_init_c_test)
 
 add_executable(praktor_runtime_c_test ${CMAKE_CURRENT_SOURCE_DIR}/praktor_runtime_test.c)
 target_sources(praktor_runtime_c_test PRIVATE
+    ${PROJECT_SOURCE_DIR}/praktor/src/providers/process.c
+    ${PROJECT_SOURCE_DIR}/praktor/src/actions/tool.c
+    ${PROJECT_SOURCE_DIR}/praktor/src/yml/yaml_service.c
     ${PROJECT_SOURCE_DIR}/praktor/src/runtime/runtime.c
     ${PROJECT_SOURCE_DIR}/praktor/src/runtime/component_host.c
     ${PROJECT_SOURCE_DIR}/praktor/src/yml/workflow_snapshot.c
@@ -953,17 +958,79 @@ target_sources(praktor_runtime_c_test PRIVATE
     ${PROJECT_SOURCE_DIR}/praktor/src/actions/native_host.c
     ${PROJECT_SOURCE_DIR}/praktor/src/actions/value_store.c
     ${PROJECT_SOURCE_DIR}/praktor/src/actions/output_scan.c
-    ${PROJECT_SOURCE_DIR}/praktor/src/actions/regex_tre.c
+    ${PROJECT_SOURCE_DIR}/praktor/src/actions/regex_pcre2.c
     ${PROJECT_SOURCE_DIR}/praktor/src/actions/workflow_snapshot_values.c
     ${PROJECT_SOURCE_DIR}/praktor/src/actions/workflow_parallel_process_guard.c
     ${PROJECT_SOURCE_DIR}/praktor/src/actions/workflow_owner_settlement.c
     ${PROJECT_SOURCE_DIR}/praktor/src/actions/workflow_parallel_commit.c)
 target_link_libraries(praktor_runtime_c_test PRIVATE
-    CMeta::CMeta CMeta::ACE CMeta::CFlow Salts::CYaml Salts::Core CMeta::CSTL Salts::JsonParser Salts::BehaviorTree praktor_process_driver unofficial::tre::tre praktor_process_retainer Salts::NativeIO Salts::TinyTest)
+    CMeta::CMeta CMeta::ACE CMeta::CFlow Salts::CYaml Salts::Core CMeta::CSTL Salts::JsonParser Salts::BehaviorTree praktor_process_driver PCRE2::8BIT praktor_process_retainer Salts::NativeIO Salts::TinyTest)
 set_target_properties(praktor_runtime_c_test PROPERTIES
     C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF LINKER_LANGUAGE C)
 add_test(NAME praktor_runtime_c_test COMMAND praktor_runtime_c_test)
-set_tests_properties(praktor_runtime_c_test PROPERTIES TIMEOUT 45)
+set_tests_properties(praktor_runtime_c_test PROPERTIES TIMEOUT 45 ENVIRONMENT
+    "PRAKTOR_TIMEOUT_MS=50;PRAKTOR_STREAM_OUTPUT=false")
+
+# Generic provider fixture and its formal integration/ownership suite.
+add_executable(praktor_execution_fixture ${CMAKE_CURRENT_SOURCE_DIR}/service_fixture.c)
+target_link_libraries(praktor_execution_fixture PRIVATE Salts::Core)
+set_target_properties(praktor_execution_fixture PROPERTIES FOLDER "praktor/test")
+foreach(_mode IN ITEMS echo sleep sleep-long env fail)
+    if(_mode STREQUAL "echo")
+        set(_arguments "['emit', '{text}']")
+        set(_timeout 5000)
+    elseif(_mode STREQUAL "sleep" OR _mode STREQUAL "sleep-long")
+        set(_arguments "['sleep']")
+        if(_mode STREQUAL "sleep")
+            set(_timeout 50)
+        else()
+            set(_timeout 5000)
+        endif()
+    elseif(_mode STREQUAL "env")
+        set(_arguments "['env', 'PRAKTOR_CLI_ENV_TEST_VALUE']")
+        set(_timeout 5000)
+    else()
+        set(_arguments "['fail']")
+        set(_timeout 5000)
+    endif()
+    file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/services/${_mode}.yml"
+        CONTENT "provider:\n  kind: exe\n  path: '$<TARGET_FILE:praktor_execution_fixture>'\nconfig:\n  args: ${_arguments}\n  timeout_ms: ${_timeout}\n")
+endforeach()
+add_executable(praktor_service_test ${CMAKE_CURRENT_SOURCE_DIR}/service_test.c)
+target_sources(praktor_service_test PRIVATE
+    ${PROJECT_SOURCE_DIR}/praktor/src/runtime/component_host.c
+    ${PROJECT_SOURCE_DIR}/praktor/src/providers/process.c
+    ${PROJECT_SOURCE_DIR}/praktor/src/actions/tool.c
+    ${PROJECT_SOURCE_DIR}/praktor/src/yml/yaml_service.c
+    ${PROJECT_SOURCE_DIR}/praktor/src/yml/yaml_document.c
+    ${PROJECT_SOURCE_DIR}/praktor/src/yml/yaml_fields.c
+    ${PROJECT_SOURCE_DIR}/praktor/src/yml/yaml_task_fields.c)
+target_include_directories(praktor_service_test PRIVATE
+    ${PROJECT_SOURCE_DIR}/praktor/include ${PROJECT_SOURCE_DIR}/praktor/src/runtime)
+target_link_libraries(praktor_service_test PRIVATE Praktor CMeta::ACE CMeta::CSTL
+    Salts::CYaml Salts::Core Salts::JsonParser Salts::TinyTest Salts::BehaviorTree praktor_process_driver)
+if(WIN32)
+    set(_payload_url "file:///${CMAKE_CURRENT_SOURCE_DIR}/data/service-payload.txt")
+else()
+    set(_payload_url "file://${CMAKE_CURRENT_SOURCE_DIR}/data/service-payload.txt")
+endif()
+target_compile_definitions(praktor_service_test PRIVATE
+    PRAKTOR_SERVICE_ECHO="${CMAKE_CURRENT_BINARY_DIR}/services/echo.yml"
+    PRAKTOR_SERVICE_SLEEP="${CMAKE_CURRENT_BINARY_DIR}/services/sleep.yml"
+    PRAKTOR_SERVICE_LONG_SLEEP="${CMAKE_CURRENT_BINARY_DIR}/services/sleep-long.yml"
+    PRAKTOR_SERVICE_ENV="${CMAKE_CURRENT_BINARY_DIR}/services/env.yml"
+    PRAKTOR_SERVICE_DOTENV="${CMAKE_CURRENT_SOURCE_DIR}/data/cli.env"
+    PRAKTOR_SERVICE_FAIL="${CMAKE_CURRENT_BINARY_DIR}/services/fail.yml"
+    PRAKTOR_SERVICE_CURL="${PROJECT_SOURCE_DIR}/examples/services/download.yml"
+    PRAKTOR_SERVICE_PAYLOAD_URL="${_payload_url}"
+    PRAKTOR_SERVICE_PAYLOAD_FILE="${CMAKE_CURRENT_SOURCE_DIR}/data/service-payload.txt"
+    PRAKTOR_SERVICE_UNSUPPORTED="${CMAKE_CURRENT_SOURCE_DIR}/data/service-unsupported.yml"
+    PRAKTOR_SERVICE_OUTPUT_A="${CMAKE_CURRENT_BINARY_DIR}/service-first with spaces.txt"
+    PRAKTOR_SERVICE_OUTPUT_B="${CMAKE_CURRENT_BINARY_DIR}/service-second.txt")
+add_dependencies(praktor_service_test praktor_execution_fixture)
+set_target_properties(praktor_service_test PROPERTIES FOLDER "praktor/test")
+add_test(NAME praktor_service_test COMMAND praktor_service_test)
+set_tests_properties(praktor_service_test PROPERTIES TIMEOUT 30)
 
 add_executable(praktor_c_api_test ${CMAKE_CURRENT_SOURCE_DIR}/praktor_c_api_test.c)
 target_link_libraries(praktor_c_api_test PRIVATE Praktor Salts::TinyTest Salts::JsonParser)
@@ -974,7 +1041,9 @@ target_link_libraries(praktor_cli_test PRIVATE Salts::Core Salts::JsonParser Sal
 target_compile_definitions(praktor_cli_test PRIVATE
     PRAKTOR_CLI_PATH="$<TARGET_FILE:praktor>"
     PRAKTOR_CLI_WORKFLOW="${CMAKE_CURRENT_SOURCE_DIR}/data/cli-shell.yml"
+    PRAKTOR_CLI_TASK_WORKFLOW="${CMAKE_CURRENT_SOURCE_DIR}/data/cli-tasks.yml"
     PRAKTOR_CLI_TIMEOUT_WORKFLOW="${CMAKE_CURRENT_SOURCE_DIR}/data/cli-timeout.yml"
+    PRAKTOR_CLI_INVALID_DEFAULTS_WORKFLOW="${CMAKE_CURRENT_BINARY_DIR}/cli-invalid-defaults.yml"
     PRAKTOR_CLI_ENV_WORKFLOW="${CMAKE_CURRENT_BINARY_DIR}/cli-env.yml")
 if(WIN32)
     set(PRAKTOR_CLI_ENV_COMMAND "echo %PRAKTOR_CLI_ENV_TEST_VALUE%")
@@ -982,6 +1051,7 @@ else()
     set(PRAKTOR_CLI_ENV_COMMAND "echo $PRAKTOR_CLI_ENV_TEST_VALUE")
 endif()
 configure_file(data/cli-env.yml.in cli-env.yml @ONLY)
+configure_file(data/cli-invalid-defaults.yml.in cli-invalid-defaults.yml @ONLY)
 add_dependencies(praktor_cli_test praktor)
 add_test(NAME praktor_cli_test COMMAND praktor_cli_test)
 set_tests_properties(praktor_cli_test PROPERTIES TIMEOUT 30)
@@ -1017,7 +1087,7 @@ foreach(_target IN ITEMS
     actions_session_c_test
     actions_native_host_test
     actions_value_store_test
-    actions_regex_tre_test
+    actions_regex_pcre2_test
     actions_tree_adapter_test
     actions_plan_test
     actions_output_scan_test

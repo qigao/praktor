@@ -14,5 +14,9 @@ praktor_runtime_status praktor_runtime_execute_yaml(
     const char *yaml,size_t yaml_size,const praktor_runtime_limits *limits,
     praktor_cancel_probe cancel,void *cancel_context,
     praktor_runtime_result *out);
+praktor_runtime_status praktor_runtime_execute_task_yaml(
+    const char *yaml,size_t yaml_size,const praktor_runtime_limits *limits,
+    praktor_cancel_probe cancel,void *cancel_context,const char *task,
+    praktor_runtime_result *out);
 void praktor_runtime_result_destroy(praktor_runtime_result *result);
 #endif

@@ -221,6 +221,13 @@ int praktor_yaml_task_metadata_create(praktor_yaml_node node,json_value_t **out,
  rc=praktor_yaml_check_keys(node,extras?extended:keys,extras?sizeof(extended)/sizeof(extended[0]):sizeof(keys)/sizeof(keys[0]),error);if(rc!=SALTS_OK)return rc;
  if(praktor_yaml_has(node,"with")&&!praktor_yaml_has(node,"tool")){rc=optional(node,"with",&with,error);if(rc!=SALTS_OK)return rc;return at_error(with,"'with' is valid only with the 'tool' runner",error);}
  result=json_create_object();if(!result){if(error)error->origin=PRAKTOR_YAML_FAILURE_ALLOCATION;return SALTS_ENOMEM;}
+ if(praktor_yaml_has(node,"tool")) {
+     praktor_yaml_node tool={0};
+     rc=optional(node,"tool",&tool,error);if(rc!=SALTS_OK)goto fail;
+     rc=add_scalar(result,"tool",tool,"tool must be a scalar service name",error);if(rc!=SALTS_OK)goto fail;
+     rc=optional(node,"with",&with,error);if(rc!=SALTS_OK)goto fail;
+     if(praktor_yaml_valid(with)){rc=add_map(result,"with",with,error);if(rc!=SALTS_OK)goto fail;}
+ }
  rc=optional(node,"name",&name,error);if(rc!=SALTS_OK)goto fail;if(!praktor_yaml_valid(name)){rc=at_error(node,"task requires a 'name'",error);goto fail;}
  rc=praktor_yaml_field_scalar(name,vstr_from_cstr("Expected YAML scalar"),&name_text,error);if(rc!=SALTS_OK)goto fail;
  if(!tstr_len(name_text)){rc=at_error(name,"task name cannot be empty",error);goto fail;}

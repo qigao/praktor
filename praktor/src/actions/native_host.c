@@ -1,6 +1,6 @@
 #include "actions/native_host.h"
 #include "actions/output_scan.h"
-#include "actions/regex_tre.h"
+#include "actions/regex_pcre2.h"
 #include <json_parser.h>
 #include <ctype.h>
 #include <core/clock.h>
@@ -33,6 +33,7 @@ typedef struct native_regex_cache_entry {
 typedef struct native_host_impl {
   praktor_value_store values;
   size_t scratch_capacity;
+  size_t max_value_bytes;
   char *scratch;
   praktor_output_pair *pairs;
   size_t pair_capacity;
@@ -54,10 +55,23 @@ static int value_result(int result) {
     default: return PRAKTOR_BT_VALUE_ERROR;
   }
 }
+/* Explicit task/root values override inherited process environment. Dotenv is
+ * loaded by the caller before execution; never cache or mutate env here. */
+static int lookup_value(native_host_impl *impl,const char *key,char *value,
+                        size_t capacity,size_t *size) {
+  int rc=praktor_value_store_get(&impl->values,key,value,capacity,size);
+  if(rc!=PRAKTOR_VALUE_ENOTFOUND)return rc;
+  const char *environment=getenv(key);
+  if(!environment)return PRAKTOR_VALUE_ENOTFOUND;
+  size_t length=strlen(environment);
+  *size=length;
+  if(length>impl->max_value_bytes||!value||capacity<=length)return PRAKTOR_VALUE_ENOBUFS;
+  memcpy(value,environment,length+1u);return PRAKTOR_VALUE_OK;
+}
 static int get_value(void *user, const char *key, char *value,
                      size_t capacity, size_t *size) {
   native_host_impl *impl = (native_host_impl *)user;
-  return value_result(praktor_value_store_get(&impl->values, key, value, capacity, size));
+  return value_result(lookup_value(impl,key,value,capacity,size));
 }
 static int set_value(void *user, const char *key, const char *value) {
   native_host_impl *impl = (native_host_impl *)user;
@@ -65,7 +79,9 @@ static int set_value(void *user, const char *key, const char *value) {
 }
 static int contains_value(void *user, const char *key, int *contains) {
   native_host_impl *impl = (native_host_impl *)user;
-  return value_result(praktor_value_store_contains(&impl->values, key, contains));
+  int result=praktor_value_store_contains(&impl->values,key,contains);
+  if(result==PRAKTOR_VALUE_OK&&!*contains&&getenv(key))*contains=1;
+  return value_result(result);
 }
 static const praktor_leaf_parameter *parameter(
     const praktor_leaf_request *request, const char *name) {
@@ -102,7 +118,7 @@ static int resolve(native_host_impl *impl, const praktor_leaf_parameter *param,
         if (length - 2u >= impl->scratch_capacity) return SALTS_ENOBUFS;
         memcpy(key_scratch, param->text + 1, length - 2u);
         key_scratch[length - 2u] = '\0';
-        return praktor_value_store_get(&impl->values, key_scratch, out,
+        return lookup_value(impl, key_scratch, out,
                                            impl->scratch_capacity, &required) == PRAKTOR_VALUE_OK
             ? SALTS_OK : SALTS_EINVAL;
       }
@@ -640,6 +656,7 @@ int praktor_native_host_init_with_config(
     return result == PRAKTOR_VALUE_ENOMEM ? SALTS_ENOMEM : SALTS_EINVAL;
   }
   impl->scratch_capacity = scratch_bytes + 1u;
+  impl->max_value_bytes = config->max_value_bytes;
   impl->scratch = (char *)calloc(5u, impl->scratch_capacity);
   impl->pair_capacity = config->max_value_bytes / 2u + 1u;
   impl->pairs = (praktor_output_pair *)calloc(impl->pair_capacity, sizeof(praktor_output_pair));

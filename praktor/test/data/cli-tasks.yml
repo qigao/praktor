@@ -1,0 +1,13 @@
+tasks:
+  - name: unrelated
+    command: exit 9
+  - name: configure
+    set_variable: configured
+    value: ready
+  - name: build
+    depends_on: [configure]
+    set_variable: built
+    from: configured
+  - name: test
+    depends_on: [build]
+    command: exit 7

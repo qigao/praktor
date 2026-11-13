@@ -44,6 +44,24 @@ static void require_stats(praktor_workflow_dag_state *state,
 }
 
 spec("C11 DAG owner-turn readiness and settlement") {
+    it("selects transitive dependencies while excluding siblings and retaining duplicate edges") {
+        praktor_workflow_dependencies *graph=diamond_graph();praktor_workflow_dag_state *run=NULL;
+        check(praktor_workflow_dag_state_create_task(graph,1u,"c",&run)==SALTS_OK);
+        for(size_t i=0u;i<5u;++i) {
+            bool selected=false;check(praktor_workflow_dag_is_selected(run,i,&selected)==SALTS_OK);
+            check(selected==(i==0u||i==2u));
+        }
+        size_t chosen=99u,count=0u;
+        check(praktor_workflow_dag_claim_ready(run,&chosen,1u,&count)==SALTS_OK&&count==1u&&chosen==0u);
+        check(praktor_workflow_dag_finish(run,chosen,true)==SALTS_OK);
+        check(praktor_workflow_dag_claim_ready(run,&chosen,1u,&count)==SALTS_OK&&count==1u&&chosen==2u);
+        check(praktor_workflow_dag_finish(run,chosen,true)==SALTS_OK);
+        praktor_workflow_dag_stats stats={0};check(praktor_workflow_dag_get_stats(run,&stats)==SALTS_OK);
+        check(stats.task_count==5u&&stats.completed==2u&&stats.quiescent&&stats.all_succeeded);
+        praktor_workflow_dag_state *saved=run;
+        check(praktor_workflow_dag_state_create_task(graph,1u,"absent",&run)==SALTS_EINVAL&&run==saved);
+        praktor_workflow_dag_state_destroy(run);praktor_workflow_dependencies_destroy(graph);
+    }
     it("claims in declaration order, honors capacity and retires duplicate edges") {
         praktor_workflow_dependencies *graph=diamond_graph();
         praktor_workflow_dag_state *run=NULL;

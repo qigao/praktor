@@ -1,4 +1,4 @@
-find_package(unofficial-tre CONFIG REQUIRED)
+find_package(PCRE2 10.46 CONFIG REQUIRED COMPONENTS 8BIT)
 
 file(GLOB_RECURSE PRAKTOR_SOURCES CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/src/*.c")
@@ -21,7 +21,7 @@ target_link_libraries(Praktor
         Salts::CYamlJsonAdapter Salts::XmlParser Salts::CsvParser
         Salts::NativeIO Salts::BehaviorTree
         praktor_process_driver praktor_process_retainer praktor_process_native
-        unofficial::tre::tre)
+        PCRE2::8BIT)
 if(UNIX)
     target_link_libraries(Praktor PRIVATE m)
 endif()

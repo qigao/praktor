@@ -35,7 +35,8 @@ spec("C11 Praktor SDK ABI v3") {
         check(praktor_load_environment(invalid,sizeof(invalid)-1u)==PRAKTOR_RUNTIME_INVALID);
     }
     it("publishes real shell output through the shared-library API after native drain") {
-        const char yaml[] = "tasks:\n  - name: shell\n    command: echo sdk-shell\n";
+        const char yaml[] = "defaults: {timeout: 5000, stream_output: false}\n"
+            "tasks:\n  - name: shell\n    command: echo sdk-shell\n";
         praktor_execute_request request = {0};
         const json_value_t *task, *outputs;
         request.yaml = yaml; request.yaml_size = sizeof(yaml) - 1u;

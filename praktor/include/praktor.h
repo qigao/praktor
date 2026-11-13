@@ -45,8 +45,15 @@ typedef struct praktor_execute_request {
     praktor_cancel_probe is_cancelled;
     void *cancel_context;
 } praktor_execute_request;
+/* Executes borrowed inline YAML. Explicit services references read independent
+ * YAML declaration files relative to the caller's current directory. */
 PRAKTOR_API praktor_runtime_status praktor_execute(
     const praktor_execute_request *request,praktor_runtime_result *result);
+/* Execute one named task and its transitive dependencies. Other tasks appear
+ * as skipped. Existing request/result layouts and all-task entrypoint stay
+ * unchanged. task is borrowed, nonempty; unknown names return INVALID. */
+PRAKTOR_API praktor_runtime_status praktor_execute_task(
+    const praktor_execute_request *request,const char *task,praktor_runtime_result *result);
 PRAKTOR_API void praktor_release_result(praktor_runtime_result *result);
 PRAKTOR_API praktor_runtime_limits praktor_default_limits(void);
 PRAKTOR_API const cmeta_data_desc *praktor_config_reflection(void);

@@ -1,7 +1,50 @@
 #include "yml/yaml_workflow_metadata.h"
 #include "yaml_diagnostic_internal.h"
 #include "yml/yaml_task_fields.h"
+#include <limits.h>
 #include <string.h>
+static bool timeout_value(const char *text,size_t length,int *out) {
+    int value=0;
+    if(!length)return false;
+    for(size_t i=0u;i<length;++i) {
+        if(text[i]<'0'||text[i]>'9')return false;
+        int digit=text[i]-'0';
+        if(value>(INT_MAX-digit)/10)return false;
+        value=value*10+digit;
+    }
+    if(!value)return false;
+    *out=value;return true;
+}
+static bool stream_value(const char *text,size_t length,bool *out) {
+    if(length==4u&&!memcmp(text,"true",4u)){*out=true;return true;}
+    if(length==5u&&!memcmp(text,"false",5u)){*out=false;return true;}
+    return false;
+}
+int praktor_yaml_workflow_resolve_defaults(const json_value_t *metadata,
+    const char *environment_timeout,const char *environment_stream,
+    int *timeout_ms,bool *stream_output,const char **error) {
+    if(error)*error=NULL;
+    if(!metadata||!timeout_ms||!stream_output)return SALTS_EINVAL;
+    int timeout=*timeout_ms;
+    bool stream=*stream_output;
+    const char *reason=NULL;
+    if(environment_timeout&&!timeout_value(environment_timeout,strlen(environment_timeout),&timeout))
+        reason="PRAKTOR_TIMEOUT_MS must be an integer from 1 to 2147483647";
+    else if(environment_stream&&!stream_value(environment_stream,strlen(environment_stream),&stream))
+        reason="PRAKTOR_STREAM_OUTPUT must be true or false";
+    const json_value_t *defaults=json_object_get(metadata,"defaults");
+    if(!reason&&defaults) {
+        const json_value_t *value=json_object_get(defaults,"timeout");
+        const char *text=json_string(value);
+        if(value&&(!text||!timeout_value(text,json_string_len(value),&timeout)))
+            reason="defaults.timeout must be an integer from 1 to 2147483647";
+        value=json_object_get(defaults,"stream_output");text=json_string(value);
+        if(!reason&&value&&(!text||!stream_value(text,json_string_len(value),&stream)))
+            reason="defaults.stream_output must be true or false";
+    }
+    if(reason){if(error)*error=reason;return SALTS_EINVAL;}
+    *timeout_ms=timeout;*stream_output=stream;return SALTS_OK;
+}
 static int at_error(praktor_yaml_node node,const char *message,praktor_yaml_field_error *error) {
     return praktor_yaml_field_fail_at(node,vstr_from_cstr(message),error);
 }
@@ -86,84 +129,37 @@ done:
         error->origin = PRAKTOR_YAML_FAILURE_ALLOCATION;
     return status;
 }
-/* Normalize supported service deployments while the YAML owner is alive.
- * The snapshot owns the resulting strings through Configurator shutdown. */
-static int add_services(json_value_t *result,praktor_yaml_node node,
-                        praktor_yaml_field_error *error) {
-    static const vstr service_keys[]={{"provider",8},{"config",6}};
-    static const vstr provider_keys[]={{"kind",4},{"adapter",7},{"path",4}};
-    static const vstr config_keys[]={{"timeout_ms",10}};
-    json_value_t *services=NULL,*entry=NULL;
-    tstr name=NULL,kind=NULL,adapter=NULL,path=NULL;
-    int rc=SALTS_EINVAL;
+/* Keep service files as explicit references; parsing a workflow snapshot never
+ * opens files or starts providers. Runtime owns the admitted definitions. */
+static int add_services(json_value_t *result,praktor_yaml_node node,praktor_yaml_field_error *error) {
     if(!praktor_yaml_is_map(node)||praktor_yaml_count(node)>PRAKTOR_WORKFLOW_MAX_SERVICES)
-        return at_error(node,"services must be a map with at most 16 entries",error);
-    services=json_create_object();
-    if(!services)return SALTS_ENOMEM;
-    for(size_t i=0u;i<praktor_yaml_count(node);++i) {
-        praktor_yaml_node item=praktor_yaml_at(node,i),provider={0},config={0},value={0};
-        int timeout=300000;
-        rc=praktor_yaml_key(item,&name,NULL);if(rc!=SALTS_OK)goto done;
-        if(!tstr_len(name)||tstr_len(name)>128u||json_object_get(services,name)||
-           !strcmp(name,"praktor_runtime_component")) {
-            rc=at_error(item,"service names must be unique, nonempty and at most 128 bytes",error);goto done;
-        }
-        for(size_t j=0u;j<tstr_len(name);++j) {
+        return at_error(node,"services must map at most 16 names to YAML files",error);
+    int rc=add_string_map(result,"services",node,error);if(rc!=SALTS_OK)return rc;
+    const json_value_t *services=json_object_get(result,"services");
+    if(json_object_size(services)!=praktor_yaml_count(node))return at_error(node,"duplicate service name",error);
+    for(size_t i=0u;i<json_object_size(services);++i) {
+        const char *name=json_object_key(services,i),*file=json_get_string(services,name);
+        size_t n=strlen(name);
+        if(!n||n>128u||!file||!*file||strlen(file)>4096u||!strcmp(name,"praktor_runtime_component"))
+            return at_error(node,"invalid service name or YAML file reference",error);
+        for(size_t j=0u;j<n;++j) {
             unsigned char c=(unsigned char)name[j];
-            if(!((c>='a'&&c<='z')||(c>='A'&&c<='Z')||
-                 (c>='0'&&c<='9')||c=='_'||c=='-'||c=='.')) {
-                rc=at_error(item,"invalid service name",error);goto done;
-            }
+            if(!((c>='a'&&c<='z')||(c>='A'&&c<='Z')||(c>='0'&&c<='9')||c=='_'||c=='-'||c=='.'))
+                return at_error(node,"invalid service name",error);
         }
-        if(!praktor_yaml_is_map(item)) {rc=at_error(item,"service must be a map",error);goto done;}
-        rc=praktor_yaml_check_keys(item,service_keys,2u,error);if(rc!=SALTS_OK)goto done;
-        rc=optional(item,"provider",&provider,error);if(rc!=SALTS_OK)goto done;
-        if(!praktor_yaml_is_map(provider)) {rc=at_error(item,"service.provider must be a map",error);goto done;}
-        rc=praktor_yaml_check_keys(provider,provider_keys,3u,error);if(rc!=SALTS_OK)goto done;
-        rc=praktor_yaml_field_get(provider,"kind",&value,error);if(rc!=SALTS_OK)goto done;
-        rc=praktor_yaml_field_scalar(value,vstr_from_cstr("provider.kind must be a scalar"),&kind,error);if(rc!=SALTS_OK)goto done;
-        rc=praktor_yaml_field_get(provider,"adapter",&value,error);if(rc!=SALTS_OK)goto done;
-        rc=praktor_yaml_field_scalar(value,vstr_from_cstr("provider.adapter must be a scalar"),&adapter,error);if(rc!=SALTS_OK)goto done;
-        if(strcmp(kind,"exe")||strcmp(adapter,"curl")) {
-            rc=at_error(provider,"supported download provider is kind: exe, adapter: curl",error);goto done;
-        }
-        rc=praktor_yaml_field_get(provider,"path",&value,error);if(rc!=SALTS_OK)goto done;
-        rc=praktor_yaml_field_scalar(value,vstr_from_cstr("provider.path must be a scalar"),&path,error);if(rc!=SALTS_OK)goto done;
-        if(!tstr_len(path)||tstr_len(path)>4096u) {rc=at_error(value,"provider.path must contain 1..4096 bytes",error);goto done;}
-        rc=optional(item,"config",&config,error);if(rc!=SALTS_OK)goto done;
-        if(praktor_yaml_valid(config)) {
-            if(!praktor_yaml_is_map(config)) {rc=at_error(config,"service.config must be a map",error);goto done;}
-            rc=praktor_yaml_check_keys(config,config_keys,1u,error);if(rc!=SALTS_OK)goto done;
-            rc=optional(config,"timeout_ms",&value,error);if(rc!=SALTS_OK)goto done;
-            if(praktor_yaml_valid(value)) {
-                rc=praktor_yaml_integer(value,&timeout,NULL);if(rc!=SALTS_OK||timeout<=0) {
-                    rc=at_error(value,"service timeout_ms must be a positive integer",error);goto done;
-                }
-            }
-        }
-        entry=json_create_object();if(!entry){rc=SALTS_ENOMEM;goto done;}
-        rc=add_value(entry,"path",json_create_string(path));if(rc!=SALTS_OK)goto done;
-        rc=add_value(entry,"timeout_ms",json_create_number(timeout));if(rc!=SALTS_OK)goto done;
-        rc=add_value(services,name,entry);entry=NULL;if(rc!=SALTS_OK)goto done;
-        tstr_free(name);name=NULL;tstr_free(kind);kind=NULL;
-        tstr_free(adapter);adapter=NULL;tstr_free(path);path=NULL;
     }
-    rc=add_value(result,"services",services);services=NULL;
-done:
-    tstr_free(name);tstr_free(kind);tstr_free(adapter);tstr_free(path);
-    json_free(entry);json_free(services);
-    return rc;
+    return SALTS_OK;
 }
 int praktor_yaml_workflow_metadata_create(praktor_yaml_node node,json_value_t **out,
     praktor_yaml_field_error *error) {
-    static const vstr allowed[]={{"name",4},{"description",11},{"inputs",6},{"outputs",7},
-        {"input_policy",12},{"variables",9},{"env",3},{"dotEnv",6},{"defaults",8},
+    static const vstr allowed[]={{"name",4},{"description",11},{"outputs",7},
+        {"variables",9},{"env",3},{"dotEnv",6},{"defaults",8},
         {"includes",8},{"tasks",5},{"services",8}};
-    static const vstr default_keys[]={{"timeout",7}};
+    static const vstr default_keys[]={{"timeout",7},{"stream_output",13}};
     praktor_yaml_node child={0},defaults_node={0},timeout_node={0};
     praktor_yaml_node variables_node={0},env_node={0},dot_env_node={0};
     json_value_t *result=NULL,*defaults=NULL;
-    tstr policy=NULL;int status;
+    int status;
     praktor_yaml_field_error_dispose(error);
     if(!out)return SALTS_EINVAL;
     if(!praktor_yaml_is_map(node))return at_error(node,"workflow must be a map",error);
@@ -179,17 +175,6 @@ int praktor_yaml_workflow_metadata_create(praktor_yaml_node node,json_value_t **
     if(praktor_yaml_valid(child)){status=add_scalar(result,"name",child,"Expected YAML scalar",error);if(status!=SALTS_OK)goto fail;}
     status=optional(node,"description",&child,error);if(status!=SALTS_OK)goto fail;
     if(praktor_yaml_valid(child)){status=add_scalar(result,"description",child,"Expected YAML scalar",error);if(status!=SALTS_OK)goto fail;}
-    status=optional(node,"input_policy",&child,error);if(status!=SALTS_OK)goto fail;
-    if(praktor_yaml_valid(child)) {
-        status=praktor_yaml_field_scalar(child,vstr_from_cstr("input_policy must be a scalar"),&policy,error);
-        if(status!=SALTS_OK)goto fail;
-        if(strcmp(policy,"strict")&&strcmp(policy,"allow_extra")) {
-            tstr_free(policy);policy=NULL;
-            status=at_error(child,"input_policy must be 'strict' or 'allow_extra'",error);goto fail;
-        }
-        status=add_value(result,"strict_inputs",json_create_bool(strcmp(policy,"strict")==0));
-        tstr_free(policy);policy=NULL;if(status!=SALTS_OK)goto fail;
-    }
     status=optional(node,"variables",&variables_node,error);if(status!=SALTS_OK)goto fail;
     if(praktor_yaml_valid(variables_node)) {
         status=add_string_map(result,"variables",variables_node,error);
@@ -208,15 +193,29 @@ int praktor_yaml_workflow_metadata_create(praktor_yaml_node node,json_value_t **
     status=optional(node,"defaults",&defaults_node,error);if(status!=SALTS_OK)goto fail;
     if(praktor_yaml_valid(defaults_node)) {
         if(!praktor_yaml_is_map(defaults_node)){status=at_error(defaults_node,"defaults must be a map",error);goto fail;}
-        status=praktor_yaml_check_keys(defaults_node,default_keys,1u,error);if(status!=SALTS_OK)goto fail;
+        status=praktor_yaml_check_keys(defaults_node,default_keys,2u,error);if(status!=SALTS_OK)goto fail;
         defaults=json_create_object();if(!defaults){status=SALTS_ENOMEM;goto fail;}
-        status=optional(defaults_node,"timeout",&timeout_node,error);if(status!=SALTS_OK)goto fail;
-        if(praktor_yaml_valid(timeout_node)){status=add_scalar(defaults,"timeout",timeout_node,"Expected YAML scalar",error);if(status!=SALTS_OK)goto fail;}
+        for(size_t i=0u;i<2u;++i) {
+            const char *key=i==0u?"timeout":"stream_output";
+            status=optional(defaults_node,key,&timeout_node,error);if(status!=SALTS_OK)goto fail;
+            if(praktor_yaml_valid(timeout_node)) {
+                tstr text=NULL;int timeout=0;bool stream=false;
+                const char *message=i==0u?
+                    "defaults.timeout must be an integer from 1 to 2147483647":
+                    "defaults.stream_output must be true or false";
+                status=praktor_yaml_field_scalar(timeout_node,vstr_from_cstr(message),&text,error);
+                if(status!=SALTS_OK)goto fail;
+                bool valid=i==0u?timeout_value(text,tstr_len(text),&timeout):stream_value(text,tstr_len(text),&stream);
+                if(!valid){tstr_free(text);status=at_error(timeout_node,message,error);goto fail;}
+                status=add_value(defaults,key,json_create_string(text));tstr_free(text);
+                if(status!=SALTS_OK)goto fail;
+            }
+        }
         status=add_value(result,"defaults",defaults);defaults=NULL;if(status!=SALTS_OK)goto fail;
     }
     *out=result;return SALTS_OK;
 fail:
-    tstr_free(policy);json_free(defaults);json_free(result);
+    json_free(defaults);json_free(result);
     if(status==SALTS_ENOMEM&&error&&error->origin==PRAKTOR_YAML_FAILURE_NONE)error->origin=PRAKTOR_YAML_FAILURE_ALLOCATION;
     return status;
 }
