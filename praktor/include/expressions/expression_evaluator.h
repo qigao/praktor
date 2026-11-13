@@ -1,8 +1,8 @@
 #ifndef PRAKTOR_EXPRESSION_EVALUATOR_H
 #define PRAKTOR_EXPRESSION_EVALUATOR_H
-#include <salts/error_codes.h>
-#include <tstr.h>
-#include <vstr.h>
+#include <core/error_codes.h>
+#include <core/tstr.h>
+#include <core/vstr.h>
 #ifdef __cplusplus
 extern "C" {
 #endif

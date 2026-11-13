@@ -1,4 +1,4 @@
-name: system-actions-contract
+name: system-praktor/actions-contract
 
 tasks:
   - name: process_initial_status

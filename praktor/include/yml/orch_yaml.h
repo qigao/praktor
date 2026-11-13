@@ -5,10 +5,10 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-/* Qualification-only recursive YAML -> canonical CSTL-backed AST.
- * Supports legacy named scalar/mapping/sequence, nested flat if/while/switch,
+/* Recursive YAML -> owned Orch AST.
+ * Supports named scalar/mapping/sequence, nested flat if/while/switch,
  * set_variable and flat timeout/repeat/delay with child. Retired named forms
- * are rejected. This parser does not execute nodes or replace production C++.
+ * are rejected. This parser constructs data and does not execute nodes.
  * Input YAML is borrowed; the returned tree is uniquely owned and independent
  * of the document. Failure never publishes a provisional output. */
 int praktor_orch_from_named_yaml(praktor_yaml_node node, praktor_orch_tree **out,

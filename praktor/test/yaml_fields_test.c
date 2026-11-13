@@ -1,7 +1,7 @@
 #include "yml/yaml_fields.h"
-#include <cmeta_fs.h>
-#include <fmt.h>
-#include <salts/thread.h>
+#include <file/fs.h>
+#include <core/fmt.h>
+#include <threads/threads.h>
 #include <string.h>
 #include <tinytest.h>
 
@@ -44,10 +44,10 @@ static void boolean_case(const char *scalar, int strict, int force) {
 
 static size_t corpus(const char *name, bool boolean) {
     tstr path = tstr_format("{}/{}", PRAKTOR_YAML_FIELD_CORPUS_DIR, name);
-    cmeta_fs_buf_t file = {0};
+    fs_buf_t file = {0};
     vstr rest;
     size_t count = 0;
-    check(path && cmeta_fs_read_file(path, &file) == SALTS_OK);
+    check(path && fs_read_file(path, &file) == SALTS_OK);
     tstr_free(path);
     rest = vstr_from_buf(file.base, file.len);
     while (rest.len) {
@@ -82,7 +82,7 @@ static size_t corpus(const char *name, bool boolean) {
         praktor_yaml_document_destroy(owner);
         ++count;
     }
-    cmeta_fs_buf_free(&file);
+    fs_buf_free(&file);
     return count;
 }
 
@@ -233,13 +233,13 @@ spec("C YAML field grammar without a C++ parser") {
         praktor_yaml_field_error_dispose(&error);
     }
     it("isolates concurrent field readers and diagnostic owners") {
-        cmeta_thread_t threads[4] = {NULL};
+        sync_thread_t threads[4] = {NULL};
         bool passed[4] = {false}, joined = true;
         size_t created = 0, index;
         for (; created < 4; ++created)
-            if (cmeta_thread_create(&threads[created], independent_reader, &passed[created]) != SALTS_OK) break;
+            if (sync_thread_create(&threads[created], independent_reader, &passed[created]) != SALTS_OK) break;
         for (index = 0; index < created; ++index)
-            if (cmeta_thread_join(&threads[index]) != SALTS_OK) joined = false;
+            if (sync_thread_join(&threads[index]) != SALTS_OK) joined = false;
         check(joined && created == 4);
         for (index = 0; index < 4; ++index) check(passed[index] && !threads[index]);
     }

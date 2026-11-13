@@ -2,7 +2,7 @@
 #include "yaml_diagnostic_internal.h"
 #include <ctype.h>
 #include <errno.h>
-#include <fmt.h>
+#include <core/fmt.h>
 #include <inttypes.h>
 #include <stdlib.h>
 #include <string.h>

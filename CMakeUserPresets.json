@@ -1,588 +1,327 @@
 {
   "version": 6,
   "include": [
-    "CMakePresets.json"
+    "CMakePresets.json",
+    "presets/UserEnvironments.json"
   ],
   "configurePresets": [
     {
-      "name": "ci-sdk-base",
-      "hidden": true,
-      "inherits": "vcpkg-cache-ci",
-      "generator": "Ninja",
-      "binaryDir": "${sourceDir}/build/ci-sdk",
-      "environment": {
-        "SALTS_ROOT": "$penv{SALTS_ROOT}",
-        "SALTS_UTILS_ROOT": "$penv{SALTS_UTILS_ROOT}",
-        "CHTTP_ROOT": "$penv{CHTTP_ROOT}",
-        "TURBOSCRIPT_ROOT": "$penv{TURBOSCRIPT_ROOT}",
-        "VCPKG_ROOT": "$penv{VCPKG_ROOT}",
-        "PKG_ROOT": "${sourceDir}/stage",
-        "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed/ci",
-        "PATH": "$env{RE2C_ROOT}/bin${pathListSep}${sourceDir}/build/ci-sdk/bin${pathListSep}$penv{PATH}",
-        "LD_LIBRARY_PATH": "${sourceDir}/build/ci-sdk/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/$penv{TRIPLET}/lib${pathListSep}$env{TURBOSCRIPT_ROOT}/lib${pathListSep}$env{CHTTP_ROOT}/lib${pathListSep}$env{SALTS_UTILS_ROOT}/lib${pathListSep}$env{SALTS_ROOT}/lib${pathListSep}$penv{LD_LIBRARY_PATH}",
-        "DYLD_LIBRARY_PATH": "${sourceDir}/build/ci-sdk/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/$penv{TRIPLET}/lib${pathListSep}$env{TURBOSCRIPT_ROOT}/lib${pathListSep}$env{CHTTP_ROOT}/lib${pathListSep}$env{SALTS_UTILS_ROOT}/lib${pathListSep}$env{SALTS_ROOT}/lib${pathListSep}$penv{DYLD_LIBRARY_PATH}"
-      },
-      "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Release",
-        "ENABLE_TESTS": true,
-        "ENABLE_SCRIPT_ENGINE": false,
-        "ENABLE_SANITIZER_ADDRESS": false,
-        "VCPKG_MANIFEST_MODE": true,
-        "VCPKG_INSTALLED_DIR": "$env{VCPKG_INSTALLED_DIR}",
-        "VCPKG_TARGET_TRIPLET": "$penv{TRIPLET}",
-        "VCPKG_HOST_TRIPLET": "$penv{HOST_TRIPLET}",
-        "CMAKE_PREFIX_PATH": "$env{VCPKG_INSTALLED_DIR}/$penv{TRIPLET}",
-        "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/$penv{RID}",
-        "CMAKE_C_COMPILER_LAUNCHER": "ccache",
-        "CMAKE_CXX_COMPILER_LAUNCHER": "ccache"
-      }
-    },
-    {
-      "name": "ci-windows-sdk",
+      "name": "native-release-user",
+      "displayName": "Windows llvm-mingw Release",
       "inherits": [
-        "ci-sdk-base",
-        "Msvc",
-        "flags-msvc"
-      ],
-      "condition": {
-        "type": "equals",
-        "lhs": "${hostSystemName}",
-        "rhs": "Windows"
-      },
-      "environment": {
-        "PATH": "$env{RE2C_ROOT}/bin${pathListSep}${sourceDir}/build/ci-sdk/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/$penv{TRIPLET}/bin${pathListSep}$env{SALTS_ROOT}/bin${pathListSep}$env{SALTS_UTILS_ROOT}/bin${pathListSep}$env{CHTTP_ROOT}/bin${pathListSep}$penv{PATH}"
-      }
-    },
-    {
-      "name": "ci-linux-sdk",
-      "inherits": [
-        "ci-sdk-base",
-        "Gcc",
-        "flags-gnu"
-      ],
-      "condition": {
-        "type": "equals",
-        "lhs": "${hostSystemName}",
-        "rhs": "Linux"
-      }
-    },
-    {
-      "name": "ci-macos-sdk",
-      "inherits": [
-        "ci-sdk-base",
-        "AppleClang",
-        "flags-darwin"
-      ],
-      "condition": {
-        "type": "equals",
-        "lhs": "${hostSystemName}",
-        "rhs": "Darwin"
-      }
-    },
-    {
-      "name": "ci-android-sdk",
-      "inherits": [
-        "ci-sdk-base",
-        "android-base"
-      ],
-      "cacheVariables": {
-        "ANDROID_ABI": "arm64-v8a",
-        "ENABLE_TESTS": false,
-        "PRAKTOR_HOST_LEMON_EXECUTABLE": "$penv{PRAKTOR_HOST_LEMON_EXECUTABLE}"
-      }
-    },
-    {
-      "name": "vcpkg-cache-ci",
-      "hidden": true,
-      "inherits": "vcpkg-cache",
-      "environment": {
-        "VCPKG_CACHE_REPOSITORY_ROOT": "$penv{VCPKG_CACHE_REPOSITORY_ROOT}",
-        "VCPKG_BINARY_SOURCES": "$penv{VCPKG_BINARY_SOURCES}"
-      }
-    },
-    {
-      "name": "vcpkg-cache-linux",
-      "hidden": true,
-      "inherits": "vcpkg-cache",
-      "cacheVariables": {
-        "VCPKG_HOST_TRIPLET": "x64-linux"
-      },
-      "environment": {
-        "VCPKG_CACHE_REPOSITORY_ROOT": "$penv{HOME}/.cache/qigao/vcpkg-cache"
-      }
-    },
-    {
-      "name": "vcpkg-cache-windows",
-      "hidden": true,
-      "inherits": "vcpkg-cache",
-      "cacheVariables": {
-        "VCPKG_HOST_TRIPLET": "x64-windows"
-      },
-      "environment": {
-        "VCPKG_CACHE_REPOSITORY_ROOT": "$penv{LOCALAPPDATA}/qigao/vcpkg-cache",
-        "RE2C_ROOT": "$env{PKG_ROOT}/re2c/windows-x64"
-      }
-    },
-    {
-      "name": "vcpkg-cache",
-      "hidden": true,
-      "toolchainFile": "$env{VCPKG_CACHE_REPOSITORY_ROOT}/cmake/QigaoVcpkgToolchain.cmake",
-      "environment": {
-        "VCPKG_BINARY_SOURCES": "clear;default,readwrite;nugettimeout,1800;nugetconfig,${sourceDir}/cmake/vcpkg-cache.nuget.config,read",
-        "VCPKG_OVERLAY_PORTS": "$env{VCPKG_CACHE_REPOSITORY_ROOT}/ports",
-        "RE2C_ROOT": "$penv{RE2C_ROOT}",
-        "PATH": "$env{RE2C_ROOT}/bin${pathListSep}$penv{PATH}"
-      }
-    },
-    {
-      "name": "win-toolchain",
-      "hidden": true,
-      "environment": {
-        "PROJECT_ROOT": "C:/projects/cpp",
-        "PKG_ROOT": "$env{PROJECT_ROOT}/external/pkgs",
-        "VCPKG_ROOT": "C:/tools/vcpkg",
-        "USER_ROOT": "C:/Users/lockg",
-        "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed"
-      },
-      "inherits": [
-        "vcpkg-cache-windows"
+        "llvm-mingw-native-environment",
+        "windows-llvm-mingw",
+        "full-native"
       ]
     },
     {
-      "name": "win-paths",
-      "hidden": true,
-      "inherits": "win-toolchain",
-      "cacheVariables": {
-        "VCPKG_INSTALLED_DIR": "$env{VCPKG_INSTALLED_DIR}",
-        "PKG_CONFIG_EXECUTABLE": "$env{VCPKG_INSTALLED_DIR}/x64-windows/tools/pkgconf/pkgconf.exe",
-        "VCPKG_TARGET_TRIPLET": "x64-windows",
-        "VCPKG_MANIFEST_MODE": "ON"
-      },
-      "architecture": {
-        "value": "x64",
-        "strategy": "external"
-      },
-      "toolset": {
-        "value": "host=x64",
-        "strategy": "external"
-      }
-    },
-    {
-      "name": "linux-paths",
-      "hidden": true,
-      "cacheVariables": {
-        "VCPKG_INSTALLED_DIR": "$env{VCPKG_INSTALLED_DIR}",
-        "VCPKG_TARGET_TRIPLET": "x64-linux",
-        "VCPKG_MANIFEST_MODE": "ON"
-      },
-      "environment": {
-        "PKG_ROOT": "/opt",
-        "VCPKG_ROOT": "/opt/vcpkg",
-        "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed"
-      },
+      "name": "msvc-release-user",
+      "displayName": "Windows MSVC Release",
       "inherits": [
-        "vcpkg-cache-linux"
+        "msvc-environment",
+        "windows-msvc",
+        "full-native"
       ]
     },
     {
-      "name": "android-win-environment",
-      "hidden": true,
-      "inherits": "win-toolchain",
-      "environment": {
-        "ANDROID_SDK_ROOT": "$env{USER_ROOT}/AppData/Local/Android/Sdk",
-        "ANDROID_NDK_VERSION": "28.2.13676358",
-        "ANDROID_NDK_HOME": "$env{ANDROID_SDK_ROOT}/ndk/$env{ANDROID_NDK_VERSION}"
-      }
-    },
-    {
-      "name": "android-win-user-paths",
-      "hidden": true,
+      "name": "llvm-native-release-user",
+      "displayName": "POSIX LLVM Release",
       "inherits": [
-        "vcpkg-cache-windows",
-        "android-win-paths",
-        "ISWindows"
-      ],
-      "environment": {
-        "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed/android"
-      },
-      "cacheVariables": {
-        "PKG_CONFIG_EXECUTABLE": "$env{VCPKG_INSTALLED_DIR}/x64-windows/tools/pkgconf/pkgconf.exe",
-        "VCPKG_INSTALLED_DIR": "$env{VCPKG_INSTALLED_DIR}"
-      }
-    },
-    {
-      "name": "win-dev-user",
-      "inherits": [
-        "base-win-dev-user",
-        "win-paths"
-      ],
-      "environment": {
-        "SALTS_ROOT": "$env{PKG_ROOT}/salts/debug",
-        "SALTS_UTILS_ROOT": "$env{PKG_ROOT}/salts-utils/debug",
-        "CHTTP_ROOT": "$env{PKG_ROOT}/chttp/debug",
-        "TURBOSCRIPT_ROOT": "$env{PKG_ROOT}/turbo_script/debug",
-        "PATH": "$env{RE2C_ROOT}/bin${pathListSep}${sourceDir}/build/Msvc/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-windows/debug/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-windows/bin${pathListSep}$env{SALTS_ROOT}/bin${pathListSep}$env{SALTS_UTILS_ROOT}/bin${pathListSep}$env{CHTTP_ROOT}/bin${pathListSep}$env{TURBOSCRIPT_ROOT}/bin${pathListSep}$penv{PATH}"
-      },
-      "cacheVariables": {
-        "ENABLE_SANITIZER_ADDRESS": "ON",
-        "CMAKE_PREFIX_PATH": "$env{VCPKG_INSTALLED_DIR}/x64-windows/debug",
-        "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/praktor/debug"
-      }
-    },
-    {
-      "name": "win-release-user",
-      "inherits": [
-        "base-win-release-user",
-        "win-paths"
-      ],
-      "environment": {
-        "SALTS_ROOT": "$penv{SALTS_ROOT}",
-        "SALTS_UTILS_ROOT": "$penv{SALTS_UTILS_ROOT}",
-        "CHTTP_ROOT": "$penv{CHTTP_ROOT}",
-        "TURBOSCRIPT_ROOT": "$penv{TURBOSCRIPT_ROOT}",
-        "PATH": "$env{RE2C_ROOT}/bin${pathListSep}${sourceDir}/build/Msvc-Release/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-windows/bin${pathListSep}$env{SALTS_ROOT}/bin${pathListSep}$env{SALTS_UTILS_ROOT}/bin${pathListSep}$env{CHTTP_ROOT}/bin${pathListSep}$env{TURBOSCRIPT_ROOT}/bin${pathListSep}$penv{PATH}"
-      },
-      "cacheVariables": {
-        "CMAKE_PREFIX_PATH": "$env{VCPKG_INSTALLED_DIR}/x64-windows",
-        "ENABLE_TESTS": "ON",
-        "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/praktor/release"
-      }
-    },
-    {
-      "name": "linux-dev-user",
-      "inherits": [
-        "base-linux-dev-user",
-        "linux-paths"
-      ],
-      "environment": {
-        "SALTS_ROOT": "$env{PKG_ROOT}/salts/debug",
-        "SALTS_UTILS_ROOT": "$env{PKG_ROOT}/salts-utils/debug",
-        "CHTTP_ROOT": "$env{PKG_ROOT}/chttp/debug",
-        "TURBOSCRIPT_ROOT": "$env{PKG_ROOT}/turbo_script/debug",
-        "LD_LIBRARY_PATH": "${sourceDir}/build/linux-gcc-debug/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-linux/debug/lib${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-linux/lib${pathListSep}$env{SALTS_ROOT}/lib${pathListSep}$env{SALTS_UTILS_ROOT}/lib${pathListSep}$env{CHTTP_ROOT}/lib${pathListSep}$env{TURBOSCRIPT_ROOT}/lib${pathListSep}$penv{LD_LIBRARY_PATH}"
-      },
-      "cacheVariables": {
-        "ENABLE_SANITIZER_ADDRESS": "ON",
-        "CMAKE_PREFIX_PATH": "$env{VCPKG_INSTALLED_DIR}/x64-linux/debug",
-        "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/praktor/debug"
-      }
-    },
-    {
-      "name": "linux-release-user",
-      "inherits": [
-        "release-linux-ninja",
-        "linux-paths"
-      ],
-      "environment": {
-        "SALTS_ROOT": "$penv{SALTS_ROOT}",
-        "SALTS_UTILS_ROOT": "$penv{SALTS_UTILS_ROOT}",
-        "CHTTP_ROOT": "$penv{CHTTP_ROOT}",
-        "TURBOSCRIPT_ROOT": "$penv{TURBOSCRIPT_ROOT}",
-        "LD_LIBRARY_PATH": "${sourceDir}/build/linux-gcc-release/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-linux/lib${pathListSep}$env{SALTS_ROOT}/lib${pathListSep}$env{SALTS_UTILS_ROOT}/lib${pathListSep}$env{CHTTP_ROOT}/lib${pathListSep}$env{TURBOSCRIPT_ROOT}/lib${pathListSep}$penv{LD_LIBRARY_PATH}"
-      },
-      "cacheVariables": {
-        "CMAKE_PREFIX_PATH": "$env{VCPKG_INSTALLED_DIR}/x64-linux",
-        "ENABLE_TESTS": "ON",
-        "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/praktor/release"
-      }
-    },
-    {
-      "name": "linux-sdk-package",
-      "inherits": [
-        "linux-release-user"
-      ],
-      "binaryDir": "${sourceDir}/build/linux-gcc-sdk-package",
-      "cacheVariables": {
-        "ENABLE_SANITIZER_ADDRESS": "OFF",
-        "ENABLE_TESTS": "OFF",
-        "BUILD_TESTS": "OFF",
-        "BUILD_EXAMPLES": "OFF"
-      }
-    },
-    {
-      "name": "android-dependencies-debug",
-      "hidden": true,
-      "environment": {
-        "SALTS_ROOT": "$env{PKG_ROOT}/salts-android/debug",
-        "SALTS_UTILS_ROOT": "$env{PKG_ROOT}/salts-utils-android/debug",
-        "CHTTP_ROOT": "$env{PKG_ROOT}/chttp-android/debug",
-        "TURBOSCRIPT_ROOT": "$env{PKG_ROOT}/turbo_script-android/debug"
-      },
-      "cacheVariables": {
-        "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/praktor-android/debug"
-      }
-    },
-    {
-      "name": "android-dependencies-release",
-      "hidden": true,
-      "environment": {
-        "SALTS_ROOT": "$penv{SALTS_ROOT}",
-        "SALTS_UTILS_ROOT": "$penv{SALTS_UTILS_ROOT}",
-        "CHTTP_ROOT": "$penv{CHTTP_ROOT}",
-        "TURBOSCRIPT_ROOT": "$penv{TURBOSCRIPT_ROOT}"
-      },
-      "cacheVariables": {
-        "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/praktor-android/release",
-        "PRAKTOR_HOST_LEMON_EXECUTABLE": "$penv{PRAKTOR_HOST_LEMON_EXECUTABLE}"
-      }
-    },
-    {
-      "name": "android-arm64-v8a-debug-win",
-      "inherits": [
-        "android-arm64-v8a-debug",
-        "android-dependencies-debug",
-        "android-win-user-paths",
-        "android-win-environment"
+        "llvm-native-environment",
+        "toolkit-llvm-native",
+        "full-native"
       ]
     },
     {
-      "name": "android-arm64-v8a-release-win",
+      "name": "gcc-release-user",
+      "displayName": "Linux GCC Release",
       "inherits": [
-        "android-arm64-v8a-release",
-        "android-dependencies-release",
-        "android-win-user-paths",
-        "android-win-environment"
+        "gcc-environment",
+        "linux-gcc",
+        "full-native"
       ]
     },
     {
-      "name": "android-x86_64-debug-win",
+      "name": "android-release-user",
+      "displayName": "Android NDK Clang Release",
       "inherits": [
-        "android-x86_64-debug",
-        "android-dependencies-debug",
-        "android-win-user-paths",
-        "android-win-environment"
+        "android-environment",
+        "android-release"
       ]
     },
     {
-      "name": "android-x86_64-release-win",
+      "name": "llvm-mingw-x64-release-user",
+      "displayName": "llvm-mingw Windows x64 Release",
       "inherits": [
-        "android-x86_64-release",
-        "android-dependencies-release",
-        "android-win-user-paths",
-        "android-win-environment"
+        "llvm-mingw-x64-environment",
+        "target-llvm-mingw-x64",
+        "full-native"
       ]
     },
     {
-      "name": "android-x86-debug-win",
+      "name": "llvm-mingw-arm64-release-user",
+      "displayName": "llvm-mingw Windows ARM64 Release",
       "inherits": [
-        "android-x86-debug",
-        "android-dependencies-debug",
-        "android-win-user-paths",
-        "android-win-environment"
+        "target-llvm-mingw-arm64",
+        "llvm-mingw-arm64-environment",
+        "release-mode"
+      ],
+      "environment": {
+        "SALTS_BASE_ROOT": "$penv{LLVM_MINGW_ARM64_SALTS_BASE_ROOT}",
+        "VCPKG_INSTALLED_DIR": "$penv{LLVM_MINGW_ARM64_VCPKG_INSTALLED_DIR}"
+      }
+    },
+    {
+      "name": "android-arm64-release-user",
+      "displayName": "Android NDK arm64-v8a Release",
+      "inherits": [
+        "android-arm64-environment",
+        "android-arm64-v8a-release"
       ]
     },
     {
-      "name": "android-x86-release-win",
+      "name": "android-x64-release-user",
+      "displayName": "Android NDK x86_64 Release",
       "inherits": [
-        "android-x86-release",
-        "android-dependencies-release",
-        "android-win-user-paths",
-        "android-win-environment"
+        "android-x64-environment",
+        "android-x86_64-release"
+      ]
+    },
+    {
+      "name": "macos-gcc-release-user",
+      "displayName": "macOS GCC Release",
+      "inherits": [
+        "gcc-environment",
+        "macos-gcc",
+        "full-native"
+      ]
+    },
+    {
+      "name": "gcc-arm64-release-user",
+      "displayName": "Linux ARM64 GCC Release",
+      "inherits": [
+        "gcc-environment",
+        "linux-gcc-arm64",
+        "full-native"
       ]
     }
   ],
   "buildPresets": [
     {
-      "name": "win-dev-user",
-      "configurePreset": "win-dev-user"
+      "name": "native-release-user",
+      "inherits": [
+        "base-build",
+        "build-windows"
+      ],
+      "configurePreset": "native-release-user"
     },
     {
-      "name": "win-release-user",
-      "configurePreset": "win-release-user"
+      "name": "install-native-release-user",
+      "inherits": [
+        "base-install",
+        "build-windows"
+      ],
+      "configurePreset": "native-release-user"
     },
     {
-      "name": "linux-dev-user",
-      "configurePreset": "linux-dev-user"
+      "name": "msvc-release-user",
+      "inherits": [
+        "base-build",
+        "build-windows"
+      ],
+      "configurePreset": "msvc-release-user"
     },
     {
-      "name": "linux-release-user",
-      "configurePreset": "linux-release-user"
+      "name": "install-msvc-release-user",
+      "inherits": [
+        "base-install",
+        "build-windows"
+      ],
+      "configurePreset": "msvc-release-user"
     },
     {
-      "name": "linux-sdk-package",
-      "configurePreset": "linux-sdk-package"
+      "name": "llvm-native-release-user",
+      "inherits": [
+        "base-build",
+        "build-posix"
+      ],
+      "configurePreset": "llvm-native-release-user"
     },
     {
-      "name": "install-win-dev-user",
-      "configurePreset": "win-dev-user",
-      "targets": [
-        "install"
-      ]
+      "name": "install-llvm-native-release-user",
+      "inherits": [
+        "base-install",
+        "build-posix"
+      ],
+      "configurePreset": "llvm-native-release-user"
     },
     {
-      "name": "install-win-release-user",
-      "configurePreset": "win-release-user",
-      "targets": [
-        "install"
-      ]
+      "name": "gcc-release-user",
+      "inherits": [
+        "base-build",
+        "build-linux"
+      ],
+      "configurePreset": "gcc-release-user"
     },
     {
-      "name": "install-linux-dev-user",
-      "configurePreset": "linux-dev-user",
-      "targets": [
-        "install"
-      ]
+      "name": "install-gcc-release-user",
+      "inherits": [
+        "base-install",
+        "build-linux"
+      ],
+      "configurePreset": "gcc-release-user"
     },
     {
-      "name": "install-linux-release-user",
-      "configurePreset": "linux-release-user",
-      "targets": [
-        "install"
-      ]
+      "name": "android-release-user",
+      "inherits": "base-build",
+      "configurePreset": "android-release-user"
     },
     {
-      "name": "install-linux-sdk-package",
-      "configurePreset": "linux-sdk-package",
-      "targets": [
-        "install"
-      ]
+      "name": "install-android-release-user",
+      "inherits": "base-install",
+      "configurePreset": "android-release-user"
     },
     {
-      "name": "android-arm64-v8a-debug-win",
-      "configurePreset": "android-arm64-v8a-debug-win"
+      "name": "llvm-mingw-x64-release-user",
+      "inherits": [
+        "base-build",
+        "build-windows"
+      ],
+      "configurePreset": "llvm-mingw-x64-release-user"
     },
     {
-      "name": "android-arm64-v8a-release-win",
-      "configurePreset": "android-arm64-v8a-release-win"
+      "name": "install-llvm-mingw-x64-release-user",
+      "inherits": [
+        "base-install",
+        "build-windows"
+      ],
+      "configurePreset": "llvm-mingw-x64-release-user"
     },
     {
-      "name": "android-x86_64-debug-win",
-      "configurePreset": "android-x86_64-debug-win"
+      "name": "llvm-mingw-arm64-release-user",
+      "inherits": [
+        "base-build",
+        "build-windows"
+      ],
+      "configurePreset": "llvm-mingw-arm64-release-user"
     },
     {
-      "name": "android-x86_64-release-win",
-      "configurePreset": "android-x86_64-release-win"
+      "name": "install-llvm-mingw-arm64-release-user",
+      "inherits": [
+        "base-install",
+        "build-windows"
+      ],
+      "configurePreset": "llvm-mingw-arm64-release-user"
     },
     {
-      "name": "android-x86-debug-win",
-      "configurePreset": "android-x86-debug-win"
+      "name": "android-arm64-release-user",
+      "inherits": "base-build",
+      "configurePreset": "android-arm64-release-user"
     },
     {
-      "name": "android-x86-release-win",
-      "configurePreset": "android-x86-release-win"
+      "name": "install-android-arm64-release-user",
+      "inherits": "base-install",
+      "configurePreset": "android-arm64-release-user"
     },
     {
-      "name": "install-android-arm64-v8a-debug-win",
-      "configurePreset": "android-arm64-v8a-debug-win",
-      "targets": [
-        "install"
-      ]
+      "name": "android-x64-release-user",
+      "inherits": "base-build",
+      "configurePreset": "android-x64-release-user"
     },
     {
-      "name": "install-android-arm64-v8a-release-win",
-      "configurePreset": "android-arm64-v8a-release-win",
-      "targets": [
-        "install"
-      ]
+      "name": "install-android-x64-release-user",
+      "inherits": "base-install",
+      "configurePreset": "android-x64-release-user"
     },
     {
-      "name": "install-android-x86_64-debug-win",
-      "configurePreset": "android-x86_64-debug-win",
-      "targets": [
-        "install"
-      ]
+      "name": "macos-gcc-release-user",
+      "inherits": [
+        "base-build",
+        "build-macos"
+      ],
+      "configurePreset": "macos-gcc-release-user"
     },
     {
-      "name": "install-android-x86_64-release-win",
-      "configurePreset": "android-x86_64-release-win",
-      "targets": [
-        "install"
-      ]
+      "name": "install-macos-gcc-release-user",
+      "inherits": [
+        "base-install",
+        "build-macos"
+      ],
+      "configurePreset": "macos-gcc-release-user"
     },
     {
-      "name": "install-android-x86-debug-win",
-      "configurePreset": "android-x86-debug-win",
-      "targets": [
-        "install"
-      ]
+      "name": "gcc-arm64-release-user",
+      "inherits": [
+        "base-build",
+        "build-linux"
+      ],
+      "configurePreset": "gcc-arm64-release-user"
     },
     {
-      "name": "install-android-x86-release-win",
-      "configurePreset": "android-x86-release-win",
-      "targets": [
-        "install"
-      ]
-    },
-    {
-      "name": "ci-linux-sdk",
-      "configurePreset": "ci-linux-sdk"
-    },
-    {
-      "name": "install-ci-linux-sdk",
-      "configurePreset": "ci-linux-sdk",
-      "targets": [
-        "install"
-      ]
-    },
-    {
-      "name": "ci-macos-sdk",
-      "configurePreset": "ci-macos-sdk"
-    },
-    {
-      "name": "install-ci-macos-sdk",
-      "configurePreset": "ci-macos-sdk",
-      "targets": [
-        "install"
-      ]
-    },
-    {
-      "name": "ci-android-sdk",
-      "configurePreset": "ci-android-sdk"
-    },
-    {
-      "name": "install-ci-android-sdk",
-      "configurePreset": "ci-android-sdk",
-      "targets": [
-        "install"
-      ]
-    },
-    {
-      "name": "ci-windows-sdk",
-      "configurePreset": "ci-windows-sdk"
-    },
-    {
-      "name": "install-ci-windows-sdk",
-      "configurePreset": "ci-windows-sdk",
-      "targets": [
-        "install"
-      ]
+      "name": "install-gcc-arm64-release-user",
+      "inherits": [
+        "base-install",
+        "build-linux"
+      ],
+      "configurePreset": "gcc-arm64-release-user"
     }
   ],
   "testPresets": [
     {
-      "name": "win-dev-user",
-      "inherits": "base-test",
-      "configurePreset": "win-dev-user"
+      "name": "native-release-user",
+      "inherits": [
+        "base-test",
+        "test-windows"
+      ],
+      "configurePreset": "native-release-user"
     },
     {
-      "name": "win-release-user",
-      "inherits": "base-test",
-      "configurePreset": "win-release-user"
+      "name": "msvc-release-user",
+      "inherits": [
+        "base-test",
+        "test-windows"
+      ],
+      "configurePreset": "msvc-release-user"
     },
     {
-      "name": "linux-dev-user",
-      "inherits": "base-test",
-      "configurePreset": "linux-dev-user"
+      "name": "llvm-native-release-user",
+      "inherits": [
+        "base-test",
+        "test-posix"
+      ],
+      "configurePreset": "llvm-native-release-user"
     },
     {
-      "name": "linux-release-user",
-      "inherits": "base-test",
-      "configurePreset": "linux-release-user"
+      "name": "gcc-release-user",
+      "inherits": [
+        "base-test",
+        "test-linux"
+      ],
+      "configurePreset": "gcc-release-user"
     },
     {
-      "name": "ci-linux-sdk",
-      "inherits": "base-test",
-      "configurePreset": "ci-linux-sdk"
+      "name": "macos-gcc-release-user",
+      "inherits": [
+        "base-test",
+        "test-macos"
+      ],
+      "configurePreset": "macos-gcc-release-user"
     },
     {
-      "name": "ci-macos-sdk",
-      "inherits": "base-test",
-      "configurePreset": "ci-macos-sdk"
+      "name": "gcc-arm64-release-user",
+      "inherits": [
+        "base-test",
+        "test-linux"
+      ],
+      "configurePreset": "gcc-arm64-release-user"
     },
     {
-      "name": "ci-windows-sdk",
-      "inherits": "base-test",
-      "configurePreset": "ci-windows-sdk"
+      "name": "llvm-mingw-x64-release-user",
+      "inherits": [
+        "base-test",
+        "test-windows"
+      ],
+      "configurePreset": "llvm-mingw-x64-release-user"
     }
   ]
 }

@@ -1,32 +1,44 @@
-include(process_target.cmake)
-include(native_target.cmake)
-include(service_targets.cmake)
-if(ENABLE_TESTS)
-    include(service_tests.cmake)
-    add_executable(praktor_process_native_test test/process_native_test.c)
-    target_link_libraries(praktor_process_native_test PRIVATE praktor_process_native Salts::TinyTest Salts::Platform)
-    set_target_properties(praktor_process_native_test PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF LINKER_LANGUAGE C)
-    add_test(NAME praktor_process_native_test COMMAND praktor_process_native_test)
-    set_tests_properties(praktor_process_native_test PROPERTIES TIMEOUT 30)
-    if(WIN32)
-        # Test properties are scoped to the directory that declares the test.
-        set_tests_properties(praktor_process_native_test PROPERTIES
-            RESOURCE_LOCK praktor_managed_process_fixture)
-    endif()
-    add_executable(praktor_process_control_test test/process_control_test.c)
-    target_link_libraries(praktor_process_control_test PRIVATE praktor_process_native Salts::TinyTest Salts::Platform)
-    set_target_properties(praktor_process_control_test PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF LINKER_LANGUAGE C)
-    add_test(NAME praktor_process_control_test COMMAND praktor_process_control_test)
-    set_tests_properties(praktor_process_control_test PROPERTIES TIMEOUT 30)
-    add_executable(praktor_process_worker_test test/process_worker_test.c)
-    target_link_libraries(praktor_process_worker_test PRIVATE praktor_process_driver Salts::TinyTest Salts::Platform)
-    set_target_properties(praktor_process_worker_test PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF LINKER_LANGUAGE C)
-    add_test(NAME praktor_process_worker_test COMMAND praktor_process_worker_test)
-    set_tests_properties(praktor_process_worker_test PROPERTIES TIMEOUT 30)
-    add_executable(praktor_process_driver_test test/process_driver_test.c)
-    target_link_libraries(praktor_process_driver_test PRIVATE praktor_process_driver Salts::TinyTest Salts::Platform)
-    set_target_properties(praktor_process_driver_test PROPERTIES
-        C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF LINKER_LANGUAGE C)
-    add_test(NAME praktor_process_driver_test COMMAND praktor_process_driver_test)
-    set_tests_properties(praktor_process_driver_test PROPERTIES TIMEOUT 30)
+add_library(praktor_process_retainer STATIC
+    ${CMAKE_CURRENT_LIST_DIR}/src/process_retainer.c)
+target_include_directories(praktor_process_retainer PUBLIC
+    ${CMAKE_CURRENT_LIST_DIR}/include)
+target_link_libraries(praktor_process_retainer PUBLIC Salts::NativeIO)
+target_compile_features(praktor_process_retainer PUBLIC c_std_11)
+set_target_properties(praktor_process_retainer PROPERTIES
+    POSITION_INDEPENDENT_CODE ON)
+add_library(praktor_process_driver STATIC
+    ${CMAKE_CURRENT_LIST_DIR}/src/process_driver.c
+    ${CMAKE_CURRENT_LIST_DIR}/src/process_worker.c)
+target_include_directories(praktor_process_driver PUBLIC
+    ${CMAKE_CURRENT_LIST_DIR}/include)
+target_link_libraries(praktor_process_driver PUBLIC praktor_process_retainer PRIVATE Salts::Core)
+target_compile_features(praktor_process_driver PUBLIC c_std_11)
+set_target_properties(praktor_process_driver PROPERTIES
+    C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF POSITION_INDEPENDENT_CODE ON)
+# Persistent-application host + control state machine. No Salts::NativeIO,
+# C++ compiler, Shell/Program runtime or Legacy execution dependency.
+add_library(praktor_process_native STATIC
+    ${CMAKE_CURRENT_LIST_DIR}/src/process_control.c
+    ${CMAKE_CURRENT_LIST_DIR}/src/process_native.c)
+target_include_directories(praktor_process_native PUBLIC ${CMAKE_CURRENT_LIST_DIR}/include)
+target_link_libraries(praktor_process_native PRIVATE Salts::Core)
+if(WIN32)
+    target_link_libraries(praktor_process_native PRIVATE user32)
+endif()
+target_compile_features(praktor_process_native PUBLIC c_std_11)
+set_target_properties(praktor_process_native PROPERTIES
+    C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF POSITION_INDEPENDENT_CODE ON)
+add_library(praktor_service_control STATIC ${CMAKE_CURRENT_LIST_DIR}/src/service_control.c)
+target_include_directories(praktor_service_control PUBLIC ${CMAKE_CURRENT_LIST_DIR}/include)
+target_link_libraries(praktor_service_control PRIVATE Salts::Core)
+set_target_properties(praktor_service_control PROPERTIES
+    C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF POSITION_INDEPENDENT_CODE ON)
+add_library(praktor_service_process_host STATIC ${CMAKE_CURRENT_LIST_DIR}/src/service_process_host.c)
+target_include_directories(praktor_service_process_host PUBLIC ${CMAKE_CURRENT_LIST_DIR}/include)
+target_link_libraries(praktor_service_process_host PUBLIC praktor_service_control PRIVATE praktor_process_driver)
+set_target_properties(praktor_service_process_host PROPERTIES
+    C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF POSITION_INDEPENDENT_CODE ON)
+
+if(BUILD_TESTS)
+    add_subdirectory(test)
 endif()

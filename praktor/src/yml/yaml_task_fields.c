@@ -2,7 +2,7 @@
 #include "yaml_diagnostic_internal.h"
 #include <cstl/map.h>
 #include <cstl/vec.h>
-#include <fmt.h>
+#include <core/fmt.h>
 #include <stdlib.h>
 #include <string.h>
 

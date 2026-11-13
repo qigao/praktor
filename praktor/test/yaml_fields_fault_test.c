@@ -1,7 +1,7 @@
 /* Single-point failures in the real document/field implementation boundaries;
  * provider parsing/decoding and allocation remain real, never reimplemented. */
 #include "yml/yaml_fields.h"
-#include <fmt.h>
+#include <core/fmt.h>
 #include <string.h>
 #include <tinytest.h>
 

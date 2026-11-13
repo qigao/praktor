@@ -1,11 +1,11 @@
 #include "yml/orch_tree.h"
-#include <fmt.h>
+#include <core/fmt.h>
 #include <limits.h>
-#include <salts/error_codes.h>
-#include <salts/thread.h>
+#include <core/error_codes.h>
+#include <threads/threads.h>
 #include <string.h>
 #include <tinytest.h>
-#include <tstr.h>
+#include <core/tstr.h>
 
 static vstr view(const char *text) { return vstr_from_cstr(text); }
 static bool is_text(vstr text, const char *expected) { return vstr_eq(text, view(expected)) != 0; }
@@ -172,9 +172,9 @@ spec("Native orchestration catalog and command lowering") {
         praktor_orch_tree_destroy(tree);
     }
     it("constructs and destroys independent owners concurrently") {
-        cmeta_thread_t threads[4] = {0}; bool passed[4] = {false}; size_t index;
-        for (index = 0; index < 4; ++index) check(cmeta_thread_create(&threads[index], independent, &passed[index]) == SALTS_OK);
-        for (index = 0; index < 4; ++index) check(cmeta_thread_join(&threads[index]) == SALTS_OK && passed[index]);
+        sync_thread_t threads[4] = {0}; bool passed[4] = {false}; size_t index;
+        for (index = 0; index < 4; ++index) check(sync_thread_create(&threads[index], independent, &passed[index]) == SALTS_OK);
+        for (index = 0; index < 4; ++index) check(sync_thread_join(&threads[index]) == SALTS_OK && passed[index]);
     }
 }
 

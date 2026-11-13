@@ -1,8 +1,8 @@
 #include "expressions/expression_evaluator.h"
 #include "expressions/expression_regex_salts.h"
-#include <fmt.h>
+#include <core/fmt.h>
 #include <math.h>
-#include <salts/thread.h>
+#include <threads/threads.h>
 #include <string.h>
 #include <tinytest.h>
 
@@ -221,14 +221,14 @@ spec("C expression evaluator") {
         check(state.compiles == 0 && state.destroys == 0);
     }
     it("supports nested Host evaluation and independent concurrent callers") {
-        cmeta_thread_t threads[4] = {0};
+        sync_thread_t threads[4] = {0};
         parallel_fixture states[4] = {0};
         size_t created = 0, index;
         int joined = 1;
         for (; created < 4; ++created)
-            if (cmeta_thread_create(&threads[created], evaluate_parallel, &states[created]) != 0) break;
+            if (sync_thread_create(&threads[created], evaluate_parallel, &states[created]) != 0) break;
         for (index = 0; index < created; ++index)
-            if (cmeta_thread_join(&threads[index]) != 0) joined = 0;
+            if (sync_thread_join(&threads[index]) != 0) joined = 0;
         check(created == 4 && joined);
         for (index = 0; index < created; ++index)
             check(!states[index].failed && states[index].state.resolves == 750);

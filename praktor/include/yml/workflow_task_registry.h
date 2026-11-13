@@ -3,18 +3,16 @@
 
 #include "yml/workflow_snapshot.h"
 #include <json_parser.h>
-#include <salts/error_codes.h>
+#include <core/error_codes.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <vstr.h>
+#include <core/vstr.h>
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-/* Qualification-only typed task outputs and status owner.
- * This does not replace the production C++ WorkflowContext/TaskRegistry,
- * the shared execution context, or the Scheduler. Create copies all task
+/* Typed task outputs and status owner. Create copies all task
  * names from the C-owned snapshot; the result survives snapshot destruction.
  * One owner thread must serialize all access. No callback, global cache,
  * dynamic task creation or C++ runtime is retained. */
@@ -92,7 +90,7 @@ int praktor_workflow_task_registry_merge_outputs(
  * unchanged; caller must destroy or retry the group.
  *
  * This prepares typed outputs only; it does not publish C11 value-store
- * transactions. The separate qualification-only Parallel adapter invokes
+ * transactions. The separate Parallel adapter invokes
  * existing value_txn_commit_group() before this no-fail owner publication.
  * No concurrent mutation, callback reentry or owner destruction is admitted.
  * On failure prepare leaves *out unchanged. */

@@ -1,0 +1,46 @@
+# Run from the repository root with an independent, already-built Praktor:
+# praktor build.yml --timeout-ms 3600000
+# Load the matching SDK/cache paths and Windows developer environment first.
+name: Praktor Windows x64 Release
+description: Configure, build, test and install the complete CMake user profile
+dotEnv: [.env]
+
+tasks:
+  - name: prepare
+    description: Create the build log directory
+    shell:
+      cmd: cmake -E make_directory build/logs
+      timeout: 30000
+      stream_output: false
+
+  - name: configure
+    description: Configure the complete graph; log is build/logs/configure.log
+    depends_on: [prepare]
+    shell:
+      cmd: cmake --preset llvm-mingw-x64-release-user > build/logs/configure.log 2>&1
+      timeout: 300000
+      stream_output: false
+
+  - name: build
+    description: Build all configured targets; log is build/logs/build.log
+    depends_on: [configure]
+    shell:
+      cmd: cmake --build --preset llvm-mingw-x64-release-user > build/logs/build.log 2>&1
+      timeout: 1800000
+      stream_output: false
+
+  - name: test
+    description: Run the complete CTest graph; log is build/logs/test.log
+    depends_on: [build]
+    shell:
+      cmd: ctest --preset llvm-mingw-x64-release-user > build/logs/test.log 2>&1
+      timeout: 600000
+      stream_output: false
+
+  - name: install
+    description: Install through the user preset; log is build/logs/install.log
+    depends_on: [test]
+    shell:
+      cmd: cmake --build --preset install-llvm-mingw-x64-release-user > build/logs/install.log 2>&1
+      timeout: 300000
+      stream_output: false

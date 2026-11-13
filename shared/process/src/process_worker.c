@@ -1,20 +1,20 @@
 #include "praktor/process_worker.h"
-#include <salts/clock.h>
-#include <salts/thread.h>
+#include <core/clock.h>
+#include <threads/threads.h>
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 typedef struct worker_state {
-  cmeta_mutex_t mutex;
-  cmeta_cond_t changed;
-  cmeta_thread_t thread;
+  sync_mutex_t mutex;
+  sync_cond_t changed;
+  sync_thread_t thread;
   const void *driver_token;
   bool completed, cancel_requested, streamed;
   praktor_process_state state;
   praktor_process_driver driver;
-  cmeta_process_options_t options;
+  process_options_t options;
   char *metadata, *input;
   const char **arguments, **environment;
   size_t input_size, max_output_bytes;
@@ -41,7 +41,7 @@ const char *praktor_process_state_name(praktor_process_state state) {
 }
 void praktor_process_worker_config_init(praktor_process_worker_config *c) {
   if (!c) return;
-  memset(c,0,sizeof(*c)); cmeta_process_options_init(&c->options);
+  memset(c,0,sizeof(*c)); process_options_init(&c->options);
   c->max_input_bytes = c->max_output_bytes = c->max_metadata_bytes = 16u*1024u*1024u;
   c->max_arguments = c->max_environment_entries = 4096;
 }
@@ -51,13 +51,13 @@ static void free_admission(worker_state *s) {
   memset(&s->options,0,sizeof(s->options));
 }
 static void free_worker(worker_state *s) {
-  free_admission(s); cmeta_cond_destroy(&s->changed); cmeta_mutex_destroy(&s->mutex); free(s);
+  free_admission(s); sync_cond_destroy(&s->changed); sync_mutex_destroy(&s->mutex); free(s);
 }
 static int cancelled(void *user) {
   worker_state *s = user; int result;
-  cmeta_mutex_lock(&s->mutex); result = s->cancel_requested ? 1 : 0; cmeta_mutex_unlock(&s->mutex); return result;
+  sync_mutex_lock(&s->mutex); result = s->cancel_requested ? 1 : 0; sync_mutex_unlock(&s->mutex); return result;
 }
-static praktor_process_state terminal(cmeta_process_state_t state) {
+static praktor_process_state terminal(process_state_t state) {
   switch (state) {
     case SALTS_PROCESS_EXITED: return PRAKTOR_PROCESS_EXITED;
     case SALTS_PROCESS_SIGNALED: return PRAKTOR_PROCESS_SIGNALED;
@@ -73,7 +73,7 @@ static void run_worker(void *user) {
   praktor_process_state state = PRAKTOR_PROCESS_SPAWN_FAILED;
   bool spawned = false;
   int r = SALTS_OK;
-  cmeta_mutex_lock(&s->mutex); s->driver_token = cmeta_thread_current_token(); cmeta_mutex_unlock(&s->mutex);
+  sync_mutex_lock(&s->mutex); s->driver_token = sync_thread_current_token(); sync_mutex_unlock(&s->mutex);
   if (s->thread_start) r = s->thread_start(s->user);
   if (r != SALTS_OK) {
     state = PRAKTOR_PROCESS_WAIT_FAILED;
@@ -86,9 +86,9 @@ static void run_worker(void *user) {
     /* Process has copied all metadata and stdin before admission returns. */
     free_admission(s);
     if (spawned) {
-      cmeta_mutex_lock(&s->mutex);
+      sync_mutex_lock(&s->mutex);
       if (!s->cancel_requested) s->state = PRAKTOR_PROCESS_RUNNING;
-      cmeta_mutex_unlock(&s->mutex);
+      sync_mutex_unlock(&s->mutex);
       r = praktor_process_driver_run(&s->driver,cancelled,s);
     }
     if (s->driver.impl) {
@@ -97,16 +97,16 @@ static void run_worker(void *user) {
       state = !spawned ? PRAKTOR_PROCESS_SPAWN_FAILED : view.output_limited
           ? PRAKTOR_PROCESS_OUTPUT_LIMIT_EXCEEDED : view.failed || r != SALTS_OK
           ? PRAKTOR_PROCESS_WAIT_FAILED : terminal(view.result.state);
-    } else (void)snprintf(s->error,sizeof(s->error),"Salts::Process admission failed (status %d)",r);
+    } else (void)snprintf(s->error,sizeof(s->error),"Salts::NativeIO admission failed (status %d)",r);
   }
   free_admission(s);
-  cmeta_mutex_lock(&s->mutex);
+  sync_mutex_lock(&s->mutex);
   /* Decide cancellation and publish completion atomically with observers. */
   if (spawned && s->cancel_requested && state != PRAKTOR_PROCESS_TIMED_OUT &&
       state != PRAKTOR_PROCESS_WAIT_FAILED && state != PRAKTOR_PROCESS_OUTPUT_LIMIT_EXCEEDED)
     state = PRAKTOR_PROCESS_CANCELLED;
   s->state = state; s->completed = true;
-  cmeta_cond_broadcast(&s->changed); cmeta_mutex_unlock(&s->mutex);
+  sync_cond_broadcast(&s->changed); sync_mutex_unlock(&s->mutex);
 }
 static int measure_string(const char *text, size_t *used, size_t limit) {
   size_t n;
@@ -164,51 +164,51 @@ int praktor_process_worker_start(praktor_process_worker *worker, const praktor_p
   s->input_size = c->input_size; s->max_output_bytes = c->max_output_bytes;
   s->emit = c->emit; s->user = c->user; s->thread_start = c->thread_start;
   s->streamed = c->emit != NULL; s->state = PRAKTOR_PROCESS_STARTING;
-  cmeta_mutex_init(&s->mutex); cmeta_cond_init(&s->changed);
+  sync_mutex_init(&s->mutex); sync_cond_init(&s->changed);
   if (!s->mutex || !s->changed) { free_worker(s); return SALTS_ENOMEM; }
   /* Publish before thread create: setup callbacks may observe this handle.
    * No caller may race start or destroy while start is still returning. */
   worker->impl = s;
-  r = cmeta_thread_create(&s->thread,run_worker,s);
+  r = sync_thread_create(&s->thread,run_worker,s);
   if (r != SALTS_OK) { worker->impl = NULL; free_worker(s); }
   return r;
 }
 int praktor_process_worker_state(const praktor_process_worker *worker, praktor_process_state *state) {
   worker_state *s = worker ? worker->impl : NULL;
   if (!s || !state) return SALTS_EINVAL;
-  cmeta_mutex_lock(&s->mutex); *state = s->state; cmeta_mutex_unlock(&s->mutex); return SALTS_OK;
+  sync_mutex_lock(&s->mutex); *state = s->state; sync_mutex_unlock(&s->mutex); return SALTS_OK;
 }
 int praktor_process_worker_cancel(praktor_process_worker *worker, bool *accepted) {
   worker_state *s = worker ? worker->impl : NULL;
   if (!s || !accepted) return SALTS_EINVAL;
-  cmeta_mutex_lock(&s->mutex); *accepted = !s->completed && !s->cancel_requested;
+  sync_mutex_lock(&s->mutex); *accepted = !s->completed && !s->cancel_requested;
   if (*accepted) { s->cancel_requested = true; s->state = PRAKTOR_PROCESS_CANCELLING; }
-  cmeta_mutex_unlock(&s->mutex); return SALTS_OK;
+  sync_mutex_unlock(&s->mutex); return SALTS_OK;
 }
 int praktor_process_worker_wait(const praktor_process_worker *worker, uint64_t timeout_ns) {
   worker_state *s = worker ? worker->impl : NULL;
-  uint64_t started = cmeta_hrtime(), elapsed, slice;
+  uint64_t started = hrtime(), elapsed, slice;
   int r = SALTS_OK;
   if (!s) return SALTS_EINVAL;
-  cmeta_mutex_lock(&s->mutex);
-  if (!s->completed && timeout_ns && s->driver_token == cmeta_thread_current_token()) r = SALTS_EBUSY;
+  sync_mutex_lock(&s->mutex);
+  if (!s->completed && timeout_ns && s->driver_token == sync_thread_current_token()) r = SALTS_EBUSY;
   else while (!s->completed) {
-    elapsed = cmeta_hrtime()-started;
+    elapsed = hrtime()-started;
     if (timeout_ns != UINT64_MAX && elapsed >= timeout_ns) { r = SALTS_ETIMEDOUT; break; }
     slice = UINT64_C(1000000000);
     if (timeout_ns != UINT64_MAX && timeout_ns-elapsed < slice) slice = timeout_ns-elapsed;
-    r = cmeta_cond_timedwait(&s->changed,&s->mutex,slice);
+    r = sync_cond_timedwait(&s->changed,&s->mutex,slice);
     if (r && r != -ETIMEDOUT) break;
     r = SALTS_OK;
   }
-  cmeta_mutex_unlock(&s->mutex); return r;
+  sync_mutex_unlock(&s->mutex); return r;
 }
 static const char *diagnostic(praktor_process_state state) {
   switch (state) {
     case PRAKTOR_PROCESS_TIMED_OUT: return "Command timed out";
     case PRAKTOR_PROCESS_CANCELLED: return "Command cancelled";
     case PRAKTOR_PROCESS_OUTPUT_LIMIT_EXCEEDED: return "Captured process output exceeded the configured limit";
-    case PRAKTOR_PROCESS_WAIT_FAILED: return "Salts::Process I/O or cleanup failed";
+    case PRAKTOR_PROCESS_WAIT_FAILED: return "Salts::NativeIO I/O or cleanup failed";
     default: return NULL;
   }
 }
@@ -216,8 +216,8 @@ int praktor_process_worker_result(const praktor_process_worker *worker, praktor_
   worker_state *s = worker ? worker->impl : NULL;
   praktor_process_view view = {0};
   if (!s || !out) return SALTS_EINVAL;
-  cmeta_mutex_lock(&s->mutex);
-  if (!s->completed) { cmeta_mutex_unlock(&s->mutex); return SALTS_EBUSY; }
+  sync_mutex_lock(&s->mutex);
+  if (!s->completed) { sync_mutex_unlock(&s->mutex); return SALTS_EBUSY; }
   if (s->driver.impl) (void)praktor_process_driver_view(&s->driver,&view);
   else { view.result.pid = -1; view.result.exit_code = -1; }
   out->state = s->state; out->result = view.result;
@@ -227,7 +227,7 @@ int praktor_process_worker_result(const praktor_process_worker *worker, praktor_
   out->diagnostic = diagnostic(s->state); out->output_streamed_live = s->streamed;
   if (s->state == PRAKTOR_PROCESS_SPAWN_FAILED) { out->stderr_data = out->error; out->stderr_size = strlen(out->error); }
   if (out->diagnostic) out->result.exit_code = -1;
-  cmeta_mutex_unlock(&s->mutex); return SALTS_OK;
+  sync_mutex_unlock(&s->mutex); return SALTS_OK;
 }
 int praktor_process_worker_destroy(praktor_process_worker *worker) {
   worker_state *s = worker ? worker->impl : NULL;
@@ -235,11 +235,11 @@ int praktor_process_worker_destroy(praktor_process_worker *worker) {
   int r;
   if (!worker) return SALTS_EINVAL;
   if (!s) return SALTS_OK;
-  cmeta_mutex_lock(&s->mutex);
-  if (!s->completed && s->driver_token == cmeta_thread_current_token()) { cmeta_mutex_unlock(&s->mutex); return SALTS_EBUSY; }
-  cmeta_mutex_unlock(&s->mutex);
+  sync_mutex_lock(&s->mutex);
+  if (!s->completed && s->driver_token == sync_thread_current_token()) { sync_mutex_unlock(&s->mutex); return SALTS_EBUSY; }
+  sync_mutex_unlock(&s->mutex);
   (void)praktor_process_worker_cancel(worker,&accepted);
-  if (s->thread) { r = cmeta_thread_join(&s->thread); if (r != SALTS_OK) return r; }
+  if (s->thread) { r = sync_thread_join(&s->thread); if (r != SALTS_OK) return r; }
   if (s->driver.impl) { r = praktor_process_driver_release(&s->driver); if (r != SALTS_OK) return r; }
   worker->impl = NULL; free_worker(s); return SALTS_OK;
 }

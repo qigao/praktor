@@ -2,7 +2,7 @@
 #define PRAKTOR_INIT_H
 
 #include <stddef.h>
-#include <tstr.h>
+#include <core/tstr.h>
 
 #ifdef __cplusplus
 extern "C" {

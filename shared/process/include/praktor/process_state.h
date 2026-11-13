@@ -1,6 +1,6 @@
 #ifndef PRAKTOR_PROCESS_STATE_H
 #define PRAKTOR_PROCESS_STATE_H
-/* Shared C value contract, independent of Salts::Process and its worker. */
+/* Shared C value contract, independent of Salts::NativeIO and its worker. */
 typedef enum praktor_process_state {
   PRAKTOR_PROCESS_STARTING, PRAKTOR_PROCESS_RUNNING, PRAKTOR_PROCESS_CANCELLING,
   PRAKTOR_PROCESS_EXITED, PRAKTOR_PROCESS_SIGNALED, PRAKTOR_PROCESS_TIMED_OUT,

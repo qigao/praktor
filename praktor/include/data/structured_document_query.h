@@ -2,7 +2,7 @@
 #define PRAKTOR_STRUCTURED_DOCUMENT_QUERY_H
 
 #include <json_parser.h>
-#include <salts/error_codes.h>
+#include <core/error_codes.h>
 #include <stddef.h>
 
 #ifdef __cplusplus

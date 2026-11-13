@@ -90,66 +90,6 @@ function(cmake_install_headers)
     endif()
 endfunction()
 
-function(cmake_add_grammar TARGET_NAME)
-  set(options LEXER_DEPENDS_ON_GRAMMAR)
-  set(oneValueArgs LEXER_RE GRAMMAR_Y FOLDER LEXER_OUTPUT)
-  set(multiValueArgs LEXER_DEPENDS)
-  cmake_parse_arguments(ARG "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
-  string(TOLOWER "${TARGET_NAME}" target_name_lower)
-
-  if(ARG_GRAMMAR_Y)
-    set(GRAMMAR_H "${CMAKE_CURRENT_BINARY_DIR}/${target_name_lower}_grammar_gen.h")
-  endif()
-
-  if(ARG_LEXER_RE)
-    if(ARG_LEXER_OUTPUT)
-      set(LEXER_GEN "${CMAKE_CURRENT_BINARY_DIR}/${ARG_LEXER_OUTPUT}")
-    else()
-      set(LEXER_GEN "${CMAKE_CURRENT_BINARY_DIR}/${target_name_lower}_lexer_gen.c")
-    endif()
-    set(lexer_depends ${ARG_LEXER_RE} ${ARG_LEXER_DEPENDS})
-    if(ARG_LEXER_DEPENDS_ON_GRAMMAR)
-      if(NOT ARG_GRAMMAR_Y)
-        message(FATAL_ERROR "cmake_add_grammar: LEXER_DEPENDS_ON_GRAMMAR requires GRAMMAR_Y")
-      endif()
-      list(APPEND lexer_depends ${GRAMMAR_H})
-    endif()
-    add_custom_command(
-      OUTPUT ${LEXER_GEN}
-      COMMAND ${RE2C_EXECUTABLE} -o ${LEXER_GEN} ${ARG_LEXER_RE}
-      DEPENDS ${lexer_depends}
-      COMMENT "Generating ${TARGET_NAME} lexer with re2c"
-      VERBATIM)
-    set(LEXER_TARGET "${TARGET_NAME}_lexer_codegen")
-    add_custom_target(${LEXER_TARGET} DEPENDS ${LEXER_GEN})
-    if(ARG_FOLDER)
-      set_target_properties(${LEXER_TARGET} PROPERTIES FOLDER ${ARG_FOLDER})
-    endif()
-    set(${TARGET_NAME}_LEXER_GEN ${LEXER_GEN} PARENT_SCOPE)
-    set(${TARGET_NAME}_LEXER_TARGET ${LEXER_TARGET} PARENT_SCOPE)
-  endif()
-
-  if(ARG_GRAMMAR_Y)
-    set(GRAMMAR_GEN "${CMAKE_CURRENT_BINARY_DIR}/${target_name_lower}_grammar_gen.c")
-    set(GRAMMAR_Y_GEN "${CMAKE_CURRENT_BINARY_DIR}/${target_name_lower}_grammar_gen.y")
-    add_custom_command(
-      OUTPUT ${GRAMMAR_GEN} ${GRAMMAR_H}
-      COMMAND ${CMAKE_COMMAND} -E copy ${ARG_GRAMMAR_Y} ${GRAMMAR_Y_GEN}
-      COMMAND ${LEMON_EXECUTABLE} -T${LEMPAR} ${GRAMMAR_Y_GEN}
-      DEPENDS ${ARG_GRAMMAR_Y} ${LEMON_DEPENDS}
-      COMMENT "Generating ${TARGET_NAME} parser with lemon"
-      VERBATIM)
-    set(GRAMMAR_TARGET "${TARGET_NAME}_grammar_codegen")
-    add_custom_target(${GRAMMAR_TARGET} DEPENDS ${GRAMMAR_GEN} ${GRAMMAR_H})
-    if(ARG_FOLDER)
-      set_target_properties(${GRAMMAR_TARGET} PROPERTIES FOLDER ${ARG_FOLDER})
-    endif()
-    set(${TARGET_NAME}_GRAMMAR_GEN ${GRAMMAR_GEN} PARENT_SCOPE)
-    set(${TARGET_NAME}_GRAMMAR_H ${GRAMMAR_H} PARENT_SCOPE)
-    set(${TARGET_NAME}_GRAMMAR_TARGET ${GRAMMAR_TARGET} PARENT_SCOPE)
-  endif()
-endfunction()
-
 function(cmake_add_source VAR)
   set(options RECURSE)
   set(oneValueArgs)

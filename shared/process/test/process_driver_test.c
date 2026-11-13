@@ -1,33 +1,29 @@
 #include "praktor/process_driver.h"
-#if defined(PRAKTOR_PROCESS_RETAINER)
-#include <salts/process_retainer.h>
-#endif
-#include <salts/clock.h>
-#include <salts/thread.h>
+#include <praktor/process_retainer.h>
+#include <core/clock.h>
+#include <threads/threads.h>
 #include <tinytest.h>
 #include <stdlib.h>
 #include <string.h>
 
-static cmeta_process_options_t command(const char *text) {
-  cmeta_process_options_t o;
-  cmeta_process_options_init(&o);
+static process_options_t command(const char *text) {
+  process_options_t o;
+  process_options_init(&o);
   o.program = text; o.flags = SALTS_PROCESS_SHELL_COMMAND; o.timeout_ms = 5000u;
   return o;
 }
 static void finish(praktor_process_driver *driver) {
   bool done = false;
-  uint64_t started = cmeta_hrtime();
-  while (!done && cmeta_hrtime() - started < UINT64_C(6000000000)) {
+  uint64_t started = hrtime();
+  while (!done && hrtime() - started < UINT64_C(6000000000)) {
     check(praktor_process_driver_tick(driver, &done) == SALTS_OK);
-    if (!done) cmeta_sleep_ms(1u);
+    if (!done) sleep_ms(1u);
   }
   check(done);
 }
-#if defined(PRAKTOR_PROCESS_RETAINER)
 static int count_line(void *user, const char *text, size_t size) {
   (void)text; (void)size; ++*(int *)user; return SALTS_OK;
 }
-#endif
 static int reject_line(void *user, const char *text, size_t size) {
   (void)user; (void)text; (void)size; return SALTS_EIO;
 }
@@ -35,7 +31,7 @@ static int reject_line(void *user, const char *text, size_t size) {
 spec("C11 Process driver without a C++ runtime") {
   it("executes and captures a real child with fixed output bounds") {
     praktor_process_driver driver = {0}; praktor_process_view view;
-    cmeta_process_options_t o = command("echo c11-process-driver");
+    process_options_t o = command("echo c11-process-driver");
     check(praktor_process_driver_start(&driver, &o, NULL, 0u, 128u, NULL, NULL, NULL) == SALTS_OK);
     finish(&driver);
     check(praktor_process_driver_close(&driver, 3000u) == SALTS_OK);
@@ -48,9 +44,9 @@ spec("C11 Process driver without a C++ runtime") {
     char input[16384];
     praktor_process_driver driver = {0}; praktor_process_view view;
 #if defined(_WIN32)
-    cmeta_process_options_t o = command("powershell.exe -NoProfile -Command \"$x=[Console]::In.ReadToEnd(); [Console]::Out.Write($x); [Console]::Error.Write('stderr')\"");
+    process_options_t o = command("powershell.exe -NoProfile -Command \"$x=[Console]::In.ReadToEnd(); [Console]::Out.Write($x); [Console]::Error.Write('stderr')\"");
 #else
-    cmeta_process_options_t o = command("cat; printf stderr >&2");
+    process_options_t o = command("cat; printf stderr >&2");
 #endif
     memset(input, 'x', sizeof(input));
     check(praktor_process_driver_start(&driver, &o, input, sizeof(input), 32768u, NULL, NULL, NULL) == SALTS_OK);
@@ -64,7 +60,7 @@ spec("C11 Process driver without a C++ runtime") {
   }
   it("rejects capture overflow without exceeding the combined bound") {
     praktor_process_driver driver = {0}; praktor_process_view view;
-    cmeta_process_options_t o = command("echo output-too-large-for-budget");
+    process_options_t o = command("echo output-too-large-for-budget");
     check(praktor_process_driver_start(&driver, &o, NULL, 0u, 8u, NULL, NULL, NULL) == SALTS_OK);
     finish(&driver);
     (void)praktor_process_driver_close(&driver, 3000u);
@@ -74,7 +70,7 @@ spec("C11 Process driver without a C++ runtime") {
   }
   it("handles failed admission and a failing stream callback through the same cleanup path") {
     praktor_process_driver driver = {0}; praktor_process_view view;
-    cmeta_process_options_t o = command("");
+    process_options_t o = command("");
     check(praktor_process_driver_start(&driver, &o, NULL, 0u, 128u, NULL, NULL, NULL) != SALTS_OK);
     if (driver.impl != NULL) {
       (void)praktor_process_driver_close(&driver, 3000u);
@@ -87,21 +83,59 @@ spec("C11 Process driver without a C++ runtime") {
     check(praktor_process_driver_view(&driver, &view) == SALTS_OK && view.failed);
     check(praktor_process_driver_release(&driver) == SALTS_OK);
   }
-#if defined(PRAKTOR_PROCESS_RETAINER)
+  it("keeps reservations pending and rejects stale and copied recovery owners") {
+    praktor_process_retainer retainer = {0}, copied;
+    praktor_process_retainer_token first = {0}, second = {0}, third = {0};
+    size_t pending = 0u, reaped = 1u;
+    check(praktor_process_retainer_init(&retainer, 1u) == SALTS_OK);
+    check(praktor_process_retainer_reserve(&retainer, &first) == SALTS_OK);
+    check(praktor_process_retainer_release(&retainer, first) == SALTS_OK);
+    check(praktor_process_retainer_reserve(&retainer, &second) == SALTS_OK);
+    check(praktor_process_retainer_release(&retainer, first) == SALTS_EINVAL);
+    copied = retainer;
+    check(praktor_process_retainer_release(&copied, second) == SALTS_EINVAL);
+    check(praktor_process_retainer_run_ready(&retainer, 8u, &reaped, &pending) == SALTS_EBUSY);
+    check(pending == 1u && reaped == 0u);
+    check(praktor_process_retainer_destroy(&retainer) == SALTS_EBUSY);
+    check(praktor_process_retainer_release(&retainer, second) == SALTS_OK);
+    check(praktor_process_retainer_destroy(&retainer) == SALTS_OK);
+    check(praktor_process_retainer_init(&retainer, 1u) == SALTS_OK);
+    check(praktor_process_retainer_reserve(&retainer, &third) == SALTS_OK);
+    check(praktor_process_retainer_release(&retainer, second) == SALTS_EINVAL);
+    check(praktor_process_retainer_release(&retainer, third) == SALTS_OK);
+    check(praktor_process_retainer_destroy(&retainer) == SALTS_OK);
+  }
+  it("rejects exhausted reservation identities and reclaims failed spawn capacity") {
+    praktor_process_retainer retainer = {0};
+    praktor_process_retainer_token token = {0};
+    praktor_process_driver driver = {0};
+    process_options_t options = command("");
+    check(praktor_process_retainer_init(&retainer, 1u) == SALTS_OK);
+    check(praktor_process_driver_start(&driver, &options, NULL, 0u, 128u,
+          &retainer, NULL, NULL) != SALTS_OK);
+    check(praktor_process_driver_close(&driver, 10u) == SALTS_EIO);
+    check(praktor_process_driver_release(&driver) == SALTS_OK);
+    check(praktor_process_retainer_reserve(&retainer, &token) == SALTS_OK);
+    check(praktor_process_retainer_release(&retainer, token) == SALTS_OK);
+    retainer.serial = UINT64_MAX;
+    check(praktor_process_retainer_reserve(&retainer, &token) == SALTS_ERANGE);
+    check(token.owner == NULL && token.serial == 0u);
+    check(praktor_process_retainer_destroy(&retainer) == SALTS_OK);
+  }
   it("reserves before spawn and retains only C buffers after callback-user destruction") {
-    cflow_process_retainer retainer = {0};
+    praktor_process_retainer retainer = {0};
     praktor_process_driver driver = {0}, rejected = {0}; praktor_process_view view;
     size_t pending = 1u, reaped = 0u;
     int *cookie = (int *)calloc(1u, sizeof(int));
     bool done = false;
     uint64_t started;
 #if defined(_WIN32)
-    cmeta_process_options_t o = command("ping -n 6 127.0.0.1 > NUL");
+    process_options_t o = command("ping -n 6 127.0.0.1 > NUL");
 #else
-    cmeta_process_options_t o = command("sleep 5");
+    process_options_t o = command("sleep 5");
 #endif
     check(cookie != NULL);
-    check(cflow_process_retainer_init(&retainer, 1u) == SALTS_OK);
+    check(praktor_process_retainer_init(&retainer, 1u) == SALTS_OK);
     check(praktor_process_driver_start(&driver, &o, NULL, 0u, 128u, &retainer, count_line, cookie) == SALTS_OK);
     check(praktor_process_driver_tick(&driver, &done) == SALTS_OK && !done);
     check(praktor_process_driver_start(&rejected, &o, NULL, 0u, 128u, &retainer, NULL, NULL) == SALTS_ENOBUFS);
@@ -112,15 +146,14 @@ spec("C11 Process driver without a C++ runtime") {
     check(praktor_process_driver_tick(&driver, &done) == SALTS_EBUSY);
     free(cookie); /* ASan catches any late call into this destroyed Host. */
     check(praktor_process_driver_release(&driver) == SALTS_OK && driver.impl == NULL);
-    check(cflow_process_retainer_destroy(&retainer) == SALTS_EBUSY);
-    started = cmeta_hrtime();
-    while (pending && cmeta_hrtime() - started < UINT64_C(6000000000)) {
-      int r = cflow_process_retainer_run_ready(&retainer, 64u, &reaped, &pending);
+    check(praktor_process_retainer_destroy(&retainer) == SALTS_EBUSY);
+    started = hrtime();
+    while (pending && hrtime() - started < UINT64_C(6000000000)) {
+      int r = praktor_process_retainer_run_ready(&retainer, 64u, &reaped, &pending);
       check(r == SALTS_OK || r == SALTS_EBUSY);
-      if (pending) cmeta_sleep_ms(1u);
+      if (pending) sleep_ms(1u);
     }
     check(pending == 0u);
-    check(cflow_process_retainer_destroy(&retainer) == SALTS_OK);
+    check(praktor_process_retainer_destroy(&retainer) == SALTS_OK);
   }
-#endif
 }

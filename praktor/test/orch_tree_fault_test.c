@@ -1,14 +1,11 @@
-/* Fault public constructor boundaries, not CSTL/tstr allocator internals. */
+/* Fault the AST's owned storage and public string constructors. */
 #include "yml/orch_tree.h"
-#include <cstl/vec.h>
-#include <fmt.h>
-#include <salts/error_codes.h>
+#include <core/fmt.h>
+#include <core/error_codes.h>
 #include <stdlib.h>
 #include <string.h>
-#ifndef PRAKTOR_ORCH_FAULT_PROVIDER
 #include <tinytest.h>
-#endif
-#include <tstr.h>
+#include <core/tstr.h>
 
 static unsigned failure_point, operations;
 static size_t live_owners, live_strings;
@@ -17,11 +14,20 @@ static bool inject(void) {
     if (!failure_point || ++operations != failure_point) return false;
     injected = true; return true;
 }
-void praktor_orch_test_fail(unsigned point) { failure_point = point; operations = 0; injected = false; }
-size_t praktor_orch_test_live(void) { return live_owners + live_strings; }
+static void praktor_orch_test_fail(unsigned point) { failure_point = point; operations = 0; injected = false; }
+static size_t praktor_orch_test_live(void) { return live_owners + live_strings; }
 static void *fault_calloc(size_t count, size_t size) {
     void *result = inject() ? NULL : calloc(count, size);
     if (result) ++live_owners;
+    return result;
+}
+static void *fault_realloc(void *pointer, size_t size) {
+    bool new_owner = pointer == NULL;
+    void *result;
+    /* orch_reserve requests nonzero sizes; failed growth retains its owner. */
+    if (inject()) return NULL;
+    result = realloc(pointer, size);
+    if (result && new_owner) ++live_owners;
     return result;
 }
 static void fault_free(void *pointer) { if (pointer) --live_owners; free(pointer); }
@@ -36,23 +42,21 @@ static tstr fault_format(const char *pattern, const fmt_arg_t *args, size_t coun
     return result;
 }
 static void fault_string_free(tstr text) { if (text) --live_strings; tstr_free(text); }
-static stl_status fault_push(vec_t *vector, const void *value) { return inject() ? STL_OUT_OF_MEMORY : vec_push(vector, value); }
 #define calloc fault_calloc
+#define realloc fault_realloc
 #define free fault_free
 #define tstr_from_v fault_copy
 #define tstr_free fault_string_free
-#define vec_push fault_push
 #undef tstr_format
 #define tstr_format(pattern, ...) fault_format(pattern, FMT_ARGS(__VA_ARGS__), (size_t)FMT_ARG_COUNT(__VA_ARGS__))
 #include "../src/yml/orch_tree.c"
 #undef calloc
+#undef realloc
 #undef free
 #undef tstr_from_v
 #undef tstr_free
-#undef vec_push
 #undef tstr_format
 
-#ifndef PRAKTOR_ORCH_FAULT_PROVIDER
 static void walk_faults(praktor_orch_command input, int expected) {
     praktor_orch_command saved = {0};
     unsigned point;
@@ -128,7 +132,7 @@ static void walk_flat_faults(void) {
 }
 
 spec("Native orchestration construction rollback") {
-    it("releases scalar and sequence nodes strings and both vectors at every boundary") {
+    it("releases scalar and sequence nodes strings and owned arrays at every boundary") {
         praktor_orch_command input = {0}; vstr commands[] = {{"one", 3}, {"", 0}, {"last", 4}};
         input.command = vstr_from_cstr("echo"); walk_faults(input, SALTS_OK);
         input.sequence = true; input.commands = commands; input.command_count = 3; walk_faults(input, SALTS_OK);
@@ -159,4 +163,3 @@ spec("Native orchestration construction rollback") {
     }
 
 }
-#endif

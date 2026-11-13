@@ -6,7 +6,7 @@
 #include "yml/yaml_workflow_metadata.h"
 #include "yml/workflow_dependencies.h"
 #include <json_parser.h>
-#include <salts/error_codes.h>
+#include <core/error_codes.h>
 #include <string.h>
 #include <tinytest.h>
 

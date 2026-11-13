@@ -1,10 +1,10 @@
 #include "yml/yaml_action_params.h"
 #include "yml/orch_tree.h"
-#include "../../actions/core/output_scan.h"
-#include <cmeta_fs.h>
-#include <fmt.h>
+#include "actions/output_scan.h"
+#include <file/fs.h>
+#include <core/fmt.h>
 #include <limits.h>
-#include <salts/thread.h>
+#include <threads/threads.h>
 #include <string.h>
 #include <tinytest.h>
 
@@ -39,10 +39,10 @@ static void error_is(const char *source, praktor_yaml_action_kind kind, const ch
 static size_t corpus(bool force) {
     tstr path = tstr_format("{}/{}", PRAKTOR_YAML_ACTION_CORPUS_DIR,
         force ? "force_terminate_corpus.tsv" : "system_action_string_corpus.tsv");
-    cmeta_fs_buf_t file = {0};
+    fs_buf_t file = {0};
     vstr rest;
     size_t count = 0;
-    check(path && cmeta_fs_read_file(path, &file) == SALTS_OK); tstr_free(path);
+    check(path && fs_read_file(path, &file) == SALTS_OK); tstr_free(path);
     rest = vstr_from_buf(file.base, file.len);
     while (rest.len) {
         vstr line = vstr_trim_right(vstr_split_next(&rest, vstr_from_cstr("\n")), "\r"), fields[7];
@@ -99,7 +99,7 @@ static size_t corpus(bool force) {
         praktor_yaml_action_params_destroy(owner); praktor_yaml_document_destroy(doc); praktor_yaml_field_error_dispose(&error);
         ++count;
     }
-    cmeta_fs_buf_free(&file);
+    fs_buf_free(&file);
     return count;
 }
 
@@ -260,11 +260,11 @@ spec("C-owned typed YAML Action parameters") {
         praktor_yaml_field_error_dispose(&error); praktor_yaml_action_params_destroy(owner);
     }
     it("isolates concurrent independent parameter owners") {
-        cmeta_thread_t threads[4] = {NULL};
+        sync_thread_t threads[4] = {NULL};
         bool passed[4] = {false}, joined = true;
         size_t created = 0, index;
-        for (; created < 4; ++created) if (cmeta_thread_create(&threads[created], independent_params, &passed[created]) != SALTS_OK) break;
-        for (index = 0; index < created; ++index) if (cmeta_thread_join(&threads[index]) != SALTS_OK) joined = false;
+        for (; created < 4; ++created) if (sync_thread_create(&threads[created], independent_params, &passed[created]) != SALTS_OK) break;
+        for (index = 0; index < created; ++index) if (sync_thread_join(&threads[index]) != SALTS_OK) joined = false;
         check(joined && created == 4);
         for (index = 0; index < 4; ++index) check(passed[index] && !threads[index]);
     }

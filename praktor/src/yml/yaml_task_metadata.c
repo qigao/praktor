@@ -1,6 +1,6 @@
 #include "yml/yaml_task_metadata.h"
 #include "yaml_diagnostic_internal.h"
-#include <fmt.h>
+#include <core/fmt.h>
 #include <string.h>
 static int at_error(praktor_yaml_node n,const char *m,praktor_yaml_field_error *e){return praktor_yaml_field_fail_at(n,vstr_from_cstr(m),e);}
 static int add_owned(json_value_t *o,const char *k,json_value_t *v){if(!v)return SALTS_ENOMEM;if(!json_object_add_n(o,k,strlen(k),v)){json_free(v);return SALTS_ENOMEM;}return SALTS_OK;}

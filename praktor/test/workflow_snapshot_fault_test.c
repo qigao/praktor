@@ -9,7 +9,7 @@
 #include "yml/yaml_workflow_metadata.h"
 #include "yml/yaml_action_params.h"
 #include "yml/orch_yaml.h"
-#include <salts/error_codes.h>
+#include <core/error_codes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

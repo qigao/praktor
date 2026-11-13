@@ -1,0 +1,134 @@
+{
+  "version": 6,
+  "include": [
+    "../CMakePresets.json"
+  ],
+  "configurePresets": [
+    {
+      "name": "vcpkg-cache",
+      "hidden": true,
+      "environment": {
+        "VCPKG_CACHE_VERSION": "$penv{VCPKG_CACHE_VERSION}",
+        "SALTS_BASE_VERSION": "$penv{SALTS_BASE_VERSION}",
+        "VCPKG_INSTALLED_DIR": "$penv{VCPKG_INSTALLED_DIR}",
+        "SALTS_BASE_ROOT": "$penv{SALTS_BASE_ROOT}",
+        "VCPKG_CACHE_REPOSITORY_ROOT": "$penv{VCPKG_CACHE_REPOSITORY_ROOT}",
+        "CMETA_ROOT": "$penv{CMETA_ROOT}",
+        "SALTS_UTILS_ROOT": "$penv{SALTS_UTILS_ROOT}",
+        "PRAKTOR_VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed",
+        "VCPKG_BINARY_SOURCES": "clear;default,readwrite;nugettimeout,1800;nugetconfig,${sourceDir}/cmake/vcpkg-cache.nuget.config,read"
+      },
+      "cacheVariables": {
+        "VCPKG_INSTALLED_DIR": "$env{VCPKG_INSTALLED_DIR}",
+        "VCPKG_TARGET_TRIPLET": "$env{VCPKG_TARGET_TRIPLET}",
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/build/${presetName}/stage",
+        "CMAKE_PREFIX_PATH": "$env{PRAKTOR_VCPKG_INSTALLED_DIR}/$env{VCPKG_TARGET_TRIPLET}/$env{VCPKG_CONFIGURATION_SUBDIR};$env{PRAKTOR_VCPKG_INSTALLED_DIR}/$env{VCPKG_TARGET_TRIPLET};$env{VCPKG_INSTALLED_DIR}/$env{VCPKG_TARGET_TRIPLET}/$env{VCPKG_CONFIGURATION_SUBDIR};$env{VCPKG_INSTALLED_DIR}/$env{VCPKG_TARGET_TRIPLET}"
+      },
+      "description": "Consume the explicit preinstalled vcpkg-cache SDK; configure runs no resolver or port build"
+    },
+    {
+      "name": "llvm-mingw-native-environment",
+      "hidden": true,
+      "inherits": [
+        "vcpkg-cache",
+        "llvm-mingw-runtime"
+      ],
+      "environment": {
+        "LLVM_MINGW_TARGET": "$penv{LLVM_MINGW_TARGET}"
+      }
+    },
+    {
+      "name": "msvc-environment",
+      "hidden": true,
+      "inherits": [
+        "vcpkg-cache",
+        "native-runtime"
+      ],
+      "environment": {
+        "VCPKG_TARGET_TRIPLET": "$env{MSVC_TARGET_TRIPLET}"
+      }
+    },
+    {
+      "name": "llvm-native-environment",
+      "hidden": true,
+      "inherits": [
+        "vcpkg-cache",
+        "native-runtime"
+      ],
+      "environment": {
+        "VCPKG_TARGET_TRIPLET": "$env{LLVM_NATIVE_TARGET_TRIPLET}"
+      }
+    },
+    {
+      "name": "gcc-environment",
+      "hidden": true,
+      "inherits": [
+        "vcpkg-cache",
+        "native-runtime"
+      ],
+      "environment": {
+        "VCPKG_TARGET_TRIPLET": "$env{GCC_TARGET_TRIPLET}"
+      },
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "$env{GCC_C_COMPILER}",
+        "CMAKE_CXX_COMPILER": "$env{GCC_CXX_COMPILER}"
+      }
+    },
+    {
+      "name": "llvm-mingw-x64-environment",
+      "hidden": true,
+      "inherits": [
+        "vcpkg-cache",
+        "llvm-mingw-runtime"
+      ],
+      "environment": {}
+    },
+    {
+      "name": "llvm-mingw-arm64-environment",
+      "hidden": true,
+      "inherits": [
+        "vcpkg-cache",
+        "llvm-mingw-runtime"
+      ],
+      "environment": {}
+    },
+    {
+      "name": "android-toolchain-environment",
+      "hidden": true,
+      "inherits": "vcpkg-cache"
+    },
+    {
+      "name": "android-environment",
+      "hidden": true,
+      "inherits": "android-toolchain-environment",
+      "environment": {
+        "VCPKG_TARGET_TRIPLET": "$env{ANDROID_TARGET_TRIPLET}"
+      }
+    },
+    {
+      "name": "android-arm64-environment",
+      "hidden": true,
+      "inherits": [
+        "android-toolchain-environment"
+      ],
+      "environment": {}
+    },
+    {
+      "name": "android-x64-environment",
+      "hidden": true,
+      "inherits": [
+        "android-toolchain-environment"
+      ],
+      "environment": {}
+    },
+    {
+      "name": "llvm-mingw-runtime",
+      "hidden": true,
+      "inherits": "native-runtime",
+      "environment": {
+        "LLVM_MINGW_ROOT": "$penv{LLVM_MINGW_ROOT}",
+        "PATH": "${sourceDir}/build/${presetName}/bin${pathListSep}$env{PRAKTOR_VCPKG_INSTALLED_DIR}/$env{VCPKG_TARGET_TRIPLET}/$env{VCPKG_CONFIGURATION_SUBDIR}bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/$env{VCPKG_TARGET_TRIPLET}/$env{VCPKG_CONFIGURATION_SUBDIR}bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/$env{VCPKG_TARGET_TRIPLET}/bin${pathListSep}$env{SALTS_BASE_ROOT}/bin${pathListSep}$env{SALTS_UTILS_ROOT}/bin${pathListSep}$env{LLVM_MINGW_ROOT}/$env{LLVM_MINGW_TARGET}/bin${pathListSep}$env{LLVM_MINGW_ROOT}/bin${pathListSep}$penv{PATH}"
+      }
+    }
+  ]
+}

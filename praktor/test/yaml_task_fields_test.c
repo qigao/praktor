@@ -1,6 +1,6 @@
 #include "yml/yaml_task_fields.h"
-#include <fmt.h>
-#include <salts/thread.h>
+#include <core/fmt.h>
+#include <threads/threads.h>
 #include <string.h>
 #include <tinytest.h>
 
@@ -216,10 +216,10 @@ spec("C-owned YAML task fields") {
         tstr_free(source); tstr_free(text);
     }
     it("uses independent owners concurrently without document lifetime coupling") {
-        cmeta_thread_t threads[4] = {0};
+        sync_thread_t threads[4] = {0};
         bool passed[4] = {false};
         size_t index;
-        for (index = 0; index < 4; ++index) check(cmeta_thread_create(&threads[index], independent, &passed[index]) == SALTS_OK);
-        for (index = 0; index < 4; ++index) check(cmeta_thread_join(&threads[index]) == SALTS_OK && passed[index]);
+        for (index = 0; index < 4; ++index) check(sync_thread_create(&threads[index], independent, &passed[index]) == SALTS_OK);
+        for (index = 0; index < 4; ++index) check(sync_thread_join(&threads[index]) == SALTS_OK && passed[index]);
     }
 }

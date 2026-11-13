@@ -5,18 +5,18 @@
 #include "yml/workflow_snapshot.h"
 #include "yml/workflow_dag_state.h"
 #include "yml/workflow_task_registry.h"
-#include "orch_session_plan.h"
-#include "native_host.h"
-#include "workflow_snapshot_values.h"
-#include "workflow_parallel_process_guard.h"
+#include "actions/orch_session_plan.h"
+#include "actions/native_host.h"
+#include "actions/workflow_snapshot_values.h"
+#include "actions/workflow_parallel_process_guard.h"
 #include <cflow/executor.h>
 #include <cmeta/ace_interceptor.h>
 #include <cmeta/cleanup.h>
-#include <salts/process_retainer.h>
-#include <salts/clock.h>
-#include <salts/error_codes.h>
+#include <praktor/process_retainer.h>
+#include <core/clock.h>
+#include <core/error_codes.h>
 #include <json_parser.h>
-#include <vstr.h>
+#include <core/vstr.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -31,8 +31,8 @@ typedef struct prk_state {
     praktor_workflow_snapshot *snapshot;
     praktor_workflow_task_registry *registry;
     praktor_workflow_dag_state *dag;
-    praktor_c11_value_store root;
-    cflow_process_retainer retainer;
+    praktor_value_store root;
+    praktor_process_retainer retainer;
     bool has_retainer;
 } prk_state;
 static void clean_snapshot(void *u,void *slot) {
@@ -52,30 +52,30 @@ static void clean_dag(void *u,void *slot) {
 }
 static void clean_root(void *u,void *slot) {
     (void)u;
-    praktor_c11_value_store_destroy((praktor_c11_value_store *)slot);
+    praktor_value_store_destroy((praktor_value_store *)slot);
 }
 void praktor_runtime_result_destroy(praktor_runtime_result *result) {
     if(!result)return;
     if(result->json)json_serialize_free(result->json);
     *result=(praktor_runtime_result){0};
 }
-static int drain(cflow_process_retainer *retainer,uint64_t budget_ns) {
-    uint64_t started=cmeta_hrtime();
+static int drain(praktor_process_retainer *retainer,uint64_t budget_ns) {
+    uint64_t started=hrtime();
     size_t pending=SIZE_MAX;
     do {
         size_t reaped=0u;
-        int status=cflow_process_retainer_run_ready(
+        int status=praktor_process_retainer_run_ready(
             retainer,64u,&reaped,&pending);
         if(status!=SALTS_OK&&status!=SALTS_EBUSY)return status;
         if(status==SALTS_OK&&pending==0u)return SALTS_OK;
-        cmeta_sleep_ms(1u);
-    }while(cmeta_hrtime()-started<budget_ns);
+        sleep_ms(1u);
+    }while(hrtime()-started<budget_ns);
     return SALTS_EBUSY;
 }
 /* CFlow callback owns the mutable Session for the whole tick run; no CFlow
  * worker touches the DAG, root variable store or TaskRegistry. */
 typedef struct prk_callback {
-    praktor_c11_session *session;
+    praktor_session *session;
     praktor_cancel_probe cancel;
     void *cancel_context;
     uint64_t deadline;
@@ -91,17 +91,17 @@ static void callback_run(void *p) {
     while(c->outcome==SALTS_BT_RUNNING) {
         if(c->cancel&&c->cancel(c->cancel_context)) {
             c->cancelled=true;
-            c->status=praktor_c11_session_cancel(c->session);
+            c->status=praktor_session_cancel(c->session);
             break;
         }
-        if(cmeta_hrtime()>=c->deadline) {
+        if(hrtime()>=c->deadline) {
             c->expired=true;
-            c->status=praktor_c11_session_cancel(c->session);
+            c->status=praktor_session_cancel(c->session);
             break;
         }
-        c->status=praktor_c11_session_tick(c->session,&c->outcome);
+        c->status=praktor_session_tick(c->session,&c->outcome);
         if(c->status!=SALTS_OK)break;
-        if(c->outcome==SALTS_BT_RUNNING)cmeta_sleep_ms(1u);
+        if(c->outcome==SALTS_BT_RUNNING)sleep_ms(1u);
     }
 }
 static void callback_cancel(void *p) {
@@ -143,23 +143,23 @@ CMETA_STATIC_ASSERT(CMETA_TYPE_MATCHES(&admit_action,prk_action_gate_target_fn),
 /* Explicit native action selection, not a fallback sequence. Preflight every
  * plan before executing any DAG node. */
 static int make_plan(const praktor_workflow_snapshot *snapshot,size_t id,
-    praktor_c11_orch_session_plan **out,char *error,size_t capacity) {
+    praktor_orch_session_plan **out,char *error,size_t capacity) {
     praktor_workflow_snapshot_task_kind kind;
-    praktor_c11_session_config cfg={0};
+    praktor_session_config cfg={0};
     const praktor_orch_tree *tree=praktor_workflow_snapshot_task_tree(snapshot,id);
     const praktor_orch_node *node=praktor_orch_tree_root(tree);
     if(!node||praktor_workflow_snapshot_task_kind_at(snapshot,id,&kind)!=SALTS_OK)
         return SALTS_EINVAL;
-    praktor_c11_session_config_init(&cfg);
+    praktor_session_config_init(&cfg);
     if(kind==PRAKTOR_WORKFLOW_SNAPSHOT_COMMAND)
-        return praktor_c11_orch_session_plan_create_native_command(
+        return praktor_orch_session_plan_create_native_command(
             tree,&cfg.tree,out,error,capacity);
     switch(praktor_orch_node_type(node)) {
     case PRAKTOR_ORCH_SHELL:
-        return praktor_c11_orch_session_plan_create_native_shell(
+        return praktor_orch_session_plan_create_native_shell(
             tree,&cfg.tree,out,error,capacity);
     case PRAKTOR_ORCH_SET_VARIABLE:
-        return praktor_c11_orch_session_plan_create(
+        return praktor_orch_session_plan_create(
             tree,&cfg.tree,out,error,capacity);
     default:
         return SALTS_ENOTSUP;
@@ -192,33 +192,33 @@ static bool add_owned(json_value_t *parent,const char *key,
 static bool add_text(json_value_t *parent,const char *key,const char *value) {
     return add_owned(parent,key,json_create_string_n(value,strlen(value)));
 }
-static int read_output(praktor_c11_value_store *store,const char *key,
+static int read_output(praktor_value_store *store,const char *key,
                        char *data,size_t capacity,size_t *length) {
-    if(praktor_c11_value_store_get(store,key,data,capacity,length)!=
-            PRAKTOR_C11_VALUE_OK)return SALTS_ENOENT;
+    if(praktor_value_store_get(store,key,data,capacity,length)!=
+            PRAKTOR_VALUE_OK)return SALTS_ENOENT;
     if(*length>=capacity||memchr(data,'\0',*length))return SALTS_EINVAL;
     data[*length]='\0';
     return SALTS_OK;
 }
 static int publish_success(prk_state *s,size_t task_id,
-    praktor_c11_value_store *scope,bool shell,const char *set_key,
+    praktor_value_store *scope,bool shell,const char *value_key,
     cflow_executor_control *control) {
     const char *ports[PRK_MAX_OUTPUTS]={0};
     const char *labels[PRK_MAX_OUTPUTS]={0};
     size_t count=0u;
     char values[PRK_MAX_OUTPUTS][PRK_MAX_VALUE+1u]={{0}};
     size_t lengths[PRK_MAX_OUTPUTS]={0};
-    praktor_c11_value_txn txn={0};
+    praktor_value_txn txn={0};
     json_value_t *typed=json_create_object();
     praktor_workflow_task_output_update update={0};
     int rc=SALTS_EINVAL;
     if(!typed)return SALTS_ENOMEM;
     if(shell) {
         ports[0]="shell_exit_code";labels[0]="exit_code";
-        ports[1]="shell_output";labels[1]="stdout";
+        ports[1]=value_key;labels[1]="stdout";
         ports[2]="shell_stderr";labels[2]="stderr";count=3u;
     }else {
-        ports[0]=set_key;labels[0]=set_key;count=1u;
+        ports[0]=value_key;labels[0]=value_key;count=1u;
     }
     for(size_t i=0u;i<count;++i) {
         if(!ports[i]||read_output(scope,ports[i],values[i],
@@ -227,27 +227,27 @@ static int publish_success(prk_state *s,size_t task_id,
                 json_create_string_n(values[i],lengths[i])))
             goto done;
     }
-    if(praktor_c11_workflow_prepare_task_text_outputs(
-            &s->root,scope,ports,count,&txn)!=PRAKTOR_C11_VALUE_OK)goto done;
+    if(praktor_workflow_prepare_task_text_outputs(
+            &s->root,scope,ports,count,&txn)!=PRAKTOR_VALUE_OK)goto done;
     update.task_index=task_id;update.updates=typed;
     size_t pending=SIZE_MAX;
-    uint64_t started=cmeta_hrtime();
+    uint64_t started=hrtime();
     do {
-        int commit=praktor_c11_workflow_parallel_commit_after_cflow_and_process_drain(
+        int commit=praktor_workflow_parallel_commit_after_cflow_and_process_drain(
             s->registry,&update,&txn,1u,control,&s->retainer,64u,&pending);
-        if(commit==PRAKTOR_C11_PARALLEL_OK && pending==0u) {
+        if(commit==PRAKTOR_PARALLEL_OK && pending==0u) {
             rc=SALTS_OK;break;
         }
-        if(commit!=PRAKTOR_C11_PARALLEL_BUSY)break;
-        cmeta_sleep_ms(1u);
-    }while(cmeta_hrtime()-started<UINT64_C(5000000000));
+        if(commit!=PRAKTOR_PARALLEL_BUSY)break;
+        sleep_ms(1u);
+    }while(hrtime()-started<UINT64_C(5000000000));
 done:
-    praktor_c11_value_txn_abort(&txn);
+    praktor_value_txn_abort(&txn);
     json_free(typed);
     return rc;
 }
 static int publish_failure_exit(prk_state *s,size_t index,
-                                praktor_c11_value_store *scope) {
+                                praktor_value_store *scope) {
     char code[64]={0};size_t n=0u;
     if(read_output(scope,"shell_exit_code",code,sizeof(code),&n)!=SALTS_OK)
         return SALTS_ENOENT;
@@ -312,7 +312,7 @@ praktor_runtime_status praktor_runtime_execute_yaml(
     praktor_component_host components={0};
     prk_state owner={0};
     cmeta_cleanup cleanup[4]={{0}};
-    praktor_c11_orch_session_plan *plans[PRK_MAX_TASKS]={0};
+    praktor_orch_session_plan *plans[PRK_MAX_TASKS]={0};
     praktor_runtime_status status=PRAKTOR_RUNTIME_INVALID;
     size_t task_count=0u;
     uint64_t deadline=0u;
@@ -329,7 +329,7 @@ praktor_runtime_status praktor_runtime_execute_yaml(
             "CMeta Configurator refused the C11 owner");goto done;
     }
     component_live=true;
-    deadline=cmeta_hrtime()+(uint64_t)options.timeout_ms*UINT64_C(1000000);
+    deadline=hrtime()+(uint64_t)options.timeout_ms*UINT64_C(1000000);
     (void)cmeta_cleanup_arm(&cleanup[0],clean_snapshot,NULL,&owner.snapshot);
     (void)cmeta_cleanup_arm(&cleanup[1],clean_registry,NULL,&owner.registry);
     (void)cmeta_cleanup_arm(&cleanup[2],clean_dag,NULL,&owner.dag);
@@ -355,14 +355,14 @@ praktor_runtime_status praktor_runtime_execute_yaml(
                 "Native C11 action is not implemented");goto done;
         }
     }
-    rc=praktor_c11_value_store_init(&owner.root,
+    rc=praktor_value_store_init(&owner.root,
         (size_t)options.value_capacity,128u,PRK_MAX_VALUE);
-    if(rc!=PRAKTOR_C11_VALUE_OK)goto done;
+    if(rc!=PRAKTOR_VALUE_OK)goto done;
     (void)cmeta_cleanup_arm(&cleanup[3],clean_root,NULL,&owner.root);
-    rc=praktor_c11_workflow_seed_root_text_variables(
+    rc=praktor_workflow_seed_root_text_variables(
         owner.snapshot,&owner.root);
-    if(rc!=PRAKTOR_C11_VALUE_OK)goto done;
-    rc=cflow_process_retainer_init(&owner.retainer,1u);
+    if(rc!=PRAKTOR_VALUE_OK)goto done;
+    rc=praktor_process_retainer_init(&owner.retainer,1u);
     if(rc!=SALTS_OK)goto done;
     owner.has_retainer=true;
     status=PRAKTOR_RUNTIME_OK;
@@ -373,7 +373,7 @@ praktor_runtime_status praktor_runtime_execute_yaml(
                 owner.dag,PRAKTOR_WORKFLOW_DAG_CANCELLED);
             status=PRAKTOR_RUNTIME_CANCELLED;break;
         }
-        if(cmeta_hrtime()>=deadline){
+        if(hrtime()>=deadline){
             (void)praktor_workflow_dag_stop(
                 owner.dag,PRAKTOR_WORKFLOW_DAG_DEADLINE);
             status=PRAKTOR_RUNTIME_DEADLINE;break;
@@ -384,11 +384,11 @@ praktor_runtime_status praktor_runtime_execute_yaml(
         if(rc!=SALTS_OK||index>=task_count){
             status=PRAKTOR_RUNTIME_RESOURCE;break;
         }
-        praktor_c11_native_host host={0};
-        praktor_c11_bt_host hooks={0};
-        praktor_c11_native_host_config hostconfig={0};
-        praktor_c11_session session={0};
-        praktor_c11_session_config config={0};
+        praktor_native_host host={0};
+        praktor_bt_host hooks={0};
+        praktor_native_host_config hostconfig={0};
+        praktor_session session={0};
+        praktor_session_config config={0};
         cflow_executor executor={0};
         cflow_executor_control control={0};
         prk_callback driver={0};
@@ -409,22 +409,22 @@ praktor_runtime_status praktor_runtime_execute_yaml(
         shell=shell||kind==PRAKTOR_WORKFLOW_SNAPSHOT_COMMAND;
         task_error=praktor_workflow_task_registry_start(owner.registry,index);
         if(task_error!=SALTS_OK)goto task_done;
-        praktor_c11_native_host_config_init(&hostconfig,
+        praktor_native_host_config_init(&hostconfig,
             (size_t)options.value_capacity,128u,PRK_MAX_VALUE);
         hostconfig.max_running_leaves=1u;
-        task_error=praktor_c11_native_host_init_with_config(
+        task_error=praktor_native_host_init_with_config(
             &host,&hostconfig);
         if(task_error!=SALTS_OK)goto task_done;
         has_host=true;
-        task_error=praktor_c11_workflow_load_task_text_scope(
+        task_error=praktor_workflow_load_task_text_scope(
             owner.snapshot,index,&owner.root,
-            praktor_c11_native_host_values(&host));
-        if(task_error!=PRAKTOR_C11_VALUE_OK)goto task_done;
-        task_error=praktor_c11_native_host_bind(&host,&hooks);
+            praktor_native_host_values(&host));
+        if(task_error!=PRAKTOR_VALUE_OK)goto task_done;
+        task_error=praktor_native_host_bind(&host,&hooks);
         if(task_error!=SALTS_OK)goto task_done;
-        praktor_c11_session_config_init(&config);
+        praktor_session_config_init(&config);
         config.host=hooks;config.retainer=&owner.retainer;
-        task_error=praktor_c11_orch_session_plan_init_session(
+        task_error=praktor_orch_session_plan_init_session(
             plans[index],&config,&session);
         if(task_error!=SALTS_OK)goto task_done;
         has_session=true;
@@ -472,7 +472,7 @@ praktor_runtime_status praktor_runtime_execute_yaml(
         }else if(!passed)status=PRAKTOR_RUNTIME_FAILED;
 task_done:
         if(has_session){
-            int closed=praktor_c11_session_destroy(&session);
+            int closed=praktor_session_destroy(&session);
             if(closed!=SALTS_OK){
                 /* NativeIO has not proved borrowed owner transfer; never
                  * pretend this fallible close is a lexical RAII callback. */
@@ -488,16 +488,17 @@ task_done:
                 if(!shell)task_error=native_set_key(
                     tree,selected_key,sizeof(selected_key));
                 if(task_error==SALTS_OK)task_error=publish_success(
-                    &owner,index,praktor_c11_native_host_values(&host),
-                    shell,shell?NULL:selected_key,&control);
+                    &owner,index,praktor_native_host_values(&host),
+                    shell,shell?(kind==PRAKTOR_WORKFLOW_SNAPSHOT_COMMAND
+                        ?"stdout":"shell_output"):selected_key,&control);
             }else if(shell) {
                 /* Failure exit is a typed task diagnostic, not a root commit. */
                 (void)publish_failure_exit(&owner,index,
-                    praktor_c11_native_host_values(&host));
+                    praktor_native_host_values(&host));
             }
         }
         if(has_executor)cflow_executor_destroy(&executor);
-        if(has_host)praktor_c11_native_host_destroy(&host);
+        if(has_host)praktor_native_host_destroy(&host);
         if(task_error!=SALTS_OK){
             status=PRAKTOR_RUNTIME_RESOURCE;
             (void)snprintf(out->error,sizeof(out->error),
@@ -520,10 +521,10 @@ task_done:
         status=PRAKTOR_RUNTIME_RESOURCE;
 done:
     for(size_t i=0u;i<task_count;++i)
-        praktor_c11_orch_session_plan_destroy(plans[i]);
+        praktor_orch_session_plan_destroy(plans[i]);
     if(owner.has_retainer) {
         if(drain(&owner.retainer,UINT64_C(5000000000))!=SALTS_OK ||
-           cflow_process_retainer_destroy(&owner.retainer)!=SALTS_OK)
+           praktor_process_retainer_destroy(&owner.retainer)!=SALTS_OK)
             abort(); /* Process ownership is never discarded silently. */
     }
     cmeta_cleanup_reverse(cleanup,4u);

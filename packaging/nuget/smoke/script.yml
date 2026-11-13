@@ -1,4 +1,0 @@
-tasks:
-  - name: script_result
-    script: |
-      ctx.output("answer", 6 * 7);

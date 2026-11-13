@@ -23,6 +23,7 @@ vcpkg_installed/
 _ReSharper*
 *.log
 .cache/
+.openidea/
 
 # Compiled Object files
 *.slo

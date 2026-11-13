@@ -1,6 +1,6 @@
 #include "expressions/expression_regex_salts.h"
 
-#include <re.h>
+#include <core/re.h>
 
 #include <stdio.h>
 

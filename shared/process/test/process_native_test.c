@@ -4,8 +4,8 @@
 #include <stdlib.h>
 #ifdef _WIN32
 #include <windows.h>
-#include <salts/clock.h>
-#include <salts/thread.h>
+#include <core/clock.h>
+#include <threads/threads.h>
 #endif
 
 spec("C native application host ownership") {
@@ -91,13 +91,13 @@ static praktor_process_control_request fixture_request(void) {
   praktor_process_control_request request = r; request.image_name = image_name(); return request;
 }
 static bool cleanup(praktor_process_control_host *h) {
-  uint64_t began = cmeta_hrtime(); praktor_process_snapshot s = {0}; praktor_process_backend_result r;
+  uint64_t began = hrtime(); praktor_process_snapshot s = {0}; praktor_process_backend_result r;
   do {
     r = h->query(h->user,image_name(),&s);
     if (r.ok && !s.running) return true;
     if (r.ok) (void)h->terminate(h->user,&s);
-    cmeta_sleep_ms(1);
-  } while (cmeta_hrtime()-began < UINT64_C(3000000000));
+    sleep_ms(1);
+  } while (hrtime()-began < UINT64_C(3000000000));
   return false;
 }
 typedef struct window_probe { DWORD pid; bool ready; } window_probe;
@@ -108,12 +108,12 @@ static BOOL CALLBACK window_ready(HWND window, LPARAM parameter) {
   return TRUE;
 }
 static bool ready(uint32_t pid) {
-  uint64_t began = cmeta_hrtime(); window_probe p = {pid,false};
+  uint64_t began = hrtime(); window_probe p = {pid,false};
   do {
     (void)EnumWindows(window_ready,(LPARAM)&p);
     if (p.ready) return true;
-    cmeta_sleep_ms(1);
-  } while (cmeta_hrtime()-began < UINT64_C(3000000000));
+    sleep_ms(1);
+  } while (hrtime()-began < UINT64_C(3000000000));
   return false;
 }
 spec("C-only native application execution") {

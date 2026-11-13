@@ -5,13 +5,12 @@
 #include "yml/orch_tree.h"
 #include <json_parser.h>
 #include <stddef.h>
-#include <vstr.h>
+#include <core/vstr.h>
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-/* Qualification-only in-memory C11 workflow aggregate, not the reviewed
- * WorkflowPlan or an executor. Composes the existing canonical C11 workflow
+/* Immutable in-memory C11 workflow aggregate. Composes canonical C11 workflow
  * metadata, task metadata, command desugaring, named/flat Orch AST and graph.
  *
  * Admission currently requires every task to be a Command or Orchestration

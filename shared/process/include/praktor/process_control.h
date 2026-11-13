@@ -3,7 +3,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <salts/error_codes.h>
+#include <core/error_codes.h>
 #ifdef __cplusplus
 extern "C" {
 #endif

@@ -9,7 +9,7 @@
 extern "C" {
 #endif
 
-/* Qualification-only, single-owner DAG readiness counter over the existing
+/* Single-owner DAG readiness counter over the existing
  * immutable C11 workflow_dependencies projection. It DOES NOT own or mutate
  * that graph, execute tasks, create workers, publish values, or implement a
  * second queue. The graph must outlive the state; all mutations happen on the

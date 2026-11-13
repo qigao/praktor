@@ -1,5 +1,5 @@
 #include "yml/workflow_snapshot.h"
-#include <salts/error_codes.h>
+#include <core/error_codes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

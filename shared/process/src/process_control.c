@@ -1,6 +1,6 @@
 #include "praktor/process_control.h"
-#include <salts/clock.h>
-#include <salts/thread.h>
+#include <core/clock.h>
+#include <threads/threads.h>
 #include <limits.h>
 #include <string.h>
 
@@ -11,7 +11,7 @@ typedef struct control {
   uint64_t began;
 } control;
 static uint64_t now(control *c) {
-  return c->host->now_ns ? c->host->now_ns(c->host->user) : cmeta_hrtime();
+  return c->host->now_ns ? c->host->now_ns(c->host->user) : hrtime();
 }
 static bool fail(control *c, praktor_process_control_error error,
                   const char *phase, const char *message, int native_error) {
@@ -40,7 +40,7 @@ static void pause_poll(control *c, uint64_t began, uint64_t budget) {
   if (ms > c->host->poll_interval_ms) ms = c->host->poll_interval_ms;
   if (ms > UINT32_MAX) ms = UINT32_MAX;
   if (c->host->sleep_ms) c->host->sleep_ms(c->host->user,(uint32_t)ms);
-  else cmeta_sleep_ms((uint32_t)ms);
+  else sleep_ms((uint32_t)ms);
 }
 static bool poll_for_stopped(control *c, uint64_t began, uint64_t budget, const char *phase) {
   for (;;) {

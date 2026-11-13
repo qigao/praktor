@@ -12,7 +12,7 @@ static praktor_service_request request(praktor_service_profile *profile) {
   const praktor_service_request r = {PRAKTOR_PROCESS_START,"Retro Camera Service","fixture",profile,{args,2},5000,1};
   *profile = p; return r;
 }
-spec("C service controller with real Salts::Process commands") {
+spec("C service controller with real Salts::NativeIO commands") {
   it("executes status, escaped argv, start, restart and stop without a C++ shell") {
     const praktor_service_config config = {64,65536,1024};
     praktor_service_control control = {0}; praktor_service_process_host process = {0}; praktor_service_host host;

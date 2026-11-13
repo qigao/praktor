@@ -1,33 +1,33 @@
 #include "praktor/process_worker.h"
-#include <salts/clock.h>
-#include <salts/thread.h>
+#include <core/clock.h>
+#include <threads/threads.h>
 #include <tinytest.h>
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
 
-typedef struct gate { cmeta_mutex_t mutex; cmeta_cond_t changed; bool entered, release; } gate;
+typedef struct gate { sync_mutex_t mutex; sync_cond_t changed; bool entered, release; } gate;
 static void gate_init(gate *g) {
-  memset(g,0,sizeof(*g)); cmeta_mutex_init(&g->mutex); cmeta_cond_init(&g->changed);
+  memset(g,0,sizeof(*g)); sync_mutex_init(&g->mutex); sync_cond_init(&g->changed);
   check(g->mutex != NULL && g->changed != NULL);
 }
 static int gated_setup(void *user) {
   gate *g = user;
-  cmeta_mutex_lock(&g->mutex); g->entered = true; cmeta_cond_broadcast(&g->changed);
-  while (!g->release) cmeta_cond_wait(&g->changed,&g->mutex);
-  cmeta_mutex_unlock(&g->mutex); return SALTS_OK;
+  sync_mutex_lock(&g->mutex); g->entered = true; sync_cond_broadcast(&g->changed);
+  while (!g->release) sync_cond_wait(&g->changed,&g->mutex);
+  sync_mutex_unlock(&g->mutex); return SALTS_OK;
 }
 static bool gate_wait(gate *g) {
-  bool entered; uint64_t started = cmeta_hrtime();
-  cmeta_mutex_lock(&g->mutex);
-  while (!g->entered && cmeta_hrtime()-started < UINT64_C(6000000000))
-    (void)cmeta_cond_timedwait(&g->changed,&g->mutex,UINT64_C(10000000));
-  entered = g->entered; cmeta_mutex_unlock(&g->mutex); return entered;
+  bool entered; uint64_t started = hrtime();
+  sync_mutex_lock(&g->mutex);
+  while (!g->entered && hrtime()-started < UINT64_C(6000000000))
+    (void)sync_cond_timedwait(&g->changed,&g->mutex,UINT64_C(10000000));
+  entered = g->entered; sync_mutex_unlock(&g->mutex); return entered;
 }
 static void gate_release(gate *g) {
-  cmeta_mutex_lock(&g->mutex); g->release = true; cmeta_cond_broadcast(&g->changed); cmeta_mutex_unlock(&g->mutex);
+  sync_mutex_lock(&g->mutex); g->release = true; sync_cond_broadcast(&g->changed); sync_mutex_unlock(&g->mutex);
 }
-static void gate_destroy(gate *g) { cmeta_cond_destroy(&g->changed); cmeta_mutex_destroy(&g->mutex); }
+static void gate_destroy(gate *g) { sync_cond_destroy(&g->changed); sync_mutex_destroy(&g->mutex); }
 static praktor_process_worker_config command(const char *text) {
   praktor_process_worker_config c; praktor_process_worker_config_init(&c);
   c.options.program = text; c.options.flags = SALTS_PROCESS_SHELL_COMMAND; c.options.timeout_ms = 10000;
@@ -64,14 +64,14 @@ static void observe(void *user) {
 }
 typedef struct reentrant { praktor_process_worker *worker; const void *caller, *driver; int error, calls; } reentrant;
 static int remember_thread(void *user) {
-  reentrant *r = user; r->driver = cmeta_thread_current_token();
+  reentrant *r = user; r->driver = sync_thread_current_token();
   if (r->driver == r->caller) r->error = 1;
   return SALTS_OK;
 }
 static int reenter(void *user, const char *text, size_t size) {
   reentrant *r = user; praktor_process_worker_view view; praktor_process_state state;
   (void)text; (void)size; ++r->calls;
-  if (cmeta_thread_current_token() != r->driver) r->error = 2;
+  if (sync_thread_current_token() != r->driver) r->error = 2;
   if (praktor_process_worker_state(r->worker,&state) != SALTS_OK) r->error = 3;
   if (praktor_process_worker_result(r->worker,&view) != SALTS_EBUSY) r->error = 4;
   if (praktor_process_worker_wait(r->worker,0) != SALTS_ETIMEDOUT) r->error = 5;
@@ -81,7 +81,7 @@ static int reenter(void *user, const char *text, size_t size) {
 }
 static int admitted(void *user, const char *text, size_t size) {
   gate *g = user; (void)text; (void)size;
-  cmeta_mutex_lock(&g->mutex); g->entered = true; cmeta_cond_broadcast(&g->changed); cmeta_mutex_unlock(&g->mutex); return SALTS_OK;
+  sync_mutex_lock(&g->mutex); g->entered = true; sync_cond_broadcast(&g->changed); sync_mutex_unlock(&g->mutex); return SALTS_OK;
 }
 
 spec("C11 joined Process worker without C++ execution state") {
@@ -163,20 +163,20 @@ spec("C11 joined Process worker without C++ execution state") {
   it("broadcasts completion to concurrent observers without cancelling on a wait deadline") {
     praktor_process_worker worker = {0}; praktor_process_worker_view view;
     praktor_process_worker_config c = command(sleep_command()); bool accepted;
-    cmeta_thread_t threads[3] = {0}; observer observers[3]; size_t i;
+    sync_thread_t threads[3] = {0}; observer observers[3]; size_t i;
     check(praktor_process_worker_start(&worker,&c) == SALTS_OK);
     check(praktor_process_worker_wait(&worker,UINT64_C(1000000)) == SALTS_ETIMEDOUT);
-    for (i = 0; i < 3; ++i) { observers[i].worker = &worker; observers[i].error = 0; check(cmeta_thread_create(&threads[i],observe,&observers[i]) == SALTS_OK); }
+    for (i = 0; i < 3; ++i) { observers[i].worker = &worker; observers[i].error = 0; check(sync_thread_create(&threads[i],observe,&observers[i]) == SALTS_OK); }
     check(praktor_process_worker_cancel(&worker,&accepted) == SALTS_OK && accepted);
     view = finish(&worker); check(view.state == PRAKTOR_PROCESS_CANCELLED && view.result.exit_code == -1);
-    for (i = 0; i < 3; ++i) { check(cmeta_thread_join(&threads[i]) == SALTS_OK); check(!observers[i].error && observers[i].state == PRAKTOR_PROCESS_CANCELLED); }
+    for (i = 0; i < 3; ++i) { check(sync_thread_join(&threads[i]) == SALTS_OK); check(!observers[i].error && observers[i].state == PRAKTOR_PROCESS_CANCELLED); }
     check(praktor_process_worker_cancel(&worker,&accepted) == SALTS_OK && !accepted);
     check(praktor_process_worker_destroy(&worker) == SALTS_OK);
   }
   it("contains callback reentrancy and refuses driver-thread blocking or destruction") {
     praktor_process_worker worker = {0};
     reentrant r = {&worker,NULL,NULL,0,0}; praktor_process_worker_config c = command("echo reentrant");
-    praktor_process_worker_view view; r.caller = cmeta_thread_current_token();
+    praktor_process_worker_view view; r.caller = sync_thread_current_token();
     c.thread_start = remember_thread; c.emit = reenter; c.user = &r;
     check(praktor_process_worker_start(&worker,&c) == SALTS_OK); view = finish(&worker);
     check(view.state == PRAKTOR_PROCESS_EXITED && !r.error && r.calls > 0 && view.output_streamed_live);

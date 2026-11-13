@@ -3,10 +3,10 @@
 #include <cyaml.h>
 #include <cyaml_json_adapter.h>
 #include <dsv_filter.h>
-#include <fmt.h>
+#include <core/fmt.h>
 #include <stdint.h>
 #include <string.h>
-#include <tstr.h>
+#include <core/tstr.h>
 #include <xml_parser/xml_parser.h>
 
 typedef struct query_error { char *text; size_t capacity; } query_error;
@@ -91,40 +91,40 @@ static int query_yaml(const char *document, size_t size, const char *path,
 
 static int query_xml(const char *document, size_t size, const char *path,
     json_value_t **out, query_error *error) {
-    salts_xml_document xml = {0};
-    salts_xml_diagnostic diagnostic = {0};
-    salts_xml_node_list result = {0};
+    xml_document xml = {0};
+    xml_diagnostic diagnostic = {0};
+    xml_node_list result = {0};
     qvm_diagnostic_t query_diagnostic = {0};
     json_value_t *matches = NULL;
     int status = SALTS_OK;
     size_t index;
-    if (salts_xml_parse(&xml, document, size, NULL, &diagnostic) != SALTS_XML_OK)
+    if (xml_parse(&xml, document, size, NULL, &diagnostic) != SALTS_XML_OK)
         return fail(error, SALTS_EINVAL, diagnostic.message[0] ? diagnostic.message : "Invalid XML input");
     if (!path[0]) { status = fail(error, SALTS_EINVAL, "XPath expression must not be empty"); goto cleanup; }
-    if (salts_xml_document_xpath_query(&xml, path, &result, NULL, &query_diagnostic) != QVM_STATUS_OK) {
+    if (xml_document_xpath_query(&xml, path, &result, NULL, &query_diagnostic) != QVM_STATUS_OK) {
         status = fail(error, SALTS_EINVAL,
             query_diagnostic.message ? query_diagnostic.message : "XPath evaluation failed");
         goto cleanup;
     }
     matches = json_create_array();
     if (!matches) status = fail(error, SALTS_ENOMEM, "Failed to allocate query result");
-    for (index = 0; status == SALTS_OK && index < salts_xml_node_list_size(&result); ++index) {
-        salts_xml_node node = salts_xml_node_list_at(&result, index);
-        salts_xml_string_view text = salts_xml_node_text_view(node);
+    for (index = 0; status == SALTS_OK && index < xml_node_list_size(&result); ++index) {
+        xml_node node = xml_node_list_at(&result, index);
+        xml_string_view text = xml_node_text_view(node);
         if (text.data) status = push(error, matches, json_create_string_n(text.data, text.size));
         else {
             size_t serialized_size = 0;
-            char *serialized = salts_xml_node_serialize(node, &serialized_size);
+            char *serialized = xml_node_serialize(node, &serialized_size);
             if (!serialized) status = fail(error, SALTS_EIO, "Failed to serialize XPath result");
             else {
                 status = push(error, matches, json_create_string_n(serialized, serialized_size));
-                salts_xml_owned_string_free(serialized);
+                xml_owned_string_free(serialized);
             }
         }
     }
 cleanup:
-    salts_xml_node_list_destroy(&result);
-    salts_xml_document_destroy(&xml);
+    xml_node_list_destroy(&result);
+    xml_document_destroy(&xml);
     if (status != SALTS_OK) { json_free(matches); return status; }
     return collapse(error, matches, out);
 }

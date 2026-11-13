@@ -1,6 +1,6 @@
 #include "yml/yaml_document.h"
 #include <errno.h>
-#include <fmt.h>
+#include <core/fmt.h>
 #include <inttypes.h>
 #include <limits.h>
 #include <stdlib.h>

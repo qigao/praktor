@@ -1,3 +1,0 @@
-tasks:
-  - name: command_ok
-    command: "printf praktor-command-ok"

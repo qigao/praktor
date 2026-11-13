@@ -1,15 +1,15 @@
 #ifndef PRAKTOR_WORKFLOW_DEPENDENCIES_H
 #define PRAKTOR_WORKFLOW_DEPENDENCIES_H
 #include <json_parser.h>
-#include <salts/error_codes.h>
-#include <vstr.h>
+#include <core/error_codes.h>
+#include <core/vstr.h>
 #include <stdbool.h>
 #include <stddef.h>
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-/* Qualification-only task dependency projection, not an executor/scheduler.
+/* Immutable task dependency projection, not an executor/scheduler.
  * Input elements are existing C11 YAML task-metadata JSON objects in task
  * declaration order. No YAML document, metadata JSON or runtime owner is
  * retained. Output uniquely owns copied names and ordered directed edges.

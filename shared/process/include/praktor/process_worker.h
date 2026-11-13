@@ -2,13 +2,13 @@
 #define PRAKTOR_PROCESS_WORKER_H
 #include "process_driver.h"
 #include "process_state.h"
-#include <salts/error_codes.h>
+#include <core/error_codes.h>
 #ifdef __cplusplus
 extern "C" {
 #endif
 typedef struct praktor_process_worker { void *impl; } praktor_process_worker;
 typedef struct praktor_process_worker_config {
-  cmeta_process_options_t options;
+  process_options_t options;
   const void *input;
   size_t input_size, max_input_bytes, max_output_bytes;
   size_t max_metadata_bytes, max_arguments, max_environment_entries;
@@ -21,7 +21,7 @@ typedef struct praktor_process_worker_config {
 } praktor_process_worker_config;
 typedef struct praktor_process_worker_view {
   praktor_process_state state;
-  cmeta_process_result_t result;
+  process_result_t result;
   const char *stdout_data, *stderr_data, *error, *diagnostic;
   size_t stdout_size, stderr_size;
   bool output_streamed_live;

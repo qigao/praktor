@@ -7,8 +7,8 @@
 #endif
 #include <windows.h>
 #include <tlhelp32.h>
-#include <salts/clock.h>
-#include <salts/thread.h>
+#include <core/clock.h>
+#include <threads/threads.h>
 #include <stdio.h>
 #include <wchar.h>
 #include <wctype.h>
@@ -381,12 +381,12 @@ int praktor_process_native_close(praktor_process_native *native, uint32_t budget
   if (!native || !native->impl) return SALTS_OK;
   n = native->impl; n->closing = true;
 #ifdef _WIN32
-  began = cmeta_hrtime();
+  began = hrtime();
   do {
     r = recover(n);
     if (r == SALTS_OK) break;
-    if (r == SALTS_EIO || (cmeta_hrtime()-began)/UINT64_C(1000000) >= budget_ms) return r;
-    cmeta_sleep_ms(1);
+    if (r == SALTS_EIO || (hrtime()-began)/UINT64_C(1000000) >= budget_ms) return r;
+    sleep_ms(1);
   } while (true);
 #else
   (void)budget_ms;
@@ -395,7 +395,7 @@ int praktor_process_native_close(praktor_process_native *native, uint32_t budget
 }
 void praktor_process_native_destroy_join(praktor_process_native *native) {
 #ifdef _WIN32
-  while (praktor_process_native_close(native,10) != SALTS_OK) cmeta_sleep_ms(1);
+  while (praktor_process_native_close(native,10) != SALTS_OK) sleep_ms(1);
 #else
   (void)praktor_process_native_close(native,0);
 #endif

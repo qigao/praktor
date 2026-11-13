@@ -1,6 +1,6 @@
 #include "yml/yaml_value.h"
-#include <fmt.h>
-#include <salts/thread.h>
+#include <core/fmt.h>
+#include <threads/threads.h>
 #include <string.h>
 #include <tinytest.h>
 
@@ -203,13 +203,13 @@ spec("C YAML contract values and mapping whitelists") {
         tstr_free(source); tstr_free(key);
     }
     it("isolates concurrent independent conversions and result owners") {
-        cmeta_thread_t threads[4] = {NULL};
+        sync_thread_t threads[4] = {NULL};
         bool passed[4] = {false}, joined = true;
         size_t created = 0, index;
         for (; created < 4; ++created)
-            if (cmeta_thread_create(&threads[created], independent_values, &passed[created]) != SALTS_OK) break;
+            if (sync_thread_create(&threads[created], independent_values, &passed[created]) != SALTS_OK) break;
         for (index = 0; index < created; ++index)
-            if (cmeta_thread_join(&threads[index]) != SALTS_OK) joined = false;
+            if (sync_thread_join(&threads[index]) != SALTS_OK) joined = false;
         check(joined && created == 4);
         for (index = 0; index < 4; ++index) check(passed[index] && !threads[index]);
     }

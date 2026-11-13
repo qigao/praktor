@@ -2,8 +2,8 @@
 #define PRAKTOR_YAML_DOCUMENT_H
 
 #include <cyaml.h>
-#include <salts/error_codes.h>
-#include <tstr.h>
+#include <core/error_codes.h>
+#include <core/tstr.h>
 
 #ifdef __cplusplus
 extern "C" {

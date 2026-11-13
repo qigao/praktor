@@ -1,9 +1,9 @@
 #include "util/praktor_init.h"
 
-#include <cmeta_fs.h>
+#include <file/fs.h>
 #include <cstl/vec.h>
 #include <errno.h>
-#include <fmt.h>
+#include <core/fmt.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -112,7 +112,7 @@ static tstr init_path_join(const char *base, const char *child) {
     capacity = base_length + child_length + 2u;
     path = tstr_new_len(NULL, capacity - 1u);
     if (path == NULL) return NULL;
-    if (cmeta_fs_path_join(path, capacity, base, child) != 0 ||
+    if (fs_path_join(path, capacity, base, child) != 0 ||
         !tstr_set_len_checked(path, strlen(path))) {
         tstr_free(path);
         return NULL;
@@ -128,7 +128,7 @@ static tstr init_path_dirname(const char *path) {
     capacity = strlen(path) + 2u;
     directory = tstr_new_len(NULL, capacity - 1u);
     if (directory == NULL) return NULL;
-    if (cmeta_fs_path_dirname(path, directory, capacity) != 0 ||
+    if (fs_path_dirname(path, directory, capacity) != 0 ||
         !tstr_set_len_checked(directory, strlen(directory))) {
         tstr_free(directory);
         return NULL;
@@ -194,7 +194,7 @@ static tstr init_executable_directory(void) {
         int length;
         tstr directory;
         if (path == NULL) return NULL;
-        length = cmeta_fs_readlink("/proc/self/exe", path, capacity);
+        length = fs_readlink("/proc/self/exe", path, capacity);
         if (length >= 0) {
             (void)tstr_set_len_checked(path, (size_t)length);
             directory = init_path_dirname(path);
@@ -214,36 +214,36 @@ static tstr init_executable_directory(void) {
 
 static praktor_init_status init_discover_directory(const char *directory,
                                                     praktor_init_names *names) {
-    cmeta_fs_stat_t stat_value = {0};
-    cmeta_fs_dir_t *handle = NULL;
-    cmeta_fs_dirent_t entry;
+    fs_stat_t stat_value = {0};
+    fs_dir_t *handle = NULL;
+    fs_dirent_t entry;
     int read_status;
-    if (cmeta_fs_access(directory, SALTS_FS_ACCESS_EXISTS) != 0 ||
-        cmeta_fs_stat(directory, &stat_value) != 0 || !stat_value.is_directory)
+    if (fs_access(directory, SALTS_FS_ACCESS_EXISTS) != 0 ||
+        fs_stat(directory, &stat_value) != 0 || !stat_value.is_directory)
         return PRAKTOR_INIT_OK;
-    if (cmeta_fs_opendir(directory, &handle) != 0) return PRAKTOR_INIT_IO_ERROR;
-    while ((read_status = cmeta_fs_readdir(handle, &entry)) > 0) {
+    if (fs_opendir(directory, &handle) != 0) return PRAKTOR_INIT_IO_ERROR;
+    while ((read_status = fs_readdir(handle, &entry)) > 0) {
         size_t length = strlen(entry.name);
         tstr full_path;
         praktor_init_status status;
         if (length <= 4u || strcmp(entry.name + length - 4u, ".yml") != 0) continue;
         full_path = init_path_join(directory, entry.name);
         if (full_path == NULL) {
-            (void)cmeta_fs_closedir(handle);
+            (void)fs_closedir(handle);
             return PRAKTOR_INIT_NO_MEMORY;
         }
         memset(&stat_value, 0, sizeof(stat_value));
-        read_status = cmeta_fs_access(full_path, SALTS_FS_ACCESS_EXISTS) == 0
-            ? cmeta_fs_stat(full_path, &stat_value) : -ENOENT;
+        read_status = fs_access(full_path, SALTS_FS_ACCESS_EXISTS) == 0
+            ? fs_stat(full_path, &stat_value) : -ENOENT;
         tstr_free(full_path);
         if (read_status != 0 || !stat_value.is_file) continue;
         status = init_names_add(names, entry.name, length - 4u);
         if (status != PRAKTOR_INIT_OK) {
-            (void)cmeta_fs_closedir(handle);
+            (void)fs_closedir(handle);
             return status;
         }
     }
-    if (cmeta_fs_closedir(handle) != 0 || read_status < 0) return PRAKTOR_INIT_IO_ERROR;
+    if (fs_closedir(handle) != 0 || read_status < 0) return PRAKTOR_INIT_IO_ERROR;
     return PRAKTOR_INIT_OK;
 }
 
@@ -252,11 +252,11 @@ static praktor_init_status init_find_template(tstr const search_paths[3],
                                               tstr *source_path) {
     size_t i;
     for (i = 0u; i < 3u; ++i) {
-        cmeta_fs_stat_t stat_value = {0};
+        fs_stat_t stat_value = {0};
         tstr candidate = init_path_join(search_paths[i], filename);
         if (candidate == NULL) return PRAKTOR_INIT_NO_MEMORY;
-        if (cmeta_fs_access(candidate, SALTS_FS_ACCESS_EXISTS) == 0 &&
-            cmeta_fs_stat(candidate, &stat_value) == 0) {
+        if (fs_access(candidate, SALTS_FS_ACCESS_EXISTS) == 0 &&
+            fs_stat(candidate, &stat_value) == 0) {
             *source_path = candidate;
             return PRAKTOR_INIT_OK;
         }
@@ -267,17 +267,17 @@ static praktor_init_status init_find_template(tstr const search_paths[3],
 
 static praktor_init_status init_copy_exclusive(const char *source_path,
                                                const char *working_directory) {
-    cmeta_fs_root_t *root = NULL;
-    cmeta_fs_root_file_t *destination = NULL;
-    cmeta_file_t source = SALTS_INVALID_FILE;
+    fs_root_t *root = NULL;
+    fs_root_file_t *destination = NULL;
+    file_t source = SALTS_INVALID_FILE;
     char buffer[PRAKTOR_INIT_COPY_CHUNK_BYTES];
     praktor_init_status status = PRAKTOR_INIT_IO_ERROR;
     int created = 0, read_count = 0;
-    if (cmeta_fs_root_open(working_directory, &root) != 0) goto finished;
-    source = cmeta_fs_open(source_path, SALTS_FS_O_RDONLY, 0);
+    if (fs_root_open(working_directory, &root) != 0) goto finished;
+    source = fs_open(source_path, SALTS_FS_O_RDONLY, 0);
     if (source == SALTS_INVALID_FILE) goto finished;
     {
-        int open_status = cmeta_fs_root_file_open(
+        int open_status = fs_root_file_open(
             root, "praktor.yml",
             SALTS_FS_O_WRONLY | SALTS_FS_O_CREAT | SALTS_FS_ROOT_O_EXCL,
             SALTS_FS_DEFAULT_MODE, &destination);
@@ -288,22 +288,22 @@ static praktor_init_status init_copy_exclusive(const char *source_path,
         if (open_status != 0) goto finished;
         created = 1;
     }
-    while ((read_count = cmeta_fs_read(source, buffer, sizeof(buffer))) > 0) {
+    while ((read_count = fs_read(source, buffer, sizeof(buffer))) > 0) {
         size_t offset = 0u;
         while (offset < (size_t)read_count) {
-            int written = cmeta_fs_root_file_write(
+            int written = fs_root_file_write(
                 destination, buffer + offset, (size_t)read_count - offset);
             if (written <= 0) goto finished;
             offset += (size_t)written;
         }
     }
     if (read_count < 0) goto finished;
-    if (cmeta_fs_root_file_close(destination) != 0) {
+    if (fs_root_file_close(destination) != 0) {
         destination = NULL;
         goto finished;
     }
     destination = NULL;
-    if (cmeta_fs_close(source) != 0) {
+    if (fs_close(source) != 0) {
         source = SALTS_INVALID_FILE;
         goto finished;
     }
@@ -311,11 +311,11 @@ static praktor_init_status init_copy_exclusive(const char *source_path,
     status = PRAKTOR_INIT_OK;
 
 finished:
-    if (destination != NULL) (void)cmeta_fs_root_file_close(destination);
-    if (source != SALTS_INVALID_FILE) (void)cmeta_fs_close(source);
+    if (destination != NULL) (void)fs_root_file_close(destination);
+    if (source != SALTS_INVALID_FILE) (void)fs_close(source);
     if (created && status != PRAKTOR_INIT_OK && root != NULL)
-        (void)cmeta_fs_root_unlink(root, "praktor.yml");
-    if (root != NULL) (void)cmeta_fs_root_close(root);
+        (void)fs_root_unlink(root, "praktor.yml");
+    if (root != NULL) (void)fs_root_close(root);
     return status;
 }
 
@@ -368,15 +368,15 @@ praktor_init_status praktor_init_project(const praktor_init_options *options,
         goto finished;
     }
     {
-        cmeta_fs_root_t *root = NULL;
-        cmeta_fs_stat_t destination = {0};
+        fs_root_t *root = NULL;
+        fs_stat_t destination = {0};
         int existing;
-        if (cmeta_fs_root_open(working_directory, &root) != 0) {
+        if (fs_root_open(working_directory, &root) != 0) {
             status = PRAKTOR_INIT_IO_ERROR;
             goto finished;
         }
-        existing = cmeta_fs_root_lstat(root, "praktor.yml", &destination);
-        (void)cmeta_fs_root_close(root);
+        existing = fs_root_lstat(root, "praktor.yml", &destination);
+        (void)fs_root_close(root);
         if (existing == 0) {
             status = PRAKTOR_INIT_ALREADY_EXISTS;
             goto finished;

@@ -1,15 +1,8 @@
 @PACKAGE_INIT@
 include(CMakeFindDependencyMacro)
-foreach(_root IN ITEMS SALTS_ROOT SALTS_UTILS_ROOT)
-    if(NOT DEFINED ENV{${_root}} OR NOT IS_DIRECTORY "$ENV{${_root}}")
-        set(Praktor_FOUND FALSE)
-        set(Praktor_NOT_FOUND_MESSAGE "${_root} is required for C11 SDK")
-        return()
-    endif()
-endforeach()
-find_dependency(Salts CONFIG
-    PATHS "$ENV{SALTS_ROOT}" NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)
-find_dependency(SaltsUtils CONFIG
-    PATHS "$ENV{SALTS_UTILS_ROOT}" NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)
+find_dependency(SaltsBase CONFIG
+    PATHS "$ENV{SALTS_BASE_ROOT}" NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)
+find_dependency(CMeta CONFIG
+    PATHS "$ENV{CMETA_ROOT}" NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)
 include("${CMAKE_CURRENT_LIST_DIR}/PraktorTargets.cmake")
 check_required_components(Praktor)

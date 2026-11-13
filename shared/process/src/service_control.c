@@ -1,6 +1,6 @@
 #include "praktor/service_control.h"
-#include <salts/clock.h>
-#include <salts/thread.h>
+#include <core/clock.h>
+#include <threads/threads.h>
 #include <ctype.h>
 #include <limits.h>
 #include <stdio.h>
@@ -90,7 +90,7 @@ void praktor_service_control_destroy(praktor_service_control *control) {
   if (s->busy) return;
   free(s->argv); free(s->metadata); free(s); control->impl = NULL;
 }
-static uint64_t now(const execution *e) { return e->host->now_ns ? e->host->now_ns(e->host->user) : cmeta_hrtime(); }
+static uint64_t now(const execution *e) { return e->host->now_ns ? e->host->now_ns(e->host->user) : hrtime(); }
 static uint64_t elapsed(const execution *e) { return now(e)-e->began; }
 static bool fail(execution *e, praktor_service_error code, const char *phase, const char *message, bool state) {
   e->result.error = code; e->result.phase = phase; e->result.message = message;
@@ -225,7 +225,7 @@ static bool poll_for(execution *e, praktor_service_state target) {
     }
     remaining = (e->budget-used+UINT64_C(999999))/UINT64_C(1000000);
     sleep = (uint32_t)((uint64_t)e->request->poll_interval_ms < remaining ? (uint64_t)e->request->poll_interval_ms : remaining);
-    if (e->host->sleep_ms) e->host->sleep_ms(e->host->user,sleep); else cmeta_sleep_ms(sleep);
+    if (e->host->sleep_ms) e->host->sleep_ms(e->host->user,sleep); else sleep_ms(sleep);
     if (!query(e,"poll")) return false;
     if (e->result.state == target) return true;
   }

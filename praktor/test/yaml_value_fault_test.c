@@ -1,6 +1,6 @@
 /* Fault each production module boundary while retaining real YAML/JSON trees. */
 #include "yml/yaml_value.h"
-#include <fmt.h>
+#include <core/fmt.h>
 #include <string.h>
 #include <tinytest.h>
 

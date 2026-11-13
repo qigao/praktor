@@ -5,7 +5,7 @@
 #include <cmeta/component.h>
 #include <cmeta/interface.h>
 #include <cmeta/object_interface.h>
-#include <salts/error_codes.h>
+#include <core/error_codes.h>
 #include <string.h>
 
 cmeta_reflect_value(praktor_runtime_limits,"praktor.runtime.limits.v3",
@@ -47,9 +47,9 @@ static cmeta_status project_owner(void *user,const cmeta_object_ref *object,
 static const cmeta_object_interface_provider interfaces={
     sizeof(cmeta_object_interface_provider),NULL,project_owner};
 
-static cmeta_status SALTS_COMPONENT_CALL create_owner(void *ctx,
+static cmeta_status SALTS_CONFIGURATOR_CALL create_owner(void *ctx,
     const cmeta_data_desc *config_data,const void *config_value,
-    const salts_component_dependency *deps,size_t count,
+    const salts_configurator_dependency *deps,size_t count,
     cmeta_object_ref *out) {
     const praktor_runtime_limits *limits=(const praktor_runtime_limits *)config_value;
     (void)deps;
@@ -62,13 +62,13 @@ static cmeta_status SALTS_COMPONENT_CALL create_owner(void *ctx,
         return CMETA_INVALID_ARGUMENT;
     return cmeta_object_borrow(out,ctx,&cmeta_data_int,NULL);
 }
-static cmeta_status SALTS_COMPONENT_CALL activate_owner(
+static cmeta_status SALTS_CONFIGURATOR_CALL activate_owner(
     void *ctx,const cmeta_object_ref *object) {
     if (!ctx || !cmeta_object_ref_valid(object))return CMETA_INVALID_ARGUMENT;
     *(int *)ctx=1;
     return CMETA_OK;
 }
-static void SALTS_COMPONENT_CALL deactivate_owner(
+static void SALTS_CONFIGURATOR_CALL deactivate_owner(
     void *ctx,const cmeta_object_ref *object) {
     (void)object;
     *(int *)ctx=0;
@@ -79,9 +79,9 @@ int praktor_component_host_start(praktor_component_host *host,
     praktor_owner_service owner=praktor_owner_service_bind(NULL,NULL);
     if (!host || !limits)return SALTS_EINVAL;
     memset(host,0,sizeof(*host));
-    host->binding=(salts_component_provider_binding){
-        sizeof(salts_component_provider_binding),
-        SALTS_COMPONENT_PROVIDER_BINDING_ABI_VERSION,
+    host->binding=(salts_configurator_provider_binding){
+        sizeof(salts_configurator_provider_binding),
+        SALTS_CONFIGURATOR_PROVIDER_BINDING_ABI_VERSION,
         cmeta_component_meta(praktor_runtime_component),
         &host->admitted,&interfaces,
         create_owner,activate_owner,deactivate_owner
@@ -90,14 +90,14 @@ int praktor_component_host_start(praktor_component_host *host,
         &host->binding,cmeta_reflected_data(praktor_runtime_limits),limits};
     if (salts_configurator_context_init(&host->context,&host->deployment,1u,
             NULL,0u,host->instances,1u,host->dependencies,1u,
-            host->activation_order,1u)!=SALTS_COMPONENT_OK)
+            host->activation_order,1u)!=SALTS_CONFIGURATOR_OK)
         return SALTS_EINVAL;
-    if (salts_configurator_context_resolve(&host->context)!=SALTS_COMPONENT_OK ||
-        salts_configurator_context_start(&host->context)!=SALTS_COMPONENT_OK)
+    if (salts_configurator_context_resolve(&host->context)!=SALTS_CONFIGURATOR_OK ||
+        salts_configurator_context_start(&host->context)!=SALTS_CONFIGURATOR_OK)
         return SALTS_EINVAL;
     host->active=true;
     if (salts_configurator_context_find_service(&host->context,
-            praktor_owner_service_interface(),&service)!=SALTS_COMPONENT_OK ||
+            praktor_owner_service_interface(),&service)!=SALTS_CONFIGURATOR_OK ||
         praktor_owner_service_borrow_from_object(
             service.object,service.interfaces,&owner)!=CMETA_OK ||
         praktor_owner_service_available(&owner)!=1) {
@@ -112,7 +112,7 @@ int praktor_component_host_start(praktor_component_host *host,
 int praktor_component_host_stop(praktor_component_host *host) {
     if (!host)return SALTS_EINVAL;
     if (!host->active)return SALTS_OK;
-    if (salts_configurator_context_stop(&host->context)!=SALTS_COMPONENT_OK)
+    if (salts_configurator_context_stop(&host->context)!=SALTS_CONFIGURATOR_OK)
         return SALTS_EIO;
     host->active=false;
     return SALTS_OK;

@@ -2,7 +2,7 @@
 #define PRAKTOR_WORKFLOW_VALUE_H
 
 #include <json_parser.h>
-#include <salts/error_codes.h>
+#include <core/error_codes.h>
 #include <stdint.h>
 
 #ifdef __cplusplus

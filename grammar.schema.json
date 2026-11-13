@@ -317,7 +317,7 @@
     },
     "triggersBlock": {
       "type": "object",
-      "description": "Defines event-driven actions to take upon task completion.",
+      "description": "Defines event-driven praktor/actions to take upon task completion.",
       "properties": {
         "on_success": {
           "$ref": "#/$defs/triggerActionList",
@@ -739,7 +739,7 @@
           ],
           "additionalProperties": false
         },
-        "actions": {
+        "praktor/actions": {
           "$ref": "#/$defs/orchestrationNode",
           "description": "Explicit orchestration tree used as the task runner."
         },
@@ -989,7 +989,7 @@
             },
             {
               "required": [
-                "actions"
+                "praktor/actions"
               ]
             },
             {
@@ -1231,7 +1231,7 @@
             },
             {
               "required": [
-                "actions"
+                "praktor/actions"
               ]
             },
             {
@@ -1472,7 +1472,7 @@
                   },
                   {
                     "required": [
-                      "actions"
+                      "praktor/actions"
                     ]
                   },
                   {

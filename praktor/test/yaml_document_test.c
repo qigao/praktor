@@ -1,7 +1,7 @@
 #include "yml/yaml_document.h"
 #include <limits.h>
-#include <fmt.h>
-#include <salts/thread.h>
+#include <core/fmt.h>
+#include <threads/threads.h>
 #include <string.h>
 #include <tinytest.h>
 
@@ -222,13 +222,13 @@ spec("C-owned YAML document and borrowed nodes") {
         tstr_free(text);
     }
     it("isolates concurrent independent parser and source owners") {
-        cmeta_thread_t threads[4] = {NULL};
+        sync_thread_t threads[4] = {NULL};
         bool passed[4] = {false}, joined = true;
         size_t created = 0, index;
         for (; created < 4; ++created)
-            if (cmeta_thread_create(&threads[created], independent_document, &passed[created]) != SALTS_OK) break;
+            if (sync_thread_create(&threads[created], independent_document, &passed[created]) != SALTS_OK) break;
         for (index = 0; index < created; ++index)
-            if (cmeta_thread_join(&threads[index]) != SALTS_OK) joined = false;
+            if (sync_thread_join(&threads[index]) != SALTS_OK) joined = false;
         check(joined && created == 4);
         for (index = 0; index < 4; ++index) check(passed[index] && !threads[index]);
     }

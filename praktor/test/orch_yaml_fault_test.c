@@ -2,12 +2,12 @@
  * Salts YAML provider and the real CSTL-backed AST remain in use; this test
  * wraps only the Praktor module's boundary calls and scratch allocations. */
 #include "yml/orch_yaml.h"
-#include <salts/error_codes.h>
+#include <core/error_codes.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 #include <tinytest.h>
-#include <tstr.h>
+#include <core/tstr.h>
 
 #define TRACKED_CAPACITY 512u
 static void *tracked[TRACKED_CAPACITY];

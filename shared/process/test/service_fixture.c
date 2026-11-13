@@ -1,10 +1,10 @@
-#include <salts/thread.h>
+#include <threads/threads.h>
 #include <stdio.h>
 #include <string.h>
 int main(int argc, char **argv) {
   FILE *file; int state = 1;
   if (argc < 4) return 2;
-  if (!strcmp(argv[2],"slow")) { cmeta_sleep_ms(2000); return 0; }
+  if (!strcmp(argv[2],"slow")) { sleep_ms(2000); return 0; }
   if (!strcmp(argv[2],"flood")) { unsigned i; for (i = 0; i < 4096; ++i) putchar('x'); return 0; }
   if (strcmp(argv[2],"Retro Camera Service")) return 3;
   if (!strcmp(argv[1],"query")) {

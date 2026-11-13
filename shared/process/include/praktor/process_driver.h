@@ -1,7 +1,7 @@
 #ifndef PRAKTOR_PROCESS_DRIVER_H
 #define PRAKTOR_PROCESS_DRIVER_H
-#include <salts/process.h>
-struct cflow_process_retainer;
+#include <process_async.h>
+struct praktor_process_retainer;
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -14,7 +14,7 @@ typedef struct praktor_process_driver { void *impl; } praktor_process_driver;
 typedef int (*praktor_process_emit)(void *user, const char *line, size_t size);
 typedef struct praktor_process_view {
   bool active, closing, done, failed, output_limited;
-  cmeta_process_result_t result;
+  process_result_t result;
   const char *stdout_data, *stderr_data, *error;
   size_t stdout_size, stderr_size;
 } praktor_process_view;
@@ -22,12 +22,12 @@ typedef struct praktor_process_view {
  * copies admission metadata). max_output_bytes is a combined stdout/stderr
  * bound. NULL retainer selects synchronous ownership: release refuses live
  * leases and the caller must continue closing; no implicit recovery owner.
- * A non-NULL retainer requires the explicit PRAKTOR_PROCESS_RETAINER build
- * capability (the P1 SDK); otherwise admission returns ENOTSUP before spawn.
- * The baseline SDK profile uses the same Process owner without P1 APIs. */
+ * A non-NULL retainer is a Praktor recovery owner over the same SaltsBase
+ * async process. Reservation precedes spawn and failed admission retains
+ * the driver until its explicit close/release cleanup. */
 int praktor_process_driver_start(praktor_process_driver *driver,
-    const cmeta_process_options_t *options, const void *input, size_t input_size,
-    size_t max_output_bytes, struct cflow_process_retainer *retainer,
+    const process_options_t *options, const void *input, size_t input_size,
+    size_t max_output_bytes, struct praktor_process_retainer *retainer,
     praktor_process_emit emit, void *emit_user);
 int praktor_process_driver_tick(praktor_process_driver *driver, bool *done);
 /* Synchronous compatibility operations. run polls a borrowed cancellation

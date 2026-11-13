@@ -1,7 +1,7 @@
 /* Inject failures at the production module's public provider/owner boundaries.
  * Parsing and decoding still use the real YAML provider, with real allocations. */
 #include "yml/yaml_document.h"
-#include <fmt.h>
+#include <core/fmt.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -63,9 +63,7 @@ static tstr fault_location(uint32_t line, uint32_t column) {
 #undef tstr_dup
 #undef tstr_format
 
-#ifdef PRAKTOR_YAML_FAULT_PROVIDER
-void praktor_yaml_test_fail(unsigned point) { failure_point = point; operation = 0; }
-#else
+
 #include <tinytest.h>
 static const char *source = "first: text\nvalue: '7'\n";
 static praktor_yaml_document *owner(void) {
@@ -160,5 +158,3 @@ spec("C YAML owner and output rollback at every provider boundary") {
         }
     }
 }
-
-#endif

@@ -1,7 +1,7 @@
 #include "yml/yaml_action_params.h"
 #include "yaml_diagnostic_internal.h"
 #include <ctype.h>
-#include <fmt.h>
+#include <core/fmt.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -11,7 +11,7 @@ struct praktor_yaml_action_params {
     /* Private bounded argument array; every tstr has exactly one owner. */
     struct { tstr *items; size_t count, capacity; } arguments;
     union {
-        struct { tstr url, path, sha256; bool overwrite; int timeout_ms; } download;
+        struct { tstr url, path, sha256, service; bool overwrite; int timeout_ms; } download;
         struct { tstr name, profile; praktor_process_operation operation; int timeout_ms, poll_interval_ms; } service;
         struct { tstr image_name, executable, working_directory; praktor_process_operation operation;
             int startup_timeout_ms, stop_timeout_ms; bool force_terminate; } process;
@@ -173,7 +173,7 @@ static int arguments(praktor_yaml_action_params *owner, praktor_yaml_node parent
 }
 #define KEY(text) {text, sizeof(text) - 1u}
 static int download(praktor_yaml_action_params *owner, praktor_yaml_node node, praktor_yaml_field_error *error) {
-    static const vstr keys[] = {KEY("url"), KEY("path"), KEY("sha256"), KEY("overwrite"), KEY("timeout_ms")};
+    static const vstr keys[] = {KEY("url"), KEY("path"), KEY("sha256"), KEY("overwrite"), KEY("timeout_ms"), KEY("service")};
     int status;
     if (!praktor_yaml_is_map(node)) return parameter_error_at(node, "download must be a map", error);
     status = praktor_yaml_check_keys(node, keys, sizeof(keys) / sizeof(keys[0]), error);
@@ -186,6 +186,10 @@ static int download(praktor_yaml_action_params *owner, praktor_yaml_node node, p
     if (status != SALTS_OK) return status;
     if (!tstr_len(owner->value.download.url)) return empty_error(node, "url", "download.url cannot be empty", error);
     if (!tstr_len(owner->value.download.path)) return empty_error(node, "path", "download.path cannot be empty", error);
+    if (praktor_yaml_has(node, "service")) {
+        status = read_text(owner, node, "service", "download.service must be a scalar", false, &owner->value.download.service, error);
+        if (status != SALTS_OK) return status;
+    }
     if (praktor_yaml_has(node, "sha256")) {
         status = read_text(owner, node, "sha256", "download.sha256 must be a scalar", false, &owner->value.download.sha256, error);
         if (status != SALTS_OK) return status;
@@ -467,7 +471,7 @@ void praktor_yaml_action_params_destroy(praktor_yaml_action_params *owner) {
     free(owner->arguments.items);
     switch (owner->kind) {
     case PRAKTOR_YAML_ACTION_DOWNLOAD:
-        tstr_free(owner->value.download.url); tstr_free(owner->value.download.path); tstr_free(owner->value.download.sha256); break;
+        tstr_free(owner->value.download.url); tstr_free(owner->value.download.path); tstr_free(owner->value.download.sha256); tstr_free(owner->value.download.service); break;
     case PRAKTOR_YAML_ACTION_SERVICE:
         tstr_free(owner->value.service.name); tstr_free(owner->value.service.profile); break;
     case PRAKTOR_YAML_ACTION_MANAGED_PROCESS:
@@ -514,7 +518,7 @@ static vstr text_view(tstr text) { return text ? tstr_to_v(text) : vstr_from_cst
 int praktor_yaml_action_download(const praktor_yaml_action_params *owner, praktor_yaml_download_view *out) {
     if (!owner || !out || owner->kind != PRAKTOR_YAML_ACTION_DOWNLOAD) return SALTS_EINVAL;
     *out = (praktor_yaml_download_view){text_view(owner->value.download.url), text_view(owner->value.download.path), text_view(owner->value.download.sha256),
-        owner->value.download.overwrite, owner->value.download.timeout_ms};
+        owner->value.download.overwrite, owner->value.download.timeout_ms, text_view(owner->value.download.service)};
     return SALTS_OK;
 }
 int praktor_yaml_action_service(const praktor_yaml_action_params *owner, praktor_yaml_service_view *out) {

@@ -1,6 +1,6 @@
 #include "yaml_diagnostic_internal.h"
 #include <ctype.h>
-#include <fmt.h>
+#include <core/fmt.h>
 #include <stdint.h>
 #include <string.h>
 
