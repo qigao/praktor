@@ -1,9 +1,3 @@
 @PACKAGE_INIT@
-include(CMakeFindDependencyMacro)
-find_dependency(SaltsBase CONFIG
-    PATHS "$ENV{SALTS_BASE_ROOT}" NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)
-find_dependency(CMeta CONFIG
-    PATHS "$ENV{CMETA_ROOT}" NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)
-find_dependency(PCRE2 10.46 CONFIG COMPONENTS 8BIT)
 include("${CMAKE_CURRENT_LIST_DIR}/PraktorTargets.cmake")
 check_required_components(Praktor)

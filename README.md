@@ -71,9 +71,10 @@ Shared modules retain their own CMake entrypoints. Common helpers stay in
 
 ## Building and qualification
 
-The installed CMake SDK exports `Praktor::Praktor` and loads its required
-SaltsBase, CMeta and PCRE2 (10.46 or newer, 8-bit) packages. Supply the matching
-shared vcpkg-cache prefix through the consumer's CMake dependency search paths.
+The installed CMake SDK exports `Praktor::Praktor`. Consumers explicitly resolve
+the required SaltsBase, CMeta and PCRE2 (10.46 or newer, 8-bit) packages before
+loading Praktor. Supply the matching shared vcpkg-cache prefix through the
+consumer's CMake dependency search paths.
 The SDK archive does not bundle those external SDKs or their runtime DLLs.
 
 The complete build consumes installed **SaltsBase**, **CMeta** and **SaltsUtils** packages from explicit `SALTS_BASE_ROOT`, `CMETA_ROOT` and `SALTS_UTILS_ROOT` environment variables. SaltsBase supplies Core, NativeIO and parsers; CMeta exports `CMeta::CMeta`, `CMeta::CSTL` and `CMeta::CFlow`; SaltsUtils supplies IDL and Schema. The shared/behavior-tree implementation lives in this repository. Configure consumes these installed dependencies without copying or rebuilding them.
@@ -81,6 +82,13 @@ The complete build consumes installed **SaltsBase**, **CMeta** and **SaltsUtils*
 Select the compiler-matched shared vcpkg-cache installation with `VCPKG_INSTALLED_DIR`. The Windows x64 LLVM-MinGW preset selects `qigao-x64-windows-llvm-mingw`; package discovery and runtime PATH use that tree. `vcpkg.json` remains the production dependency declaration. The cache checkout (`VCPKG_CACHE_REPOSITORY_ROOT`), restored installation and first-party SDK roots have separate roles; sharing the checkout does not establish ABI compatibility. Import the values described in [.env.example](.env.example) into the parent environment before invoking CMake; CMake does not load `.env`.
 
 On Windows, enter the configured `VSDEVCMD_BAT` environment and restore the selected `VCPKG_ROOT` if VsDevCmd changes it. All production modules are assembled unconditionally. `BUILD_TESTS` controls formal tests and is enabled by the full native user profile; there is no foundation-only build profile.
+
+The root `Praktor` project owns C11 and PIC for all modules. C++ is enabled only
+with `BUILD_TESTS`, with the public-header tests using root-owned strict C++17.
+Module targets retain public compile requirements, symbol visibility and folder
+settings, without repeating root language modes or setting library VERSION/
+SOVERSION. The SDK package version belongs to the root project. Target names,
+the `Praktor::` namespace and the public C ABI remain unchanged.
 
 Runtime profiles consume `CMeta::ACE`, `CMeta::CFlow` and SaltsBase's `process_async`. The public C ABI remains v3. `CMakeOptions.cmake` owns project options; dependency prefixes and runtime paths belong to the user preset. The Windows x64 entry includes the runtime, CLI, shared SDK and formal tests:
 
@@ -126,8 +134,14 @@ See [C11 runtime reset](docs/RUNTIME_RESET.md) for the owner and feature boundar
 
 ## Upstream dependency versions
 
-The locally tested Windows LLVM-MinGW chain uses SaltsBase 0.1.6, CMeta 0.1.6,
-SaltsUtils 0.1.3 and the vcpkg-cache 0.1.3 restored payload. These identify this
+The locally tested Windows LLVM-MinGW chain uses SaltsBase 0.1.8, CMeta 0.1.6,
+SaltsUtils 0.1.4 and the vcpkg-cache 0.1.3 restored payload. CMeta uses the declared
+source SDK at `679710f7e3312811efdd92494744a2499286a6a5`, built against Base 0.1.8;
+its older published 0.1.6 binary is built against Base 0.1.6. These identify this
 qualification run, rather than imposing a second package lock. The installed
-package configs enforce their dependency versions. `.env` supplies the selected
-SDK roots and version fields; preserve credentials when updating those fields.
+package configs enforce their dependency composition, and root configuration
+requires the exact versions selected in the parent environment. `.env` supplies
+the SDK roots and version fields; Praktor's native workflow loader can load it
+before CMake runs. Preserve credentials when updating those fields and use
+`cmake --fresh --preset <user-preset>` after changing SDKs. Base 0.1.8 keeps
+JPEG/libyuv discovery with direct Media consumers.

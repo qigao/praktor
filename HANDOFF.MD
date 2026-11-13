@@ -270,3 +270,39 @@ CTest 70/70 通过，install 成功；本次为增量构建。临时 runner 已�
   未创建 consumer/smoke 等独立验证工程，未验证其他平台。
 - 0.1.0 原生包使用 CMake 正式安装布局，不捆绑外部 SDK 或第三方 runtime
   DLL；消费方仍需匹配的 SaltsBase、CMeta、vcpkg-cache 及运行时路径。
+
+## 2026-11-13：统一 CMake 配置与匹配 SDK
+
+- 继续只有根 `Praktor` 一个项目。C11、PIC 和测试所需的严格 C++17 统一
+  由根目录维护；仅在 `BUILD_TESTS` 开启时启用 C++，生产仍为 C 项目。
+  删除目标上的重复标准/PIC、可由源码推导的 C linker 设置、与目标同名的
+  OUTPUT_NAME，以及 helper 的自动 VERSION/SOVERSION 和 NO_VERSION 支持。
+  保留公开编译要求、符号可见性、target 名称、`Praktor::` namespace 和
+  现有生产/测试入口；未增加内部库、独立验证工程或功能开关。
+- 原工作区已移除安装 Config 的依赖查找；本次保留该修改，并移除无用途的
+  CMakeFindDependencyMacro include。SDK 消费方显式解析所需的 Base、CMeta
+  和 PCRE2 target，再加载 Praktor；README 已同步。
+- 旧 Base 0.1.6 仍会全局查找 JPEG/libyuv。现复用已验证的 Base 0.1.8、
+  Utils 0.1.4 及匹配 Base 0.1.8 的 CMeta 0.1.6 源码 SDK，cache 仍为
+  0.1.3、编译器仍为同一 LLVM-MinGW x64。CMeta 源码 ref 为
+  `679710f7e3312811efdd92494744a2499286a6a5`；不能把按 Base 0.1.6
+  发布的旧 CMeta 0.1.6 二进制当作该组合。原 SDK 目录未覆盖。
+- Utils 使用刚发布的原始 Windows LLVM-MinGW TAR，SHA-256 为
+  `396c31ba32adcd36fd40d46785223a01fb4c1794e193035e3cae72561d17b665`。
+  经已构建 Praktor 的原生 YAML task 调用 tar 解到独立版本目录。
+  仅调整本地 `.env` 相关 SDK 根和版本字段，保留凭据及机器设置；示例同步。
+  根 find_package 读取已有版本变量进行精确查找，SDK 变更后显式 fresh 配置。
+- 独立临时 runner 从旧已安装 CLI/DLL 启动，Praktor 原生加载 `.env` 并
+  编排 `build/cmake-cleanup/verify.yml --task install`。该工作流依次执行
+  正式 fresh configure、完整 build、CTest 和 install 用户 preset，没有
+  用外部解释器加载环境、替换变量或编排构建。旧 SDK PATH 仅供 runner
+  自身加载；CMake/CTest 子进程通过用户 preset 选择当前匹配的 SDK。
+- 同一新 SDK 组合下，清理前后 553 条编译命令、全部 Ninja 构建命令及
+  71 项 CTest 的命令/属性完全一致。配置 trace 只有一个源项目，
+  JPEG/libyuv 查找和 cache 项均为零；生成审计见
+  `build/cmake-cleanup/generation-audit.json`。
+- Windows x64 完整构建、71/71 CTest（13.51 秒，JUnit 无失败/错误/跳过）
+  和 install 通过。日志、原生工作流结果、JUnit 和验证回执位于
+  `build/cmake-cleanup/`。CTest preset 将相对 JUnit 路径解释为相对 binary
+  目录，原报告位于其 `build/cmake-cleanup/ctest.xml`，另复制一份到日志目录。
+  安装前缀保持在当前 user preset 的 stage。其他平台和 sanitizer 未验证。

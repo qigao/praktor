@@ -28,7 +28,7 @@ endif()
 target_compile_features(Praktor PUBLIC c_std_11)
 target_compile_definitions(Praktor PRIVATE PRAKTOR_BUILD_SHARED=1)
 set_target_properties(Praktor PROPERTIES
-    C_VISIBILITY_PRESET hidden OUTPUT_NAME Praktor FOLDER "praktor")
+    C_VISIBILITY_PRESET hidden FOLDER "praktor")
 install(TARGETS Praktor EXPORT PraktorTargets
     RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
     LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"

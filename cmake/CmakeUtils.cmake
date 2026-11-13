@@ -1,15 +1,19 @@
 # Salts CMake Utilities
+include_guard(GLOBAL)
 
 function(cmake_config_target target_name)
-    set(options NO_INSTALL NO_VERSION)
-    set(oneValueArgs FOLDER VERSION SOVERSION EXPORT_NAME ALIAS OUTPUT_NAME)
+    set(options NO_INSTALL)
+    set(oneValueArgs FOLDER EXPORT_NAME ALIAS OUTPUT_NAME)
     set(multiValueArgs)
-    cmake_parse_arguments(ARG "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
+    cmake_parse_arguments(PARSE_ARGV 1 ARG "${options}" "${oneValueArgs}" "${multiValueArgs}")
+    if(DEFINED ARG_UNPARSED_ARGUMENTS)
+        message(FATAL_ERROR "cmake_config_target: unknown arguments: ${ARG_UNPARSED_ARGUMENTS}")
+    endif()
+    if(DEFINED ARG_KEYWORDS_MISSING_VALUES)
+        message(FATAL_ERROR "cmake_config_target: missing values for: ${ARG_KEYWORDS_MISSING_VALUES}")
+    endif()
 
     get_target_property(target_type ${target_name} TYPE)
-    if(NOT target_type)
-        message(FATAL_ERROR "cmake_config_target: target '${target_name}' does not exist")
-    endif()
 
     if(ARG_ALIAS)
         if(target_type STREQUAL "EXECUTABLE")
@@ -29,23 +33,6 @@ function(cmake_config_target target_name)
 
     if(ARG_OUTPUT_NAME)
         set_target_properties(${target_name} PROPERTIES OUTPUT_NAME ${ARG_OUTPUT_NAME})
-    endif()
-
-    if(NOT ARG_NO_VERSION AND
-       (target_type STREQUAL "SHARED_LIBRARY" OR target_type STREQUAL "STATIC_LIBRARY"))
-        if(NOT ARG_VERSION AND PROJECT_VERSION)
-            set(ARG_VERSION ${PROJECT_VERSION})
-        endif()
-        if(NOT ARG_SOVERSION AND PROJECT_VERSION_MAJOR)
-            set(ARG_SOVERSION ${PROJECT_VERSION_MAJOR})
-        endif()
-
-        if(ARG_VERSION)
-            set_target_properties(${target_name} PROPERTIES VERSION ${ARG_VERSION})
-        endif()
-        if(ARG_SOVERSION)
-            set_target_properties(${target_name} PROPERTIES SOVERSION ${ARG_SOVERSION})
-        endif()
     endif()
 
     if(NOT ARG_NO_INSTALL)
@@ -116,7 +103,7 @@ function(cmake_add_source VAR)
         endforeach()
     endforeach()
 
-    file(${glob_mode} collected ${patterns})
+    file(${glob_mode} collected CONFIGURE_DEPENDS ${patterns})
 
     if(ARG_EXCLUDES)
         list(REMOVE_ITEM collected ${ARG_EXCLUDES})
