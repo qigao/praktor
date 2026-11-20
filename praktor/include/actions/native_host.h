@@ -30,6 +30,12 @@ typedef struct praktor_native_host_config {
    * frames within the adapter's explicit match/depth/heap limits. */
   size_t regex_cache_capacity;
   size_t max_regex_captures;
+  /* Optional read-only base store. Its owner outlives this host. */
+  const praktor_value_store *parent_values;
+  bool reserve_event_fields;
+  /* Optional read-only chart membership. Returns -1 for an unknown field. */
+  int (*chart_active)(void *user, const char *field);
+  void *chart_user;
 } praktor_native_host_config;
 /* Initializes every field, including future-compatible bounded defaults. */
 void praktor_native_host_config_init(
@@ -45,6 +51,8 @@ int praktor_native_host_bind(praktor_native_host *host,
                                  praktor_bt_host *out_hooks);
 /* Borrowed value store. Do not destroy it independently. */
 praktor_value_store *praktor_native_host_values(praktor_native_host *host);
+/* Borrow the current immutable chart event until the next bind or clear. */
+void praktor_native_host_event_values(praktor_native_host *host, const praktor_value_store *values);
 #ifdef __cplusplus
 }
 #endif

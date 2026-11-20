@@ -1,4 +1,5 @@
 #include "actions/plan.h"
+#include "actions/variable_reference.h"
 #include <errno.h>
 #include <limits.h>
 #include <math.h>
@@ -32,9 +33,8 @@ static size_t text_size(const praktor_session_node *n, const praktor_leaf_parame
   return n->text_sizes ? n->text_sizes[p-n->parameters] : strlen(p->text);
 }
 static bool substituted(const praktor_session_node *n, const praktor_leaf_parameter *p) {
-  size_t size;
   if (!p || p->kind != PRAKTOR_LEAF_STRING) return false;
-  size = text_size(n,p); return size >= 2 && p->text[0] == '{' && p->text[size-1] == '}';
+  return praktor_variable_reference(vstr_from_buf(p->text,text_size(n,p))).data != NULL;
 }
 static int fail(char *error, size_t capacity, const char *action, const char *detail) {
   if (error && capacity) (void)snprintf(error,capacity,"Node '%s': %s",action ? action : "",detail);
@@ -77,11 +77,34 @@ int praktor_compile_node(const salts_bt_tree_config *limits, const char *action,
   }
   n.action = action; n.parameters = parameters; n.parameter_count = count; n.text_sizes = sizes;
   n.tree.parent_index = parent; n.tree.kind = kind(action);
+  for (i = 0; i < count; ++i) {
+    p = parameters+i;
+    const bool source = !strcmp(p->name,"input_key") || !strcmp(p->name,"from") ||
+                        !strcmp(p->name,"watch_key") || !strcmp(p->name,"queue_key");
+    if (source && !substituted(&n,p))
+      return fail(error,capacity,action,"read ports require a $name reference");
+    if (p->kind == PRAKTOR_LEAF_STRING &&
+        !(strcmp(p->name,"condition") == 0 && find(&n,"guard_fields")) &&
+        praktor_retired_variable_reference(vstr_from_buf(p->text,text_size(&n,p))))
+      return fail(error,capacity,action,"use $name for a variable reference");
+  }
   scalar = find(&n,"condition") != NULL;
   if (!strcmp(action,"SubTree")) return fail(error,capacity,action,"SubTree must be expanded before plan compilation");
   switch (n.tree.kind) {
     case SALTS_BT_NODE_LEAF:
       if (children) return fail(error,capacity,action,"unsupported control has children; refusing to reinterpret as a leaf");
+      if (strcmp(action,"Assert")==0) {
+        n.guard_leaf = PRAKTOR_GUARD_LEAF_ASSERT;
+      } else if (strcmp(action,"WaitUntil")==0) {
+        n.guard_leaf = PRAKTOR_GUARD_LEAF_WAIT_UNTIL;
+        p = find(&n,"timeout_ms");
+        if (!p || praktor_parameter_integer(p,p->kind == PRAKTOR_LEAF_STRING ? text_size(&n,p) : 0,&value) != SALTS_OK ||
+            value <= 0)
+          return fail(error,capacity,action,"timeout_ms must be a positive 32-bit integer");
+        n.guard_timeout_ns = (uint64_t)value * UINT64_C(1000000);
+      }
+      if (n.guard_leaf != PRAKTOR_GUARD_LEAF_NONE && (!scalar || !find(&n,"guard_fields")))
+        return fail(error,capacity,action,"a compiled guard is required");
       break;
     case SALTS_BT_NODE_IF_THEN_ELSE:
       if (children < (scalar ? 1u : 2u) || children > (scalar ? 2u : 3u))
@@ -103,7 +126,15 @@ int praktor_compile_node(const salts_bt_tree_config *limits, const char *action,
       break;
     default: break;
   }
-  if (n.tree.kind == SALTS_BT_NODE_SWITCH && !find(&n,"variable")) return fail(error,capacity,action,"Switch requires parameter 'variable'");
+  if (n.tree.kind == SALTS_BT_NODE_SWITCH) {
+    p = find(&n,"variable");
+    const praktor_leaf_parameter *labels = find(&n,"case_labels");
+    if (labels && (labels->kind != PRAKTOR_LEAF_STRING || !substituted(&n,p)))
+      return fail(error,capacity,action,"Switch with named cases requires a $name reference");
+    if (!labels && !substituted(&n,p) &&
+        praktor_parameter_integer(p,p && p->kind == PRAKTOR_LEAF_STRING ? text_size(&n,p) : 0,&value) != SALTS_OK)
+      return fail(error,capacity,action,"Switch requires a $name reference or an integer");
+  }
   if (n.tree.kind == SALTS_BT_NODE_ENTRY_UPDATED && !find(&n,"watch_key")) return fail(error,capacity,action,"EntryUpdated requires parameter 'watch_key'");
   if (!children && (n.tree.kind == SALTS_BT_NODE_PARALLEL || n.tree.kind == SALTS_BT_NODE_REACTIVE_SEQUENCE ||
                    n.tree.kind == SALTS_BT_NODE_REACTIVE_FALLBACK || n.tree.kind == SALTS_BT_NODE_SWITCH)) {
@@ -124,6 +155,9 @@ int praktor_compile_node(const salts_bt_tree_config *limits, const char *action,
     p = find(&n,key); dynamic = substituted(&n,p);
     if (!p && n.tree.kind == SALTS_BT_NODE_REPEAT) return fail(error,capacity,action,"Repeat requires parameter 'num_cycles'");
     value = fallback;
+    if (!p && n.tree.kind == SALTS_BT_NODE_WHILE_DO &&
+        (size_t)value > limits->max_control_iterations)
+      value = (int)limits->max_control_iterations;
     if (dynamic && n.tree.kind == SALTS_BT_NODE_REPEAT) value = 0;
     else if (dynamic && n.tree.kind != SALTS_BT_NODE_TIMEOUT && n.tree.kind != SALTS_BT_NODE_DELAY &&
              (size_t)value > limits->max_control_iterations) value = (int)limits->max_control_iterations;

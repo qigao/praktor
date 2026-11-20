@@ -1,6 +1,8 @@
 #include "actions/native_host.h"
+#include "actions/json_selection.h"
 #include "actions/output_scan.h"
 #include "actions/regex_pcre2.h"
+#include "actions/variable_reference.h"
 #include <json_parser.h>
 #include <ctype.h>
 #include <core/clock.h>
@@ -32,6 +34,11 @@ typedef struct native_regex_cache_entry {
 
 typedef struct native_host_impl {
   praktor_value_store values;
+  const praktor_value_store *parent_values;
+  const praktor_value_store *event_values;
+  bool reserve_event_fields;
+  int (*chart_active)(void *user, const char *field);
+  void *chart_user;
   size_t scratch_capacity;
   size_t max_value_bytes;
   char *scratch;
@@ -57,10 +64,35 @@ static int value_result(int result) {
 }
 /* Explicit task/root values override inherited process environment. Dotenv is
  * loaded by the caller before execution; never cache or mutate env here. */
+static bool event_field(native_host_impl *impl, const char *key) {
+  return impl->reserve_event_fields && key && !strncmp(key, "event.", 6u);
+}
+static bool chart_field(native_host_impl *impl, const char *key) {
+  return impl->chart_active && key && !strncmp(key, "chart.", 6u);
+}
+static int read_value(native_host_impl *impl, const char *key, char *value,
+                      size_t capacity, size_t *size) {
+  if (chart_field(impl,key)) {
+    const int active=impl->chart_active(impl->chart_user,key+6u);
+    if(active<0)return PRAKTOR_VALUE_ENOTFOUND;
+    *size=1u;
+    if(!value||capacity<=1u)return PRAKTOR_VALUE_ENOBUFS;
+    value[0]=active?'1':'0';
+    value[1]='\0';
+    return PRAKTOR_VALUE_OK;
+  }
+  if (event_field(impl,key))
+    return impl->event_values ? praktor_value_store_get(impl->event_values,key,value,capacity,size)
+                              : PRAKTOR_VALUE_ENOTFOUND;
+  int rc=praktor_value_store_get(&impl->values,key,value,capacity,size);
+  if (rc == PRAKTOR_VALUE_ENOTFOUND && impl->parent_values)
+    return praktor_value_store_get(impl->parent_values,key,value,capacity,size);
+  return rc;
+}
 static int lookup_value(native_host_impl *impl,const char *key,char *value,
                         size_t capacity,size_t *size) {
-  int rc=praktor_value_store_get(&impl->values,key,value,capacity,size);
-  if(rc!=PRAKTOR_VALUE_ENOTFOUND)return rc;
+  int rc=read_value(impl,key,value,capacity,size);
+  if(rc!=PRAKTOR_VALUE_ENOTFOUND||event_field(impl,key)||chart_field(impl,key))return rc;
   const char *environment=getenv(key);
   if(!environment)return PRAKTOR_VALUE_ENOTFOUND;
   size_t length=strlen(environment);
@@ -73,13 +105,28 @@ static int get_value(void *user, const char *key, char *value,
   native_host_impl *impl = (native_host_impl *)user;
   return value_result(lookup_value(impl,key,value,capacity,size));
 }
+static int write_value(native_host_impl *impl, const char *key, const char *value) {
+  if (event_field(impl,key)||chart_field(impl,key)) return PRAKTOR_VALUE_EINVAL;
+  return praktor_value_store_set(&impl->values,key,value);
+}
 static int set_value(void *user, const char *key, const char *value) {
   native_host_impl *impl = (native_host_impl *)user;
-  return value_result(praktor_value_store_set(&impl->values, key, value));
+  return value_result(write_value(impl,key,value));
 }
 static int contains_value(void *user, const char *key, int *contains) {
   native_host_impl *impl = (native_host_impl *)user;
+  if (chart_field(impl,key)) {
+    *contains=impl->chart_active(impl->chart_user,key+6u)>=0;
+    return PRAKTOR_BT_VALUE_OK;
+  }
+  if (event_field(impl,key)) {
+    *contains=0;
+    return impl->event_values ? value_result(praktor_value_store_contains(impl->event_values,key,contains))
+                              : PRAKTOR_BT_VALUE_OK;
+  }
   int result=praktor_value_store_contains(&impl->values,key,contains);
+  if (result == PRAKTOR_VALUE_OK && !*contains && impl->parent_values)
+    result=praktor_value_store_contains(impl->parent_values,key,contains);
   if(result==PRAKTOR_VALUE_OK&&!*contains&&getenv(key))*contains=1;
   return value_result(result);
 }
@@ -98,10 +145,9 @@ static int copy_text(char *out, size_t capacity, const char *text) {
   memcpy(out, text, length + 1u);
   return SALTS_OK;
 }
-/* Resolve exact {key} substitutions, matching the legacy parameter convention. */
 static int resolve(native_host_impl *impl, const praktor_leaf_parameter *param,
-                    char *out, char *key_scratch) {
-  size_t length, required = 0u;
+                    char *out) {
+  size_t required = 0u;
   int written;
   if (param == NULL) return SALTS_EINVAL;
   switch (param->kind) {
@@ -111,20 +157,25 @@ static int resolve(native_host_impl *impl, const praktor_leaf_parameter *param,
       if (!isfinite(param->number)) return SALTS_EINVAL;
       written = snprintf(out, impl->scratch_capacity, "%.6f", param->number);
       return written >= 0 && (size_t)written < impl->scratch_capacity ? SALTS_OK : SALTS_ENOBUFS;
-    case PRAKTOR_LEAF_STRING:
+    case PRAKTOR_LEAF_STRING: {
       if (param->text == NULL) return SALTS_EINVAL;
-      length = strlen(param->text);
-      if (length >= 3u && param->text[0] == '{' && param->text[length - 1u] == '}') {
-        if (length - 2u >= impl->scratch_capacity) return SALTS_ENOBUFS;
-        memcpy(key_scratch, param->text + 1, length - 2u);
-        key_scratch[length - 2u] = '\0';
-        return lookup_value(impl, key_scratch, out,
+      const vstr text = vstr_from_cstr(param->text);
+      if (praktor_retired_variable_reference(text)) return SALTS_EINVAL;
+      const vstr key = praktor_variable_reference(text);
+      if (key.data) {
+        return lookup_value(impl, key.data, out,
                                            impl->scratch_capacity, &required) == PRAKTOR_VALUE_OK
             ? SALTS_OK : SALTS_EINVAL;
       }
       return copy_text(out, impl->scratch_capacity, param->text);
+    }
   }
   return SALTS_EINVAL;
+}
+static const char *source_key(const praktor_leaf_parameter *param, const char *fallback) {
+  if (!param) return fallback;
+  return param->kind == PRAKTOR_LEAF_STRING && param->text
+      ? praktor_variable_reference(vstr_from_cstr(param->text)).data : NULL;
 }
 static int parse_integer(const char *text, int *out) {
   char *end = NULL;
@@ -154,7 +205,7 @@ static int resolve_integer(native_host_impl *impl,
     *out = (int)param->number;
     return SALTS_OK;
   }
-  result = resolve(impl, param, scratch, scratch + impl->scratch_capacity);
+  result = resolve(impl, param, scratch);
   if (result != SALTS_OK) return result;
   return parse_integer(scratch, out);
 }
@@ -218,8 +269,7 @@ static int sleep_duration(native_host_impl *impl,
     if (param->kind == PRAKTOR_LEAF_NUMBER) {
       value = param->number;
     } else if (param->kind == PRAKTOR_LEAF_STRING) {
-      result = resolve(impl, param, impl->scratch,
-                        impl->scratch + impl->scratch_capacity);
+      result = resolve(impl, param, impl->scratch);
       if (result != SALTS_OK) return result;
       errno = 0;
       value = strtod(impl->scratch, &end);
@@ -289,7 +339,7 @@ static int tick_parse_lines(native_host_impl *impl,
   praktor_value_write writes[2];
   param = parameter(request, "filter");
   if (param != NULL) {
-    result = resolve(impl, param, input, temporary);
+    result = resolve(impl, param, input);
     if (result != SALTS_OK) return result;
     if (*input != '\0') {
       regex_status = cached_regex(impl, input, &filter);
@@ -300,10 +350,9 @@ static int tick_parse_lines(native_host_impl *impl,
     }
   }
   param = parameter(request, "input_key");
-  result = param == NULL ? copy_text(key, impl->scratch_capacity, "shell_output")
-                         : resolve(impl, param, key, temporary);
-  if (result != SALTS_OK) return result;
-  result = praktor_value_store_get(&impl->values, key, input,
+  const char *source = source_key(param, "shell_output");
+  if (!source) return SALTS_EINVAL;
+  result = lookup_value(impl, source, input,
                                        impl->scratch_capacity, &required);
   if (result == PRAKTOR_VALUE_ENOTFOUND) {
     *status = SALTS_BT_FAILURE;
@@ -312,7 +361,7 @@ static int tick_parse_lines(native_host_impl *impl,
   if (result != PRAKTOR_VALUE_OK) return SALTS_EINVAL;
   param = parameter(request, "output_key");
   result = param == NULL ? copy_text(key, impl->scratch_capacity, "parsed_lines")
-                         : resolve(impl, param, key, temporary);
+                         : resolve(impl, param, key);
   if (result != SALTS_OK) return result;
   key_size = strlen(key);
   if (impl->scratch_capacity - key_size <= sizeof("_count") - 1u)
@@ -348,6 +397,8 @@ static int tick_parse_lines(native_host_impl *impl,
   if (count_size < 0 || (size_t)count_size >= sizeof(count_text)) return SALTS_ENOBUFS;
   writes[0].key = key; writes[0].value = input;
   writes[1].key = temporary; writes[1].value = count_text;
+  if (event_field(impl,key) || event_field(impl,temporary) ||
+      chart_field(impl,key) || chart_field(impl,temporary)) return SALTS_EINVAL;
   result = praktor_value_store_set_many(&impl->values, writes, 2u);
   if (result != PRAKTOR_VALUE_OK)
     return result == PRAKTOR_VALUE_EINVAL ? SALTS_EINVAL : SALTS_ENOBUFS;
@@ -355,11 +406,16 @@ static int tick_parse_lines(native_host_impl *impl,
   return SALTS_OK;
 }
 
-/* Native JSONPath delegates to the canonical installed C11 SaltsUtils parser.
- * Equivalent to Legacy OutputParser::parseJson for UTF-8 text: normalize
- * paths, select first match, unquote JSON strings, serialize other values.
- * Parse/no-match failure leaves existing outputs untouched. Binary JSON
- * strings cannot be stored in the bounded C11 text store and fail closed. */
+static int json_output(native_host_impl *impl,const char *key,const char *value) {
+  const int written=write_value(impl,key,value);
+  if(written==PRAKTOR_VALUE_OK)return SALTS_OK;
+  if(written==PRAKTOR_VALUE_ENOMEM)return SALTS_ENOMEM;
+  if(written==PRAKTOR_VALUE_EINVAL)return SALTS_EINVAL;
+  return SALTS_ENOBUFS;
+}
+
+/* The default result keeps the existing first-match DOM semantics. The
+ * cardinality-aware modes count matches in the SDK's SAX query stream. */
 static int tick_parse_json(native_host_impl *impl,
                            const praktor_leaf_request *request,
                            salts_bt_node_status *status) {
@@ -367,47 +423,56 @@ static int tick_parse_json(native_host_impl *impl,
   char *key=impl->scratch;
   char *input=key+impl->scratch_capacity;
   char *path=input+impl->scratch_capacity;
-  char *temporary=path+impl->scratch_capacity;
-  char *out_key=temporary+impl->scratch_capacity;
+  char *out_key=path+impl->scratch_capacity;
   json_value_t *document=NULL,*selected=NULL;
   char *serialized=NULL;
   const char *value=NULL;
   size_t required=0u,length=0u;
   int r;
+  praktor_json_result mode=PRAKTOR_JSON_FIRST;
+  param=parameter(request,"result");
+  if(param&&(param->kind!=PRAKTOR_LEAF_STRING||!param->text||
+             praktor_json_result_parse(param->text,&mode)!=SALTS_OK))return SALTS_EINVAL;
   param=parameter(request,"input_key");
-  r=param ? resolve(impl,param,key,temporary)
-          : copy_text(key,impl->scratch_capacity,"shell_output");
-  if(r!=SALTS_OK)return r;
-  r=praktor_value_store_get(&impl->values,key,input,
+  const char *source=source_key(param,"shell_output");
+  if(!source)return SALTS_EINVAL;
+  r=lookup_value(impl,source,input,
                                 impl->scratch_capacity,&required);
-  if(r==PRAKTOR_VALUE_ENOTFOUND){*status=SALTS_BT_FAILURE;return SALTS_OK;}
+  if(r==PRAKTOR_VALUE_ENOTFOUND) {
+    if(mode!=PRAKTOR_JSON_FIRST) {
+      if(request->error&&request->error_capacity)
+        (void)snprintf(request->error,request->error_capacity,
+                       "ParseJson: input variable '%s' is missing",source);
+      return SALTS_ENOENT;
+    }
+    *status=SALTS_BT_FAILURE;
+    return SALTS_OK;
+  }
   if(r!=PRAKTOR_VALUE_OK)
     return r==PRAKTOR_VALUE_ENOBUFS?SALTS_ENOBUFS:SALTS_EINVAL;
   param=parameter(request,"path");
-  r=param?resolve(impl,param,path,temporary)
-         :copy_text(path,impl->scratch_capacity,"");
-  if(r!=SALTS_OK)return r;
-  /* Legacy trims whitespace before converting key and array notation. */
-  {
-    char *start=path;
-    while(*start&&isspace((unsigned char)*start))++start;
-    length=strlen(start);
-    while(length&&isspace((unsigned char)start[length-1u]))--length;
-    memmove(path,start,length);path[length]='\0';
-  }
-  length=strlen(path);
-  if(!length){r=copy_text(path,impl->scratch_capacity,"$");if(r!=SALTS_OK)return r;}
-  else if(path[0]=='['){
-    if(length+1u>=impl->scratch_capacity)return SALTS_ENOBUFS;
-    memmove(path+1u,path,length+1u);path[0]='$';
-  }else if(path[0]!='$'){
-    if(length+2u>=impl->scratch_capacity)return SALTS_ENOBUFS;
-    memmove(path+2u,path,length+1u);path[0]='$';path[1]='.';
+  const char *fixed_path="";
+  if(mode==PRAKTOR_JSON_FIRST) {
+    r=param?resolve(impl,param,path):copy_text(path,impl->scratch_capacity,"");
+    if(r!=SALTS_OK)return r;
+    r=praktor_json_path_normalize(path,impl->scratch_capacity);
+    if(r!=SALTS_OK)return r;
+  }else if(param){
+    if(param->kind!=PRAKTOR_LEAF_STRING||!param->text)return SALTS_EINVAL;
+    fixed_path=param->text;
   }
   param=parameter(request,"output_key");
-  r=param?resolve(impl,param,out_key,temporary)
+  r=param?resolve(impl,param,out_key)
          :copy_text(out_key,impl->scratch_capacity,"parsed_output");
   if(r!=SALTS_OK)return r;
+  if(mode!=PRAKTOR_JSON_FIRST) {
+    r=praktor_json_selection_run(mode,fixed_path,input,required,path,
+        impl->max_value_bytes+1u,request->error,request->error_capacity);
+    if(r!=SALTS_OK)return r;
+    r=json_output(impl,out_key,path);
+    if(r==SALTS_OK)*status=SALTS_BT_SUCCESS;
+    return r;
+  }
   document=json_parse(input,strlen(input));
   if(!document){*status=SALTS_BT_FAILURE;return SALTS_OK;}
   selected=json_path_get(document,path); /* borrowed from document */
@@ -425,12 +490,7 @@ static int tick_parse_json(native_host_impl *impl,
     value=serialized;
   }
   if(length>=impl->scratch_capacity)r=SALTS_ENOBUFS;
-  else{
-    int write=praktor_value_store_set(&impl->values,out_key,value);
-    r=write==PRAKTOR_VALUE_OK?SALTS_OK:
-      write==PRAKTOR_VALUE_ENOMEM?SALTS_ENOMEM:
-      write==PRAKTOR_VALUE_EINVAL?SALTS_EINVAL:SALTS_ENOBUFS;
-  }
+  else r=json_output(impl,out_key,value);
   json_serialize_free(serialized);
   json_free(document);
   if(r!=SALTS_OK)return r;
@@ -452,10 +512,9 @@ static int tick_parse_regex(native_host_impl *impl,
   int result, capture_group = 1;
 
   param = parameter(request, "input_key");
-  result = param == NULL ? copy_text(key, impl->scratch_capacity, "shell_output")
-                         : resolve(impl, param, key, temporary);
-  if (result != SALTS_OK) return result;
-  result = praktor_value_store_get(&impl->values, key, input,
+  const char *source = source_key(param, "shell_output");
+  if (!source) return SALTS_EINVAL;
+  result = lookup_value(impl, source, input,
                                        impl->scratch_capacity, &required);
   if (result == PRAKTOR_VALUE_ENOTFOUND) {
     *status = SALTS_BT_FAILURE;
@@ -465,7 +524,7 @@ static int tick_parse_regex(native_host_impl *impl,
 
   param = parameter(request, "pattern");
   result = param == NULL ? copy_text(pattern, impl->scratch_capacity, "")
-                         : resolve(impl, param, pattern, temporary);
+                         : resolve(impl, param, pattern);
   if (result != SALTS_OK) return result;
   regex_status = cached_regex(impl, pattern, &regex);
   if (regex_status == PRAKTOR_REGEX_INVALID_PATTERN) {
@@ -491,7 +550,7 @@ static int tick_parse_regex(native_host_impl *impl,
 
   param = parameter(request, "output_key");
   result = param == NULL ? copy_text(key, impl->scratch_capacity, "parsed_output")
-                         : resolve(impl, param, key, temporary);
+                         : resolve(impl, param, key);
   if (result != SALTS_OK) return result;
   if (!match.participated) {
     temporary[0] = '\0';
@@ -500,7 +559,7 @@ static int tick_parse_regex(native_host_impl *impl,
     memcpy(temporary, input + match.offset, match.size);
     temporary[match.size] = '\0';
   }
-  result = praktor_value_store_set(&impl->values, key, temporary);
+  result = write_value(impl,key,temporary);
   if (result != PRAKTOR_VALUE_OK)
     return result == PRAKTOR_VALUE_EINVAL ? SALTS_EINVAL : SALTS_ENOBUFS;
   *status = SALTS_BT_SUCCESS;
@@ -509,29 +568,28 @@ static int tick_parse_regex(native_host_impl *impl,
 
 static int tick_parse_key_value(native_host_impl *impl,
     const praktor_leaf_request *request, salts_bt_node_status *status) {
-  const char *names[] = {"input_key", "delimiter", "line_separator", "output_key"};
-  const char *defaults[] = {"shell_output", "=", "\n", "parsed_output"};
+  const char *names[] = {"delimiter", "line_separator", "output_key"};
+  const char *defaults[] = {"=", "\n", "parsed_output"};
   char *input = impl->scratch;
   char *delimiter = input + impl->scratch_capacity;
   char *separator = delimiter + impl->scratch_capacity;
   char *key = separator + impl->scratch_capacity;
   char *output = key + impl->scratch_capacity;
-  char *ports[] = {key, delimiter, separator, key};
+  char *ports[] = {delimiter, separator, key};
   size_t i, required = 0u;
   int result;
-  /* Resolve input key, snapshot input, then resolve the remaining ports. All
+  /* Snapshot the input, then resolve the remaining ports. All
    * aliases are safe: no value store publication happens until encoding ends. */
-  for (i = 0u; i < 4u; ++i) {
+  const char *source = source_key(parameter(request, "input_key"), "shell_output");
+  if (!source) return SALTS_EINVAL;
+  result = lookup_value(impl, source, input, impl->scratch_capacity, &required);
+  if (result == PRAKTOR_VALUE_ENOTFOUND) { *status = SALTS_BT_FAILURE; return SALTS_OK; }
+  if (result != PRAKTOR_VALUE_OK) return SALTS_EINVAL;
+  for (i = 0u; i < 3u; ++i) {
     const praktor_leaf_parameter *param = parameter(request, names[i]);
     result = param == NULL ? copy_text(ports[i], impl->scratch_capacity, defaults[i])
-        : resolve(impl, param, ports[i], output);
+        : resolve(impl, param, ports[i]);
     if (result != SALTS_OK) return result;
-    if (i == 0u) {
-      result = praktor_value_store_get(&impl->values, key, input,
-          impl->scratch_capacity, &required);
-      if (result == PRAKTOR_VALUE_ENOTFOUND) { *status = SALTS_BT_FAILURE; return SALTS_OK; }
-      if (result != PRAKTOR_VALUE_OK) return SALTS_EINVAL;
-    }
   }
   result = praktor_output_key_value_json(
       (praktor_output_span){input, strlen(input)},
@@ -539,7 +597,7 @@ static int tick_parse_key_value(native_host_impl *impl,
       (praktor_output_span){separator, strlen(separator)},
       impl->pairs, impl->pair_capacity, output, impl->scratch_capacity);
   if (result != 0) return result == -2 ? SALTS_ENOBUFS : SALTS_EINVAL;
-  result = praktor_value_store_set(&impl->values, key, output);
+  result = write_value(impl,key,output);
   if (result != PRAKTOR_VALUE_OK)
     return result == PRAKTOR_VALUE_EINVAL ? SALTS_EINVAL : SALTS_ENOBUFS;
   *status = SALTS_BT_SUCCESS;
@@ -550,8 +608,8 @@ static int tick_leaf(void *user, const praktor_leaf_request *request,
                       salts_bt_node_status *status) {
   native_host_impl *impl = (native_host_impl *)user;
   const praktor_leaf_parameter *param;
-  char *key, *value, *temporary;
-  int result, contains = 0, expected = 0, actual = 0;
+  char *key, *value;
+  int result, expected = 0, actual = 0;
   size_t required = 0u, i, j;
   if (impl == NULL || request == NULL || request->action == NULL || status == NULL ||
       (request->parameter_count != 0u && request->parameters == NULL)) return SALTS_EINVAL;
@@ -570,36 +628,31 @@ static int tick_leaf(void *user, const praktor_leaf_request *request,
   if (strcmp(request->action, "ParseKeyValue") == 0) return tick_parse_key_value(impl, request, status);
   key = impl->scratch;
   value = key + impl->scratch_capacity;
-  temporary = value + impl->scratch_capacity;
   if (strcmp(request->action, "SetVariable") == 0) {
     param = parameter(request, "key");
     if (param == NULL) { *status = SALTS_BT_FAILURE; return SALTS_OK; }
-    result = resolve(impl, param, key, temporary);
+    result = resolve(impl, param, key);
     if (result != SALTS_OK) return result;
     param = parameter(request, "value");
     if (param != NULL) {
-      result = resolve(impl, param, value, temporary);
+      result = resolve(impl, param, value);
     } else if ((param = parameter(request, "from")) != NULL) {
-      result = resolve(impl, param, temporary, value);
-      if (result != SALTS_OK) return result;
-      result = praktor_value_store_contains(&impl->values, temporary, &contains);
-      if (result != PRAKTOR_VALUE_OK) return SALTS_EINVAL;
-      if (!contains) { *status = SALTS_BT_FAILURE; return SALTS_OK; }
-      result = praktor_value_store_get(&impl->values, temporary, value,
-                                           impl->scratch_capacity, &required) == PRAKTOR_VALUE_OK
-          ? SALTS_OK : SALTS_EINVAL;
+      const char *source = source_key(param, NULL);
+      if (!source) return SALTS_EINVAL;
+      result = lookup_value(impl, source, value, impl->scratch_capacity, &required);
+      if (result == PRAKTOR_VALUE_ENOTFOUND) { *status = SALTS_BT_FAILURE; return SALTS_OK; }
+      result = result == PRAKTOR_VALUE_OK ? SALTS_OK : SALTS_EINVAL;
     } else { *status = SALTS_BT_FAILURE; return SALTS_OK; }
     if (result != SALTS_OK) return result;
-    result = praktor_value_store_set(&impl->values, key, value);
-    if (result != PRAKTOR_VALUE_OK) return SALTS_ENOBUFS;
+    result = write_value(impl,key,value);
+    if (result != PRAKTOR_VALUE_OK) return result == PRAKTOR_VALUE_EINVAL ? SALTS_EINVAL : SALTS_ENOBUFS;
     *status = SALTS_BT_SUCCESS;
     return SALTS_OK;
   }
   if (strcmp(request->action, "CheckExitCode") == 0) {
     param = parameter(request, "input_key");
-    result = param == NULL ? copy_text(key, impl->scratch_capacity, "shell_exit_code")
-                           : resolve(impl, param, key, temporary);
-    if (result != SALTS_OK) return result;
+    const char *source = source_key(param, "shell_exit_code");
+    if (!source) return SALTS_EINVAL;
     param = parameter(request, "expected");
     if (param != NULL) {
       if (param->kind == PRAKTOR_LEAF_BOOLEAN) return SALTS_EINVAL;
@@ -608,11 +661,11 @@ static int tick_leaf(void *user, const praktor_leaf_request *request,
             fabs(param->number - trunc(param->number)) > 0.0) return SALTS_EINVAL;
         expected = (int)param->number;
       } else {
-        result = resolve(impl, param, value, temporary);
+        result = resolve(impl, param, value);
         if (result != SALTS_OK || parse_integer(value, &expected) != SALTS_OK) return SALTS_EINVAL;
       }
     }
-    result = praktor_value_store_get(&impl->values, key, value,
+    result = lookup_value(impl, source, value,
                                          impl->scratch_capacity, &required);
     if (result == PRAKTOR_VALUE_ENOTFOUND) { *status = SALTS_BT_FAILURE; return SALTS_OK; }
     if (result != PRAKTOR_VALUE_OK || parse_integer(value, &actual) != SALTS_OK) return SALTS_EINVAL;
@@ -657,6 +710,10 @@ int praktor_native_host_init_with_config(
   }
   impl->scratch_capacity = scratch_bytes + 1u;
   impl->max_value_bytes = config->max_value_bytes;
+  impl->parent_values = config->parent_values;
+  impl->reserve_event_fields = config->reserve_event_fields;
+  impl->chart_active = config->chart_active;
+  impl->chart_user = config->chart_user;
   impl->scratch = (char *)calloc(5u, impl->scratch_capacity);
   impl->pair_capacity = config->max_value_bytes / 2u + 1u;
   impl->pairs = (praktor_output_pair *)calloc(impl->pair_capacity, sizeof(praktor_output_pair));
@@ -736,4 +793,8 @@ int praktor_native_host_bind(praktor_native_host *host, praktor_bt_host *out_hoo
 praktor_value_store *praktor_native_host_values(praktor_native_host *host) {
   native_host_impl *impl = host == NULL ? NULL : (native_host_impl *)host->impl;
   return impl == NULL ? NULL : &impl->values;
+}
+void praktor_native_host_event_values(praktor_native_host *host, const praktor_value_store *values) {
+  native_host_impl *impl = host->impl;
+  impl->event_values = values;
 }

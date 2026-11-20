@@ -62,6 +62,29 @@ spec("Praktor CLI workflow execution") {
     check(process_read_stderr(child, error, sizeof(error) - 1u, &size) == SALTS_OK);
     check(strstr(error, "usage: praktor --config workflow.yml") != NULL);
   }
+  it("runs the repository basic example with whole-value command references") {
+    const char *arguments[]={"--config",PRAKTOR_CLI_BASIC_EXAMPLE,"--task","goodbye",NULL};
+    process_options_t options;
+    process_result_t result={0};
+    char output[8192]={0};
+    size_t size=0u;
+    process_options_init(&options);
+    options.program=PRAKTOR_CLI_PATH;
+    options.args=arguments;
+    options.timeout_ms=5000u;
+    options.max_output_bytes=sizeof output-1u;
+    check_equal(process_spawn(&options,&child),SALTS_OK);
+    check_equal(process_wait_for(child,10000u,&result),SALTS_OK);
+    check(result.state==SALTS_PROCESS_EXITED && result.exit_code==0);
+    check_equal(process_read_stdout(child,output,sizeof output-1u,&size),SALTS_OK);
+    document=json_parse(output,size);
+    check_not_null(document);
+    const json_value_t *tasks=json_object_get(document,"tasks");
+    const json_value_t *hello=json_object_get(json_object_get(tasks,"hello"),"outputs");
+    const json_value_t *goodbye=json_object_get(json_object_get(tasks,"goodbye"),"outputs");
+    check_contains(required_text(hello,"stdout"),"Hello from MyProject");
+    check_contains(required_text(goodbye,"stdout"),"Execution of MyProject workflow finished.");
+  }
   it("loads dotEnv and evaluates root variables and task vars through the shared library") {
     const char *arguments[] = {PRAKTOR_CLI_ENV_WORKFLOW, NULL};
     process_options_t options;
@@ -84,6 +107,7 @@ spec("Praktor CLI workflow execution") {
     const json_value_t *overlay = json_object_get(json_object_get(tasks, "overlay"), "outputs");
     check(strstr(required_text(root, "stdout"), "root-scope") != NULL);
     check(strstr(required_text(overlay, "stdout"), "dotenv-loaded") != NULL);
+    check(strcmp(required_text(json_object_get(tasks,"matrix.dotenv-0"),"status"),"success")==0);
   }
   it("accepts an explicit workflow timeout through the positive int boundary") {
     const char *arguments[] = {PRAKTOR_CLI_WORKFLOW, "--timeout-ms", "2147483647", NULL};

@@ -11,13 +11,16 @@ tasks:
   - name: first
     tool: packages
     with:
-      url: '{first_url}'
-      path: '{first_path}'
+      url: $first_url
+      path: $first_path
   - name: second
-    tool: packages
-    with:
-      url: '{second_url}'
-      path: '{second_path}'
+    outputs: [$second_package]
+    actions:
+      Sequence:
+        - Tool:
+            service: packages
+            with: {url: $second_url, path: $second_path}
+        - {set_variable: second_package, from: $second_path}
   - name: all
     depends_on: [first, second]
     set_variable: downloads_complete

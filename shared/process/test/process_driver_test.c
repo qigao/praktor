@@ -1,15 +1,17 @@
 #include "praktor/process_driver.h"
-#include <praktor/process_retainer.h>
 #include <core/clock.h>
-#include <threads/threads.h>
-#include <tinytest.h>
+#include <praktor/process_retainer.h>
 #include <stdlib.h>
 #include <string.h>
+#include <threads/threads.h>
+#include <tinytest.h>
 
 static process_options_t command(const char *text) {
   process_options_t o;
   process_options_init(&o);
-  o.program = text; o.flags = SALTS_PROCESS_SHELL_COMMAND; o.timeout_ms = 5000u;
+  o.program = text;
+  o.flags = SALTS_PROCESS_SHELL_COMMAND;
+  o.timeout_ms = 5000u;
   return o;
 }
 static void finish(praktor_process_driver *driver) {
@@ -17,20 +19,28 @@ static void finish(praktor_process_driver *driver) {
   uint64_t started = hrtime();
   while (!done && hrtime() - started < UINT64_C(6000000000)) {
     check(praktor_process_driver_tick(driver, &done) == SALTS_OK);
-    if (!done) sleep_ms(1u);
+    if (!done)
+      sleep_ms(1u);
   }
   check(done);
 }
 static int count_line(void *user, const char *text, size_t size) {
-  (void)text; (void)size; ++*(int *)user; return SALTS_OK;
+  (void)text;
+  (void)size;
+  ++*(int *)user;
+  return SALTS_OK;
 }
 static int reject_line(void *user, const char *text, size_t size) {
-  (void)user; (void)text; (void)size; return SALTS_EIO;
+  (void)user;
+  (void)text;
+  (void)size;
+  return SALTS_EIO;
 }
 
 spec("C11 Process driver without a C++ runtime") {
   it("executes and captures a real child with fixed output bounds") {
-    praktor_process_driver driver = {0}; praktor_process_view view;
+    praktor_process_driver driver = {0};
+    praktor_process_view view;
     process_options_t o = command("echo c11-process-driver");
     check(praktor_process_driver_start(&driver, &o, NULL, 0u, 128u, NULL, NULL, NULL) == SALTS_OK);
     finish(&driver);
@@ -42,14 +52,18 @@ spec("C11 Process driver without a C++ runtime") {
   }
   it("drains stdout and stderr while writing more than one stdin chunk") {
     char input[16384];
-    praktor_process_driver driver = {0}; praktor_process_view view;
+    praktor_process_driver driver = {0};
+    praktor_process_view view;
 #if defined(_WIN32)
-    process_options_t o = command("powershell.exe -NoProfile -Command \"$x=[Console]::In.ReadToEnd(); [Console]::Out.Write($x); [Console]::Error.Write('stderr')\"");
+    process_options_t o =
+        command("powershell.exe -NoProfile -Command \"$x=[Console]::In.ReadToEnd(); "
+                "[Console]::Out.Write($x); [Console]::Error.Write('stderr')\"");
 #else
     process_options_t o = command("cat; printf stderr >&2");
 #endif
     memset(input, 'x', sizeof(input));
-    check(praktor_process_driver_start(&driver, &o, input, sizeof(input), 32768u, NULL, NULL, NULL) == SALTS_OK);
+    check(praktor_process_driver_start(&driver, &o, input, sizeof(input), 32768u, NULL, NULL,
+                                       NULL) == SALTS_OK);
     finish(&driver);
     check(praktor_process_driver_close(&driver, 3000u) == SALTS_OK);
     check(praktor_process_driver_view(&driver, &view) == SALTS_OK);
@@ -59,7 +73,8 @@ spec("C11 Process driver without a C++ runtime") {
     check(praktor_process_driver_release(&driver) == SALTS_OK);
   }
   it("rejects capture overflow without exceeding the combined bound") {
-    praktor_process_driver driver = {0}; praktor_process_view view;
+    praktor_process_driver driver = {0};
+    praktor_process_view view;
     process_options_t o = command("echo output-too-large-for-budget");
     check(praktor_process_driver_start(&driver, &o, NULL, 0u, 8u, NULL, NULL, NULL) == SALTS_OK);
     finish(&driver);
@@ -69,7 +84,8 @@ spec("C11 Process driver without a C++ runtime") {
     check(praktor_process_driver_release(&driver) == SALTS_OK);
   }
   it("handles failed admission and a failing stream callback through the same cleanup path") {
-    praktor_process_driver driver = {0}; praktor_process_view view;
+    praktor_process_driver driver = {0};
+    praktor_process_view view;
     process_options_t o = command("");
     check(praktor_process_driver_start(&driver, &o, NULL, 0u, 128u, NULL, NULL, NULL) != SALTS_OK);
     if (driver.impl != NULL) {
@@ -77,7 +93,8 @@ spec("C11 Process driver without a C++ runtime") {
       check(praktor_process_driver_release(&driver) == SALTS_OK);
     }
     o = command("echo callback-error");
-    check(praktor_process_driver_start(&driver, &o, NULL, 0u, 128u, NULL, reject_line, NULL) == SALTS_OK);
+    check(praktor_process_driver_start(&driver, &o, NULL, 0u, 128u, NULL, reject_line, NULL) ==
+          SALTS_OK);
     finish(&driver);
     check(praktor_process_driver_close(&driver, 3000u) == SALTS_EIO);
     check(praktor_process_driver_view(&driver, &view) == SALTS_OK && view.failed);
@@ -111,8 +128,8 @@ spec("C11 Process driver without a C++ runtime") {
     praktor_process_driver driver = {0};
     process_options_t options = command("");
     check(praktor_process_retainer_init(&retainer, 1u) == SALTS_OK);
-    check(praktor_process_driver_start(&driver, &options, NULL, 0u, 128u,
-          &retainer, NULL, NULL) != SALTS_OK);
+    check(praktor_process_driver_start(&driver, &options, NULL, 0u, 128u, &retainer, NULL, NULL) !=
+          SALTS_OK);
     check(praktor_process_driver_close(&driver, 10u) == SALTS_EIO);
     check(praktor_process_driver_release(&driver) == SALTS_OK);
     check(praktor_process_retainer_reserve(&retainer, &token) == SALTS_OK);
@@ -124,7 +141,8 @@ spec("C11 Process driver without a C++ runtime") {
   }
   it("reserves before spawn and retains only C buffers after callback-user destruction") {
     praktor_process_retainer retainer = {0};
-    praktor_process_driver driver = {0}, rejected = {0}; praktor_process_view view;
+    praktor_process_driver driver = {0}, rejected = {0};
+    praktor_process_view view;
     size_t pending = 1u, reaped = 0u;
     int *cookie = (int *)calloc(1u, sizeof(int));
     bool done = false;
@@ -136,11 +154,14 @@ spec("C11 Process driver without a C++ runtime") {
 #endif
     check(cookie != NULL);
     check(praktor_process_retainer_init(&retainer, 1u) == SALTS_OK);
-    check(praktor_process_driver_start(&driver, &o, NULL, 0u, 128u, &retainer, count_line, cookie) == SALTS_OK);
+    check(praktor_process_driver_start(&driver, &o, NULL, 0u, 128u, &retainer, count_line,
+                                       cookie) == SALTS_OK);
     check(praktor_process_driver_tick(&driver, &done) == SALTS_OK && !done);
-    check(praktor_process_driver_start(&rejected, &o, NULL, 0u, 128u, &retainer, NULL, NULL) == SALTS_ENOBUFS);
+    check(praktor_process_driver_start(&rejected, &o, NULL, 0u, 128u, &retainer, NULL, NULL) ==
+          SALTS_ENOBUFS);
     check(rejected.impl == NULL);
-    check(praktor_process_driver_release(&driver) == SALTS_EBUSY); /* live admission cannot be handed off */
+    check(praktor_process_driver_release(&driver) ==
+          SALTS_EBUSY); /* live admission cannot be handed off */
     check(praktor_process_driver_close(&driver, 0u) == SALTS_EBUSY);
     check(praktor_process_driver_view(&driver, &view) == SALTS_OK && view.active && view.closing);
     check(praktor_process_driver_tick(&driver, &done) == SALTS_EBUSY);
@@ -151,7 +172,8 @@ spec("C11 Process driver without a C++ runtime") {
     while (pending && hrtime() - started < UINT64_C(6000000000)) {
       int r = praktor_process_retainer_run_ready(&retainer, 64u, &reaped, &pending);
       check(r == SALTS_OK || r == SALTS_EBUSY);
-      if (pending) sleep_ms(1u);
+      if (pending)
+        sleep_ms(1u);
     }
     check(pending == 0u);
     check(praktor_process_retainer_destroy(&retainer) == SALTS_OK);

@@ -208,7 +208,7 @@ spec("C11 WorkflowContext root string admission") {
         praktor_value_store *values=NULL;
         praktor_leaf_parameter params[2]={
             {"key",PRAKTOR_LEAF_STRING,"result",0.0,false},
-            {"value",PRAKTOR_LEAF_STRING,"{MODE}",0.0,false}
+            {"value",PRAKTOR_LEAF_STRING,"$MODE",0.0,false}
         };
         praktor_leaf_request request={
             0u,"SetVariable",params,2u,false,NULL
@@ -259,7 +259,7 @@ spec("C11 WorkflowContext native task scope and selected output ownership") {
         praktor_value_txn staged={0};
         praktor_leaf_parameter params[2]={
             {"key",PRAKTOR_LEAF_STRING,"answer",0.0,false},
-            {"value",PRAKTOR_LEAF_STRING,"{MODE}",0.0,false}
+            {"value",PRAKTOR_LEAF_STRING,"$MODE",0.0,false}
         };
         praktor_leaf_request req={0u,"SetVariable",params,2u,false,NULL};
         salts_bt_node_status status=SALTS_BT_FAILURE;

@@ -180,7 +180,7 @@ spec("C11 orchestration parser boundary faults") {
              "if: ready\n"
              "then: {Shell: {cmd: run}}\n","if",true);
         walk("name: select\n"
-             "switch: mode\n"
+             "switch: $mode\n"
              "cases: [{Shell: {cmd: one}}, {Shell: {cmd: two}}]\n","switch",true);
         walk("name: delayed\n"
              "delay: 5\n"
@@ -201,7 +201,7 @@ spec("C11 orchestration parser boundary faults") {
         walk("name: task\n"
              "sequence:\n"
              "  - Shell: {cmd: okay}\n"
-             "  - ParseRegex: {input_key: stdout, pattern: ok}\n","sequence",true);
+             "  - ParseRegex: {input_key: $stdout, pattern: ok}\n","sequence",true);
         walk("Sequence:\n"
              "  child: {Shell: {cmd: good}}\n"
              "  bogus: wrong\n",NULL,false);

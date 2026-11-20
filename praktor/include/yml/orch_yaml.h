@@ -13,6 +13,9 @@ extern "C" {
  * of the document. Failure never publishes a provisional output. */
 int praktor_orch_from_named_yaml(praktor_yaml_node node, praktor_orch_tree **out,
     char *error, size_t error_capacity);
+/* Compile a standalone guard using the same predicate as an Assert leaf. */
+int praktor_orch_from_guard_yaml(praktor_yaml_node node, praktor_orch_tree **out,
+    char *error, size_t error_capacity);
 /* Task-level flat forms also support single-child decorators and run_once. */
 int praktor_orch_from_flat_yaml(praktor_yaml_node node, const char *node_type,
     praktor_orch_tree **out, char *error, size_t error_capacity);

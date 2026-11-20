@@ -16,7 +16,7 @@ static const char *native_workflow=
     "      Sequence:\n"
     "        - set_variable: answer\n"
     "          value: '7'\n"
-    "        - CheckExitCode: {input_key: answer, expected: 7}\n";
+    "        - CheckExitCode: {input_key: $answer, expected: 7}\n";
 
 static const char *delayed_workflow=
     "tasks:\n"
@@ -49,6 +49,68 @@ static uint64_t fake_time(void *user) {
 }
 
 spec("C11 Orch AST to owned Session Plan and native leaf execution") {
+    group("wait_until activation") {
+        static praktor_workflow_snapshot *input;
+        static praktor_orch_session_plan *plan;
+        static praktor_native_host host;
+        static praktor_session session;
+        static uint64_t now;
+        before_each() {
+            input=NULL;
+            plan=NULL;
+            host=(praktor_native_host){0};
+            session=(praktor_session){0};
+            now=0u;
+            const char *yaml=
+                "tasks:\n"
+                "  - name: wait\n"
+                "    wait_until:\n"
+                "      guard: {fields: [phase], match: '$phase == \"ready\"'}\n"
+                "      timeout_ms: 10\n";
+            input=snapshot(yaml);
+            check_equal(praktor_native_host_init(&host,8u,64u,128u),SALTS_OK);
+            praktor_session_config config;
+            praktor_session_config_init(&config);
+            config.now_ns=fake_time;
+            config.clock_user=&now;
+            check_equal(praktor_native_host_bind(&host,&config.host),SALTS_OK);
+            char reason[160]={0};
+            check_equal(praktor_orch_session_plan_create(
+                praktor_workflow_snapshot_task_tree(input,0u),&config.tree,
+                &plan,reason,sizeof reason),SALTS_OK);
+            check_equal(praktor_orch_session_plan_init_session(plan,&config,&session),SALTS_OK);
+        }
+        after_each() {
+            check_equal(praktor_session_destroy(&session),SALTS_OK);
+            praktor_orch_session_plan_destroy(plan);
+            praktor_workflow_snapshot_destroy(input);
+            praktor_native_host_destroy(&host);
+        }
+        it("reads a new value on the next tick and succeeds before the deadline") {
+            salts_bt_node_status outcome;
+            check_equal(praktor_session_tick(&session,&outcome),SALTS_OK);
+            check_equal(outcome,SALTS_BT_RUNNING);
+            check_equal(praktor_value_store_set(
+                praktor_native_host_values(&host),"phase","ready"),PRAKTOR_VALUE_OK);
+            now=UINT64_C(9000000);
+            check_equal(praktor_session_tick(&session,&outcome),SALTS_OK);
+            check_equal(outcome,SALTS_BT_SUCCESS);
+        }
+        it("starts a fresh deadline after cancellation and fails at expiry") {
+            salts_bt_node_status outcome;
+            check_equal(praktor_session_tick(&session,&outcome),SALTS_OK);
+            check_equal(outcome,SALTS_BT_RUNNING);
+            check_equal(praktor_session_cancel(&session),SALTS_OK);
+            now=UINT64_C(50000000);
+            check_equal(praktor_session_tick(&session,&outcome),SALTS_OK);
+            check_equal(outcome,SALTS_BT_RUNNING);
+            now=UINT64_C(60000000);
+            check_equal(praktor_session_tick(&session,&outcome),SALTS_OK);
+            check_equal(outcome,SALTS_BT_FAILURE);
+            check_contains(praktor_session_error(&session),"wait_until timed out after 10 ms");
+        }
+    }
+
     it("compiles actual YAML AST, survives source teardown, executes SetVariable/CheckExitCode") {
         praktor_workflow_snapshot *input=snapshot(native_workflow);
         praktor_orch_session_plan *plan=NULL;
@@ -203,7 +265,7 @@ spec("C11 Orch AST to owned Session Plan and native leaf execution") {
             "    actions:\n"
             "      Sequence:\n"
             "        - SetVariable: {key: answer, value: 7}\n"
-            "        - CheckExitCode: {input_key: answer, expected: 7}\n";
+            "        - CheckExitCode: {input_key: $answer, expected: 7}\n";
         praktor_workflow_snapshot *input=NULL;
         char error[256]={0};
         check(praktor_workflow_snapshot_create_inline(
@@ -222,7 +284,7 @@ spec("C11 Orch AST to owned Session Plan and native leaf execution") {
             {vstr_from_cstr("output_key"),vstr_from_cstr("not_stdout")}
         };
         const praktor_orch_input_param parse_ports[]={
-            {vstr_from_cstr("input_key"),vstr_from_cstr("stdout")},
+            {vstr_from_cstr("input_key"),vstr_from_cstr("$stdout")},
             {vstr_from_cstr("output_key"),vstr_from_cstr("parsed")}
         };
         const praktor_orch_flat_node nodes[]={
@@ -260,7 +322,7 @@ spec("C11 Orch AST to owned Session Plan and native leaf execution") {
             {vstr_from_cstr("output_key"),vstr_from_cstr("not_stdout")}
         };
         const praktor_orch_input_param parse_ports[]={
-            {vstr_from_cstr("input_key"),vstr_from_cstr("stdout")},
+            {vstr_from_cstr("input_key"),vstr_from_cstr("$stdout")},
             {vstr_from_cstr("pattern"),vstr_from_cstr("(native)")},
             {vstr_from_cstr("output_key"),vstr_from_cstr("parsed")}
         };
@@ -299,7 +361,7 @@ spec("C11 Orch AST to owned Session Plan and native leaf execution") {
             {vstr_from_cstr("output_key"),vstr_from_cstr("not_stdout")}
         };
         const praktor_orch_input_param parse_ports[]={
-            {vstr_from_cstr("input_key"),vstr_from_cstr("stdout")},
+            {vstr_from_cstr("input_key"),vstr_from_cstr("$stdout")},
             {vstr_from_cstr("output_key"),vstr_from_cstr("parsed")}
         };
         const praktor_orch_flat_node nodes[]={

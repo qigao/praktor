@@ -1,0 +1,25 @@
+# curl reads the API key from the inherited environment.
+provider:
+  kind: exe
+  path: curl
+config:
+  args:
+    - --disable
+    - --silent
+    - --show-error
+    - --fail
+    - --proto
+    - '=https'
+    - --connect-timeout
+    - '10'
+    - --variable
+    - '%ANTHROPIC_API_KEY'
+    - --expand-header
+    - 'x-api-key: {{ANTHROPIC_API_KEY}}'
+    - --header
+    - 'anthropic-version: 2023-06-01'
+    - --json
+    - $request
+    - --url
+    - 'https://api.anthropic.com/v1/messages'
+  timeout_ms: 60000

@@ -121,12 +121,96 @@ spec("Reusable YAML execution services") {
         PRAKTOR_SERVICE_ECHO);
     source = tstr_cat(
         source,
-        "  - name: first\n    tool: shared\n    with:\n      text: '{message}'\n  - name: second\n "
+        "  - name: first\n    tool: shared\n    with:\n      text: $message\n  - name: second\n "
         "   depends_on: [first]\n    vars:\n      message: task-value\n    tool: shared\n    "
-        "with:\n      text: '{message}'\n");
+        "with:\n      text: $message\n");
     check(execute() == PRAKTOR_RUNTIME_OK);
     check(strcmp(json_get_string(outputs("first"), "stdout"), "root-value") == 0);
     check(strcmp(json_get_string(outputs("second"), "stdout"), "task-value") == 0);
+  }
+  it("combines an admitted service capability with task values in a guard") {
+    source = workflow(PRAKTOR_SERVICE_CURL);
+    source = tstr_cat(source,
+        "  - name: route\n"
+        "    vars: {phase: ready}\n"
+        "    if:\n"
+        "      guard:\n"
+        "        fields: [phase]\n"
+        "        match: '$phase == \"ready\" && capability(\"download\") && !capability(\"Download\")'\n"
+        "    then: {assert: {guard: {fields: [], expr: 'true'}}}\n"
+        "    else: {assert: {guard: {fields: [], expr: 'false'}}}\n");
+    check(execute() == PRAKTOR_RUNTIME_OK);
+  }
+  it("passes an inline JSON value with braces as one literal argument") {
+    source = workflow(PRAKTOR_SERVICE_ECHO);
+    source = tstr_cat(source,
+        "  - name: emit\n"
+        "    tool: shared\n"
+        "    with: {text: '{\"data\":{\"name\":\"$literal\"}}'}\n");
+    check(execute() == PRAKTOR_RUNTIME_OK);
+    check(strcmp(json_get_string(outputs("emit"), "stdout"),
+                 "{\"data\":{\"name\":\"$literal\"}}") == 0);
+  }
+  it("binds separate Tool leaves and restarts the same leaf within a repeat") {
+    source = workflow(PRAKTOR_SERVICE_ECHO);
+    source = tstr_cat(source,
+        "  - name: invoke\n"
+        "    outputs: [$first, $shell_output]\n"
+        "    actions:\n"
+        "      Sequence:\n"
+        "        - {set_variable: text, value: first}\n"
+        "        - repeat: 2\n"
+        "          child:\n"
+        "            Sequence:\n"
+        "              - Tool: {service: shared, with: {text: $text}}\n"
+        "              - if: {guard: {fields: [text], match: '$text == \"first\"'}}\n"
+        "                then:\n"
+        "                  - {set_variable: first, from: $shell_output}\n"
+        "                  - {set_variable: text, value: repeated}\n"
+        "        - assert: {guard: {fields: [shell_output], match: '$shell_output == \"repeated\"'}}\n"
+        "        - {set_variable: text, value: second}\n"
+        "        - Tool: {service: shared, with: {text: $text}}\n");
+    check(execute() == PRAKTOR_RUNTIME_OK);
+    check_equal(json_get_string(outputs("invoke"),"first"),"first");
+    check_equal(json_get_string(outputs("invoke"),"shell_output"),"second");
+  }
+  it("drains a timed-out nested Tool before the fallback invokes another service") {
+    source = tstr_cat_typed(NULL,
+        "services: {slow: '{}', recover: '{}'}\n"
+        "tasks:\n"
+        "  - name: invoke\n"
+        "    outputs: [$shell_output]\n"
+        "    actions:\n"
+        "      Fallback:\n"
+        "        - timeout: 100\n"
+        "          child: {Tool: {service: slow}}\n"
+        "        - Tool: {service: recover, with: {text: recovered}}\n",
+        PRAKTOR_SERVICE_LONG_SLEEP,PRAKTOR_SERVICE_ECHO);
+    check(execute() == PRAKTOR_RUNTIME_OK);
+    check_equal(json_get_string(outputs("invoke"),"shell_output"),"recovered");
+  }
+  it("rejects a retired reference in an invocation before starting a tool") {
+    source = workflow(PRAKTOR_SERVICE_ECHO);
+    source = tstr_cat(source,
+        "  - name: emit\n"
+        "    tool: shared\n"
+        "    with: {text: '{legacy}'}\n");
+    check(execute() != PRAKTOR_RUNTIME_OK);
+    check_null(result.json);
+    check_contains(result.error,"Use $name for a tool value reference");
+  }
+  it("takes a false guard branch when the workflow has no services") {
+    source = tstr_dup(
+        "tasks:\n"
+        "  - name: route\n"
+        "    vars: {phase: ready}\n"
+        "    if:\n"
+        "      guard:\n"
+        "        fields: [phase]\n"
+        "        match: 'capability(\"download\")'\n"
+        "    then: {assert: {guard: {fields: [], expr: 'false'}}}\n"
+        "    else: {assert: {guard: {fields: [], expr: 'true'}}}\n");
+    check(execute() == PRAKTOR_RUNTIME_OK);
   }
   it("inherits environment loaded through the native dotenv entrypoint") {
     source = tstr_cat_typed(
@@ -141,7 +225,7 @@ spec("Reusable YAML execution services") {
     source =
         tstr_cat_typed(NULL,
                        "dotEnv:\n  - '{}'\nservices:\n  shared: '{}'\ntasks:\n  - name: env\n    "
-                       "tool: shared\n    with:\n      text: '{PRAKTOR_CLI_ENV_TEST_VALUE}'\n",
+                       "tool: shared\n    with:\n      text: $PRAKTOR_CLI_ENV_TEST_VALUE\n",
                        PRAKTOR_SERVICE_DOTENV, PRAKTOR_SERVICE_ECHO);
     check(praktor_load_environment(source, tstr_len(source)) == PRAKTOR_RUNTIME_OK);
     check(execute() == PRAKTOR_RUNTIME_OK);
@@ -207,6 +291,16 @@ spec("Reusable YAML execution services") {
                             PRAKTOR_SERVICE_PAYLOAD_URL, files[0]);
     check(execute() == PRAKTOR_RUNTIME_INVALID);
     check(strstr(result.error, "unsupported provider.kind") != NULL);
+    check(fs_access(files[0], SALTS_FS_ACCESS_EXISTS) != 0);
+  }
+  it("rejects duplicate capability declarations before task IO") {
+    source = tstr_cat_typed(NULL,
+                            "services:\n  shared: '{}'\n  invalid: '{}'\ntasks:\n  - name: first\n"
+                            "    tool: shared\n    with:\n      url: '{}'\n      path: '{}'\n",
+                            PRAKTOR_SERVICE_CURL, PRAKTOR_SERVICE_DUPLICATE_CAPABILITY,
+                            PRAKTOR_SERVICE_PAYLOAD_URL, files[0]);
+    check(execute() == PRAKTOR_RUNTIME_INVALID);
+    check_contains(result.error, "duplicate service capability");
     check(fs_access(files[0], SALTS_FS_ACCESS_EXISTS) != 0);
   }
   it("rejects missing files and duplicate service identities") {

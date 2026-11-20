@@ -45,8 +45,26 @@ typedef struct praktor_execute_request {
     praktor_cancel_probe is_cancelled;
     void *cancel_context;
 } praktor_execute_request;
-/* Executes borrowed inline YAML. Explicit services references read independent
- * YAML declaration files relative to the caller's current directory. */
+
+typedef struct praktor_event_field {
+    const char *name;
+    const char *value;
+} praktor_event_field;
+typedef struct praktor_host_event {
+    const char *name;
+    const praktor_event_field *fields;
+    size_t field_count;
+} praktor_host_event;
+/* Called on the workflow thread before a BT tick, for one live external-event
+ * chart. task is NULL for the document chart. Return 1 with one event, 0 for
+ * none, or a negative error. Do not block or reenter execution. Names and
+ * values are NUL-terminated UTF-8 text, borrowed until the next poll or
+ * execution return. A payload has at most 32 fields and 8 KiB of values. */
+typedef int (*praktor_event_poll)(void *context,const char *task,praktor_host_event *event);
+/* Executes borrowed inline YAML. Explicit services and includes references
+ * read independent YAML files relative to the caller's current directory.
+ * Dynamic tasks expand before task selection from task variables, document
+ * variables or the inherited environment. The task limit covers expansion. */
 PRAKTOR_API praktor_runtime_status praktor_execute(
     const praktor_execute_request *request,praktor_runtime_result *result);
 /* Execute one named task and its transitive dependencies. Other tasks appear
@@ -54,6 +72,11 @@ PRAKTOR_API praktor_runtime_status praktor_execute(
  * unchanged. task is borrowed, nonempty; unknown names return INVALID. */
 PRAKTOR_API praktor_runtime_status praktor_execute_task(
     const praktor_execute_request *request,const char *task,praktor_runtime_result *result);
+/* A non-NULL poll binds source: external declarations. task optionally
+ * selects one task and its dependencies, as in praktor_execute_task. */
+PRAKTOR_API praktor_runtime_status praktor_execute_with_events(
+    const praktor_execute_request *request,const char *task,praktor_event_poll poll,
+    void *event_context,praktor_runtime_result *result);
 PRAKTOR_API void praktor_release_result(praktor_runtime_result *result);
 PRAKTOR_API praktor_runtime_limits praktor_default_limits(void);
 PRAKTOR_API const cmeta_data_desc *praktor_config_reflection(void);

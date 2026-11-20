@@ -4,6 +4,7 @@ schema PraktorWorkflow [version(1)];
 message Workflow {
     optional string name;
     optional string description;
+    optional @Min(1) @Max(16) int64 parallelism;
 }
 
 message workflowOutputField {
@@ -37,6 +38,7 @@ message managedProcessAction {
 message taskDefinition {
     @Size(min = 1) string name;
     optional string description;
+    optional list<string> outputs;
     optional string when;
     optional eachBlock each;
     optional string working_dir;
@@ -83,6 +85,7 @@ message orchestrationParseJsonNode {
     string input_key;
     optional string path;
     optional string output_key;
+    optional string result;
 }
 
 message orchestrationParseRegexNode {

@@ -1,0 +1,41 @@
+name: Sensor handshake
+parallelism: 2
+statechart:
+  initial: waiting
+  events:
+    sensor.ready:
+      source: internal
+      fields: {voltage_mv: int64}
+  states:
+    waiting:
+      transitions:
+        - 'on': sensor.ready
+          guard:
+            fields: [event.data.voltage_mv]
+            expr: '$event.data.voltage_mv >= 11000'
+          target: sensor_ready
+    sensor_ready: {type: final}
+tasks:
+  - name: check_status
+    sequence:
+      - wait_until:
+          guard:
+            fields: [chart.workflow.sensor_ready]
+            expr: '$chart.workflow.sensor_ready == 1'
+          timeout_ms: 1000
+      - {set_variable: check_result, value: ready}
+    outputs: [$check_result]
+  - name: report_reading
+    vars: {voltage_mv: '11900'}
+    actions:
+      Sequence:
+        - raise:
+            scope: workflow
+            event: sensor.ready
+            with: {voltage_mv: $voltage_mv}
+  - name: confirm
+    depends_on: [check_status, report_reading]
+    assert:
+      guard:
+        fields: [check_result]
+        match: '$check_result == "ready"'

@@ -27,5 +27,6 @@ int praktor_component_host_start(praktor_component_host *host,
                                  const json_value_t *metadata,char *error,size_t capacity);
 int praktor_component_host_service(praktor_component_host *host,const char *name,
                                     praktor_execution_service *out,const json_value_t **definition);
+int praktor_component_host_has_capability(void *context, const char *name, size_t length);
 int praktor_component_host_stop(praktor_component_host *host);
 #endif

@@ -166,7 +166,7 @@ static bool is_command_parser_key(const char *key) {
 static int add_runner_selection(praktor_yaml_node node,json_value_t *result,
                                 praktor_yaml_field_error *error) {
     static const char *const controls[]={"sequence","parallel","reactive_sequence","pipeline_sequence","fallback","selector"};
-    static const char *const leaves[]={"shell","parse_json","parse_regex","parse_lines","parse_keyvalue","check_exit_code","wait_event","file_exists","sleep","set_variable","subtree"};
+    static const char *const leaves[]={"shell","parse_json","parse_regex","parse_lines","parse_keyvalue","check_exit_code","wait_event","file_exists","sleep","set_variable","subtree","wait_until","assert"};
     static const char *const decorators[]={"inverter","force_success","force_failure","repeat","timeout","delay","run_once","keep_running_until_failure","consume_queue","precondition","entry_updated"};
     static const char *const advanced[]={"switch","if","while"};
     int count=0,rc; size_t i; const char *selected=NULL,*selected_node=NULL;
@@ -210,8 +210,10 @@ static int add_runner_selection(praktor_yaml_node node,json_value_t *result,
 
 int praktor_yaml_task_metadata_create(praktor_yaml_node node,json_value_t **out,praktor_yaml_field_error *error){
  static const vstr keys[]={
+ {"wait_until",10},{"assert",6},{"statechart",10},{"outputs",7},{"default",7},
  {"name",4},{"description",11},{"depends_on",10},{"vars",4},{"env",3},{"dotEnv",6},{"when",4},{"each",4},{"timeout",7},{"retries",7},{"triggers",8},{"working_dir",11},{"silent",6},{"sources",7},{"generates",9},{"finally",7},{"command",7},{"program",7},{"args",4},{"stdin",5},{"download",8},{"uses",4},{"dynamic_tasks",13},{"output_format",13},{"service",7},{"managed_process",15},{"tool",4},{"with",4},{"script",6},{"actions",7},{"sequence",8},{"parallel",8},{"reactive_sequence",17},{"pipeline_sequence",17},{"inverter",8},{"force_success",13},{"force_failure",13},{"repeat",6},{"delay",5},{"switch",6},{"if",2},{"then",4},{"else",4},{"while",5},{"do",2},{"max_iterations",14},{"child",5},{"cases",5},{"shell",5},{"parse_json",10},{"parse_regex",11},{"parse_lines",11},{"parse_keyvalue",14},{"check_exit_code",15},{"wait_event",10},{"file_exists",11},{"sleep",5},{"set_variable",12},{"subtree",7},{"fallback",8},{"selector",8},{"run_once",8},{"keep_running_until_failure",26},{"consume_queue",13},{"precondition",12},{"entry_updated",13}};
  static const vstr extended[]={
+ {"wait_until",10},{"assert",6},{"statechart",10},{"outputs",7},{"default",7},
  {"name",4},{"description",11},{"depends_on",10},{"vars",4},{"env",3},{"dotEnv",6},{"when",4},{"each",4},{"timeout",7},{"retries",7},{"triggers",8},{"working_dir",11},{"silent",6},{"sources",7},{"generates",9},{"finally",7},{"command",7},{"program",7},{"args",4},{"stdin",5},{"download",8},{"uses",4},{"dynamic_tasks",13},{"output_format",13},{"service",7},{"managed_process",15},{"tool",4},{"with",4},{"script",6},{"actions",7},{"sequence",8},{"parallel",8},{"reactive_sequence",17},{"pipeline_sequence",17},{"inverter",8},{"force_success",13},{"force_failure",13},{"repeat",6},{"delay",5},{"switch",6},{"if",2},{"then",4},{"else",4},{"while",5},{"do",2},{"max_iterations",14},{"child",5},{"cases",5},{"shell",5},{"parse_json",10},{"parse_regex",11},{"parse_lines",11},{"parse_keyvalue",14},{"check_exit_code",15},{"wait_event",10},{"file_exists",11},{"sleep",5},{"set_variable",12},{"subtree",7},{"fallback",8},{"selector",8},{"run_once",8},{"keep_running_until_failure",26},{"consume_queue",13},{"precondition",12},{"entry_updated",13},{"value",5},{"from",4}};
  praktor_yaml_node name={0},desc={0},list={0},map={0},when={0},work={0},fin={0},with={0};
  json_value_t *result=NULL;tstr name_text=NULL;int rc;bool extras;
@@ -219,6 +221,8 @@ int praktor_yaml_task_metadata_create(praktor_yaml_node node,json_value_t **out,
  if(!praktor_yaml_is_map(node))return at_error(node,"task must be a map",error);
  extras=praktor_yaml_has(node,"set_variable")&&(praktor_yaml_has(node,"value")||praktor_yaml_has(node,"from"));
  rc=praktor_yaml_check_keys(node,extras?extended:keys,extras?sizeof(extended)/sizeof(extended[0]):sizeof(keys)/sizeof(keys[0]),error);if(rc!=SALTS_OK)return rc;
+ if(praktor_yaml_has(node,"default")&&(!praktor_yaml_has(node,"switch")||!praktor_yaml_has(node,"cases")))
+     return at_error(node,"'default' requires a switch with named cases",error);
  if(praktor_yaml_has(node,"with")&&!praktor_yaml_has(node,"tool")){rc=optional(node,"with",&with,error);if(rc!=SALTS_OK)return rc;return at_error(with,"'with' is valid only with the 'tool' runner",error);}
  result=json_create_object();if(!result){if(error)error->origin=PRAKTOR_YAML_FAILURE_ALLOCATION;return SALTS_ENOMEM;}
  if(praktor_yaml_has(node,"tool")) {
@@ -231,9 +235,15 @@ int praktor_yaml_task_metadata_create(praktor_yaml_node node,json_value_t **out,
  rc=optional(node,"name",&name,error);if(rc!=SALTS_OK)goto fail;if(!praktor_yaml_valid(name)){rc=at_error(node,"task requires a 'name'",error);goto fail;}
  rc=praktor_yaml_field_scalar(name,vstr_from_cstr("Expected YAML scalar"),&name_text,error);if(rc!=SALTS_OK)goto fail;
  if(!tstr_len(name_text)){rc=at_error(name,"task name cannot be empty",error);goto fail;}
+ if(memchr(name_text,0,tstr_len(name_text))){rc=at_error(name,"task name cannot contain NUL",error);goto fail;}
  rc=add_owned(result,"name",json_create_string(name_text));tstr_free(name_text);name_text=NULL;if(rc!=SALTS_OK)goto fail;
  rc=optional(node,"description",&desc,error);if(rc!=SALTS_OK)goto fail;if(praktor_yaml_valid(desc)){rc=add_scalar(result,"description",desc,"Expected YAML scalar",error);if(rc!=SALTS_OK)goto fail;}
  rc=optional(node,"depends_on",&list,error);if(rc!=SALTS_OK)goto fail;if(praktor_yaml_valid(list)){rc=add_list(result,"depends_on",list,error);if(rc!=SALTS_OK)goto fail;}
+ rc=optional(node,"outputs",&list,error);if(rc!=SALTS_OK)goto fail;
+ if(praktor_yaml_valid(list)){
+     if(!praktor_yaml_is_seq(list)){rc=at_error(list,"'outputs' must be a list of $name references",error);goto fail;}
+     rc=add_list(result,"outputs",list,error);if(rc!=SALTS_OK)goto fail;
+ }
  rc=optional(node,"vars",&map,error);if(rc!=SALTS_OK)goto fail;if(praktor_yaml_valid(map)){rc=add_map(result,"vars",map,error);if(rc!=SALTS_OK)goto fail;}
  rc=optional(node,"env",&map,error);if(rc!=SALTS_OK)goto fail;if(praktor_yaml_valid(map)){rc=add_map(result,"env",map,error);if(rc!=SALTS_OK)goto fail;}
  rc=optional(node,"dotEnv",&list,error);if(rc!=SALTS_OK)goto fail;if(praktor_yaml_valid(list)){rc=add_list(result,"dot_env",list,error);if(rc!=SALTS_OK)goto fail;}

@@ -1,0 +1,101 @@
+name: Praktor upstream version audit
+description: Compare the selected SDK versions with the Windows LLVM-MinGW configure report
+dotEnv: [.env]
+parallelism: 4
+
+defaults:
+  stream_output: false
+
+tasks:
+  - name: read_versions
+    command: cmake -E cat build/llvm-mingw-x64-release-user/praktor-upstream-versions.json
+
+  - name: check_salts_base
+    depends_on: [read_versions]
+    actions:
+      Sequence:
+        - set_variable: selected_version
+          value: $SALTS_BASE_VERSION
+        - ParseJson:
+            input_key: $stdout
+            path: '$.salts_base.exact'
+            output_key: configured_pattern
+            result: one
+        - ParseRegex: {input_key: $selected_version, pattern: $configured_pattern}
+
+  - name: check_cmeta
+    depends_on: [read_versions]
+    actions:
+      Sequence:
+        - set_variable: selected_version
+          value: $CMETA_VERSION
+        - ParseJson:
+            input_key: $stdout
+            path: '$.cmeta.exact'
+            output_key: configured_pattern
+            result: one
+        - ParseRegex: {input_key: $selected_version, pattern: $configured_pattern}
+
+  - name: check_salts_utils
+    depends_on: [read_versions]
+    actions:
+      Sequence:
+        - set_variable: selected_version
+          value: $SALTS_UTILS_VERSION
+        - ParseJson:
+            input_key: $stdout
+            path: '$.salts_utils.exact'
+            output_key: configured_pattern
+            result: one
+        - ParseRegex: {input_key: $selected_version, pattern: $configured_pattern}
+
+  - name: check_cache_selection
+    depends_on: [read_versions]
+    actions:
+      Sequence:
+        - set_variable: selected_version
+          value: $VCPKG_CACHE_VERSION
+        - ParseJson:
+            input_key: $stdout
+            path: '$.vcpkg_cache_selection.exact'
+            output_key: configured_pattern
+            result: one
+        - ParseRegex: {input_key: $selected_version, pattern: $configured_pattern}
+
+  - name: check_pcre2
+    depends_on: [read_versions]
+    actions:
+      Sequence:
+        - ParseJson: {input_key: $stdout, path: '$.pcre2.major', output_key: pcre2_major, result: one}
+        - ParseJson: {input_key: $stdout, path: '$.pcre2.minor', output_key: pcre2_minor, result: one}
+        - ParseJson: {input_key: $stdout, path: '$.pcre2.minimum_major', output_key: minimum_major, result: one}
+        - ParseJson: {input_key: $stdout, path: '$.pcre2.minimum_minor', output_key: minimum_minor, result: one}
+        - assert:
+            guard:
+              fields: [pcre2_major, pcre2_minor, minimum_major, minimum_minor]
+              expr: '$pcre2_major > $minimum_major || ($pcre2_major == $minimum_major && $pcre2_minor >= $minimum_minor)'
+            message: Configured PCRE2 is below the required version
+
+  - name: check_toolchain
+    depends_on: [read_versions]
+    actions:
+      Sequence:
+        - ParseJson: {input_key: $stdout, path: '$.compiler.id', output_key: compiler_id, result: one}
+        - ParseJson: {input_key: $stdout, path: '$.compiler.platform', output_key: compiler_platform, result: one}
+        - ParseJson: {input_key: $stdout, path: '$.triplet', output_key: triplet, result: one}
+        - assert:
+            guard:
+              fields: [compiler_id, compiler_platform, triplet]
+              match: '$compiler_id == "Clang" && $compiler_platform == "MinGW" && $triplet == "qigao-x64-windows-llvm-mingw"'
+            message: Configure report does not match the LLVM-MinGW toolchain
+            actual: $triplet
+
+  - name: confirm_compatible
+    depends_on:
+      - check_salts_base
+      - check_cmeta
+      - check_salts_utils
+      - check_cache_selection
+      - check_pcre2
+      - check_toolchain
+    command: echo Praktor upstream dependency versions are compatible

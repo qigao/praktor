@@ -11,13 +11,19 @@
       "description": "Optional workflow summary.",
       "type": "string"
     },
+    "parallelism": {
+      "description": "Maximum number of ready tasks driven together before publishing their outputs. Defaults to 1.",
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 16
+    },
     "outputs": {
       "$ref": "#/$defs/workflowOutputContract",
       "description": "Typed public workflow output contract."
     },
     "variables": {
       "$ref": "#/$defs/stringMap",
-      "description": "Global variables available for Mustache templating and expression evaluation."
+      "description": "Workflow variables inherited by tasks and available through whole-value references and guards."
     },
     "env": {
       "$ref": "#/$defs/stringMap",
@@ -48,6 +54,10 @@
       "$ref": "#/$defs/workflowIncludes",
       "description": "Named workflow files whose tasks and default values are included."
     },
+    "statechart": {
+      "$ref": "#/$defs/statechart",
+      "description": "Workflow-scoped state observer driven by task lifecycle events."
+    },
     "tasks": {
       "type": "array",
       "description": "The list of all task definitions in the workflow.",
@@ -75,8 +85,26 @@
   "required": [
     "tasks"
   ],
+  "not": {
+    "anyOf": [
+      {
+        "required": [
+          "env"
+        ]
+      },
+      {
+        "required": [
+          "outputs"
+        ]
+      }
+    ]
+  },
   "additionalProperties": false,
   "$defs": {
+    "variableReference": {
+      "type": "string",
+      "pattern": "^\\$(?!vars\\.)[A-Za-z_][A-Za-z0-9_-]*(\\.[A-Za-z_][A-Za-z0-9_-]*)*(?![\\s\\S])"
+    },
     "workflowContractValueTypes": {
       "oneOf": [
         {
@@ -251,7 +279,7 @@
     },
     "stringMap": {
       "type": "object",
-      "description": "A mapping of keys to values. Values support Mustache templating and variable interpolation.",
+      "description": "A mapping from names to string values.",
       "additionalProperties": {
         "type": "string"
       }
@@ -263,6 +291,11 @@
     },
     "workflowIncludes": {
       "type": "object",
+      "description": "Local task libraries keyed by alias. Paths resolve from the working directory.",
+      "maxProperties": 16,
+      "propertyNames": {
+        "pattern": "^[A-Za-z0-9_-]{1,128}$"
+      },
       "additionalProperties": {
         "type": "string",
         "minLength": 1
@@ -280,7 +313,7 @@
     },
     "triggersBlock": {
       "type": "object",
-      "description": "Defines event-driven praktor/actions to take upon task completion.",
+      "description": "Declares event-driven actions associated with task completion.",
       "properties": {
         "on_success": {
           "$ref": "#/$defs/triggerActionList",
@@ -504,7 +537,18 @@
           "$ref": "#/$defs/stringOrStringArray"
         },
         "vars": {
-          "$ref": "#/$defs/stringMap"
+          "$ref": "#/$defs/stringMap",
+          "description": "Task variables override workflow variables and can be read by whole-value references and guards."
+        },
+        "outputs": {
+          "items": {
+            "$ref": "#/$defs/variableReference",
+            "type": "string"
+          },
+          "uniqueItems": true,
+          "maxItems": 128,
+          "description": "Task values to publish on success. An explicit list selects the full set of successful outputs.",
+          "type": "array"
         },
         "env": {
           "$ref": "#/$defs/stringMap"
@@ -532,7 +576,7 @@
           "$ref": "#/$defs/triggersBlock"
         },
         "working_dir": {
-          "description": "Working directory for command execution.",
+          "description": "Parser metadata. For native execution use shell.working_dir.",
           "type": "string"
         },
         "silent": {
@@ -549,12 +593,17 @@
           "description": "Output files produced by the task."
         },
         "finally": {
-          "description": "Task invoked through the on_complete trigger lifecycle.",
+          "description": "Parser metadata for on_complete handling. Unavailable in native execution.",
           "type": "string",
           "minLength": 1
         },
         "command": {
-          "$ref": "#/$defs/nonEmptyStringOrStringArray"
+          "$ref": "#/$defs/nonEmptyStringOrStringArray",
+          "description": "The native runtime accepts one shell command with whole-value or inline $name references.",
+          "not": {
+            "type": "string",
+            "pattern": "^(\\{[A-Za-z_][A-Za-z0-9_.-]*\\}|\\$\\{[\\s\\S]*\\}|\\$vars\\.[\\s\\S]+)(?![\\s\\S])"
+          }
         },
         "program": {
           "description": "Executable path or program name for raw process execution. Does not invoke a shell.",
@@ -604,8 +653,7 @@
           "minLength": 1
         },
         "with": {
-          "type": "object",
-          "description": "Scalar inputs bound to whole argv template entries in the referenced service declaration."
+          "$ref": "#/$defs/toolInputs"
         },
         "retries": {
           "type": "object",
@@ -653,47 +701,46 @@
           "minLength": 1
         },
         "uses": {
+          "description": "Instantiate a library task and its prerequisites using alias.task.",
+          "pattern": "^[A-Za-z0-9_-]{1,128}\\.[A-Za-z0-9_-]{1,128}$",
           "type": "string",
           "minLength": 1
         },
         "dynamic_tasks": {
           "type": "object",
-          "description": "Generate and execute tasks dynamically at runtime.",
+          "description": "Expand a task template from a JSON array before DAG construction.",
           "properties": {
             "items_variable": {
-              "type": "string",
-              "minLength": 1,
-              "description": "Context path to a JSON array that drives task generation."
+              "$ref": "#/$defs/variableReference",
+              "description": "Variable containing a JSON array in task vars, document variables or the environment."
             },
             "template": {
-              "type": "object",
-              "description": "Task template with {{ item }} placeholders.",
+              "$ref": "#/$defs/taskDefinition",
+              "description": "Ordinary task template with a name that may use $index and $item.",
               "properties": {
                 "name": {
-                  "type": "string",
-                  "minLength": 1
-                },
-                "command": {
-                  "$ref": "#/$defs/nonEmptyStringOrStringArray"
-                },
-                "timeout": {
-                  "$ref": "#/$defs/durationString"
-                },
-                "when": {
-                  "type": "string"
-                },
-                "depends_on": {
-                  "$ref": "#/$defs/stringOrStringArray"
-                },
-                "env": {
-                  "$ref": "#/$defs/stringMap"
+                  "pattern": "^([A-Za-z0-9_-]|\\$(item|index)(?![A-Za-z0-9_]))+$"
                 }
               },
-              "required": [
-                "name",
-                "command"
-              ],
-              "additionalProperties": false
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "uses"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "dynamic_tasks"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "script"
+                    ]
+                  }
+                ]
+              }
             }
           },
           "required": [
@@ -702,9 +749,13 @@
           ],
           "additionalProperties": false
         },
-        "praktor/actions": {
+        "actions": {
           "$ref": "#/$defs/orchestrationNode",
           "description": "Explicit orchestration tree used as the task runner."
+        },
+        "statechart": {
+          "$ref": "#/$defs/statechart",
+          "description": "Optional task-scoped state observer attached to the task runner."
         },
         "sequence": {
           "$ref": "#/$defs/orchestrationNodeChildren"
@@ -777,12 +828,14 @@
           ]
         },
         "consume_queue": {
+          "$ref": "#/$defs/variableReference",
           "type": "string"
         },
         "precondition": {
-          "$ref": "#/$defs/orchestrationConditionScalar"
+          "$ref": "#/$defs/orchestrationPredicate"
         },
         "entry_updated": {
+          "$ref": "#/$defs/variableReference",
           "type": "string"
         },
         "if": {
@@ -821,11 +874,10 @@
           ]
         },
         "cases": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/orchestrationNodeChildren"
-          },
-          "minItems": 1
+          "$ref": "#/$defs/orchestrationSwitchCases"
+        },
+        "default": {
+          "$ref": "#/$defs/orchestrationNodeChildren"
         },
         "child": {
           "$ref": "#/$defs/orchestrationNodeChildren"
@@ -879,6 +931,12 @@
         "wait_event": {
           "$ref": "#/$defs/orchestrationWaitEventNode"
         },
+        "wait_until": {
+          "$ref": "#/$defs/orchestrationWaitUntil"
+        },
+        "assert": {
+          "$ref": "#/$defs/orchestrationAssert"
+        },
         "file_exists": {
           "$ref": "#/$defs/orchestrationFileExistsNode"
         },
@@ -892,7 +950,7 @@
           "description": "Sibling value for flat set_variable syntax"
         },
         "from": {
-          "description": "Sibling source key for flat set_variable syntax",
+          "$ref": "#/$defs/variableReference",
           "type": "string"
         },
         "subtree": {
@@ -908,6 +966,30 @@
         ]
       },
       "allOf": [
+        {
+          "$ref": "#/$defs/orchestrationSwitchRules"
+        },
+        {
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "env"
+                ]
+              },
+              {
+                "required": [
+                  "when"
+                ]
+              },
+              {
+                "required": [
+                  "triggers"
+                ]
+              }
+            ]
+          }
+        },
         {
           "anyOf": [
             {
@@ -952,7 +1034,7 @@
             },
             {
               "required": [
-                "praktor/actions"
+                "actions"
               ]
             },
             {
@@ -1119,6 +1201,16 @@
             {
               "required": [
                 "wait_event"
+              ]
+            },
+            {
+              "required": [
+                "wait_until"
+              ]
+            },
+            {
+              "required": [
+                "assert"
               ]
             },
             {
@@ -1194,7 +1286,7 @@
             },
             {
               "required": [
-                "praktor/actions"
+                "actions"
               ]
             },
             {
@@ -1361,6 +1453,16 @@
             {
               "required": [
                 "wait_event"
+              ]
+            },
+            {
+              "required": [
+                "wait_until"
+              ]
+            },
+            {
+              "required": [
+                "assert"
               ]
             },
             {
@@ -1435,7 +1537,7 @@
                   },
                   {
                     "required": [
-                      "praktor/actions"
+                      "actions"
                     ]
                   },
                   {
@@ -1586,6 +1688,16 @@
                   },
                   {
                     "required": [
+                      "wait_until"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "assert"
+                    ]
+                  },
+                  {
+                    "required": [
                       "file_exists"
                     ]
                   },
@@ -1670,6 +1782,271 @@
         "name"
       ]
     },
+    "statechartId": {
+      "type": "string",
+      "pattern": "^[A-Za-z_][A-Za-z0-9_-]*$",
+      "maxLength": 128
+    },
+    "statechartEventName": {
+      "type": "string",
+      "pattern": "^[A-Za-z_][A-Za-z0-9_-]*(\\.[A-Za-z_][A-Za-z0-9_-]*)*$",
+      "maxLength": 128
+    },
+    "statechart": {
+      "type": "object",
+      "properties": {
+        "initial": {
+          "$ref": "#/$defs/statechartId"
+        },
+        "states": {
+          "$ref": "#/$defs/statechartStates"
+        },
+        "events": {
+          "type": "object",
+          "maxProperties": 128,
+          "propertyNames": {
+            "$ref": "#/$defs/statechartEventName"
+          },
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "source": {
+                "enum": [
+                  "internal",
+                  "external"
+                ],
+                "description": "External events are supplied by the embedded praktor_execute_with_events callback."
+              },
+              "fields": {
+                "type": "object",
+                "maxProperties": 32,
+                "propertyNames": {
+                  "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+                  "maxLength": 117
+                },
+                "additionalProperties": {
+                  "enum": [
+                    "text",
+                    "int64",
+                    "bool"
+                  ]
+                }
+              }
+            },
+            "required": [
+              "source"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "initial",
+        "states"
+      ],
+      "additionalProperties": false
+    },
+    "statechartStates": {
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 128,
+      "propertyNames": {
+        "$ref": "#/$defs/statechartId"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/statechartState"
+      }
+    },
+    "statechartState": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "enum": [
+            "parallel",
+            "final",
+            "history"
+          ]
+        },
+        "states": {
+          "$ref": "#/$defs/statechartStates"
+        },
+        "initial": {
+          "$ref": "#/$defs/statechartId"
+        },
+        "transitions": {
+          "type": "array",
+          "maxItems": 512,
+          "items": {
+            "$ref": "#/$defs/statechartTransition"
+          }
+        },
+        "mode": {
+          "enum": [
+            "shallow",
+            "deep"
+          ]
+        },
+        "default": {
+          "$ref": "#/$defs/statechartId"
+        }
+      },
+      "oneOf": [
+        {
+          "propertyNames": {
+            "enum": [
+              "transitions"
+            ]
+          }
+        },
+        {
+          "required": [
+            "states",
+            "initial"
+          ],
+          "propertyNames": {
+            "enum": [
+              "states",
+              "initial",
+              "transitions"
+            ]
+          }
+        },
+        {
+          "required": [
+            "type",
+            "states"
+          ],
+          "properties": {
+            "type": {
+              "const": "parallel"
+            }
+          },
+          "propertyNames": {
+            "enum": [
+              "type",
+              "states",
+              "transitions"
+            ]
+          }
+        },
+        {
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "const": "final"
+            }
+          },
+          "propertyNames": {
+            "enum": [
+              "type"
+            ]
+          }
+        },
+        {
+          "required": [
+            "type",
+            "mode",
+            "default"
+          ],
+          "properties": {
+            "type": {
+              "const": "history"
+            }
+          },
+          "propertyNames": {
+            "enum": [
+              "type",
+              "mode",
+              "default"
+            ]
+          }
+        }
+      ],
+      "additionalProperties": false
+    },
+    "statechartTransition": {
+      "type": "object",
+      "properties": {
+        "on": {
+          "$ref": "#/$defs/statechartEventName"
+        },
+        "after_ms": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647
+        },
+        "on_done": {
+          "$ref": "#/$defs/statechartId"
+        },
+        "guard": {
+          "$ref": "#/$defs/orchestrationGuardBody"
+        },
+        "target": {
+          "$ref": "#/$defs/statechartId"
+        },
+        "type": {
+          "enum": [
+            "external",
+            "internal"
+          ]
+        }
+      },
+      "not": {
+        "anyOf": [
+          {
+            "required": [
+              "on",
+              "after_ms"
+            ]
+          },
+          {
+            "required": [
+              "on",
+              "on_done"
+            ]
+          },
+          {
+            "required": [
+              "after_ms",
+              "on_done"
+            ]
+          }
+        ]
+      },
+      "required": [
+        "target"
+      ],
+      "additionalProperties": false
+    },
+    "orchestrationRaise": {
+      "type": "object",
+      "properties": {
+        "event": {
+          "$ref": "#/$defs/statechartEventName"
+        },
+        "scope": {
+          "enum": [
+            "task",
+            "workflow"
+          ],
+          "default": "task"
+        },
+        "with": {
+          "type": "object",
+          "maxProperties": 32,
+          "additionalProperties": {
+            "$ref": "#/$defs/orchestrationConditionScalar"
+          }
+        }
+      },
+      "required": [
+        "event"
+      ],
+      "additionalProperties": false,
+      "description": "Send a declared internal event to the task Statechart or the document Statechart."
+    },
     "orchestrationNode": {
       "oneOf": [
         {
@@ -1677,8 +2054,70 @@
         },
         {
           "$ref": "#/$defs/orchestrationLeafNode"
+        },
+        {
+          "$ref": "#/$defs/orchestrationNamedAliases"
         }
       ]
+    },
+    "orchestrationNamedAliases": {
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 1,
+      "properties": {
+        "Sequence": {
+          "$ref": "#/$defs/orchestrationNodeChildren"
+        },
+        "Fallback": {
+          "$ref": "#/$defs/orchestrationNodeChildren"
+        },
+        "Selector": {
+          "$ref": "#/$defs/orchestrationNodeChildren"
+        },
+        "Inverter": {
+          "$ref": "#/$defs/orchestrationNodeChildren"
+        },
+        "ForceSuccess": {
+          "$ref": "#/$defs/orchestrationNodeChildren"
+        },
+        "ForceFailure": {
+          "$ref": "#/$defs/orchestrationNodeChildren"
+        },
+        "Precondition": {
+          "$ref": "#/$defs/orchestrationPreconditionNode/properties/precondition"
+        },
+        "Shell": {
+          "$ref": "#/$defs/orchestrationShellNode"
+        },
+        "Tool": {
+          "$ref": "#/$defs/orchestrationToolNode"
+        },
+        "ParseJson": {
+          "$ref": "#/$defs/orchestrationParseJsonNode"
+        },
+        "ParseRegex": {
+          "$ref": "#/$defs/orchestrationParseRegexNode"
+        },
+        "ParseKeyValue": {
+          "$ref": "#/$defs/orchestrationParseKeyValueNode"
+        },
+        "ParseLines": {
+          "$ref": "#/$defs/orchestrationParseLinesNode"
+        },
+        "CheckExitCode": {
+          "$ref": "#/$defs/orchestrationCheckExitCodeNode"
+        },
+        "Sleep": {
+          "$ref": "#/$defs/orchestrationSleepNode"
+        },
+        "WaitUntil": {
+          "$ref": "#/$defs/orchestrationWaitUntil"
+        },
+        "Assert": {
+          "$ref": "#/$defs/orchestrationAssert"
+        }
+      },
+      "additionalProperties": false
     },
     "orchestrationControlNode": {
       "oneOf": [
@@ -1803,6 +2242,30 @@
         {
           "type": "object",
           "properties": {
+            "wait_until": {
+              "$ref": "#/$defs/orchestrationWaitUntil"
+            }
+          },
+          "required": [
+            "wait_until"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "assert": {
+              "$ref": "#/$defs/orchestrationAssert"
+            }
+          },
+          "required": [
+            "assert"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
             "shell": {
               "$ref": "#/$defs/orchestrationShellNode"
             }
@@ -1912,6 +2375,18 @@
           "$ref": "#/$defs/orchestrationSetVariableNode"
         },
         {
+          "type": "object",
+          "properties": {
+            "raise": {
+              "$ref": "#/$defs/orchestrationRaise"
+            }
+          },
+          "required": [
+            "raise"
+          ],
+          "additionalProperties": false
+        },
+        {
           "$ref": "#/$defs/orchestrationSubTreeNode"
         }
       ]
@@ -1929,10 +2404,114 @@
         }
       ]
     },
-    "orchestrationConditionValue": {
+    "orchestrationGuard": {
+      "type": "object",
+      "properties": {
+        "guard": {
+          "$ref": "#/$defs/orchestrationGuardBody"
+        }
+      },
+      "required": [
+        "guard"
+      ],
+      "additionalProperties": false
+    },
+    "orchestrationGuardBody": {
+      "type": "object",
+      "properties": {
+        "match": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Selector expression with $name field references."
+        },
+        "expr": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "fields": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "maxItems": 64,
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "fields"
+      ],
+      "oneOf": [
+        {
+          "required": [
+            "match"
+          ],
+          "properties": {
+            "fields": {
+              "minItems": 1
+            }
+          }
+        },
+        {
+          "required": [
+            "expr"
+          ]
+        }
+      ],
+      "additionalProperties": false
+    },
+    "orchestrationWaitUntil": {
+      "type": "object",
+      "properties": {
+        "guard": {
+          "$ref": "#/$defs/orchestrationGuardBody"
+        },
+        "timeout_ms": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647
+        }
+      },
+      "required": [
+        "guard",
+        "timeout_ms"
+      ],
+      "additionalProperties": false
+    },
+    "orchestrationAssert": {
+      "type": "object",
+      "properties": {
+        "guard": {
+          "$ref": "#/$defs/orchestrationGuardBody"
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1
+        },
+        "actual": {
+          "$ref": "#/$defs/variableReference"
+        }
+      },
+      "required": [
+        "guard"
+      ],
+      "additionalProperties": false
+    },
+    "orchestrationPredicate": {
       "oneOf": [
         {
           "$ref": "#/$defs/orchestrationConditionScalar"
+        },
+        {
+          "$ref": "#/$defs/orchestrationGuard"
+        }
+      ]
+    },
+    "orchestrationConditionValue": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/orchestrationPredicate"
         },
         {
           "$ref": "#/$defs/orchestrationNodeChildren"
@@ -1984,6 +2563,53 @@
       ],
       "additionalProperties": false
     },
+    "orchestrationSwitchCases": {
+      "oneOf": [
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/orchestrationNodeChildren"
+          },
+          "minItems": 1
+        },
+        {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/orchestrationNodeChildren"
+          },
+          "minProperties": 1
+        }
+      ]
+    },
+    "orchestrationSwitchRules": {
+      "if": {
+        "required": [
+          "cases"
+        ],
+        "properties": {
+          "cases": {
+            "type": "object"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "switch"
+        ],
+        "properties": {
+          "switch": {
+            "$ref": "#/$defs/variableReference"
+          }
+        }
+      },
+      "else": {
+        "not": {
+          "required": [
+            "default"
+          ]
+        }
+      }
+    },
     "orchestrationSwitchNode": {
       "type": "object",
       "properties": {
@@ -1998,18 +2624,22 @@
           ]
         },
         "cases": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/orchestrationNodeChildren"
-          },
-          "minItems": 1
+          "$ref": "#/$defs/orchestrationSwitchCases"
+        },
+        "default": {
+          "$ref": "#/$defs/orchestrationNodeChildren"
         }
       },
       "required": [
         "switch",
         "cases"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "$ref": "#/$defs/orchestrationSwitchRules"
+        }
+      ]
     },
     "orchestrationTimeoutNode": {
       "type": "object",
@@ -2220,7 +2850,7 @@
           "type": "object",
           "properties": {
             "queue_key": {
-              "type": "string"
+              "$ref": "#/$defs/variableReference"
             },
             "item_key": {
               "type": "string"
@@ -2248,7 +2878,7 @@
           "type": "object",
           "properties": {
             "condition": {
-              "$ref": "#/$defs/orchestrationConditionScalar"
+              "$ref": "#/$defs/orchestrationPredicate"
             },
             "child": {
               "$ref": "#/$defs/orchestrationNodeChildren"
@@ -2273,7 +2903,7 @@
           "type": "object",
           "properties": {
             "watch_key": {
-              "type": "string"
+              "$ref": "#/$defs/variableReference"
             },
             "child": {
               "$ref": "#/$defs/orchestrationNodeChildren"
@@ -2305,11 +2935,39 @@
         }
       ]
     },
+    "toolInputs": {
+      "type": "object",
+      "description": "Scalar values and $name references bound to whole argv entries.",
+      "additionalProperties": {
+        "type": [
+          "string",
+          "number",
+          "boolean",
+          "null"
+        ]
+      }
+    },
+    "orchestrationToolNode": {
+      "type": "object",
+      "properties": {
+        "service": {
+          "type": "string",
+          "minLength": 1
+        },
+        "with": {
+          "$ref": "#/$defs/toolInputs"
+        }
+      },
+      "required": [
+        "service"
+      ],
+      "additionalProperties": false
+    },
     "orchestrationShellNode": {
       "oneOf": [
         {
           "type": "string",
-          "description": "Simple syntax: shell command as a string"
+          "description": "Simple syntax: shell command with full-value or inline $name references"
         },
         {
           "type": "object",
@@ -2317,11 +2975,32 @@
           "properties": {
             "cmd": {
               "type": "string",
-              "description": "Shell command to execute"
+              "description": "Shell command with full-value or inline $name references"
             },
             "output_key": {
               "type": "string",
               "description": "Blackboard key to store stdout"
+            },
+            "stderr_key": {
+              "type": "string",
+              "description": "Blackboard key to store stderr"
+            },
+            "exit_code_key": {
+              "type": "string",
+              "description": "Blackboard key to store the process exit code"
+            },
+            "working_dir": {
+              "type": "string"
+            },
+            "stream_output": {
+              "oneOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "$ref": "#/$defs/variableReference"
+                }
+              ]
             },
             "timeout": {
               "oneOf": [
@@ -2430,7 +3109,7 @@
     "orchestrationParseJsonNode": {
       "properties": {
         "input_key": {
-          "description": "Blackboard key containing JSON data",
+          "$ref": "#/$defs/variableReference",
           "type": "string"
         },
         "path": {
@@ -2439,6 +3118,15 @@
         },
         "output_key": {
           "description": "Blackboard key to store extracted data",
+          "type": "string"
+        },
+        "result": {
+          "enum": [
+            "first",
+            "one",
+            "count"
+          ],
+          "description": "Select the first match, require exactly one scalar, or save the match count.",
           "type": "string"
         }
       },
@@ -2451,7 +3139,7 @@
     "orchestrationParseRegexNode": {
       "properties": {
         "input_key": {
-          "description": "Blackboard key containing text data",
+          "$ref": "#/$defs/variableReference",
           "type": "string"
         },
         "pattern": {
@@ -2484,7 +3172,7 @@
     "orchestrationParseLinesNode": {
       "properties": {
         "input_key": {
-          "description": "Blackboard key containing text data",
+          "$ref": "#/$defs/variableReference",
           "type": "string"
         },
         "filter": {
@@ -2505,7 +3193,7 @@
     "orchestrationParseKeyValueNode": {
       "properties": {
         "input_key": {
-          "description": "Blackboard key containing key/value text",
+          "$ref": "#/$defs/variableReference",
           "type": "string"
         },
         "delimiter": {
@@ -2541,8 +3229,7 @@
           "type": "object",
           "properties": {
             "input_key": {
-              "type": "string",
-              "description": "Blackboard key containing exit code"
+              "$ref": "#/$defs/variableReference"
             },
             "expected": {
               "oneOf": [
@@ -2599,7 +3286,7 @@
           "properties": {
             "path": {
               "type": "string",
-              "description": "File path to check (supports {ctx.*} syntax)"
+              "description": "File path to check"
             },
             "output_key": {
               "type": "string",
@@ -2662,10 +3349,10 @@
           "type": "string"
         },
         "value": {
-          "description": "Value to set (supports {ctx.*} syntax)"
+          "description": "Literal value or whole-value $name reference"
         },
         "from": {
-          "description": "Alternative: copy value from another blackboard key",
+          "$ref": "#/$defs/variableReference",
           "type": "string"
         }
       },

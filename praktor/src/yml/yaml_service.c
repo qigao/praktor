@@ -66,10 +66,55 @@ done:
   praktor_yaml_task_fields_destroy(owner);
   return rc;
 }
+static int add_capabilities(json_value_t *entry, praktor_yaml_node node,
+                            praktor_yaml_field_error *error) {
+  enum { MAX_CAPABILITIES = 32, MAX_CAPABILITY_BYTES = 128 };
+  static const char name_chars[] =
+      "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_.-";
+  if (!praktor_yaml_is_seq(node) || praktor_yaml_count(node) > MAX_CAPABILITIES)
+    return at_error(node, "service capabilities must be a list with at most 32 names", error);
+  json_value_t *names = json_create_array();
+  if (!names)
+    return SALTS_ENOMEM;
+  tstr name = NULL;
+  int rc;
+  for (size_t i = 0u; i < praktor_yaml_count(node); ++i) {
+    const praktor_yaml_node item = praktor_yaml_at(node, i);
+    rc = praktor_yaml_field_string(item, vstr_from_cstr("service capability must be a string"),
+                                 &name, error);
+    if (rc != SALTS_OK)
+      goto done;
+    const size_t len = tstr_len(name);
+    if (!len || len > MAX_CAPABILITY_BYTES || strspn(name, name_chars) != len) {
+      rc = at_error(item, "service capability must contain 1..128 ASCII letters, digits, '_', '.' or '-'", error);
+      goto done;
+    }
+    for (size_t j = 0u; j < i; ++j) {
+      if (strcmp(name, json_string(json_array_get(names, j))) == 0) {
+        rc = at_error(item, "duplicate service capability", error);
+        goto done;
+      }
+    }
+    json_value_t *value = json_create_string_n(name, len);
+    if (!value || !json_array_add_checked(names, value)) {
+      json_free(value);
+      rc = SALTS_ENOMEM;
+      goto done;
+    }
+    tstr_free(name);
+    name = NULL;
+  }
+  rc = add_value(entry, "capabilities", names);
+  names = NULL;
+done:
+  tstr_free(name);
+  json_free(names);
+  return rc;
+}
 int praktor_yaml_service_definition_create(praktor_yaml_node item, json_value_t **out,
                                            praktor_yaml_field_error *error) {
   praktor_yaml_field_error_dispose(error);
-  static const vstr service_keys[] = {{"provider", 8}, {"config", 6}};
+  static const vstr service_keys[] = {{"provider", 8}, {"config", 6}, {"capabilities", 12}};
   static const vstr provider_keys[] = {{"kind", 4}, {"path", 4}};
   static const vstr config_keys[] = {{"args", 4}, {"timeout_ms", 10}, {"working_dir", 11}};
   praktor_yaml_node provider = {0}, config = {0}, value = {0}, args = {0};
@@ -78,7 +123,7 @@ int praktor_yaml_service_definition_create(praktor_yaml_node item, json_value_t 
   int timeout = 300000, rc = SALTS_EINVAL;
   if (!out || !praktor_yaml_is_map(item))
     return at_error(item, "service definition must be a map", error);
-  rc = praktor_yaml_check_keys(item, service_keys, 2u, error);
+  rc = praktor_yaml_check_keys(item, service_keys, sizeof service_keys / sizeof *service_keys, error);
   if (rc != SALTS_OK)
     goto done;
   rc = optional(item, "provider", &provider, error);
@@ -161,6 +206,14 @@ int praktor_yaml_service_definition_create(praktor_yaml_node item, json_value_t 
     goto done;
   if (praktor_yaml_valid(value)) {
     rc = add_scalar(entry, "working_dir", value, "working_dir must be a scalar", error);
+    if (rc != SALTS_OK)
+      goto done;
+  }
+  rc = optional(item, "capabilities", &value, error);
+  if (rc != SALTS_OK)
+    goto done;
+  if (praktor_yaml_valid(value)) {
+    rc = add_capabilities(entry, value, error);
     if (rc != SALTS_OK)
       goto done;
   }

@@ -12,6 +12,11 @@ typedef enum praktor_terminal_action {
   PRAKTOR_TERMINAL_FAILURE = 2,
   PRAKTOR_TERMINAL_SWITCH_FAILURE = 3
 } praktor_terminal_action;
+typedef enum praktor_guard_leaf {
+  PRAKTOR_GUARD_LEAF_NONE,
+  PRAKTOR_GUARD_LEAF_ASSERT,
+  PRAKTOR_GUARD_LEAF_WAIT_UNTIL
+} praktor_guard_leaf;
 /* Preorder compiled input. All strings/arrays are copied during init.
  * Optional text_sizes preserves binary string ports; NULL means C strings. */
 typedef struct praktor_session_node {
@@ -21,6 +26,8 @@ typedef struct praktor_session_node {
   size_t parameter_count;
   const size_t *text_sizes;
   praktor_terminal_action terminal;
+  praktor_guard_leaf guard_leaf;
+  uint64_t guard_timeout_ns;
 } praktor_session_node;
 typedef struct praktor_session_config {
   salts_bt_tree_config tree;
@@ -34,6 +41,13 @@ typedef struct praktor_session_config {
   int (*environment)(void *user, const char *const **entries);
   int (*emit)(void *user, const char *line, size_t size);
   void *process_user;
+  /* Optional monotonic clock for Session-owned waits. NULL uses hrtime(). */
+  uint64_t (*now_ns)(void *user);
+  void *clock_user;
+  /* Optional Selector capability lookup. Returns 1 for present, 0 for absent
+   * and a negative value on failure. capability_user is borrowed until destroy. */
+  int (*has_capability)(void *user, const char *name, size_t length);
+  void *capability_user;
 } praktor_session_config;
 void praktor_session_config_init(praktor_session_config *config);
 /* Single driver; callbacks must not throw or reenter. Output remains empty on

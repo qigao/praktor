@@ -1,5 +1,8 @@
 #include "actions/orch_session_plan.h"
+#include "actions/condition.h"
+#include "actions/json_selection.h"
 #include "actions/plan.h"
+#include "actions/variable_reference.h"
 #include <praktor/process_retainer.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -26,18 +29,33 @@ static int fail(char *error,size_t cap,int code,const char *reason) {
 static bool contains_mustache(const char *text,size_t length) {
     size_t i;
     for(i=1u;i<length;++i)
-        if((text[i-1u]=='{'&&text[i]=='{')||
-           (text[i-1u]=='}'&&text[i]=='}'))return true;
+        if(text[i-1u]=='{'&&text[i]=='{')return true;
     return false;
 }
+
 static bool supported(praktor_orch_type type) {
     switch(type) {
     case PRAKTOR_ORCH_SEQUENCE:
+    case PRAKTOR_ORCH_REACTIVE_SEQUENCE:
+    case PRAKTOR_ORCH_PIPELINE_SEQUENCE:
     case PRAKTOR_ORCH_FALLBACK:
     case PRAKTOR_ORCH_SELECTOR:
     case PRAKTOR_ORCH_INVERTER:
     case PRAKTOR_ORCH_FORCE_SUCCESS:
     case PRAKTOR_ORCH_FORCE_FAILURE:
+    case PRAKTOR_ORCH_IF_THEN_ELSE:
+    case PRAKTOR_ORCH_SWITCH:
+    case PRAKTOR_ORCH_WHILE_DO:
+    case PRAKTOR_ORCH_REPEAT:
+    case PRAKTOR_ORCH_TIMEOUT:
+    case PRAKTOR_ORCH_DELAY:
+    case PRAKTOR_ORCH_RUN_ONCE:
+    case PRAKTOR_ORCH_KEEP_RUNNING_UNTIL_FAILURE:
+    case PRAKTOR_ORCH_ENTRY_UPDATED:
+    case PRAKTOR_ORCH_CONSUME_QUEUE:
+    case PRAKTOR_ORCH_PRECONDITION:
+    case PRAKTOR_ORCH_WAIT_UNTIL:
+    case PRAKTOR_ORCH_ASSERT:
     case PRAKTOR_ORCH_SET_VARIABLE:
     case PRAKTOR_ORCH_TOOL:
     case PRAKTOR_ORCH_CHECK_EXIT_CODE:
@@ -70,12 +88,17 @@ size_t praktor_orch_session_plan_node_count(
     const praktor_orch_session_plan *plan) {
     return plan?plan->count:0u;
 }
+size_t praktor_orch_session_plan_retained_bytes(const praktor_orch_session_plan *plan) {
+    return plan?plan->retained_bytes:0u;
+}
 
 /* One explicit internal admission profile prevents invalid combinations of
  * independent booleans as native command/postprocessors are qualified.
  * Public opt-in wrappers preserve their existing independent contracts. */
 typedef enum orch_plan_profile {
     ORCH_PLAN_DEFAULT=0,
+    ORCH_PLAN_WORKFLOW_TREE,
+    ORCH_PLAN_CHART_TASK,
     ORCH_PLAN_SINGLE_SHELL,
     ORCH_PLAN_SINGLE_COMMAND,
     ORCH_PLAN_COMMAND_JSON,
@@ -173,7 +196,7 @@ static int create_plan(
             praktor_orch_param p={0};
             if(praktor_orch_param_at(parser,j,&p)==SALTS_OK&&
                vstr_eq(p.key,vstr_from_cstr("input_key"))&&
-               vstr_eq(p.value,vstr_from_cstr("stdout")))input_key=true;
+               vstr_eq(p.value,vstr_from_cstr("$stdout")))input_key=true;
         }
         if(!stream_key||!input_key) {
             char detail[180]={0};
@@ -191,7 +214,8 @@ static int create_plan(
             "Native Shell qualification only admits one canonical Shell node");
         goto done;
     }
-    plan->requires_native_process_owner=profile!=ORCH_PLAN_DEFAULT;
+    plan->requires_native_process_owner=
+        profile!=ORCH_PLAN_DEFAULT&&profile!=ORCH_PLAN_WORKFLOW_TREE&&profile!=ORCH_PLAN_CHART_TASK;
     plan->nodes=(praktor_session_node *)calloc(
         node_capacity,sizeof(*plan->nodes));
     stack=(orch_visit *)calloc(node_capacity,sizeof(*stack));
@@ -210,7 +234,7 @@ static int create_plan(
         praktor_leaf_parameter *copies=NULL;
         size_t *sizes=NULL;
         praktor_session_node compiled={0};
-        bool prune=false;
+        bool prune=false,has_fields=false;
         praktor_orch_type type;
         if(!visit.node||node_index>=node_capacity||
            visit.depth>limits->max_depth) {
@@ -218,14 +242,17 @@ static int create_plan(
             goto done;
         }
         type=praktor_orch_node_type(visit.node);
+        if(type==PRAKTOR_ORCH_SHELL&&profile!=ORCH_PLAN_DEFAULT)
+            plan->requires_native_process_owner=true;
         spec=praktor_orch_spec_for(type);
         if(!spec) {
             status=fail(error,cap,SALTS_EINVAL,"Invalid Orch action type");
             goto done;
         }
-        if(!supported(type) &&
+        if(!supported(type) && !(profile==ORCH_PLAN_CHART_TASK&&type==PRAKTOR_ORCH_RAISE) &&
            !(profile==ORCH_PLAN_SINGLE_SHELL&&type==PRAKTOR_ORCH_SHELL&&node_capacity==1u) &&
-           !(profile==ORCH_PLAN_SINGLE_COMMAND&&type==PRAKTOR_ORCH_SHELL) &&
+           !((profile==ORCH_PLAN_SINGLE_COMMAND||profile==ORCH_PLAN_WORKFLOW_TREE||
+              profile==ORCH_PLAN_CHART_TASK)&&type==PRAKTOR_ORCH_SHELL) &&
            !(is_command_parser_profile(profile)&&type==PRAKTOR_ORCH_SHELL)) {
             status=fail(error,cap,SALTS_ENOTSUP,
                 "Orch action not qualified for native C11 Session; no Legacy fallback");
@@ -268,28 +295,42 @@ static int create_plan(
                     "Binary Orch parameter cannot enter native C11 leaf");
                 goto done;
             }
-            if(view.value.len && contains_mustache(view.value.data,view.value.len)) {
-                status=fail(error,cap,SALTS_ENOTSUP,
-                    "Orch Mustache expansion not qualified for native C11 Session");
-                goto done;
-            }
+            if(strcmp(view.key.data,"guard_fields")==0)has_fields=true;
+            const size_t size=view.value.len;
             if(plan->retained_bytes>=PRAKTOR_ORCH_MAX_BYTES||
-               view.value.len>=PRAKTOR_ORCH_MAX_BYTES-plan->retained_bytes) {
+               size>=PRAKTOR_ORCH_MAX_BYTES-plan->retained_bytes) {
                 status=fail(error,cap,SALTS_EINVAL,"Orch Session Plan text budget exceeded");
                 goto done;
             }
-            value=(char *)malloc(view.value.len+1u);
+            value=(char *)malloc(size+1u);
             if(!value) {
                 status=fail(error,cap,SALTS_ENOMEM,"Cannot copy Orch parameter text");
                 goto done;
             }
-            if(view.value.len)memcpy(value,view.value.data,view.value.len);
-            value[view.value.len]='\0';
+            if(size)memcpy(value,view.value.data,size);
+            value[size]='\0';
             copies[j].name=view.key.data; /* immutable catalog literal */
             copies[j].kind=PRAKTOR_LEAF_STRING;
             copies[j].text=value;
-            sizes[j]=view.value.len;
-            plan->retained_bytes+=view.value.len+1u;
+            sizes[j]=size;
+            plan->retained_bytes+=size+1u;
+        }
+        for(j=0u;j<params;++j) {
+            /* Guard source is parsed by its own frontend. */
+            if(has_fields&&strcmp(copies[j].name,"condition")==0)continue;
+            if(type==PRAKTOR_ORCH_SHELL&&strcmp(copies[j].name,"cmd")==0&&
+               (profile==ORCH_PLAN_SINGLE_COMMAND||is_command_parser_profile(profile))&&
+               praktor_retired_variable_reference(vstr_from_buf(copies[j].text,sizes[j]))) {
+                status=fail(error,cap,SALTS_ENOTSUP,"Use command: $name for a variable reference");
+                goto done;
+            }
+            if(!((type==PRAKTOR_ORCH_RAISE||type==PRAKTOR_ORCH_TOOL)&&!strcmp(copies[j].name,"with"))&&
+               strcmp(copies[j].name,"case_labels")&&
+               contains_mustache(copies[j].text,sizes[j])) {
+                status=fail(error,cap,SALTS_ENOTSUP,
+                    "Orch Mustache expansion not qualified for native C11 Session");
+                goto done;
+            }
         }
         status=praktor_compile_node(
             limits,spec->name,copies,params,sizes,children,visit.parent,
@@ -302,6 +343,26 @@ static int create_plan(
                 "Native C11 Orch static pruning not yet qualified");
             goto done;
         }
+        if(type==PRAKTOR_ORCH_PARSE_JSON) {
+            const char *selection=NULL,*path="";
+            for(j=0u;j<params;++j) {
+                if(strcmp(copies[j].name,"result")==0)selection=copies[j].text;
+                else if(strcmp(copies[j].name,"path")==0)path=copies[j].text;
+            }
+            praktor_json_result mode=PRAKTOR_JSON_FIRST;
+            if(selection&&praktor_json_result_parse(selection,&mode)!=SALTS_OK) {
+                status=fail(error,cap,SALTS_EINVAL,"ParseJson result must be first, one or count");
+                goto done;
+            }
+            if(mode!=PRAKTOR_JSON_FIRST) {
+                status=praktor_json_selection_validate(path,error,cap);
+                if(status!=SALTS_OK)goto done;
+            }
+        }
+        praktor_condition condition={0};
+        status=praktor_condition_compile(&compiled,&condition,error,cap);
+        if(status!=SALTS_OK)goto done;
+        praktor_condition_destroy(&condition);
         plan->nodes[node_index]=compiled;
         for(j=children;j>0u;--j) {
             const praktor_orch_node *child=NULL;
@@ -325,10 +386,24 @@ done:
     praktor_orch_session_plan_destroy(plan);
     return status;
 }
+const praktor_session_node *praktor_orch_session_plan_node_at(
+    const praktor_orch_session_plan *plan,size_t index) {
+    return plan&&index<plan->count?&plan->nodes[index]:NULL;
+}
 int praktor_orch_session_plan_create(
     const praktor_orch_tree *tree,const salts_bt_tree_config *limits,
     praktor_orch_session_plan **out,char *error,size_t cap) {
     return create_plan(tree,limits,out,error,cap,ORCH_PLAN_DEFAULT);
+}
+int praktor_orch_session_plan_create_workflow_tree(
+    const praktor_orch_tree *tree,const salts_bt_tree_config *limits,
+    praktor_orch_session_plan **out,char *error,size_t cap) {
+    return create_plan(tree,limits,out,error,cap,ORCH_PLAN_WORKFLOW_TREE);
+}
+int praktor_orch_session_plan_create_chart_task(
+    const praktor_orch_tree *tree,const salts_bt_tree_config *limits,
+    praktor_orch_session_plan **out,char *error,size_t cap) {
+    return create_plan(tree,limits,out,error,cap,ORCH_PLAN_CHART_TASK);
 }
 int praktor_orch_session_plan_create_native_shell(
     const praktor_orch_tree *tree,const salts_bt_tree_config *limits,

@@ -230,6 +230,19 @@ int praktor_component_host_service(praktor_component_host *host,const char *name
         if(!strcmp(name,host->descriptions[i].stable_id)) {*out=host->services[i];*definition=host->definitions[i];return SALTS_OK;}
     return SALTS_ENOENT;
 }
+int praktor_component_host_has_capability(void *context, const char *name, size_t length) {
+    const praktor_component_host *host = context;
+    if (!host || !host->active || !name) return SALTS_EINVAL;
+    for (size_t i = 0u; i < host->service_count; ++i) {
+        const json_value_t *names = json_object_get(host->definitions[i], "capabilities");
+        for (size_t j = 0u; j < json_array_size(names); ++j) {
+            const json_value_t *entry = json_array_get(names, j);
+            if (length == json_string_len(entry) && !memcmp(name, json_string(entry), length))
+                return 1;
+        }
+    }
+    return 0;
+}
 int praktor_component_host_stop(praktor_component_host *host) {
     if (!host)return SALTS_EINVAL;
     for(size_t i=0u;i<host->service_count;++i)

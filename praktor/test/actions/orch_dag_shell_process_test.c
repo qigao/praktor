@@ -27,7 +27,7 @@ static const char *command_yaml=
     "    command: echo native-c11-command\n"
     "  - name: verify\n"
     "    depends_on: [command]\n"
-    "    check_exit_code: {input_key: shell_exit_code, expected: 0}\n";
+    "    check_exit_code: {input_key: $shell_exit_code, expected: 0}\n";
 static const char *command_json_yaml=
     "variables: {BASE: untouched}\n"
     "tasks:\n"
@@ -36,7 +36,7 @@ static const char *command_json_yaml=
     "    parse_json: {path: '$', output_key: parsed}\n"
     "  - name: verify\n"
     "    depends_on: [parsed_command]\n"
-    "    check_exit_code: {input_key: parsed, expected: 7}\n";
+    "    check_exit_code: {input_key: $parsed, expected: 7}\n";
 /* The canonical postprocessor retains stdout as a private pipeline port. */
 static const char *command_keyvalue_yaml=
     "variables: {BASE: untouched}\n"
@@ -47,7 +47,7 @@ static const char *command_keyvalue_yaml=
     "  - name: verify\n"
     "    depends_on: [parsed_command]\n"
     "    set_variable: confirmed\n"
-    "    from: parsed\n";
+    "    from: $parsed\n";
 /* Native PCRE2 group 1 must select "native" from the OS child output. */
 static const char *command_regex_yaml=
     "variables: {BASE: untouched}\n"
@@ -58,7 +58,7 @@ static const char *command_regex_yaml=
     "  - name: verify\n"
     "    depends_on: [parsed_command]\n"
     "    set_variable: confirmed\n"
-    "    from: parsed\n";
+    "    from: $parsed\n";
 /* ParseLines also writes an independent atomic <output_key>_count port.
  * Windows CRLF is intentionally not normalized by the Legacy-compatible
  * parser; assert count instead of making a platform-specific line-ending
@@ -72,7 +72,7 @@ static const char *command_regex_no_match_yaml=
     "  - name: verify\n"
     "    depends_on: [parsed_command]\n"
     "    set_variable: confirmed\n"
-    "    from: parsed\n";
+    "    from: $parsed\n";
 static const char *command_lines_yaml=
     "variables: {BASE: untouched}\n"
     "tasks:\n"
@@ -82,7 +82,7 @@ static const char *command_lines_yaml=
     "  - name: verify\n"
     "    depends_on: [parsed_command]\n"
     "    set_variable: confirmed\n"
-    "    from: parsed_count\n";
+    "    from: $parsed_count\n";
 static const char *command_with_parser_yaml=
     "tasks:\n"
     "  - name: parse\n"
@@ -95,7 +95,7 @@ static const char *success_yaml=
     "    shell: {cmd: echo native-c11-dag, stream_output: false}\n"
     "  - name: verify\n"
     "    depends_on: [shell]\n"
-    "    check_exit_code: {input_key: shell_exit_code, expected: 0}\n";
+    "    check_exit_code: {input_key: $shell_exit_code, expected: 0}\n";
 #if defined(_WIN32)
 static const char *cancel_yaml=
     "variables: {BASE: untouched}\n"
@@ -104,7 +104,7 @@ static const char *cancel_yaml=
     "    shell: {cmd: 'ping -n 5 127.0.0.1 > NUL', stream_output: false}\n"
     "  - name: verify\n"
     "    depends_on: [shell]\n"
-    "    check_exit_code: {input_key: shell_exit_code, expected: 0}\n";
+    "    check_exit_code: {input_key: $shell_exit_code, expected: 0}\n";
 #else
 static const char *cancel_yaml=
     "variables: {BASE: untouched}\n"
@@ -113,7 +113,7 @@ static const char *cancel_yaml=
     "    shell: {cmd: 'sleep 3', stream_output: false}\n"
     "  - name: verify\n"
     "    depends_on: [shell]\n"
-    "    check_exit_code: {input_key: shell_exit_code, expected: 0}\n";
+    "    check_exit_code: {input_key: $shell_exit_code, expected: 0}\n";
 #endif
 
 typedef struct shell_fixture {

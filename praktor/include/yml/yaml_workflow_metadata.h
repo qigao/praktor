@@ -5,6 +5,7 @@
 extern "C" {
 #endif
 #define PRAKTOR_WORKFLOW_MAX_SERVICES 16u
+#define PRAKTOR_WORKFLOW_MAX_PARALLELISM 16
 /* C-owned projection of workflow root scalar metadata. Validates the root key
  * whitelist and defaults map. Failure leaves *out unchanged. */
 int praktor_yaml_workflow_metadata_create(praktor_yaml_node node,

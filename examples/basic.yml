@@ -2,14 +2,15 @@ name: "Standard Workflow"
 description: "A basic Praktor workflow template"
 
 variables:
-  PROJECT: "MyProject"
+  hello_command: "echo Hello from MyProject!"
+  goodbye_command: "echo Execution of MyProject workflow finished."
 
 tasks:
   - name: hello
     description: "Say hello"
-    command: "echo Hello from {{ PROJECT }}!"
+    command: $hello_command
 
   - name: goodbye
     description: "Say goodbye"
     depends_on: [hello]
-    command: "echo Execution of {{ PROJECT }} workflow finished."
+    command: $goodbye_command

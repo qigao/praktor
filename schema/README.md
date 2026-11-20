@@ -2,7 +2,7 @@
 
 `workflow.schema` supplies logical field shapes through SaltsUtils IDL/Schema.
 `workflow.editor.json` supplies YAML unions and cross-field editor policies.
-The root `grammar.schema.json` is generated from those sources.
+The editor artifact `docs/grammar.schema.json` is generated from those sources.
 
 `shared/schema` consumes the public `Salts::IDL` and `Salts::Schema` metadata
 APIs. It does not infer native layouts or implement another IDL parser. Parsed
@@ -11,7 +11,13 @@ policies fail explicitly.
 
 Runtime YAML parsing uses SaltsBase `Salts::CYaml`. The schema describes the
 parser/editor model; the installed workflow runtime admits a narrower subset,
-documented in the root README. Schema presence does not enable execution.
+documented in the [user guide](../docs/USER_GUIDE.md#当前执行范围). The task
+`outputs` list is part of the native runtime and selects values to publish on
+successful task completion. The root output contract describes parser metadata.
+The native runtime also expands local `includes`, `uses`, and `dynamic_tasks`
+before building the task graph. The editor checks local shape, while admission
+resolves library files, JSON arrays, names, and dependency edges.
+[Workflow composition](../docs/grammar.md#workflow-composition)
 
 In the configured Windows developer environment:
 

@@ -26,7 +26,7 @@ int praktor_expression_lexer_next(praktor_expression_lexer *lexer,
             next.kind = PRAKTOR_EXPR_VARIABLE; begin = end;
             while (end < lexer->size && (word((unsigned char)lexer->input[end]) || lexer->input[end] == '.')) ++end;
         } else if (ch == '\'' || ch == '"' ||
-            (ch == '/' && end < lexer->size && (!lexer->has_previous ||
+            (ch == '/' && !lexer->integer_operators && end < lexer->size && (!lexer->has_previous ||
              lexer->previous == PRAKTOR_EXPR_OPERATOR || lexer->previous == PRAKTOR_EXPR_LPAREN))) {
             next.kind = ch == '/' ? PRAKTOR_EXPR_REGEX : PRAKTOR_EXPR_STRING;
             quoted = 1; begin = end;
@@ -45,11 +45,13 @@ int praktor_expression_lexer_next(praktor_expression_lexer *lexer,
         else if (ch == ')') next.kind = PRAKTOR_EXPR_RPAREN;
         else if (ch == '.') next.kind = PRAKTOR_EXPR_DOT;
         else if (ch == '=' || ch == '!' || ch == '<' || ch == '>' || ch == '&' || ch == '|' ||
+                 (lexer->integer_operators && ch != '\0' && strchr("+-*/%^~", ch)) ||
                  (ch == '/' && end < lexer->size)) {
             next.kind = PRAKTOR_EXPR_OPERATOR;
             if (end < lexer->size &&
                 (((ch == '=' || ch == '!' || ch == '<' || ch == '>') && lexer->input[end] == '=') ||
-                 (ch == '&' && lexer->input[end] == '&') || (ch == '|' && lexer->input[end] == '|'))) {
+                 (ch == '&' && lexer->input[end] == '&') || (ch == '|' && lexer->input[end] == '|') ||
+                 (lexer->integer_operators && (ch == '<' || ch == '>') && lexer->input[end] == ch))) {
                 ++end;
                 if (ch == '=' && end < lexer->size && lexer->input[end] == '=') ++end;
             }

@@ -2,6 +2,7 @@
  * ServiceHost; the current static provider is held by Configurator. */
 #include "praktor/runtime.h"
 #include "component_host.h"
+#include "statechart_internal.h"
 #include "yml/workflow_snapshot.h"
 #include "yml/yaml_workflow_metadata.h"
 #include "yml/workflow_dag_state.h"
@@ -9,8 +10,9 @@
 #include "actions/orch_session_plan.h"
 #include "actions/native_host.h"
 #include "actions/tool.h"
+#include "actions/variable_reference.h"
 #include "actions/workflow_snapshot_values.h"
-#include "actions/workflow_parallel_process_guard.h"
+#include "actions/workflow_parallel_commit.h"
 #include <cflow/executor.h>
 #include <cmeta/ace_interceptor.h>
 #include <cmeta/cleanup.h>
@@ -27,7 +29,13 @@
 
 #define PRK_MAX_TASKS 64u
 #define PRK_MAX_VALUE 4096u
-#define PRK_MAX_OUTPUTS 3u
+#define PRK_MAX_KEY 128u
+enum { PRK_EXIT_CODE, PRK_STDOUT, PRK_STDERR, PRK_PROCESS_OUTPUTS };
+typedef struct prk_task_outputs {
+    const char *keys[PRK_PROCESS_OUTPUTS];
+    const json_value_t *declared;
+    bool process;
+} prk_task_outputs;
 
 typedef struct prk_state {
     praktor_workflow_snapshot *snapshot;
@@ -74,48 +82,167 @@ static int drain(praktor_process_retainer *retainer,uint64_t budget_ns) {
     }while(hrtime()-started<budget_ns);
     return SALTS_EBUSY;
 }
-/* CFlow callback owns the mutable Session for the whole tick run; no CFlow
- * worker touches the DAG, root variable store or TaskRegistry. */
-typedef struct prk_callback {
+typedef struct prk_task_driver {
     praktor_session *session;
+    praktor_statechart *chart,*workflow_chart;
+    const char *task_name,*chart_error;
+    salts_bt_node_status outcome;
+    bool ran;
+} prk_task_driver;
+typedef struct prk_chart_views {
+    const praktor_statechart *task,*workflow;
+} prk_chart_views;
+static int chart_active(void *user,const char *key) {
+    const prk_chart_views *views=user;
+    if(views->task&&!strncmp(key,"task.",5u))
+        return praktor_statechart_active(views->task,key+5u);
+    if(views->workflow&&!strncmp(key,"workflow.",9u))
+        return praktor_statechart_active(views->workflow,key+9u);
+    return -1;
+}
+typedef struct prk_chart_actions {
+    praktor_bt_host base;
+    praktor_statechart *task,*workflow;
+} prk_chart_actions;
+static int task_leaf_tick(void *user,const praktor_leaf_request *request,
+                         salts_bt_node_status *status) {
+    const prk_chart_actions *actions=user;
+    if(strcmp(request->action,"Raise"))
+        return actions->base.tick_typed_leaf(actions->base.user,request,status);
+    if(request->in_parallel_branch)return SALTS_ENOTSUP;
+    const char *event=NULL,*bindings=NULL;
+    praktor_statechart *chart=actions->task;
+    for(size_t i=0u;i<request->parameter_count;++i) {
+        const praktor_leaf_parameter *parameter=&request->parameters[i];
+        if(!strcmp(parameter->name,"event"))event=parameter->text;
+        else if(!strcmp(parameter->name,"with"))bindings=parameter->text;
+        else if(!strcmp(parameter->name,"scope")&&!strcmp(parameter->text,"workflow"))
+            chart=actions->workflow;
+    }
+    int rc=praktor_statechart_raise(chart,&actions->base,event,bindings);
+    if(rc==SALTS_OK)*status=SALTS_BT_SUCCESS;
+    else if(request->error&&request->error_capacity)
+        (void)snprintf(request->error,request->error_capacity,"%s",
+                       praktor_statechart_error(chart));
+    return rc;
+}
+static void task_leaf_halt(void *user,const praktor_leaf_request *request) {
+    const prk_chart_actions *actions=user;
+    actions->base.halt_typed_leaf(actions->base.user,request);
+}
+static int observe_task(prk_task_driver *driver,const char *event,const char *status) {
+    praktor_statechart *const charts[]={driver->workflow_chart,driver->chart};
+    for(size_t i=0u;i<sizeof charts/sizeof charts[0];++i) {
+        if(*praktor_statechart_error(charts[i]))continue;
+        int rc=praktor_statechart_lifecycle(charts[i],event,driver->task_name,status);
+        if(rc!=SALTS_OK) {
+            driver->chart_error=praktor_statechart_error(charts[i]);
+            return rc;
+        }
+    }
+    return SALTS_OK;
+}
+typedef struct prk_running_task {
+    praktor_native_host host;
+    praktor_session session;
+    praktor_statechart chart;
+    prk_chart_views views;
+    prk_chart_actions chart_actions;
+    praktor_tool_action tool;
+    prk_task_driver driver;
+} prk_running_task;
+
+typedef struct prk_cohort_driver {
+    prk_running_task *tasks;
+    size_t count,failed_slot;
     praktor_cancel_probe cancel;
     void *cancel_context;
+    praktor_event_poll event_poll;
+    void *event_context;
     uint64_t deadline;
-    int status;
-    salts_bt_node_status outcome;
-    bool cancelled,expired,ran,finalized;
-} prk_callback;
-static void callback_run(void *p) {
-    prk_callback *c=(prk_callback *)p;
-    c->ran=true;
-    c->status=SALTS_OK;
-    c->outcome=SALTS_BT_RUNNING;
-    while(c->outcome==SALTS_BT_RUNNING) {
-        if(c->cancel&&c->cancel(c->cancel_context)) {
-            c->cancelled=true;
-            c->status=praktor_session_cancel(c->session);
-            break;
-        }
-        if(hrtime()>=c->deadline) {
-            c->expired=true;
-            c->status=praktor_session_cancel(c->session);
-            break;
-        }
-        c->status=praktor_session_tick(c->session,&c->outcome);
-        if(c->status!=SALTS_OK)break;
-        if(c->outcome==SALTS_BT_RUNNING)sleep_ms(1u);
+    char *error;
+    size_t error_capacity;
+    praktor_runtime_status status;
+    bool ran,finalized;
+} prk_cohort_driver;
+
+static int tick_task(prk_task_driver *task,const prk_cohort_driver *cohort) {
+    int rc;
+    if(!task->ran) {
+        task->ran=true;
+        rc=observe_task(task,"task.started","running");
+        if(rc!=SALTS_OK)return rc;
     }
+    praktor_statechart *const charts[]={task->workflow_chart,task->chart};
+    for(size_t i=0u;i<sizeof charts/sizeof charts[0];++i) {
+        rc=praktor_statechart_advance(charts[i]);
+        if(rc!=SALTS_OK) {
+            task->chart_error=praktor_statechart_error(charts[i]);
+            return rc;
+        }
+        if(!cohort->event_poll||!praktor_statechart_polls_external(charts[i]))continue;
+        const char *target=i?task->task_name:NULL;
+        praktor_host_event notification={0};
+        const int available=cohort->event_poll(cohort->event_context,target,&notification);
+        if(available==0)continue;
+        if(available!=1) {
+            (void)snprintf(cohort->error,cohort->error_capacity,
+                "event source for '%s' returned %d",target?target:"workflow",available);
+            return SALTS_EIO;
+        }
+        rc=praktor_statechart_receive(charts[i],&notification);
+        if(rc!=SALTS_OK) {
+            task->chart_error=praktor_statechart_error(charts[i]);
+            return rc;
+        }
+    }
+    return praktor_session_tick(task->session,&task->outcome);
+}
+
+/* One CFlow descriptor owns the entire cooperative turn. No worker accesses
+ * the DAG, registry, or mutable workflow values during this callback. */
+static void callback_run(void *p) {
+    prk_cohort_driver *c=p;
+    c->ran=true;
+    size_t remaining=c->count;
+    while(remaining&&c->status==PRAKTOR_RUNTIME_OK) {
+        for(size_t i=0u;i<c->count;++i) {
+            prk_task_driver *task=&c->tasks[i].driver;
+            if(task->outcome==SALTS_BT_SUCCESS)continue;
+            if(c->cancel&&c->cancel(c->cancel_context)) {
+                c->status=PRAKTOR_RUNTIME_CANCELLED;
+                break;
+            }
+            if(hrtime()>=c->deadline) {
+                c->status=PRAKTOR_RUNTIME_DEADLINE;
+                break;
+            }
+            const int rc=tick_task(task,c);
+            if(rc!=SALTS_OK||task->outcome==SALTS_BT_FAILURE) {
+                c->status=PRAKTOR_RUNTIME_FAILED;
+                c->failed_slot=i;
+                if(!c->error[0])
+                    (void)snprintf(c->error,c->error_capacity,"%s",
+                        task->chart_error?task->chart_error:praktor_session_error(task->session));
+                break;
+            }
+            if(task->outcome==SALTS_BT_SUCCESS)--remaining;
+        }
+        if(remaining&&c->status==PRAKTOR_RUNTIME_OK)sleep_ms(1u);
+    }
+    /* Closing happens on the owner after CFlow has finalized the callback. */
 }
 static void callback_cancel(void *p) {
-    ((prk_callback *)p)->cancelled=true;
+    ((prk_cohort_driver *)p)->status=PRAKTOR_RUNTIME_CANCELLED;
 }
 static void callback_finalize(void *p) {
-    ((prk_callback *)p)->finalized=true;
+    ((prk_cohort_driver *)p)->finalized=true;
 }
 
 typedef struct prk_admission {
     praktor_workflow_dag_state *dag;
-    size_t task_id;
+    const size_t *ids;
+    size_t count;
     cflow_executor *executor;
     cflow_executor_task descriptor;
 } prk_admission;
@@ -124,12 +251,16 @@ CMETA_INTERCEPTOR_TYPE(prk_action_gate,prk_admission,prk_ack);
 static cmeta_status before_admit(void *ctx,const prk_admission *request,
                                   bool *proceed) {
     const praktor_component_host *component=(const praktor_component_host *)ctx;
-    bool reserved=false;
-    if(!component||!component->active||component->admitted!=1 ||
-       praktor_workflow_dag_is_reserved(request->dag,request->task_id,
-                                        &reserved)!=SALTS_OK)
+    if(!component||!component->active||component->admitted!=1)
         return CMETA_CALLBACK_ERROR;
-    *proceed=reserved;
+    *proceed=false;
+    for(size_t i=0u;i<request->count;++i) {
+        bool reserved=false;
+        if(praktor_workflow_dag_is_reserved(request->dag,request->ids[i],&reserved)!=SALTS_OK)
+            return CMETA_CALLBACK_ERROR;
+        if(!reserved)return CMETA_OK;
+    }
+    *proceed=true;
     return CMETA_OK;
 }
 static cmeta_status admit_action(void *ctx,const prk_admission *request,
@@ -144,7 +275,7 @@ CMETA_STATIC_ASSERT(CMETA_TYPE_MATCHES(&admit_action,prk_action_gate_target_fn),
 
 /* Explicit native action selection, not a fallback sequence. Preflight every
  * plan before executing any DAG node. */
-static int make_plan(const praktor_workflow_snapshot *snapshot,size_t id,
+static int make_plan(const praktor_workflow_snapshot *snapshot,size_t id,bool has_chart,
     praktor_orch_session_plan **out,char *error,size_t capacity) {
     praktor_workflow_snapshot_task_kind kind;
     praktor_session_config cfg={0};
@@ -165,26 +296,126 @@ static int make_plan(const praktor_workflow_snapshot *snapshot,size_t id,
         return praktor_orch_session_plan_create(
             tree,&cfg.tree,out,error,capacity);
     default:
-        return SALTS_ENOTSUP;
+        if(has_chart)return praktor_orch_session_plan_create_chart_task(
+            tree,&cfg.tree,out,error,capacity);
+        return praktor_orch_session_plan_create_workflow_tree(
+            tree,&cfg.tree,out,error,capacity);
     }
 }
-static int native_set_key(const praktor_orch_tree *tree,
-                          char *out,size_t capacity) {
-    const praktor_orch_node *node=praktor_orch_tree_root(tree);
-    if(!node||praktor_orch_node_type(node)!=PRAKTOR_ORCH_SET_VARIABLE)
-        return SALTS_ENOTSUP;
+typedef struct prk_task_tools {
+    praktor_tool_binding *bindings;
+    size_t count;
+} prk_task_tools;
+
+static int bind_tools(praktor_component_host *components,const praktor_orch_session_plan *plan,
+    prk_task_tools *tools,char *error,size_t capacity) {
+    const size_t nodes=praktor_orch_session_plan_node_count(plan);
+    size_t count=0u,used=0u;
+    for(size_t i=0u;i<nodes;++i)
+        if(!strcmp(praktor_orch_session_plan_node_at(plan,i)->action,"Tool"))++count;
+    if(!count)return SALTS_OK;
+    tools->bindings=calloc(count,sizeof(*tools->bindings));
+    if(!tools->bindings)return SALTS_ENOMEM;
+    tools->count=count;
+    for(size_t i=0u;i<nodes;++i) {
+        const praktor_session_node *node=praktor_orch_session_plan_node_at(plan,i);
+        if(strcmp(node->action,"Tool"))continue;
+        const char *service=NULL,*payload=NULL;
+        size_t payload_size=0u;
+        for(size_t p=0u;p<node->parameter_count;++p) {
+            if(!strcmp(node->parameters[p].name,"service"))service=node->parameters[p].text;
+            if(!strcmp(node->parameters[p].name,"with")) {
+                payload=node->parameters[p].text;
+                payload_size=node->text_sizes[p];
+            }
+        }
+        praktor_tool_binding *binding=&tools->bindings[used++];
+        binding->node_index=i;
+        if(!service||praktor_component_host_service(components,service,&binding->service,
+                                                      &binding->definition)!=SALTS_OK) {
+            (void)snprintf(error,capacity,"unknown tool service '%s'",service?service:"");
+            return SALTS_EINVAL;
+        }
+        if(payload) {
+            binding->inputs=json_parse(payload,payload_size);
+            if(!binding->inputs) {
+                (void)snprintf(error,capacity,"cannot decode Tool inputs");
+                return SALTS_EINVAL;
+            }
+        }
+        int rc=praktor_tool_admit(binding->definition,binding->inputs,error,capacity);
+        if(rc!=SALTS_OK)return rc;
+    }
+    return SALTS_OK;
+}
+static vstr action_parameter(const praktor_orch_node *node,const char *name) {
     for(size_t i=0u;i<praktor_orch_param_count(node);++i) {
         praktor_orch_param param={0};
-        if(praktor_orch_param_at(node,i,&param)!=SALTS_OK)return SALTS_EINVAL;
-        if(vstr_eq(param.key,vstr_from_cstr("key"))) {
-            if(!param.value.len||param.value.len>=capacity ||
-               memchr(param.value.data,'\0',param.value.len))return SALTS_EINVAL;
-            memcpy(out,param.value.data,param.value.len);
-            out[param.value.len]='\0';
-            return SALTS_OK;
+        if(praktor_orch_param_at(node,i,&param)!=SALTS_OK)break;
+        if(vstr_eq(param.key,vstr_from_cstr(name)))return param.value;
+    }
+    return (vstr){0};
+}
+static int bind_outputs(const praktor_orch_node *root,bool command,
+    const json_value_t *task,size_t value_capacity,prk_task_outputs *out,
+    char *error,size_t capacity) {
+    const praktor_orch_type type=praktor_orch_node_type(root);
+    const char *name=json_get_string(task,"name");
+    out->declared=json_object_get(task,"outputs");
+    const size_t count=json_array_size(out->declared);
+    if(count>PRAKTOR_WORKFLOW_MAX_TEXT_OUTPUTS||count>value_capacity) {
+        (void)snprintf(error,capacity,"task '%s': too many declared outputs",name);
+        return SALTS_EINVAL;
+    }
+    for(size_t i=0u;i<count;++i) {
+        const json_value_t *item=json_array_get(out->declared,i);
+        const vstr ref={json_string(item),json_string_len(item)};
+        const vstr key=praktor_variable_reference(ref);
+        if(!key.data||key.len>PRK_MAX_KEY) {
+            (void)snprintf(error,capacity,"task '%s': outputs require $name references",name);
+            return SALTS_EINVAL;
+        }
+        for(size_t j=0u;j<i;++j) {
+            if(strcmp(ref.data,json_string(json_array_get(out->declared,j)))==0) {
+                (void)snprintf(error,capacity,"task '%s': duplicate output '%s'",name,ref.data);
+                return SALTS_EINVAL;
+            }
         }
     }
-    return SALTS_EINVAL;
+    out->process=command||type==PRAKTOR_ORCH_SHELL||type==PRAKTOR_ORCH_TOOL;
+    if(out->process) {
+        out->keys[PRK_EXIT_CODE]="shell_exit_code";
+        out->keys[PRK_STDOUT]=command?"stdout":"shell_output";
+        out->keys[PRK_STDERR]="shell_stderr";
+    }
+    static const char *const params[]={"exit_code_key","output_key","stderr_key"};
+    const size_t bindings=type==PRAKTOR_ORCH_SHELL?PRK_PROCESS_OUTPUTS:
+                          type==PRAKTOR_ORCH_SET_VARIABLE?1u:0u;
+    for(size_t i=0u;i<bindings;++i) {
+        const char *parameter=type==PRAKTOR_ORCH_SET_VARIABLE?"key":params[i];
+        const vstr key=action_parameter(root,parameter);
+        if(!key.data)continue;
+        if(!key.len||key.len>PRK_MAX_KEY||key.data[0]=='$'||
+           memchr(key.data,'\0',key.len)!=NULL) {
+            (void)snprintf(error,capacity,"task '%s': '%s' must name a literal output key",name,parameter);
+            return SALTS_EINVAL;
+        }
+        out->keys[i]=key.data;
+    }
+    if(out->process) {
+        for(size_t i=0u;i<PRK_PROCESS_OUTPUTS;++i) {
+            if(strcmp(out->keys[i],"shell_error")==0) {
+                (void)snprintf(error,capacity,"task '%s': 'shell_error' is reserved for diagnostics",name);
+                return SALTS_EINVAL;
+            }
+            for(size_t j=0u;j<i;++j)
+                if(strcmp(out->keys[i],out->keys[j])==0) {
+                    (void)snprintf(error,capacity,"task '%s': Shell output keys must be distinct",name);
+                    return SALTS_EINVAL;
+                }
+        }
+    }
+    return SALTS_OK;
 }
 static bool add_owned(json_value_t *parent,const char *key,
                       json_value_t *child) {
@@ -203,56 +434,57 @@ static int read_output(praktor_value_store *store,const char *key,
     data[*length]='\0';
     return SALTS_OK;
 }
-static int publish_success(prk_state *s,size_t task_id,
-    praktor_value_store *scope,bool shell,const char *value_key,
-    cflow_executor_control *control) {
-    const char *ports[PRK_MAX_OUTPUTS]={0};
-    const char *labels[PRK_MAX_OUTPUTS]={0};
-    size_t count=0u;
-    char values[PRK_MAX_OUTPUTS][PRK_MAX_VALUE+1u]={{0}};
-    size_t lengths[PRK_MAX_OUTPUTS]={0};
-    praktor_value_txn txn={0};
+static size_t output_count(const prk_task_outputs *bindings) {
+    return bindings->declared?json_array_size(bindings->declared):
+        bindings->process?PRK_PROCESS_OUTPUTS:bindings->keys[0]?1u:0u;
+}
+static const char *output_key(const prk_task_outputs *bindings,size_t index) {
+    return bindings->declared?json_string(json_array_get(bindings->declared,index))+1u:
+        bindings->keys[index];
+}
+
+static int stage_outputs(praktor_value_store *root,praktor_value_store *scope,
+    const prk_task_outputs *bindings,praktor_value_txn *txn,json_value_t **out,
+    char *error,size_t capacity) {
+    static const char *const process_labels[]={"exit_code","stdout","stderr"};
+    const json_value_t *declared=bindings->declared;
+    const size_t count=output_count(bindings);
+    if(!count)return SALTS_OK;
+    const char *ports[PRAKTOR_WORKFLOW_MAX_TEXT_OUTPUTS];
+    char value[PRK_MAX_VALUE+1u];
     json_value_t *typed=json_create_object();
-    praktor_workflow_task_output_update update={0};
     int rc=SALTS_EINVAL;
     if(!typed)return SALTS_ENOMEM;
-    if(shell) {
-        ports[0]="shell_exit_code";labels[0]="exit_code";
-        ports[1]=value_key;labels[1]="stdout";
-        ports[2]="shell_stderr";labels[2]="stderr";count=3u;
-    }else {
-        ports[0]=value_key;labels[0]=value_key;count=1u;
-    }
     for(size_t i=0u;i<count;++i) {
-        if(!ports[i]||read_output(scope,ports[i],values[i],
-                sizeof(values[i]),&lengths[i])!=SALTS_OK ||
-            !add_owned(typed,labels[i],
-                json_create_string_n(values[i],lengths[i])))
+        ports[i]=output_key(bindings,i);
+        const char *label=declared||!bindings->process?ports[i]:process_labels[i];
+        size_t length=0u;
+        rc=read_output(scope,ports[i],value,sizeof(value),&length);
+        if(rc!=SALTS_OK) {
+            (void)snprintf(error,capacity,"output '%s' is unavailable",ports[i]);
             goto done;
-    }
-    if(praktor_workflow_prepare_task_text_outputs(
-            &s->root,scope,ports,count,&txn)!=PRAKTOR_VALUE_OK)goto done;
-    update.task_index=task_id;update.updates=typed;
-    size_t pending=SIZE_MAX;
-    uint64_t started=hrtime();
-    do {
-        int commit=praktor_workflow_parallel_commit_after_cflow_and_process_drain(
-            s->registry,&update,&txn,1u,control,&s->retainer,64u,&pending);
-        if(commit==PRAKTOR_PARALLEL_OK && pending==0u) {
-            rc=SALTS_OK;break;
         }
-        if(commit!=PRAKTOR_PARALLEL_BUSY)break;
-        sleep_ms(1u);
-    }while(hrtime()-started<UINT64_C(5000000000));
+        if(!add_owned(typed,label,json_create_string_n(value,length))) {
+            rc=SALTS_ENOMEM;
+            goto done;
+        }
+    }
+    rc=praktor_workflow_prepare_task_text_outputs(root,scope,ports,count,txn);
+    if(rc==PRAKTOR_VALUE_OK) {
+        *out=typed;
+        return SALTS_OK;
+    }
+    if(rc==PRAKTOR_VALUE_ENOMEM)rc=SALTS_ENOMEM;
+    else if(rc==PRAKTOR_VALUE_ENOTFOUND)rc=SALTS_ENOENT;
+    else rc=SALTS_ENOBUFS;
 done:
-    praktor_value_txn_abort(&txn);
     json_free(typed);
     return rc;
 }
 static int publish_failure_exit(prk_state *s,size_t index,
-                                praktor_value_store *scope) {
+                                praktor_value_store *scope,const char *key) {
     char code[64]={0};size_t n=0u;
-    if(read_output(scope,"shell_exit_code",code,sizeof(code),&n)!=SALTS_OK)
+    if(read_output(scope,key,code,sizeof(code),&n)!=SALTS_OK)
         return SALTS_ENOENT;
     json_value_t *value=json_create_string_n(code,n);
     if(!value)return SALTS_ENOMEM;
@@ -306,18 +538,269 @@ failed:
     json_free(tasks);json_free(root);
     return SALTS_ENOMEM;
 }
+static int validate_selected_task_fields(const praktor_workflow_snapshot *snapshot,
+        const praktor_workflow_dag_state *dag,char *error,size_t capacity) {
+    static const struct {const char *key,*yaml;} unsupported[]={
+        {"when","when"},{"triggers","triggers"},{"env","env"},{"dot_env","dotEnv"},
+        {"each","each"},{"timeout","timeout"},{"retry_count","retries"},
+        {"working_dir","working_dir"},{"silent","silent"},{"sources","sources"},
+        {"generates","generates"},{"finally","finally"}
+    };
+    const size_t count=praktor_workflow_snapshot_task_count(snapshot);
+    for(size_t i=0u;i<count;++i) {
+        bool selected=false;
+        const int status=praktor_workflow_dag_is_selected(dag,i,&selected);
+        if(status!=SALTS_OK)return status;
+        if(!selected)continue;
+        const json_value_t *task=praktor_workflow_snapshot_task_metadata(snapshot,i);
+        for(size_t j=0u;j<sizeof unsupported/sizeof unsupported[0];++j) {
+            if(json_object_get(task,unsupported[j].key)) {
+                (void)snprintf(error,capacity,"task '%s': field '%s' is unsupported",
+                               json_get_string(task,"name"),unsupported[j].yaml);
+                return SALTS_ENOTSUP;
+            }
+        }
+    }
+    return SALTS_OK;
+}
+
+typedef struct prk_cohort_context {
+    prk_state *owner;
+    praktor_component_host *components;
+    praktor_statechart *workflow_chart;
+    const praktor_session_config *defaults;
+    praktor_orch_session_plan *const *plans;
+    praktor_statechart_plan *const *charts;
+    const prk_task_tools *tools;
+    const prk_task_outputs *outputs;
+    size_t value_capacity;
+    praktor_cancel_probe cancel;
+    void *cancel_context;
+    praktor_event_poll event_poll;
+    void *event_context;
+    uint64_t deadline;
+} prk_cohort_context;
+
+static bool check_output_keys(const prk_task_outputs *outputs,const size_t *ids,
+    size_t count,char *error,size_t capacity) {
+    for(size_t i=0u;i<count;++i) {
+        const prk_task_outputs *a=&outputs[ids[i]];
+        for(size_t j=i+1u;j<count;++j) {
+            const prk_task_outputs *b=&outputs[ids[j]];
+            for(size_t p=0u;p<output_count(a);++p) {
+                const char *key=output_key(a,p);
+                for(size_t q=0u;q<output_count(b);++q) {
+                    if(strcmp(key,output_key(b,q))==0) {
+                        (void)snprintf(error,capacity,"ready tasks share output key '%s'",key);
+                        return false;
+                    }
+                }
+            }
+        }
+    }
+    return true;
+}
+
+static int prepare_task(const prk_cohort_context *ctx,size_t index,prk_running_task *task) {
+    prk_state *owner=ctx->owner;
+    int rc=praktor_workflow_task_registry_start(owner->registry,index);
+    if(rc!=SALTS_OK)return rc;
+    praktor_native_host_config hostconfig;
+    praktor_native_host_config_init(&hostconfig,ctx->value_capacity,PRK_MAX_KEY,PRK_MAX_VALUE);
+    hostconfig.max_running_leaves=1u;
+    hostconfig.reserve_event_fields=ctx->charts[index]!=NULL;
+    task->views=(prk_chart_views){.task=&task->chart,.workflow=ctx->workflow_chart};
+    if(ctx->charts[index]||ctx->workflow_chart->impl) {
+        hostconfig.chart_active=chart_active;
+        hostconfig.chart_user=&task->views;
+    }
+    rc=praktor_native_host_init_with_config(&task->host,&hostconfig);
+    if(rc!=SALTS_OK)return rc;
+    rc=praktor_workflow_load_task_text_scope(owner->snapshot,index,&owner->root,
+                                            praktor_native_host_values(&task->host));
+    if(rc!=PRAKTOR_VALUE_OK)return rc;
+    praktor_session_config config=*ctx->defaults;
+    rc=praktor_native_host_bind(&task->host,&config.host);
+    if(rc!=SALTS_OK)return rc;
+    if(ctx->tools[index].count)
+        praktor_tool_action_bind(&task->tool,ctx->tools[index].bindings,
+                                 ctx->tools[index].count,&config.host);
+    config.retainer=&owner->retainer;
+    config.has_capability=praktor_component_host_has_capability;
+    config.capability_user=ctx->components;
+    if(ctx->charts[index]) {
+        rc=praktor_statechart_init(&task->chart,ctx->charts[index],&task->host,&config);
+        if(rc!=SALTS_OK)return rc;
+    }
+    if(ctx->charts[index]||ctx->workflow_chart->impl) {
+        task->chart_actions=(prk_chart_actions){
+            .base=config.host,.task=&task->chart,.workflow=ctx->workflow_chart
+        };
+        config.host.user=&task->chart_actions;
+        config.host.tick_typed_leaf=task_leaf_tick;
+        config.host.halt_typed_leaf=task_leaf_halt;
+    }
+    task->driver=(prk_task_driver){
+        .session=&task->session,
+        .chart=&task->chart,
+        .workflow_chart=ctx->workflow_chart,
+        .task_name=json_get_string(praktor_workflow_snapshot_task_metadata(owner->snapshot,index),"name"),
+        .outcome=SALTS_BT_RUNNING
+    };
+    return praktor_orch_session_plan_init_session(ctx->plans[index],&config,&task->session);
+}
+
+static int publish_cohort(const prk_cohort_context *ctx,const size_t *ids,
+    prk_running_task *tasks,size_t count,char *error,size_t capacity) {
+    praktor_workflow_task_output_update updates[PRAKTOR_WORKFLOW_MAX_PARALLELISM]={0};
+    praktor_value_txn staged[PRAKTOR_WORKFLOW_MAX_PARALLELISM]={0};
+    json_value_t *values[PRAKTOR_WORKFLOW_MAX_PARALLELISM]={0};
+    size_t used=0u;
+    int rc=SALTS_OK;
+    for(size_t i=0u;i<count;++i) {
+        rc=stage_outputs(&ctx->owner->root,
+            praktor_native_host_values(&tasks[i].host),
+            &ctx->outputs[ids[i]],&staged[used],&values[used],error,capacity);
+        if(rc!=SALTS_OK)break;
+        if(values[used]) {
+            updates[used]=(praktor_workflow_task_output_update){
+                .task_index=ids[i],.updates=values[used]
+            };
+            ++used;
+        }
+    }
+    if(rc==SALTS_OK&&used) {
+        const int committed=praktor_workflow_parallel_commit(ctx->owner->registry,updates,staged,used);
+        if(committed!=PRAKTOR_PARALLEL_OK) {
+            (void)snprintf(error,capacity,"could not commit task outputs (status %d)",committed);
+            rc=committed==PRAKTOR_PARALLEL_CONFLICT?SALTS_EINVAL:SALTS_ENOBUFS;
+        }
+    }
+    for(size_t i=0u;i<used;++i) {
+        praktor_value_txn_abort(&staged[i]);
+        json_free(values[i]);
+    }
+    return rc;
+}
+
+static praktor_runtime_status run_cohort(const prk_cohort_context *ctx,
+    const size_t *ids,size_t count,char *error,size_t capacity) {
+    prk_state *owner=ctx->owner;
+    prk_running_task tasks[PRAKTOR_WORKFLOW_MAX_PARALLELISM]={0};
+    prk_cohort_driver driver={
+        .tasks=tasks,.count=count,.failed_slot=SIZE_MAX,.cancel=ctx->cancel,
+        .cancel_context=ctx->cancel_context,.deadline=ctx->deadline,
+        .event_poll=ctx->event_poll,.event_context=ctx->event_context,
+        .error=error,.error_capacity=capacity,.status=PRAKTOR_RUNTIME_OK
+    };
+    praktor_runtime_status status=PRAKTOR_RUNTIME_RESOURCE;
+    cflow_executor executor={0};
+    cflow_executor_control control={0};
+    bool initialized=false,accepted=false;
+    int rc=SALTS_OK;
+    if(!check_output_keys(ctx->outputs,ids,count,error,capacity)) {
+        status=PRAKTOR_RUNTIME_FAILED;
+        goto settle;
+    }
+    for(size_t i=0u;i<count;++i) {
+        rc=prepare_task(ctx,ids[i],&tasks[i]);
+        if(rc!=SALTS_OK)goto settle;
+    }
+    if(!(initialized=cflow_executor_manual_init_with_capacity(&executor,1u))||
+       !cflow_executor_as_control(&executor,&control)) {
+        rc=SALTS_ENOMEM;goto settle;
+    }
+    const cflow_executor_task descriptor={
+        callback_run,callback_cancel,callback_finalize,&driver
+    };
+    prk_admission admission={owner->dag,ids,count,&executor,descriptor};
+    prk_ack ack={false};
+    prk_action_gate_hook gate={ctx->components,before_admit,NULL,NULL};
+    prk_action_gate chain={NULL,admit_action,&gate,1u};
+    accepted=prk_action_gate_invoke(&chain,&admission,&ack)==CMETA_OK&&ack.accepted;
+    if(!accepted) {
+        rc=SALTS_EBUSY;goto settle;
+    }
+    const size_t invoked=cflow_executor_run_ready(&executor);
+    if(!cflow_executor_control_shutdown(&control,CFLOW_EXECUTOR_SHUTDOWN_DRAIN)||
+       cflow_executor_control_wait_idle(&control)!=CFLOW_EXECUTOR_WAIT_IDLE)
+        abort(); /* A live callback would still borrow this cohort. */
+    if(invoked!=1u||!driver.ran||!driver.finalized) {
+        rc=SALTS_EBUSY;goto settle;
+    }
+    status=driver.status;
+settle:
+    if(initialized)cflow_executor_destroy(&executor);
+    for(size_t i=0u;i<count;++i) {
+        if(praktor_session_destroy(&tasks[i].session)!=SALTS_OK||
+           praktor_tool_action_close(&tasks[i].tool)!=SALTS_OK)
+            abort(); /* A live native owner still borrows task storage. */
+        if(rc==SALTS_OK&&tasks[i].tool.halt_status!=SALTS_OK)rc=tasks[i].tool.halt_status;
+    }
+    if(drain(&owner->retainer,UINT64_C(5000000000))!=SALTS_OK)abort();
+    if(rc!=SALTS_OK) {
+        status=PRAKTOR_RUNTIME_RESOURCE;
+        if(!error[0])(void)snprintf(error,capacity,"task preparation or cleanup failed (status %d)",rc);
+    }
+    if(status==PRAKTOR_RUNTIME_OK&&hrtime()>=ctx->deadline)
+        status=PRAKTOR_RUNTIME_DEADLINE;
+    if(status==PRAKTOR_RUNTIME_OK) {
+        rc=publish_cohort(ctx,ids,tasks,count,error,capacity);
+        if(rc!=SALTS_OK)
+            status=rc==SALTS_ENOENT||rc==SALTS_EINVAL?PRAKTOR_RUNTIME_FAILED:PRAKTOR_RUNTIME_RESOURCE;
+    }else if(driver.failed_slot<count) {
+        const size_t slot=driver.failed_slot,index=ids[slot];
+        if(ctx->outputs[index].process)
+            (void)publish_failure_exit(owner,index,praktor_native_host_values(&tasks[slot].host),
+                                       ctx->outputs[index].keys[PRK_EXIT_CODE]);
+    }
+    const bool succeeded=status==PRAKTOR_RUNTIME_OK;
+    if(!succeeded)
+        (void)praktor_workflow_dag_stop(owner->dag,status==PRAKTOR_RUNTIME_CANCELLED?
+            PRAKTOR_WORKFLOW_DAG_CANCELLED:status==PRAKTOR_RUNTIME_DEADLINE?
+            PRAKTOR_WORKFLOW_DAG_DEADLINE:PRAKTOR_WORKFLOW_DAG_FAILED);
+    for(size_t i=0u;i<count;++i) {
+        rc=succeeded?praktor_workflow_task_registry_complete(owner->registry,ids[i]):
+            praktor_workflow_task_registry_fail(owner->registry,ids[i],
+                vstr_from_cstr("C11 task group failed, was cancelled or timed out"));
+        const int settled=accepted?praktor_workflow_dag_finish(owner->dag,ids[i],succeeded):
+            praktor_workflow_dag_refuse(owner->dag,ids[i]);
+        if(rc!=SALTS_OK||settled!=SALTS_OK) {
+            status=PRAKTOR_RUNTIME_RESOURCE;
+            if(!error[0])(void)snprintf(error,capacity,"could not settle task %zu",ids[i]);
+        }
+    }
+    const char *outcome=succeeded?"success":status==PRAKTOR_RUNTIME_CANCELLED?
+        "cancelled":status==PRAKTOR_RUNTIME_DEADLINE?"deadline":"failed";
+    for(size_t i=0u;i<count;++i) {
+        if(tasks[i].driver.ran&&observe_task(&tasks[i].driver,"task.finished",outcome)!=SALTS_OK) {
+            if(status==PRAKTOR_RUNTIME_OK)status=PRAKTOR_RUNTIME_FAILED;
+            if(!error[0]) (void)snprintf(error,capacity,"%s",tasks[i].driver.chart_error);
+        }
+        if(praktor_statechart_destroy(&tasks[i].chart)!=SALTS_OK)abort();
+        praktor_native_host_destroy(&tasks[i].host);
+    }
+    return status;
+}
+
 static praktor_runtime_status execute_yaml(
     const char *yaml,size_t yaml_size,const praktor_runtime_limits *specified,
     praktor_cancel_probe cancel,void *cancel_context,
-    const char *selected_task,praktor_runtime_result *out) {
+     const char *selected_task,praktor_event_poll event_poll,void *event_context,
+     praktor_runtime_result *out) {
     praktor_runtime_limits options=
         specified?*specified:praktor_runtime_limits_default();
     praktor_component_host components={0};
     prk_state owner={0};
     cmeta_cleanup cleanup[4]={{0}};
     praktor_orch_session_plan *plans[PRK_MAX_TASKS]={0};
-    praktor_execution_service services[PRK_MAX_TASKS]={0};
-    const json_value_t *definitions[PRK_MAX_TASKS]={0};
+    prk_task_outputs outputs[PRK_MAX_TASKS]={0};
+    praktor_statechart_plan *charts[PRK_MAX_TASKS]={0};
+    praktor_statechart_plan *workflow_plan=NULL;
+    praktor_statechart workflow_chart={0};
+    praktor_native_host workflow_host={0};
+    prk_chart_views workflow_views={.workflow=&workflow_chart};
+    prk_task_tools tools[PRK_MAX_TASKS]={0};
     praktor_runtime_status status=PRAKTOR_RUNTIME_INVALID;
     size_t task_count=0u;
     praktor_session_config defaults={0};
@@ -333,14 +816,15 @@ static praktor_runtime_status execute_yaml(
     (void)cmeta_cleanup_arm(&cleanup[0],clean_snapshot,NULL,&owner.snapshot);
     (void)cmeta_cleanup_arm(&cleanup[1],clean_registry,NULL,&owner.registry);
     (void)cmeta_cleanup_arm(&cleanup[2],clean_dag,NULL,&owner.dag);
-    rc=praktor_workflow_snapshot_create_inline(vstr_from_buf(yaml,yaml_size),
+    rc=praktor_workflow_snapshot_create_for_run(vstr_from_buf(yaml,yaml_size),
+         (size_t)options.max_tasks,
          &owner.snapshot,out->error,sizeof(out->error));
-    if(rc!=SALTS_OK)goto done;
-    task_count=praktor_workflow_snapshot_task_count(owner.snapshot);
-    if(task_count>(size_t)options.max_tasks){
-        (void)snprintf(out->error,sizeof(out->error),
-            "C11 workflow exceeds configured task capacity");goto done;
+    if(rc!=SALTS_OK) {
+        if(rc==SALTS_ENOTSUP)status=PRAKTOR_RUNTIME_UNSUPPORTED;
+        else if(rc==SALTS_ENOMEM)status=PRAKTOR_RUNTIME_RESOURCE;
+        goto done;
     }
+    task_count=praktor_workflow_snapshot_task_count(owner.snapshot);
     praktor_session_config_init(&defaults);
     const char *defaults_error=NULL;
     rc=praktor_yaml_workflow_resolve_defaults(
@@ -351,6 +835,23 @@ static praktor_runtime_status execute_yaml(
         if(defaults_error)(void)snprintf(out->error,sizeof out->error,"%s",defaults_error);
         goto done;
     }
+    rc=praktor_workflow_task_registry_create(owner.snapshot,&owner.registry);
+    if(rc!=SALTS_OK)goto done;
+    const json_value_t *parallelism=json_object_get(
+        praktor_workflow_snapshot_metadata(owner.snapshot),"parallelism");
+    const size_t width=parallelism?(size_t)json_number(parallelism):1u;
+    rc=praktor_workflow_dag_state_create_task(
+         praktor_workflow_snapshot_dependencies(owner.snapshot),width,selected_task,&owner.dag);
+    if(rc!=SALTS_OK) {
+        if(rc==SALTS_ENOMEM)status=PRAKTOR_RUNTIME_RESOURCE;
+        else if(selected_task)(void)snprintf(out->error,sizeof out->error,"unknown task '%s'",selected_task);
+        goto done;
+    }
+    rc=validate_selected_task_fields(owner.snapshot,owner.dag,out->error,sizeof out->error);
+    if(rc!=SALTS_OK) {
+        if(rc==SALTS_ENOTSUP)status=PRAKTOR_RUNTIME_UNSUPPORTED;
+        goto done;
+    }
     rc=praktor_component_host_start(&components,&options,
         praktor_workflow_snapshot_metadata(owner.snapshot),out->error,sizeof out->error);
     if(rc!=SALTS_OK) {
@@ -358,15 +859,17 @@ static praktor_runtime_status execute_yaml(
         if(!out->error[0])(void)snprintf(out->error,sizeof(out->error),
             "CMeta Configurator refused the workflow services");goto done;
     }
-    rc=praktor_workflow_task_registry_create(owner.snapshot,&owner.registry);
-    if(rc!=SALTS_OK)goto done;
-    rc=praktor_workflow_dag_state_create_task(
-        praktor_workflow_snapshot_dependencies(owner.snapshot),1u,selected_task,&owner.dag);
-    if(rc!=SALTS_OK) {
-        if(rc==SALTS_ENOMEM)status=PRAKTOR_RUNTIME_RESOURCE;
-        else if(selected_task)(void)snprintf(out->error,sizeof out->error,"unknown task '%s'",selected_task);
-        goto done;
+    const praktor_yaml_node workflow_declaration=praktor_workflow_snapshot_statechart(owner.snapshot);
+    if(praktor_yaml_valid(workflow_declaration)) {
+        rc=praktor_statechart_plan_create(workflow_declaration,&defaults.tree,event_poll!=NULL,
+            &workflow_plan,out->error,sizeof out->error);
+        if(rc!=SALTS_OK) {
+            status=rc==SALTS_ENOTSUP?PRAKTOR_RUNTIME_UNSUPPORTED:
+                   rc==SALTS_ENOMEM?PRAKTOR_RUNTIME_RESOURCE:PRAKTOR_RUNTIME_INVALID;
+            goto done;
+        }
     }
+    bool has_chart_scope=workflow_plan!=NULL;
     /* Admit every selected action before starting even the first subprocess. */
     for(size_t i=0u;i<task_count;++i){
         bool selected=false;
@@ -376,27 +879,62 @@ static praktor_runtime_status execute_yaml(
             if(rc!=SALTS_OK)goto done;
             continue;
         }
-        rc=make_plan(owner.snapshot,i,&plans[i],out->error,sizeof(out->error));
+        const praktor_yaml_node declaration=praktor_workflow_snapshot_task_statechart(owner.snapshot,i);
+        const bool has_chart=praktor_yaml_valid(declaration);
+        if(has_chart||workflow_plan) {
+            const json_value_t *vars=json_object_get(praktor_workflow_snapshot_task_metadata(owner.snapshot,i),"vars");
+            for(size_t j=0u;j<json_object_size(vars);++j) {
+                const char *key=json_object_key(vars,j);
+                if(!strncmp(key,"chart.",6u)||(has_chart&&!strncmp(key,"event.",6u))) {
+                    (void)snprintf(out->error,sizeof out->error,"statechart field '%s' is read-only",key);
+                    goto done;
+                }
+            }
+        }
+        if(has_chart) {
+            has_chart_scope=true;
+            rc=praktor_statechart_plan_create(declaration,
+                &defaults.tree,event_poll!=NULL,&charts[i],out->error,sizeof out->error);
+            if(rc!=SALTS_OK) {
+                status=rc==SALTS_ENOTSUP?PRAKTOR_RUNTIME_UNSUPPORTED:
+                       rc==SALTS_ENOMEM?PRAKTOR_RUNTIME_RESOURCE:PRAKTOR_RUNTIME_INVALID;
+                goto done;
+            }
+        }
+        const praktor_orch_node *root=praktor_orch_tree_root(
+            praktor_workflow_snapshot_task_tree(owner.snapshot,i));
+        praktor_workflow_snapshot_task_kind kind;
+        rc=praktor_workflow_snapshot_task_kind_at(owner.snapshot,i,&kind);
+        if(rc!=SALTS_OK)goto done;
+        rc=bind_outputs(root,kind==PRAKTOR_WORKFLOW_SNAPSHOT_COMMAND,
+            praktor_workflow_snapshot_task_metadata(owner.snapshot,i),(size_t)options.value_capacity,&outputs[i],
+            out->error,sizeof(out->error));
+        if(rc!=SALTS_OK)goto done;
+        rc=praktor_statechart_validate_raises(charts[i],workflow_plan,root,out->error,sizeof out->error);
+        if(rc!=SALTS_OK) {
+            if(rc==SALTS_ENOMEM)status=PRAKTOR_RUNTIME_RESOURCE;
+            goto done;
+        }
+        rc=make_plan(owner.snapshot,i,has_chart||workflow_plan,&plans[i],out->error,sizeof(out->error));
         if(rc!=SALTS_OK){
             status=PRAKTOR_RUNTIME_UNSUPPORTED;
             if(!out->error[0])(void)snprintf(out->error,sizeof(out->error),
                 "Native C11 action is not implemented");goto done;
         }
-        const praktor_orch_node *root=praktor_orch_tree_root(
-            praktor_workflow_snapshot_task_tree(owner.snapshot,i));
-        if(praktor_orch_node_type(root)==PRAKTOR_ORCH_TOOL) {
-            const char *service=NULL;
-            for(size_t j=0u;j<praktor_orch_param_count(root);++j) {
-                praktor_orch_param param={0};
-                if(praktor_orch_param_at(root,j,&param)!=SALTS_OK)goto done;
-                if(vstr_eq(param.key,vstr_from_cstr("service")))service=param.value.data;
-
+        rc=bind_tools(&components,plans[i],&tools[i],out->error,sizeof(out->error));
+        if(rc!=SALTS_OK) {
+            status=rc==SALTS_ENOMEM?PRAKTOR_RUNTIME_RESOURCE:PRAKTOR_RUNTIME_INVALID;
+            goto done;
+        }
+    }
+    if(has_chart_scope) {
+        const json_value_t *variables=json_object_get(praktor_workflow_snapshot_metadata(owner.snapshot),"variables");
+        for(size_t i=0u;i<json_object_size(variables);++i) {
+            const char *key=json_object_key(variables,i);
+            if(!strncmp(key,"chart.",6u)||!strncmp(key,"event.",6u)) {
+                (void)snprintf(out->error,sizeof out->error,"statechart field '%s' is read-only",key);
+                goto done;
             }
-            if(!service||praktor_component_host_service(&components,service,&services[i],&definitions[i])!=SALTS_OK) {
-                status=PRAKTOR_RUNTIME_INVALID;
-                (void)snprintf(out->error,sizeof out->error,"unknown tool service '%s'",service?service:"");goto done;
-            }
-            if(praktor_tool_admit(definitions[i],json_object_get(praktor_workflow_snapshot_task_metadata(owner.snapshot,i),"with"),out->error,sizeof out->error)!=SALTS_OK)goto done;
         }
     }
     rc=praktor_value_store_init(&owner.root,
@@ -406,175 +944,74 @@ static praktor_runtime_status execute_yaml(
     rc=praktor_workflow_seed_root_text_variables(
         owner.snapshot,&owner.root);
     if(rc!=PRAKTOR_VALUE_OK)goto done;
-    rc=praktor_process_retainer_init(&owner.retainer,1u);
+    if(workflow_plan) {
+        praktor_native_host_config chart_config;
+        praktor_native_host_config_init(&chart_config,1u,128u,PRK_MAX_VALUE);
+        chart_config.parent_values=&owner.root;
+        chart_config.reserve_event_fields=true;
+        chart_config.chart_active=chart_active;
+        chart_config.chart_user=&workflow_views;
+        praktor_session_config config=defaults;
+        config.has_capability=praktor_component_host_has_capability;
+        config.capability_user=&components;
+        rc=praktor_native_host_init_with_config(&workflow_host,&chart_config);
+        if(rc==SALTS_OK)rc=praktor_native_host_bind(&workflow_host,&config.host);
+        if(rc==SALTS_OK)rc=praktor_statechart_init(&workflow_chart,workflow_plan,&workflow_host,&config);
+        if(rc!=SALTS_OK) {
+            status=PRAKTOR_RUNTIME_RESOURCE;
+            goto done;
+        }
+        rc=praktor_statechart_advance(&workflow_chart);
+        if(rc!=SALTS_OK) {
+            status=PRAKTOR_RUNTIME_FAILED;
+            (void)snprintf(out->error,sizeof out->error,"%s",praktor_statechart_error(&workflow_chart));
+            goto done;
+        }
+    }
+    rc=praktor_process_retainer_init(&owner.retainer,width);
     if(rc!=SALTS_OK)goto done;
     owner.has_retainer=true;
+    const prk_cohort_context ctx={
+        .owner=&owner,.components=&components,.workflow_chart=&workflow_chart,
+        .defaults=&defaults,.plans=plans,.charts=charts,.tools=tools,.outputs=outputs,
+        .value_capacity=(size_t)options.value_capacity,.cancel=cancel,
+        .cancel_context=cancel_context,.deadline=deadline,
+        .event_poll=event_poll,.event_context=event_context
+    };
     status=PRAKTOR_RUNTIME_OK;
-    for(;;){
-        size_t index=SIZE_MAX,claims=0u;
-        if(cancel&&cancel(cancel_context)){
-            (void)praktor_workflow_dag_stop(
-                owner.dag,PRAKTOR_WORKFLOW_DAG_CANCELLED);
-            status=PRAKTOR_RUNTIME_CANCELLED;break;
-        }
-        if(hrtime()>=deadline){
-            (void)praktor_workflow_dag_stop(
-                owner.dag,PRAKTOR_WORKFLOW_DAG_DEADLINE);
-            status=PRAKTOR_RUNTIME_DEADLINE;break;
-        }
-        rc=praktor_workflow_dag_claim_ready(
-            owner.dag,&index,1u,&claims);
-        if(rc==SALTS_EBUSY||(rc==SALTS_OK&&!claims))break;
-        if(rc!=SALTS_OK||index>=task_count){
-            status=PRAKTOR_RUNTIME_RESOURCE;break;
-        }
-        praktor_native_host host={0};
-        praktor_bt_host hooks={0};
-        praktor_native_host_config hostconfig={0};
-        praktor_session session={0};
-        praktor_session_config config={0};
-        praktor_tool_action tool={0};
-        cflow_executor executor={0};
-        cflow_executor_control control={0};
-        prk_callback driver={0};
-        bool has_host=false,has_session=false,has_executor=false;
-        bool accepted=false,passed=false;
-        bool shell=false;
-        bool is_tool=false;
-        char selected_key[128]={0};
-        int task_error=SALTS_OK;
-        praktor_workflow_snapshot_task_kind kind;
-        const praktor_orch_tree *tree=
-            praktor_workflow_snapshot_task_tree(owner.snapshot,index);
-        const praktor_orch_node *root=praktor_orch_tree_root(tree);
-        is_tool=praktor_orch_node_type(root)==PRAKTOR_ORCH_TOOL;
-        shell=praktor_orch_node_type(root)==PRAKTOR_ORCH_SHELL;
-        if(praktor_workflow_snapshot_task_kind_at(
-                owner.snapshot,index,&kind)!=SALTS_OK){
-            task_error=SALTS_EINVAL;goto task_done;
-        }
-        shell=shell||kind==PRAKTOR_WORKFLOW_SNAPSHOT_COMMAND||is_tool;
-        task_error=praktor_workflow_task_registry_start(owner.registry,index);
-        if(task_error!=SALTS_OK)goto task_done;
-        praktor_native_host_config_init(&hostconfig,
-            (size_t)options.value_capacity,128u,PRK_MAX_VALUE);
-        hostconfig.max_running_leaves=1u;
-        task_error=praktor_native_host_init_with_config(
-            &host,&hostconfig);
-        if(task_error!=SALTS_OK)goto task_done;
-        has_host=true;
-        task_error=praktor_workflow_load_task_text_scope(
-            owner.snapshot,index,&owner.root,
-            praktor_native_host_values(&host));
-        if(task_error!=PRAKTOR_VALUE_OK)goto task_done;
-        task_error=praktor_native_host_bind(&host,&hooks);
-        if(task_error!=SALTS_OK)goto task_done;
-        if(is_tool)praktor_tool_action_bind(&tool,services[index],definitions[index],json_object_get(praktor_workflow_snapshot_task_metadata(owner.snapshot,index),"with"),&hooks);
-        praktor_session_config_init(&config);
-        config.shell_timeout_ms=defaults.shell_timeout_ms;
-        config.shell_stream_output=defaults.shell_stream_output;
-        config.host=hooks;config.retainer=&owner.retainer;
-        task_error=praktor_orch_session_plan_init_session(
-            plans[index],&config,&session);
-        if(task_error!=SALTS_OK)goto task_done;
-        has_session=true;
-        if(!cflow_executor_manual_init_with_capacity(&executor,1u)) {
-            task_error=SALTS_EINVAL;goto task_done;
-        }
-        has_executor=true;
-        if(!cflow_executor_as_control(&executor,&control)) {
-            task_error=SALTS_EINVAL;goto task_done;
-        }
-        driver.session=&session;
-        driver.cancel=cancel;driver.cancel_context=cancel_context;
-        driver.deadline=deadline;
-        cflow_executor_task descriptor={
-            callback_run,callback_cancel,callback_finalize,&driver};
-        prk_admission admission={owner.dag,index,&executor,descriptor};
-        prk_ack ack={false};
-        prk_action_gate_hook gate={
-            &components,before_admit,NULL,NULL};
-        prk_action_gate chain={NULL,admit_action,&gate,1u};
-        accepted=prk_action_gate_invoke(&chain,&admission,&ack)==CMETA_OK
-                 &&ack.accepted;
-        if(!accepted){
-            (void)praktor_workflow_dag_refuse(owner.dag,index);
-            task_error=SALTS_EBUSY;goto task_done;
-        }
-        if(cflow_executor_run_ready(&executor)!=1u ||
-           !cflow_executor_control_shutdown(
-               &control,CFLOW_EXECUTOR_SHUTDOWN_DRAIN) ||
-           cflow_executor_control_wait_idle(&control)!=CFLOW_EXECUTOR_WAIT_IDLE ||
-           !driver.ran||!driver.finalized){
-            task_error=SALTS_EBUSY;goto task_done;
-        }
-        passed=driver.status==SALTS_OK &&
-               driver.outcome==SALTS_BT_SUCCESS &&
-               !driver.cancelled&&!driver.expired;
-        if(driver.cancelled){
-            (void)praktor_workflow_dag_stop(
-                owner.dag,PRAKTOR_WORKFLOW_DAG_CANCELLED);
+    while(status==PRAKTOR_RUNTIME_OK) {
+        if(cancel&&cancel(cancel_context)) {
+            (void)praktor_workflow_dag_stop(owner.dag,PRAKTOR_WORKFLOW_DAG_CANCELLED);
             status=PRAKTOR_RUNTIME_CANCELLED;
-        }else if(driver.expired){
-            (void)praktor_workflow_dag_stop(
-                owner.dag,PRAKTOR_WORKFLOW_DAG_DEADLINE);
+            break;
+        }
+        if(hrtime()>=deadline) {
+            (void)praktor_workflow_dag_stop(owner.dag,PRAKTOR_WORKFLOW_DAG_DEADLINE);
             status=PRAKTOR_RUNTIME_DEADLINE;
-        }else if(!passed)status=PRAKTOR_RUNTIME_FAILED;
-task_done:
-        if(has_session){
-            int closed=praktor_session_destroy(&session);
-            if(closed!=SALTS_OK){
-                /* NativeIO has not proved borrowed owner transfer; never
-                 * pretend this fallible close is a lexical RAII callback. */
-                abort();
-            }
-            has_session=false;
+            break;
         }
-        /* Keep the borrowed CFlow control alive through atomic publish. */
-        if(drain(&owner.retainer,UINT64_C(5000000000))!=SALTS_OK)
-            abort(); /* Retainer cannot be invalidated while still borrowed. */
-        if(praktor_tool_action_close(&tool)!=SALTS_OK)abort();
-        if(tool.error[0]&&!out->error[0])
-            (void)snprintf(out->error,sizeof out->error,"%s",tool.error);
-        if(accepted&&task_error==SALTS_OK) {
-            if(passed){
-                if(!shell)task_error=native_set_key(
-                    tree,selected_key,sizeof(selected_key));
-                if(task_error==SALTS_OK)task_error=publish_success(
-                    &owner,index,praktor_native_host_values(&host),
-                    shell,shell?(kind==PRAKTOR_WORKFLOW_SNAPSHOT_COMMAND
-                        ?"stdout":"shell_output"):selected_key,&control);
-            }else if(shell) {
-                /* Failure exit is a typed task diagnostic, not a root commit. */
-                (void)publish_failure_exit(&owner,index,
-                    praktor_native_host_values(&host));
-            }
-        }
-        if(has_executor)cflow_executor_destroy(&executor);
-        if(has_host)praktor_native_host_destroy(&host);
-        if(task_error!=SALTS_OK){
+        size_t ids[PRAKTOR_WORKFLOW_MAX_PARALLELISM],count=0u;
+        rc=praktor_workflow_dag_claim_ready(owner.dag,ids,width,&count);
+        if(rc!=SALTS_OK) {
             status=PRAKTOR_RUNTIME_RESOURCE;
-            if(!out->error[0])(void)snprintf(out->error,sizeof(out->error),
-                "C11 callback/admission failed (status %d)",task_error);
-            (void)praktor_workflow_dag_stop(
-                owner.dag,PRAKTOR_WORKFLOW_DAG_FAILED);
+            break;
         }
-        if(!passed||task_error!=SALTS_OK) {
-            (void)praktor_workflow_task_registry_fail(owner.registry,index,
-                vstr_from_cstr("C11 action failed, cancelled or timed out"));
-            (void)praktor_workflow_dag_finish(owner.dag,index,false);
-            if(status==PRAKTOR_RUNTIME_OK)status=PRAKTOR_RUNTIME_FAILED;
-        }else{
-            (void)praktor_workflow_task_registry_complete(owner.registry,index);
-            (void)praktor_workflow_dag_finish(owner.dag,index,true);
-        }
-        if(status!=PRAKTOR_RUNTIME_OK)break;
+        if(!count)break;
+        status=run_cohort(&ctx,ids,count,out->error,sizeof(out->error));
     }
     if(marshal_result(&owner,out,status)!=SALTS_OK)
         status=PRAKTOR_RUNTIME_RESOURCE;
 done:
-    for(size_t i=0u;i<task_count;++i)
+    if(praktor_statechart_destroy(&workflow_chart)!=SALTS_OK)abort();
+    praktor_native_host_destroy(&workflow_host);
+    praktor_statechart_plan_destroy(workflow_plan);
+    for(size_t i=0u;i<task_count;++i) {
+        for(size_t j=0u;j<tools[i].count;++j)
+            json_free(tools[i].bindings[j].inputs);
+        free(tools[i].bindings);
         praktor_orch_session_plan_destroy(plans[i]);
+        praktor_statechart_plan_destroy(charts[i]);
+    }
     if(owner.has_retainer) {
         if(drain(&owner.retainer,UINT64_C(5000000000))!=SALTS_OK ||
            praktor_process_retainer_destroy(&owner.retainer)!=SALTS_OK)
@@ -593,11 +1030,18 @@ done:
 praktor_runtime_status praktor_runtime_execute_yaml(
     const char *yaml,size_t size,const praktor_runtime_limits *limits,
     praktor_cancel_probe cancel,void *context,praktor_runtime_result *out) {
-    return execute_yaml(yaml,size,limits,cancel,context,NULL,out);
+    return execute_yaml(yaml,size,limits,cancel,context,NULL,NULL,NULL,out);
 }
 praktor_runtime_status praktor_runtime_execute_task_yaml(
     const char *yaml,size_t size,const praktor_runtime_limits *limits,
     praktor_cancel_probe cancel,void *context,const char *task,praktor_runtime_result *out) {
     if(!task||!*task)return PRAKTOR_RUNTIME_INVALID;
-    return execute_yaml(yaml,size,limits,cancel,context,task,out);
+    return execute_yaml(yaml,size,limits,cancel,context,task,NULL,NULL,out);
+}
+praktor_runtime_status praktor_runtime_execute_events_yaml(
+    const praktor_execute_request *request,const char *task,praktor_event_poll poll,
+    void *event_context,praktor_runtime_result *out) {
+    if(!request||!out||!poll||(task&&!*task))return PRAKTOR_RUNTIME_INVALID;
+    return execute_yaml(request->yaml,request->yaml_size,&request->limits,
+        request->is_cancelled,request->cancel_context,task,poll,event_context,out);
 }

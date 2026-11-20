@@ -2,30 +2,33 @@ name: "CPP Library Workflow"
 description: "A standard workflow for C++ library development"
 
 variables:
-  PROJECT_NAME: "praktor-lib"
-  BUILD_DIR: "build"
+  configure_command: "cmake -B build -S ."
+  build_command: "cmake --build build"
+  test_command: "ctest --test-dir build"
+  package_command: "cmake --build build --target package"
+  notify_command: "echo Build and test for praktor-lib completed successfully"
 
 tasks:
   - name: setup
     description: "Prepare build environment"
-    command: "cmake -B {{ BUILD_DIR }} -S ."
+    command: $configure_command
 
   - name: build
     description: "Compile the project"
     depends_on: [setup]
-    command: "cmake --build {{ BUILD_DIR }}"
+    command: $build_command
 
   - name: test
     description: "Run unit tests"
     depends_on: [build]
-    command: "ctest --test-dir {{ BUILD_DIR }}"
+    command: $test_command
 
   - name: package
     description: "Create distribution package"
     depends_on: [test]
-    command: "cmake --build {{ BUILD_DIR }} --target package"
+    command: $package_command
 
   - name: notify
     description: "Notify team of success"
     depends_on: [package]
-    command: "echo Build and test for {{ PROJECT_NAME }} completed successfully"
+    command: $notify_command

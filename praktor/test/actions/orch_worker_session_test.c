@@ -27,15 +27,15 @@ static const char *success_yaml=
     "  - name: left\n"
     "    vars: {seed: left}\n"
     "    set_variable: left_value\n"
-    "    from: seed\n"
+    "    from: $seed\n"
     "  - name: right\n"
     "    vars: {seed: right}\n"
     "    set_variable: right_value\n"
-    "    from: seed\n"
+    "    from: $seed\n"
     "  - name: verify\n"
     "    depends_on: [left, right]\n"
     "    set_variable: confirmed\n"
-    "    from: left_value\n";
+    "    from: $left_value\n";
 
 static const char *cancel_yaml=
     "variables: {late: original}\n"

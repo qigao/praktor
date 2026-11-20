@@ -149,7 +149,7 @@ static int orch_postprocessor(orch_build *build, const praktor_orch_command *inp
     else return SALTS_OK;
     status = orch_add_node(build, type, &node);
     if (status != SALTS_OK) return status;
-    status = orch_literal(build, node, "input_key", "stdout");
+    status = orch_literal(build, node, "input_key", "$stdout");
     if (status != SALTS_OK) return status;
     if (input->regex.present) {
         tstr capture;

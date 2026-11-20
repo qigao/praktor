@@ -1,43 +1,56 @@
 # Run from the repository root with an independent, already-built Praktor:
 # praktor --config build.yml --task install --timeout-ms 3600000
-# Load the matching SDK/cache paths and Windows developer environment first.
-name: Praktor Windows x64 Release
+# Set PRESET and the matching SDK/cache paths in .env.
+# After changing the SDK or toolchain, run cmake --fresh with the configure preset.
+name: Praktor build
 description: Configure, build, test and install the complete CMake user profile
 dotEnv: [.env]
 
 defaults:
-  timeout: 300000
-  stream_output: false
+    timeout: 300000
+    stream_output: false
 
 tasks:
-  - name: prepare
-    description: Create the build log directory
-    shell:
-      cmd: cmake -E make_directory build/logs
-      timeout: 30000
+    - name: validate_preset
+      description: Check the preset name before running build commands
+      actions:
+          Sequence:
+              - assert:
+                    guard: { fields: [PRESET], match: 'has($PRESET) && $PRESET != ""' }
+                    message: Set PRESET in .env to a CMake user preset
+              - set_variable: selected_preset
+                value: $PRESET
+              - ParseRegex: { input_key: $selected_preset, pattern: '\A([A-Za-z0-9_][A-Za-z0-9_.-]*)\z' }
 
-  - name: configure
-    description: Configure the complete graph; log is build/logs/configure.log
-    depends_on: [prepare]
-    shell:
-      cmd: cmake --preset llvm-mingw-x64-release-user > build/logs/configure.log 2>&1
+    - name: prepare
+      description: Create the build log directory
+      depends_on: [validate_preset]
+      shell:
+          cmd: cmake -E make_directory build/logs
+          timeout: 30000
 
-  - name: build
-    description: Build all configured targets; log is build/logs/build.log
-    depends_on: [configure]
-    shell:
-      cmd: cmake --build --preset llvm-mingw-x64-release-user > build/logs/build.log 2>&1
-      timeout: 1800000
+    - name: configure
+      description: Configure the complete graph; log is build/logs/configure.log
+      depends_on: [prepare]
+      shell:
+          cmd: cmake --preset "$PRESET" --fresh > build/logs/configure.log 2>&1
 
-  - name: test
-    description: Run the complete CTest graph; log is build/logs/test.log
-    depends_on: [build]
-    shell:
-      cmd: ctest --preset llvm-mingw-x64-release-user > build/logs/test.log 2>&1
-      timeout: 600000
+    - name: build
+      description: Build all configured targets; log is build/logs/build.log
+      depends_on: [configure]
+      shell:
+          cmd: cmake --build --preset "$PRESET" > build/logs/build.log 2>&1
+          timeout: 1800000
 
-  - name: install
-    description: Install through the user preset; log is build/logs/install.log
-    depends_on: [test]
-    shell:
-      cmd: cmake --build --preset install-llvm-mingw-x64-release-user > build/logs/install.log 2>&1
+    - name: test
+      description: Run the complete CTest graph; log is build/logs/test.log
+      depends_on: [build]
+      shell:
+          cmd: ctest --preset "$PRESET" > build/logs/test.log 2>&1
+          timeout: 600000
+
+    - name: install
+      description: Install the tested build tree (log in build/logs/install.log)
+      depends_on: [test]
+      shell:
+          cmd: cmake --install "build/$PRESET" > build/logs/install.log 2>&1

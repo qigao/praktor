@@ -16,7 +16,168 @@ Production code is C11. The shared/behavior-tree tests also compile its public h
 
 ## Current admitted subset
 
-The initial runtime is a bounded **single-owner** executor (maximum 64 tasks). It accepts self-contained YAML workflows composed of supported direct SetVariable, Shell, and canonical single-Command roots. Unsupported scripts, includes, unqualified nodes, file-based WorkflowPlan capabilities, dynamic tasks, global plugin discovery and application-level Parallel/multi-worker execution **fail closed**. A successful lower-level CFlow/Process test does not enable a missing application feature.
+The runtime is a bounded **single-owner** executor with a maximum of 64 tasks after expansion. It accepts YAML workflows with action trees and their task-level shorthands. Root `parallelism` allows ready tasks to overlap process I/O and waits, with atomic group output publication. Local `includes` and `uses` reuse task dependencies, and `dynamic_tasks` builds tasks from JSON input before execution. [DAG parallelism](docs/grammar.md#dag-parallelism) · [Workflow composition](docs/grammar.md#workflow-composition)
+
+Use `dotEnv` or the inherited environment for external values and `variables`
+or `vars` for workflow values. Admission rejects root `env` and `outputs`,
+as well as `env`, `when` and `triggers` on selected tasks.
+
+An `actions` tree can compose control nodes with Shell and Tool leaves.
+The workflow admits process defaults and service bindings before execution.
+Use a `cases` sequence for a zero-based integer `switch` or a `cases`
+mapping for exact string matches with an optional `default`. [Workflow grammar](docs/grammar.md)
+
+A task or workflow can also declare a `statechart` with named states, guarded
+transitions, lifecycle events, completion notifications and state-scoped timers.
+Statecharts expose read-only state to BT guards. The DAG schedules tasks, and
+each task's BT executes its actions and determines its outcome. A BT can
+signal the document chart with `raise` and `scope: workflow`. Other ready
+tasks can observe the transition through their guards. [Statechart grammar](docs/STATECHART.md) · [Device assessment](examples/statechart.yml) · [Sensor handshake](examples/statechart-signals.yml)
+
+### Running build and model workflows
+
+Run `praktor --config build.yml --task test --timeout-ms 3600000` locally or
+inside a CI runner configured for this build. [CI usage](docs/USER_GUIDE.md#在-ci-中复用工作流)
+
+For model calls, a `tool` task invokes a declared service, the downstream BT
+validates the response, and an optional document Statechart records the
+validation result. The sample-response example runs locally without an
+API key. The OpenAI, Claude and Gemini examples use the same task boundary
+with curl services. [Offline workflow](examples/llm/summary-workflow.yml) · [Live model workflows](docs/USER_GUIDE.md#llm-工作流)
+
+### Behavior tree guards
+
+`if`, `while`, `precondition`, `wait_until` and `assert` accept a `guard` mapping with an explicit
+list of readable task variables in `fields` and exactly one of `match` or
+`expr`. Conditions read task values when the tree ticks.
+
+- `match` uses Salts Selector for string equality, set membership, `has($field)`
+  and `capability("name")`. It requires at least one entry in `fields`.
+  Capabilities come from activated services in the current workflow.
+- `expr` compiles integer comparisons, arithmetic (`+`, `-`, `*`, `/`, `%`),
+  bitwise operations (`&`, `|`, `^`, `~`, `<<`, `>>`), boolean literals,
+  parentheses, `!`, `&&`, `||`, and `has($field)` to Salts
+  QueryVM. Comparisons read signed 64-bit decimal integers from task text
+  values. A missing or invalid integer operand produces an execution error
+  if the expression reads it. The logical operators short circuit.
+  Expressions with no variable references can use `fields: []`.
+
+Integer operators bind more tightly than comparisons. From highest to lowest
+their binary precedence is `* / %`, `+ -`, `<< >>`, `&`, `^`, then `|`.
+Write ranges as two comparisons, such as `0 <= $used && $used <= $limit`.
+Division truncates toward zero. Arithmetic overflow, division or remainder
+by zero, and shift counts outside 0 to 63 fail evaluation when reached.
+Bitwise operators use 64-bit two's-complement patterns. Shifts fill with
+zeros and discard bits shifted out.
+
+For `match`, a comparison on a missing field stays unknown under negation
+and yields a non-match. Use `has($field)` to test presence.
+
+```yaml
+tasks:
+  - name: prepare
+    set_variable: phase
+    value: ready
+  - name: verify
+    depends_on: [prepare]
+    precondition:
+      guard:
+        fields: [phase]
+        match: '$phase in ["ready", "verified"]'
+    child:
+      set_variable: check
+      value: passed
+```
+
+Running `praktor --config workflow.yml --task verify` first publishes
+`prepare.phase`. The precondition reads that value and admits its child.
+Composite tasks use a task-level list such as `outputs: [$result]` to publish
+selected variables to the workflow when they succeed. Direct task roots also
+provide default output and process or service bindings. [Output semantics](docs/grammar.md#task-outputs)
+
+A numeric condition uses the same control node syntax.
+
+```yaml
+if:
+  guard:
+    fields: [used, requested, limit, flags]
+    expr: '$used + $requested <= $limit && ($flags & (1 << 2)) != 0'
+then:
+  set_variable: decision
+  value: start
+else:
+  set_variable: decision
+  value: wait
+```
+
+Existing scalar conditions and condition subtrees keep their execution
+semantics. The workflow preflight validates each selected guard before any
+task runs. A Session owns its compiled conditions and releases them with the
+tree. The Plan retains source and bindings so each Session can open and close
+independently. QueryVM expressions use at most 4096 source bytes, 256
+instructions, and 32 levels of expression nesting.
+
+### JSON values in guards
+
+Use `ParseJson` before the guard to extract from a JSON document in the task
+scope. The `result` option controls the output written to `output_key`.
+
+| `result` | Output |
+| --- | --- |
+| `first` (default) | The first match. JSON strings become text and other values are serialized. |
+| `one` | Exactly one scalar. Strings are decoded, numbers retain their original token, and booleans and null become text. Zero or multiple matches, arrays and objects fail the action. |
+| `count` | The decimal number of matches. Zero matches write `0`. |
+
+`one` and `count` validate a fixed, streamable JSONPath during workflow
+preflight. Supported paths include member access, wildcards, and terminal
+scalar filters such as `$.exit_codes[?@ != 0]`. Invalid input or a failed
+selection leaves the previous output unchanged.
+
+```yaml
+tasks:
+  - name: verify
+    vars:
+      report: '{"health":{"status":"ready"},"exit_codes":[0,0]}'
+    actions:
+      Sequence:
+        - ParseJson: {input_key: $report, path: '$.health.status', output_key: health, result: one}
+        - ParseJson: {input_key: $report, path: '$.exit_codes[?@ != 0]', output_key: failed_jobs, result: count}
+        - assert: {guard: {fields: [health], match: '$health == "ready"'}}
+        - assert: {guard: {fields: [failed_jobs], expr: '$failed_jobs == 0'}}
+```
+
+### Waiting and assertions
+
+`wait_until` checks its guard on each tick. It succeeds as soon as the guard
+matches and returns `RUNNING` while it waits. A positive integer `timeout_ms`
+sets the local deadline from the first tick of each activation. Reaching that
+deadline fails the node with a timeout diagnostic. The workflow deadline
+applies independently. A value that changes while waiting must be supplied
+to the Session by its host.
+
+`assert` checks its guard once per activation and fails immediately when it
+does not match. Set `message` to provide a diagnostic. Set `actual` to one
+`$name` reference from the guard's `fields` to include its observed value in the
+failure message. Both nodes propagate guard evaluation errors.
+
+```yaml
+tasks:
+  - name: verify
+    vars: {phase: ready, failed_jobs: '0'}
+    actions:
+      Sequence:
+        - wait_until:
+            guard:
+              fields: [phase]
+              match: '$phase == "ready"'
+            timeout_ms: 30000
+        - assert:
+            guard:
+              fields: [failed_jobs]
+              expr: '$failed_jobs == 0'
+            message: All jobs must succeed
+            actual: $failed_jobs
+```
 
 ## CLI
 
@@ -43,7 +204,10 @@ praktor_runtime_status status = praktor_execute(&request, &result);
 praktor_release_result(&result);
 ```
 
-See [the C API guide](docs/C_API.md) for ownership and result-release requirements.
+See [the public header](praktor/include/praktor.h) for ownership and result-release requirements.
+
+Embedded callers use `praktor_execute_with_events` to deliver typed external
+events to the active document and task charts. [Host event protocol](docs/STATECHART.md#宿主事件)
 
 The public header is `praktor/include/praktor.h`. All Praktor implementation
 sources compile into one shared `Praktor` target. The CLI lives in `app/main.c`,
@@ -53,7 +217,7 @@ Actions headers and implementations live in `praktor/include/actions` and
 `praktor/src/actions`; see [the Actions guide](docs/ACTIONS.md).
 Reusable `tool` tasks reference independent service YAML files through the root
 `services` map. Configurator shares one generic execution instance per name;
-executable selection and argv templates belong to YAML. See [the user guide](USER_GUIDE.md)
+executable selection and argv templates belong to YAML. See [the user guide](docs/USER_GUIDE.md)
 and [the curl service declaration](examples/services/download.yml).
 
 Each module adds its own `test` or `tests` directory when `BUILD_TESTS` is
@@ -96,13 +260,17 @@ Runtime profiles consume `CMeta::ACE`, `CMeta::CFlow` and SaltsBase's `process_a
 cmake --preset llvm-mingw-x64-release-user
 cmake --build --preset llvm-mingw-x64-release-user
 ctest --preset llvm-mingw-x64-release-user
-cmake --build --preset install-llvm-mingw-x64-release-user
+cmake --install build/llvm-mingw-x64-release-user
 ```
 
-[build.yml](build.yml) orchestrates the same Windows x64 profile through
-Praktor, with dependencies `prepare -> configure -> build -> test -> install`.
-After loading the SDK/cache environment and entering the Windows developer
-environment described above, run it from the repository root:
+[build.yml](build.yml) selects the configure, build and test preset from
+`PRESET` in `.env` and installs from `build/<PRESET>`. Set
+`PRESET=llvm-mingw-x64-release-user` for the Windows x64 profile above, or use
+another user preset with matching configure, build and test entries. Praktor
+loads `.env` and expands `$PRESET` in each shell command.
+Use a name that begins with a letter, digit or underscore and contains letters,
+digits, underscores, hyphens or dots.
+Run from the repository root with the matching SDKs and developer environment.
 
 ```sh
 praktor --config build.yml --task install --timeout-ms 3600000
@@ -113,24 +281,26 @@ stage directories: Windows locks running executables and DLLs during rebuild
 or installation. Bootstrap that tool with the CMake commands above before
 using it to build this repository. The workflow keeps the complete CMake/CTest
 graph and delegates compiler, paths and options to the existing user presets.
+The install step copies artifacts from the tested build tree.
 Its four stage logs are written under `build/logs`, preserving command exit
 codes and stopping dependent tasks on failure. Redirecting full logs to files
 keeps them outside the runtime's bounded task-output capture. The CLI option
-sets a one-hour workflow budget; each Shell stage also has an explicit timeout.
+sets a one-hour workflow budget. Shell stages inherit the document timeout
+unless they set a stage-specific timeout.
 
 The root manifest declares `pcre2`. The compiler-matched shared vcpkg-cache
 selected by `VCPKG_INSTALLED_DIR` already supplies PCRE2 10.46; configure consumes
 its `PCRE2::8BIT` target through the existing preset prefixes. Praktor does not
 copy or rebuild that package. The existing writable product installation
 `PRAKTOR_VCPKG_INSTALLED_DIR` remains separate from the shared SDK payload.
-Regex actions use native PCRE2 syntax and leftmost-first matching; see
-[the runtime contract](docs/ACTIONS_RUNTIME.md) for capture and resource limits.
+Regex actions use native PCRE2 syntax and leftmost-first matching. See
+[the workflow grammar](docs/grammar.md) for the runtime boundary.
 
 The presets retain writable local binary caching and a read-only shared feed through [the NuGet configuration](cmake/vcpkg-cache.nuget.config); authentication comes from the parent `GITHUB_TOKEN`. Missing cached packages follow vcpkg's manifest source-build path. Runtime PATH includes both installation trees without copying DLLs. Installation writes to `build/<preset>/stage`. Windows x64 tests cover real process I/O, failed admission, capacity and stale reservations, callback detachment, CFlow/cohort drain gates, the public SDK and CLI Shell output. Other platforms, sanitizers and release packaging require their own qualification.
 
 The retired CI, source-policy audits, NuGet wrapper and separate consumer/smoke projects have been removed. Formal tests belong to their modules and run through the complete root CTest graph.
 
-See [C11 runtime reset](docs/RUNTIME_RESET.md) for the owner and feature boundaries.
+See [the user guide](docs/USER_GUIDE.md#当前执行范围) for the current execution profile.
 
 ## Upstream dependency versions
 
@@ -142,6 +312,17 @@ qualification run, rather than imposing a second package lock. The installed
 package configs enforce their dependency composition, and root configuration
 requires the exact versions selected in the parent environment. `.env` supplies
 the SDK roots and version fields; Praktor's native workflow loader can load it
-before CMake runs. Preserve credentials when updating those fields and use
-`cmake --fresh --preset <user-preset>` after changing SDKs. Base 0.1.8 keeps
+before CMake runs. Configure rejects a package config outside the selected SDK
+roots, including cached configs. Preserve credentials when updating those fields
+and use `cmake --fresh --preset <user-preset>` after changing SDKs. Base 0.1.8 keeps
 JPEG/libyuv discovery with direct Media consumers.
+
+With `PRESET=llvm-mingw-x64-release-user`, the version checks compare the CMake
+report with the selected SDK and cache versions, the PCRE2 minimum and the toolchain.
+Select an individual check with `--task check_cmeta`, or run all six checks
+through `confirm_compatible`. [Version check workflow](examples/upstream-version-checks.yml)
+
+```sh
+praktor --config build.yml --task configure
+praktor --config examples/upstream-version-checks.yml --task confirm_compatible
+```

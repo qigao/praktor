@@ -69,6 +69,8 @@ int praktor_yaml_get(praktor_yaml_node node, const char *key,
  * Location text is empty or " at line N, column N", preferring the mapping key. */
 int praktor_yaml_scalar(praktor_yaml_node node, tstr *out, praktor_yaml_diagnostic *error);
 int praktor_yaml_key(praktor_yaml_node node, tstr *out, praktor_yaml_diagnostic *error);
+/* Strict scalar decoding for contracts that reject embedded NUL. */
+int praktor_yaml_text(praktor_yaml_node node, bool key, tstr *out);
 int praktor_yaml_location(praktor_yaml_node node, tstr *out);
 /* Strict decoded decimal int (no +, spaces, bases, separators or fractions),
  * including quoted integers, matching the prior from_chars<int> contract. */

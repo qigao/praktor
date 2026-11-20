@@ -154,7 +154,7 @@ int praktor_yaml_workflow_metadata_create(praktor_yaml_node node,json_value_t **
     praktor_yaml_field_error *error) {
     static const vstr allowed[]={{"name",4},{"description",11},{"outputs",7},
         {"variables",9},{"env",3},{"dotEnv",6},{"defaults",8},
-        {"includes",8},{"tasks",5},{"services",8}};
+        {"includes",8},{"tasks",5},{"services",8},{"statechart",10},{"parallelism",11}};
     static const vstr default_keys[]={{"timeout",7},{"stream_output",13}};
     praktor_yaml_node child={0},defaults_node={0},timeout_node={0};
     praktor_yaml_node variables_node={0},env_node={0},dot_env_node={0};
@@ -167,6 +167,17 @@ int praktor_yaml_workflow_metadata_create(praktor_yaml_node node,json_value_t **
     if(status!=SALTS_OK)return status;
     result=json_create_object();
     if(!result){if(error)error->origin=PRAKTOR_YAML_FAILURE_ALLOCATION;return SALTS_ENOMEM;}
+    status=optional(node,"parallelism",&child,error);if(status!=SALTS_OK)goto fail;
+    if(praktor_yaml_valid(child)) {
+        int width=0;
+        status=praktor_yaml_integer(child,&width,NULL);
+        if(status!=SALTS_OK||width<1||width>PRAKTOR_WORKFLOW_MAX_PARALLELISM){
+            status=at_error(child,"parallelism must be an integer from 1 to 16",error);
+            goto fail;
+        }
+        status=add_value(result,"parallelism",json_create_number((double)width));
+        if(status!=SALTS_OK)goto fail;
+    }
     status=optional(node,"services",&child,error);if(status!=SALTS_OK)goto fail;
     if(praktor_yaml_valid(child)) {
         status=add_services(result,child,error);if(status!=SALTS_OK)goto fail;

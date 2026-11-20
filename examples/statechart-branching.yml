@@ -1,0 +1,47 @@
+tasks:
+  - name: route_release
+    vars:
+      attempt_id: "3"
+      preview_enabled: "true"
+      preview_strategy: canary
+    outputs: [$selected_route]
+    statechart:
+      initial: waiting
+      events:
+        deploy.ack: {source: internal, fields: {attempt_id: int64}}
+      states:
+        waiting:
+          transitions:
+            - 'on': deploy.ack
+              guard:
+                fields: [attempt_id, event.data.attempt_id]
+                expr: '$event.data.attempt_id == $attempt_id'
+              target: accepted
+            - {after_ms: 250, target: expired}
+        accepted: {type: final}
+        expired: {type: final}
+    actions:
+      Sequence:
+        # Simulate a late ACK from the previous attempt, then the current ACK.
+        - raise: {event: deploy.ack, with: {attempt_id: 2}}
+        - raise: {event: deploy.ack, with: {attempt_id: $attempt_id}}
+        - wait_until:
+            guard: {fields: [chart.task.waiting], expr: '$chart.task.waiting == 0'}
+            timeout_ms: 1000
+        - assert:
+            guard: {fields: [chart.task.accepted], expr: '$chart.task.accepted == 1'}
+            message: No ACK for the current release attempt
+        - if: {guard: {fields: [preview_enabled], match: '$preview_enabled == "true"'}}
+          then:
+            switch: $preview_strategy
+            cases:
+              shadow: {set_variable: selected_route, value: shadow}
+              canary:
+                - Shell: {cmd: echo Canary route selected}
+                - {set_variable: selected_route, value: canary}
+            default: {set_variable: selected_route, value: stable}
+          else: {set_variable: selected_route, value: stable}
+        - assert:
+            guard: {fields: [selected_route], match: '$selected_route == "canary"'}
+            message: Expected the canary release route
+            actual: $selected_route

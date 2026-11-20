@@ -2,6 +2,7 @@
 provider:
   kind: exe
   path: curl
+capabilities: [download]
 config:
   args:
     - --disable
@@ -11,7 +12,7 @@ config:
     - --silent
     - --show-error
     - --output
-    - '{path}'
+    - $path
     - --url
-    - '{url}'
+    - $url
   timeout_ms: 300000

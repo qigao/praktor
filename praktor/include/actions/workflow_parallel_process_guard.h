@@ -2,8 +2,8 @@
 #define PRAKTOR_WORKFLOW_PARALLEL_PROCESS_GUARD_H
 
 #include "actions/workflow_parallel_commit.h"
-#include <praktor/process_retainer.h>
 #include <cflow/executor.h>
+#include <praktor/process_retainer.h>
 #include <stdbool.h>
 #include <stdint.h>
 #ifdef __cplusplus
@@ -34,12 +34,8 @@ extern "C" {
  * No new task executor, Process owner or fallback exists here. */
 int praktor_workflow_parallel_commit_after_process_drain(
     praktor_workflow_task_registry *registry,
-    const praktor_workflow_task_output_update *task_outputs,
-    praktor_value_txn *branch_values,
-    size_t branch_count,
-    praktor_process_retainer *retainer,
-    size_t max_steps,
-    size_t *out_pending);
+    const praktor_workflow_task_output_update *task_outputs, praktor_value_txn *branch_values,
+    size_t branch_count, praktor_process_retainer *retainer, size_t max_steps, size_t *out_pending);
 
 /* Strict CFlow executor + native Process preflight for a fresh group-owned
  * Executor. Caller MUST have already selected DRAIN or CANCEL_PENDING and
@@ -57,13 +53,9 @@ int praktor_workflow_parallel_commit_after_process_drain(
  */
 int praktor_workflow_parallel_commit_after_cflow_and_process_drain(
     praktor_workflow_task_registry *registry,
-    const praktor_workflow_task_output_update *task_outputs,
-    praktor_value_txn *branch_values,
-    size_t branch_count,
-    cflow_executor_control *control,
-    praktor_process_retainer *retainer,
-    size_t max_steps,
-    size_t *out_pending);
+    const praktor_workflow_task_output_update *task_outputs, praktor_value_txn *branch_values,
+    size_t branch_count, cflow_executor_control *control, praktor_process_retainer *retainer,
+    size_t max_steps, size_t *out_pending);
 
 /* Source-only, owner-local and bounded in-memory error latch for ONE
  * immutable Parallel cohort. Caller passes the SAME zero-initialized record
@@ -80,25 +72,24 @@ int praktor_workflow_parallel_commit_after_cflow_and_process_drain(
 enum { PRAKTOR_PROCESS_COHORT_MAX_RETAINERS = 32 };
 
 typedef struct praktor_process_cohort_recovery {
-    uint32_t marker;
-    int first_native_error;
-    /* Latest observed pending count. SIZE_MAX means not yet observed; zero
-     * is authoritative only after a completed retainer sweep. */
-    size_t last_pending;
-    /* Bound on the FIRST exclusive recovery sweep, never at worker spawn.
-     * Later sweeps and commits MUST use the same owner identities in the
-     * same order; a changed subset or an impl replacement fails INVALID.
-     * Only the single application Owner may read/write this record. */
-    size_t bound_count;
-    /* Typed/text publication is terminal for this cohort. An exceptional
-     * post-text invariant failure also seals it against unsafe retries. */
-    bool sealed;
-    praktor_process_retainer *bound_owners[PRAKTOR_PROCESS_COHORT_MAX_RETAINERS];
-    const void *bound_impls[PRAKTOR_PROCESS_COHORT_MAX_RETAINERS];
+  uint32_t marker;
+  int first_native_error;
+  /* Latest observed pending count. SIZE_MAX means not yet observed; zero
+   * is authoritative only after a completed retainer sweep. */
+  size_t last_pending;
+  /* Bound on the FIRST exclusive recovery sweep, never at worker spawn.
+   * Later sweeps and commits MUST use the same owner identities in the
+   * same order; a changed subset or an impl replacement fails INVALID.
+   * Only the single application Owner may read/write this record. */
+  size_t bound_count;
+  /* Typed/text publication is terminal for this cohort. An exceptional
+   * post-text invariant failure also seals it against unsafe retries. */
+  bool sealed;
+  praktor_process_retainer *bound_owners[PRAKTOR_PROCESS_COHORT_MAX_RETAINERS];
+  const void *bound_impls[PRAKTOR_PROCESS_COHORT_MAX_RETAINERS];
 } praktor_process_cohort_recovery;
 
-int praktor_process_cohort_recovery_init(
-    praktor_process_cohort_recovery *gate);
+int praktor_process_cohort_recovery_init(praktor_process_cohort_recovery *gate);
 
 /* Per-worker Process barrier: each CFlow callback exclusively borrows its
  * own bounded retainer. Do not share an impl between array entries. Caller
@@ -125,10 +116,10 @@ int praktor_process_cohort_recovery_init(
  * out_pending is initialized from the last complete sweep (SIZE_MAX if
  * unknown) even on INVALID/sealed returns, never a fabricated zero.
  * out_reaped starts at 0 and counts only this turn's actual native reaps. */
-int praktor_workflow_parallel_drain_process_retainers(
-    praktor_process_cohort_recovery *gate,
-    praktor_process_retainer *const *retainers, size_t retainer_count,
-    size_t max_steps, size_t *out_pending, size_t *out_reaped);
+int praktor_workflow_parallel_drain_process_retainers(praktor_process_cohort_recovery *gate,
+                                                      praktor_process_retainer *const *retainers,
+                                                      size_t retainer_count, size_t max_steps,
+                                                      size_t *out_pending, size_t *out_reaped);
 
 /* Source-only owner-turn admission for one retainer PER branch (1:1).
  * The group must be CLOSED + finalized + idle, with no rejected/cancelled
@@ -152,12 +143,10 @@ int praktor_workflow_parallel_drain_process_retainers(
  * No shared retainer, C++ production backend change, or public SDK switch. */
 int praktor_workflow_parallel_commit_after_cflow_and_process_drains(
     praktor_workflow_task_registry *registry,
-    const praktor_workflow_task_output_update *task_outputs,
-    praktor_value_txn *branch_values, size_t branch_count,
-    const bool *branch_succeeded,
-    praktor_process_cohort_recovery *gate, cflow_executor_control *control,
-    praktor_process_retainer *const *retainers, size_t retainer_count,
-    size_t max_steps, size_t *out_pending);
+    const praktor_workflow_task_output_update *task_outputs, praktor_value_txn *branch_values,
+    size_t branch_count, const bool *branch_succeeded, praktor_process_cohort_recovery *gate,
+    cflow_executor_control *control, praktor_process_retainer *const *retainers,
+    size_t retainer_count, size_t max_steps, size_t *out_pending);
 
 #ifdef __cplusplus
 }

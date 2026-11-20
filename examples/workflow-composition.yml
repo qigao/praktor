@@ -1,0 +1,45 @@
+# Run from the repository root.
+name: Device fleet commissioning
+includes:
+  audit: examples/libraries/device-audit.yml
+parallelism: 2
+variables:
+  devices: '[{"id":"north","voltage_mv":11900},{"id":"south","voltage_mv":12100}]'
+statechart:
+  initial: inspecting
+  states:
+    inspecting:
+      transitions:
+        - 'on': task.finished
+          guard:
+            fields: [event.data.task, event.data.status]
+            match: '$event.data.task == "inspect" && $event.data.status == "success"'
+          target: commissioned
+    commissioned: {type: final}
+tasks:
+  - name: audit
+    uses: audit.verify
+    vars: {mode: commissioning}
+  - name: inspect
+    depends_on: [audit]
+    dynamic_tasks:
+      items_variable: $devices
+      template:
+        name: device-$index
+        actions:
+          Sequence:
+            - ParseJson: {input_key: $item, path: '$.voltage_mv', output_key: voltage_mv, result: one}
+            - assert:
+                guard:
+                  fields: [voltage_mv, index]
+                  expr: '$voltage_mv >= 11000 && $index >= 0'
+            - assert:
+                guard:
+                  fields: [audit_ready]
+                  match: '$audit_ready == "ready"'
+  - name: confirm
+    depends_on: [inspect]
+    assert:
+      guard:
+        fields: [chart.workflow.commissioned]
+        expr: '$chart.workflow.commissioned == 1'

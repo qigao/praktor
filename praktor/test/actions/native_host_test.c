@@ -9,7 +9,7 @@ static void stateless_leaves(void) {
   praktor_value_store *values;
   praktor_leaf_parameter params[2] = {
       {"key", PRAKTOR_LEAF_STRING, "answer", 0.0, false},
-      {"value", PRAKTOR_LEAF_STRING, "{source}", 0.0, false}};
+      {"value", PRAKTOR_LEAF_STRING, "$source", 0.0, false}};
   praktor_leaf_request request = {0u, "SetVariable", params, 2u, false, NULL};
   salts_bt_node_status status = SALTS_BT_FAILURE;
   char text[65]; size_t size = 0u;
@@ -33,7 +33,7 @@ static void stateless_leaves(void) {
   check(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_ENOBUFS);
   check(praktor_value_store_size(values) == 2u);
   request.action = "CheckExitCode";
-  params[0].name = "input_key"; params[0].text = "answer";
+  params[0].name = "input_key"; params[0].text = "$answer";
   params[1].name = "expected"; params[1].number = 7.0;
   check(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_OK && status == SALTS_BT_SUCCESS);
   params[1].number = 7.25;
@@ -131,9 +131,9 @@ static void parse_lines(void) {
   praktor_bt_host hooks = {0};
   praktor_value_store *values;
   praktor_leaf_parameter params[3] = {
-      {"input_key", PRAKTOR_LEAF_STRING, "{source_key}", 0.0, false},
-      {"output_key", PRAKTOR_LEAF_STRING, "{destination}", 0.0, false},
-      {"filter", PRAKTOR_LEAF_STRING, "{filter}", 0.0, false}};
+      {"input_key", PRAKTOR_LEAF_STRING, "$source", 0.0, false},
+      {"output_key", PRAKTOR_LEAF_STRING, "$destination", 0.0, false},
+      {"filter", PRAKTOR_LEAF_STRING, "$filter", 0.0, false}};
   praktor_leaf_request request = {0u, "ParseLines", params, 3u, false, NULL};
   salts_bt_node_status status = SALTS_BT_FAILURE;
   char text[129]; size_t size = 0u, i;
@@ -146,7 +146,6 @@ static void parse_lines(void) {
   check(praktor_native_host_init(&host, 8u, 64u, 128u) == SALTS_OK);
   check(praktor_native_host_bind(&host, &hooks) == SALTS_OK);
   values = praktor_native_host_values(&host);
-  check(praktor_value_store_set(values, "source_key", "source") == PRAKTOR_VALUE_OK);
   check(praktor_value_store_set(values, "destination", "lines") == PRAKTOR_VALUE_OK);
   check(praktor_value_store_set(values, "filter", "") == PRAKTOR_VALUE_OK);
   for (i = 0u; i < sizeof(cases) / sizeof(cases[0]); ++i) {
@@ -184,10 +183,10 @@ static void parse_regex(void) {
   praktor_bt_host hooks = {0};
   praktor_value_store *values;
   praktor_leaf_parameter params[4] = {
-      {"input_key", PRAKTOR_LEAF_STRING, "{port}", 0.0, false},
-      {"pattern", PRAKTOR_LEAF_STRING, "{regex}", 0.0, false},
+      {"input_key", PRAKTOR_LEAF_STRING, "$source", 0.0, false},
+      {"pattern", PRAKTOR_LEAF_STRING, "$regex", 0.0, false},
       {"capture_group", PRAKTOR_LEAF_NUMBER, NULL, 1.0, false},
-      {"output_key", PRAKTOR_LEAF_STRING, "{destination}", 0.0, false}};
+      {"output_key", PRAKTOR_LEAF_STRING, "$destination", 0.0, false}};
   praktor_leaf_request request = {0u, "ParseRegex", params, 4u, false, NULL};
   salts_bt_node_status status = SALTS_BT_FAILURE;
   char text[129];
@@ -195,7 +194,6 @@ static void parse_regex(void) {
   check(praktor_native_host_init(&host, 8u, 64u, 128u) == SALTS_OK);
   check(praktor_native_host_bind(&host, &hooks) == SALTS_OK);
   values = praktor_native_host_values(&host);
-  check(praktor_value_store_set(values, "port", "source") == PRAKTOR_VALUE_OK);
   check(praktor_value_store_set(values, "destination", "capture") == PRAKTOR_VALUE_OK);
   check(praktor_value_store_set(values, "source", "Built target core-42") == PRAKTOR_VALUE_OK);
   check(praktor_value_store_set(values, "regex", "target ([[:alnum:]_]+)(-([0-9]+))?") == PRAKTOR_VALUE_OK);
@@ -391,9 +389,9 @@ static void parse_key_value(void) {
   praktor_bt_host hooks = {0};
   praktor_value_store *values;
   praktor_leaf_parameter params[] = {
-      {"input_key", PRAKTOR_LEAF_STRING, "{port}", 0.0, false},
-      {"delimiter", PRAKTOR_LEAF_STRING, "{delim}", 0.0, false},
-      {"line_separator", PRAKTOR_LEAF_STRING, "{sep}", 0.0, false},
+      {"input_key", PRAKTOR_LEAF_STRING, "$source", 0.0, false},
+      {"delimiter", PRAKTOR_LEAF_STRING, "$delim", 0.0, false},
+      {"line_separator", PRAKTOR_LEAF_STRING, "$sep", 0.0, false},
       {"output_key", PRAKTOR_LEAF_STRING, "source", 0.0, false}};
   praktor_leaf_request request = {0u, "ParseKeyValue", params, 4u, false, NULL};
   salts_bt_node_status status = SALTS_BT_FAILURE;
@@ -407,7 +405,6 @@ static void parse_key_value(void) {
   check(praktor_native_host_init(&host, 5u, 32u, 256u) == SALTS_OK);
   check(praktor_native_host_bind(&host, &hooks) == SALTS_OK);
   values = praktor_native_host_values(&host);
-  check(praktor_value_store_set(values, "port", "source") == PRAKTOR_VALUE_OK);
   for (i = 0u; i < sizeof(cases) / sizeof(cases[0]); ++i) {
     check(praktor_value_store_set(values, "source", cases[i].input) == PRAKTOR_VALUE_OK);
     check(praktor_value_store_set(values, "delim", cases[i].delimiter) == PRAKTOR_VALUE_OK);
@@ -420,7 +417,7 @@ static void parse_key_value(void) {
   check(praktor_value_store_set(values, "sep", "") == PRAKTOR_VALUE_OK);
   check(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_EINVAL);
   check(praktor_value_store_get(values, "source", text, sizeof(text), &size) == PRAKTOR_VALUE_OK && strcmp(text, cases[5].expected) == 0);
-  params[0].text = "missing";
+  params[0].text = "$missing";
   check(hooks.tick_typed_leaf(hooks.user, &request, &status) == SALTS_OK && status == SALTS_BT_FAILURE);
   praktor_native_host_destroy(&host);
   check(praktor_native_host_init(&host, 2u, 32u, 16u) == SALTS_OK);
@@ -523,6 +520,57 @@ spec("C11 Native Host") {
   it("dispatches bounded typed values and fails closed") { stateless_leaves(); }
   it("owns cooperative Sleep activations per Session") { sleep_leaves(); }
   it("selects canonical JSONPath values without partial C11 output publication") { parse_json_native(); }
+  it("requires one scalar and commits counts from zero to many atomically") {
+    praktor_native_host host={0};
+    praktor_bt_host hooks={0};
+    praktor_leaf_parameter ports[]={
+      {.name="input_key",.kind=PRAKTOR_LEAF_STRING,.text="$input"},
+      {.name="output_key",.kind=PRAKTOR_LEAF_STRING,.text="output"},
+      {.name="path",.kind=PRAKTOR_LEAF_STRING,.text="$[*]"},
+      {.name="result",.kind=PRAKTOR_LEAF_STRING,.text="one"}
+    };
+    char output[32],error[160];
+    size_t length;
+    salts_bt_node_status status;
+    const praktor_leaf_request request={
+      .action="ParseJson",.parameters=ports,.parameter_count=4u,
+      .error=error,.error_capacity=sizeof error
+    };
+    check_equal(praktor_native_host_init(&host,4u,64u,128u),SALTS_OK);
+    check_equal(praktor_native_host_bind(&host,&hooks),SALTS_OK);
+    praktor_value_store *values=praktor_native_host_values(&host);
+    check_equal(praktor_value_store_set(values,"output","prior"),PRAKTOR_VALUE_OK);
+    check_equal(praktor_value_store_set(values,"input","[]"),PRAKTOR_VALUE_OK);
+    check_equal(hooks.tick_typed_leaf(hooks.user,&request,&status),SALTS_EINVAL);
+    check_contains(error,"matched 0");
+    ports[3].text="count";
+    check_equal(hooks.tick_typed_leaf(hooks.user,&request,&status),SALTS_OK);
+    check_equal(status,SALTS_BT_SUCCESS);
+    check_equal(praktor_value_store_get(values,"output",output,sizeof output,&length),PRAKTOR_VALUE_OK);
+    check_equal(output,"0");
+
+    ports[3].text="one";
+    check_equal(praktor_value_store_set(values,"input","[\"ready\"]"),PRAKTOR_VALUE_OK);
+    check_equal(hooks.tick_typed_leaf(hooks.user,&request,&status),SALTS_OK);
+    check_equal(praktor_value_store_get(values,"output",output,sizeof output,&length),PRAKTOR_VALUE_OK);
+    check_equal(output,"ready");
+
+    check_equal(praktor_value_store_set(values,"input","[1,2]"),PRAKTOR_VALUE_OK);
+    check_equal(hooks.tick_typed_leaf(hooks.user,&request,&status),SALTS_EINVAL);
+    check_contains(error,"matched 2");
+    check_equal(praktor_value_store_get(values,"output",output,sizeof output,&length),PRAKTOR_VALUE_OK);
+    check_equal(output,"ready");
+    ports[3].text="count";
+    check_equal(hooks.tick_typed_leaf(hooks.user,&request,&status),SALTS_OK);
+    check_equal(praktor_value_store_get(values,"output",output,sizeof output,&length),PRAKTOR_VALUE_OK);
+    check_equal(output,"2");
+
+    check_equal(praktor_value_store_set(values,"input","[1,"),PRAKTOR_VALUE_OK);
+    check_equal(hooks.tick_typed_leaf(hooks.user,&request,&status),SALTS_EINVAL);
+    check_equal(praktor_value_store_get(values,"output",output,sizeof output,&length),PRAKTOR_VALUE_OK);
+    check_equal(output,"2");
+    praktor_native_host_destroy(&host);
+  }
   it("parses lines with Legacy newline and parameter semantics") { parse_lines(); }
   it("extracts bounded PCRE2 capture groups without the C++ Executor") { parse_regex(); }
   it("fails closed at configured regex cache and capture bounds") { parse_regex_bounds(); }

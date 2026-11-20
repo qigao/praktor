@@ -1,10 +1,12 @@
 #include "actions/session_internal.h"
 #include <ctype.h>
+#include <core/clock.h>
+#include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-enum { OWNER_NONE, OWNER_HOST, OWNER_PROCESS };
+enum { OWNER_NONE, OWNER_HOST, OWNER_PROCESS, OWNER_GUARD_WAIT };
 static praktor_process_view process_view(session_impl *s, size_t node) {
   praktor_process_view view = {0};
   if (s->state[node].process.impl) (void)praktor_process_driver_view(&s->state[node].process, &view);
@@ -12,6 +14,12 @@ static praktor_process_view process_view(session_impl *s, size_t node) {
 }
 static void free_storage(session_impl *s) {
   size_t i;
+  if (s->state) {
+    for (i = 0; i < s->count; ++i) {
+      praktor_condition_destroy(&s->state[i].condition);
+      json_free(s->state[i].case_labels);
+    }
+  }
   for (i = 0; i < 4; ++i) free(s->scratch[i].data);
   free(s->pool.data); free(s->slots); free(s->plan_text); free(s->text_sizes);
   free(s->parameters); free(s->state); free(s->nodes); free(s);
@@ -57,7 +65,8 @@ static int publish_process(session_impl *s, size_t node, int exit_code, bool suc
 static int cache_parameter(session_impl *s, size_t node, size_t slot,
                            const char *name, const char *fallback, bool key) {
   session_text value;
-  int r = key ? session_key(s, node, name, fallback, 0, &value)
+  int r = slot == SESSION_SHELL_CMD ? session_command(s, node, &value)
+        : key ? session_key(s, node, name, fallback, 0, &value)
               : session_resolve(s, node, name, fallback, 0, &value);
   return r == SALTS_OK ? session_cache(s, node, slot, value) : r;
 }
@@ -163,7 +172,7 @@ static int tick_process(session_impl *s, size_t node, salts_bt_node_status *stat
 }
 static praktor_leaf_request request(session_impl *s, size_t node) {
   praktor_session_node *n = &s->nodes[node];
-  praktor_leaf_request out = {node, n->action, n->parameters, n->parameter_count, s->state[node].branch, s};
+  praktor_leaf_request out = {node, n->action, n->parameters, n->parameter_count, s->state[node].branch, s, NULL, 0u};
   return out;
 }
 static void dispatch_halt(session_impl *s, size_t node) {
@@ -182,12 +191,66 @@ static void halt_leaf(void *user, size_t node) {
 static bool valid_status(salts_bt_node_status status) {
   return status == SALTS_BT_RUNNING || status == SALTS_BT_SUCCESS || status == SALTS_BT_FAILURE;
 }
+static int assert_failure(session_impl *s,size_t node) {
+  const praktor_leaf_parameter *message = session_parameter(s,node,"message");
+  const praktor_leaf_parameter *actual = session_parameter(s,node,"actual");
+  const char *detail = message ? message->text : "guard did not match";
+  if (!actual) {
+    (void)snprintf(s->guard_failure,sizeof s->guard_failure,"assert: %s",detail);
+    return SALTS_OK;
+  }
+  const char *key = actual->text + 1u;
+  bool found;
+  int r = session_has(s,key,&found);
+  if (r != SALTS_OK) return r;
+  if (!found) {
+    (void)snprintf(s->guard_failure,sizeof s->guard_failure,
+                   "assert: %s (%s is missing)",detail,key);
+    return SALTS_OK;
+  }
+  session_text value;
+  r = session_get(s,key,0u,&value);
+  if (r != SALTS_OK) return r;
+  (void)snprintf(s->guard_failure,sizeof s->guard_failure,
+                 "assert: %s (%s=%s)",detail,key,value.data);
+  return SALTS_OK;
+}
+static int tick_guard_leaf(session_impl *s,size_t node,salts_bt_node_status *status) {
+  const praktor_session_node *n = &s->nodes[node];
+  session_node_state *state = &s->state[node];
+  const bool waiting = n->guard_leaf == PRAKTOR_GUARD_LEAF_WAIT_UNTIL;
+  const bool resumed = state->leaf_owner == OWNER_GUARD_WAIT;
+  /* Only a RUNNING wait retains an activation. BT halt clears leaf_owner. */
+  state->leaf_owner = OWNER_NONE;
+  if (waiting) {
+    const uint64_t now = s->config.now_ns ? s->config.now_ns(s->config.clock_user) : hrtime();
+    if (!resumed) state->wait_started_ns = now;
+    else if (now < state->wait_started_ns)
+      return session_error(s,SALTS_EINVAL,"wait_until clock moved backwards");
+    if (now-state->wait_started_ns >= n->guard_timeout_ns) {
+      (void)snprintf(s->guard_failure,sizeof s->guard_failure,
+                     "wait_until timed out after %" PRIu64 " ms",
+                     n->guard_timeout_ns/UINT64_C(1000000));
+      *status = SALTS_BT_FAILURE;
+      return SALTS_OK;
+    }
+  }
+  int r = session_condition(s,node,status);
+  if (r != SALTS_OK || *status != SALTS_BT_FAILURE) return r;
+  if (!waiting) return assert_failure(s,node);
+  state->leaf_owner = OWNER_GUARD_WAIT;
+  *status = SALTS_BT_RUNNING;
+  return SALTS_OK;
+}
 static int tick_leaf(void *user, size_t node, salts_bt_node_status *status) {
   session_impl *s = user;
   praktor_bt_host *h = &s->config.host;
   praktor_session_node *n = &s->nodes[node];
   unsigned char owner = s->state[node].leaf_owner;
   int r;
+  s->error[0] = '\0';
+  s->guard_failure[0] = '\0';
+  if (n->guard_leaf != PRAKTOR_GUARD_LEAF_NONE) return tick_guard_leaf(s,node,status);
   if (n->terminal == PRAKTOR_TERMINAL_SUCCESS || n->terminal == PRAKTOR_TERMINAL_FAILURE) {
     *status = n->terminal == PRAKTOR_TERMINAL_SUCCESS ? SALTS_BT_SUCCESS : SALTS_BT_FAILURE; return SALTS_OK;
   }
@@ -200,13 +263,19 @@ static int tick_leaf(void *user, size_t node, salts_bt_node_status *status) {
   if (!s->state[node].branch) { r = session_restore_pipeline(s, node); if (r != SALTS_OK) return r; }
   if (owner == OWNER_PROCESS) return tick_process(s, node, status);
   if (h->tick_leaf || h->tick_typed_leaf) {
-    if (h->tick_typed_leaf) { praktor_leaf_request req = request(s, node); r = h->tick_typed_leaf(h->user, &req, status); }
+    if (h->tick_typed_leaf) {
+      praktor_leaf_request req = request(s, node);
+      req.error = s->error;
+      req.error_capacity = sizeof s->error;
+      r = h->tick_typed_leaf(h->user, &req, status);
+    }
     else r = h->tick_leaf(h->user, node, status);
     if (r == SALTS_OK && valid_status(*status)) {
       s->state[node].leaf_owner = *status == SALTS_BT_RUNNING ? OWNER_HOST : OWNER_NONE; return SALTS_OK;
     }
-    if (r != SALTS_ENOTSUP || owner == OWNER_HOST) {
+    if (r != SALTS_ENOTSUP || owner == OWNER_HOST || s->error[0]) {
       s->state[node].leaf_owner = OWNER_NONE; dispatch_halt(s, node);
+      if (r != SALTS_OK && s->error[0]) return r;
       if (r == SALTS_ENOTSUP) return session_error(s, r, "host leaf hook declined active node '%s'; refusing to switch execution owners", n->action);
       if (r != SALTS_OK) return session_error(s, r, "host leaf hook returned status %d for node '%s'", r, n->action);
       return session_error(s, SALTS_EINVAL, "host leaf hook returned an invalid node status for '%s'", n->action);
@@ -246,10 +315,13 @@ static int contracts(session_impl *s, const praktor_session_node *nodes) {
   size_t i;
   bool tick = h->tick_leaf || h->tick_typed_leaf, halt = h->halt_leaf || h->halt_typed_leaf;
   if ((h->tick_leaf && h->tick_typed_leaf) || (h->halt_leaf && h->halt_typed_leaf) ||
-      (h->halt_typed_leaf && !h->tick_typed_leaf) || (tick && !halt) ||
-      !value_contract(h) || !tick || !halt) return SALTS_EINVAL;
+      (h->halt_typed_leaf && !h->tick_typed_leaf) || tick != halt ||
+      !value_contract(h)) return SALTS_EINVAL;
   for (i = 0; i < s->count; ++i) {
     salts_bt_node_kind k = nodes[i].tree.kind;
+    if (!tick && k == SALTS_BT_NODE_LEAF &&
+        nodes[i].terminal == PRAKTOR_TERMINAL_RUNTIME &&
+        nodes[i].guard_leaf == PRAKTOR_GUARD_LEAF_NONE) return SALTS_EINVAL;
     if (k == SALTS_BT_NODE_PARALLEL && nodes[i].tree.parallel_hooks &&
         (!h->parallel_enter || !h->parallel_step || !h->parallel_join || !h->parallel_finish || !h->parallel_abort)) return SALTS_EINVAL;
     if (k == SALTS_BT_NODE_PIPELINE_SEQUENCE && (h->pipeline_prepare || h->pipeline_complete || h->pipeline_abort) &&
@@ -297,6 +369,11 @@ int praktor_session_init(praktor_session *session, const praktor_session_config 
   for (i = 0; i < count; ++i) {
     if (nodes[i].terminal < PRAKTOR_TERMINAL_RUNTIME || nodes[i].terminal > PRAKTOR_TERMINAL_SWITCH_FAILURE ||
         nodes[i].parameter_count > config->max_parameters_per_node || (nodes[i].parameter_count && !nodes[i].parameters)) return SALTS_EINVAL;
+    if (nodes[i].guard_leaf < PRAKTOR_GUARD_LEAF_NONE || nodes[i].guard_leaf > PRAKTOR_GUARD_LEAF_WAIT_UNTIL ||
+        (nodes[i].guard_leaf != PRAKTOR_GUARD_LEAF_NONE &&
+         (nodes[i].tree.kind != SALTS_BT_NODE_LEAF || nodes[i].terminal != PRAKTOR_TERMINAL_RUNTIME)) ||
+        (nodes[i].guard_leaf == PRAKTOR_GUARD_LEAF_WAIT_UNTIL && !nodes[i].guard_timeout_ns))
+      return SALTS_EINVAL;
     r = string_bytes(nodes[i].action,&n,config->max_plan_bytes); if (r != SALTS_OK) return r;
     if (add_bytes(&text_bytes,n+1,1,config->max_plan_bytes) != SALTS_OK ||
         add_bytes(&parameter_count,nodes[i].parameter_count,1,config->max_plan_bytes) != SALTS_OK) return SALTS_ENOBUFS;
@@ -339,6 +416,20 @@ int praktor_session_init(praktor_session *session, const praktor_session_config 
         s->text_sizes[pindex] = n; s->parameters[pindex].text = copy_text(&cursor,p->text,n);
       } else s->parameters[pindex].text = NULL;
     }
+    r = praktor_condition_compile(&s->nodes[i],&s->state[i].condition,NULL,0u);
+    if (r != SALTS_OK) goto fail;
+    if (s->nodes[i].tree.kind == SALTS_BT_NODE_SWITCH) {
+      const praktor_leaf_parameter *p = session_parameter(s,i,"case_labels");
+      if (p) {
+        s->state[i].case_labels = json_parse(p->text,s->text_sizes[p - s->parameters]);
+        if (!s->state[i].case_labels || json_type(s->state[i].case_labels) != JSON_ARRAY ||
+            !json_array_size(s->state[i].case_labels)) { r = SALTS_EINVAL; goto fail; }
+      }
+    }
+    if (s->state[i].condition.match || s->state[i].condition.expr) {
+      const praktor_leaf_parameter *fields = session_parameter(s,i,"guard_fields");
+      if (fields->text[0] && !config->host.value_get) { r = SALTS_EINVAL; goto fail; }
+    }
   }
   runtime.tick_leaf = tick_leaf; runtime.halt_leaf = halt_leaf; runtime.condition = session_condition;
   runtime.select_child = session_select; runtime.resolve_dynamic_parameters = session_dynamic;
@@ -353,6 +444,11 @@ int praktor_session_init(praktor_session *session, const praktor_session_config 
     size_t parent = nodes[i].tree.parent_index;
     ++s->state[parent].child_count;
     s->state[i].branch = s->state[parent].branch || (nodes[parent].tree.kind == SALTS_BT_NODE_PARALLEL && nodes[parent].tree.parallel_hooks);
+    if (s->state[i].branch && (s->state[i].condition.match || s->state[i].condition.expr)) {
+      (void)praktor_bt_tree_destroy(&s->runtime);
+      r = SALTS_ENOTSUP;
+      goto fail;
+    }
   }
   free(descs); session->impl = s; return SALTS_OK;
 fail:
@@ -369,8 +465,11 @@ int praktor_session_tick(praktor_session *session, salts_bt_node_status *status)
   if (!s || !status) return SALTS_EINVAL;
   if (s->busy) return SALTS_EBUSY;
   s->error[0] = '\0'; if (++s->generation == 0) ++s->generation;
+  s->guard_failure[0] = '\0';
   if (pending(s)) return session_error(s,SALTS_EBUSY,"C11 Shell shutdown is still pending recovery ownership");
   s->busy = true; r = praktor_bt_tree_tick(&s->runtime,status); s->busy = false;
+  if (r == SALTS_OK && *status == SALTS_BT_FAILURE && !s->error[0] && s->guard_failure[0])
+    (void)snprintf(s->error,sizeof s->error,"%s",s->guard_failure);
   return session_hook_status(s,r,"C11 behavior tree tick failed");
 }
 static int clear_execution(praktor_session *session, bool cancel) {

@@ -32,7 +32,7 @@ static const char *success_yaml=
     "  - name: verify\n"
     "    depends_on: [parsed_command]\n"
     "    set_variable: confirmed\n"
-    "    from: parsed_count\n";
+    "    from: $parsed_count\n";
 #if defined(_WIN32)
 static const char *cancel_yaml=
     "variables: {BASE: untouched}\n"
@@ -530,7 +530,7 @@ static const char *multi_success_yaml=
     "  - name: verify\n"
     "    depends_on: [left, right]\n"
     "    set_variable: confirmed\n"
-    "    from: left_count\n";
+    "    from: $left_count\n";
 
 
 /* Wave 1 has two native Process branches; wave 2 can fail or cancel and

@@ -20,7 +20,7 @@ add_custom_target(update-workflow-schema
     COMMAND praktor-schema
         ${PROJECT_SOURCE_DIR}/schema/workflow.schema
         ${PROJECT_SOURCE_DIR}/schema/workflow.editor.json
-        ${PROJECT_SOURCE_DIR}/grammar.schema.json
+        ${PROJECT_SOURCE_DIR}/docs/grammar.schema.json
     DEPENDS praktor-schema
     COMMENT "Projecting the workflow editor schema from Salts IDL and Schema"
     VERBATIM

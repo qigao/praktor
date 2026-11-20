@@ -22,7 +22,7 @@ spec("Named C11 orchestration YAML into canonical CSTL AST"){
     it("retains caller tree on required-parameter and control-child errors"){
         const struct {const char *source,*reason;} cases[]={
             {"Shell: {output_key: raw}\n","Missing required parameter 'cmd'"},
-            {"ParseRegex: {input_key: raw}\n","Missing required parameter 'pattern'"},
+            {"ParseRegex: {input_key: $raw}\n","Missing required parameter 'pattern'"},
             {"WaitEvent: {timeout: 40}\n","Missing required parameter 'event'"},
             {"Sleep: {}\n","Missing required parameter 'duration'"},
             {"Sequence: []\n","Control node 'sequence' must have at least one child"},
@@ -106,9 +106,9 @@ spec("Named C11 orchestration YAML into canonical CSTL AST"){
             {"repeat","name: x\nrepeat: 3\nchild: {Shell: {cmd: go}}\n","num_cycles","3",PRAKTOR_ORCH_REPEAT},
             {"delay","name: x\ndelay: 25\nchild: {Shell: {cmd: go}}\n","delay_ms","25",PRAKTOR_ORCH_DELAY},
             {"keep_running_until_failure","name: x\nkeep_running_until_failure: 5\nchild: {Shell: {cmd: go}}\n","max_iterations","5",PRAKTOR_ORCH_KEEP_RUNNING_UNTIL_FAILURE},
-            {"precondition","name: x\nprecondition: '{ready}'\nchild: {Shell: {cmd: go}}\n","condition","{ready}",PRAKTOR_ORCH_PRECONDITION},
-            {"entry_updated","name: x\nentry_updated: value\nchild: {Shell: {cmd: go}}\n","watch_key","value",PRAKTOR_ORCH_ENTRY_UPDATED},
-            {"consume_queue","name: x\nconsume_queue: queue\nchild: {Shell: {cmd: go}}\n","queue_key","queue",PRAKTOR_ORCH_CONSUME_QUEUE},
+            {"precondition","name: x\nprecondition: $ready\nchild: {Shell: {cmd: go}}\n","condition","$ready",PRAKTOR_ORCH_PRECONDITION},
+            {"entry_updated","name: x\nentry_updated: $value\nchild: {Shell: {cmd: go}}\n","watch_key","$value",PRAKTOR_ORCH_ENTRY_UPDATED},
+            {"consume_queue","name: x\nconsume_queue: $queue\nchild: {Shell: {cmd: go}}\n","queue_key","$queue",PRAKTOR_ORCH_CONSUME_QUEUE},
             {"run_once","name: x\nrun_once: ignored\nchild: {Shell: {cmd: go}}\n",NULL,NULL,PRAKTOR_ORCH_RUN_ONCE}
         };
         size_t i;
@@ -168,15 +168,15 @@ spec("Named C11 orchestration YAML into canonical CSTL AST"){
 
     it("validates integer and boolean node parameters while preserving runtime substitutions"){
         const char *bad[]={
-            "ParseRegex: {input_key: input, pattern: x, capture_group: 1.5}\n",
+            "ParseRegex: {input_key: $input, pattern: x, capture_group: 1.5}\n",
             "Shell: {cmd: echo, stream_output: yes}\n",
             "FileExists: {path: file, fail_if_missing: 1}\n",
             "WaitEvent: {event: ready, timeout: --2}\n"
         };
         const char *good[]={
-            "ParseRegex: {input_key: input, pattern: x, capture_group: -1}\n",
+            "ParseRegex: {input_key: $input, pattern: x, capture_group: -1}\n",
             "Shell: {cmd: echo, stream_output: TRUE}\n",
-            "ParseRegex: {input_key: input, pattern: x, capture_group: '{group}' }\n"
+            "ParseRegex: {input_key: $input, pattern: x, capture_group: $group }\n"
         };
         size_t i;
         for(i=0;i<sizeof(bad)/sizeof(bad[0]);++i){
@@ -226,7 +226,7 @@ spec("Named C11 orchestration YAML into canonical CSTL AST"){
             {"shell","name: task\nshell: {cmd: hello, output_key: output}\n",PRAKTOR_ORCH_SHELL},
             {"inverter","name: task\ninverter: {child: {Shell: {cmd: hi}}}\n",PRAKTOR_ORCH_INVERTER},
             {"run_once","name: task\nrun_once: {child: {Shell: {cmd: hi}}}\n",PRAKTOR_ORCH_RUN_ONCE},
-            {"parse_regex","name: task\nparse_regex: {input_key: in, pattern: '(ok)'}\n",PRAKTOR_ORCH_PARSE_REGEX}
+            {"parse_regex","name: task\nparse_regex: {input_key: $in, pattern: '(ok)'}\n",PRAKTOR_ORCH_PARSE_REGEX}
         };
         size_t i;
         for(i=0;i<sizeof(cases)/sizeof(cases[0]);++i){
@@ -298,30 +298,30 @@ spec("Named C11 orchestration YAML into canonical CSTL AST"){
     }
     it("builds switch cases and set_variable source/value forms"){
         praktor_yaml_document *doc=doc_for(
-            "name: select\nswitch: mode\ncases:\n  - Shell: {cmd: one}\n  - Shell: {cmd: two}\n");
+            "name: select\nswitch: $mode\ncases:\n  - Shell: {cmd: one}\n  - Shell: {cmd: two}\n");
         praktor_orch_tree *tree=NULL;
         const praktor_orch_node *root=NULL,*first=NULL,*second=NULL;
         check(praktor_orch_from_flat_yaml(praktor_yaml_root(doc),"switch",&tree,NULL,0)==SALTS_OK);
         root=praktor_orch_tree_root(tree);
-        check(praktor_orch_node_type(root)==PRAKTOR_ORCH_SWITCH&&has_param(root,"variable","mode"));
+        check(praktor_orch_node_type(root)==PRAKTOR_ORCH_SWITCH&&has_param(root,"variable","$mode"));
         check(praktor_orch_child_count(root)==2);
         check(praktor_orch_child_at(root,0,&first)==SALTS_OK&&has_param(first,"cmd","one"));
         check(praktor_orch_child_at(root,1,&second)==SALTS_OK&&has_param(second,"cmd","two"));
         praktor_orch_tree_destroy(tree);praktor_yaml_document_destroy(doc);
-        doc=doc_for("name: assign\nset_variable: result\nfrom: source\n");
+        doc=doc_for("name: assign\nset_variable: result\nfrom: $source\n");
         tree=NULL;
         check(praktor_orch_from_flat_yaml(praktor_yaml_root(doc),"set_variable",&tree,NULL,0)==SALTS_OK);
         root=praktor_orch_tree_root(tree);
         check(praktor_orch_node_type(root)==PRAKTOR_ORCH_SET_VARIABLE);
-        check(has_param(root,"key","result")&&has_param(root,"from","source"));
+        check(has_param(root,"key","result")&&has_param(root,"from","$source"));
         praktor_orch_tree_destroy(tree);praktor_yaml_document_destroy(doc);
     }
     it("rejects malformed flat control forms atomically"){
         const char *bad[]={
             "name: x\nif: ready\n",
             "name: x\nwhile: ready\nmax_iterations: 1.5\ndo: {Shell: {cmd: tick}}\n",
-            "name: x\nswitch: mode\ncases: {}\n",
-            "name: x\nset_variable: result\nvalue: yes\nfrom: source\n",
+            "name: x\nswitch: $mode\ncases: {}\n",
+            "name: x\nset_variable: result\nvalue: yes\nfrom: $source\n",
             "name: x\nset_variable: result\nvalue: [not_scalar]\n",
             "name: x\nif: ready\nthen: {Shell: {cmd: run}}\nextra: bad\n"
         };

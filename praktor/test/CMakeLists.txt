@@ -729,7 +729,7 @@ target_sources(orch_yaml_c_test PRIVATE
     ${PROJECT_SOURCE_DIR}/praktor/src/yml/yaml_document.c
     ${PROJECT_SOURCE_DIR}/praktor/src/yml/yaml_fields.c)
 target_link_libraries(orch_yaml_c_test PRIVATE
-    Salts::Core Salts::CYaml Salts::TinyTest)
+    Salts::Core Salts::CYaml Salts::TinyTest Salts::JsonParser)
 
 add_test(NAME orch_yaml_c_test COMMAND orch_yaml_c_test)
 add_executable(orch_yaml_fault_test ${CMAKE_CURRENT_SOURCE_DIR}/orch_yaml_fault_test.c)
@@ -740,7 +740,7 @@ target_sources(orch_yaml_fault_test PRIVATE
     ${PROJECT_SOURCE_DIR}/praktor/src/yml/yaml_document.c
     ${PROJECT_SOURCE_DIR}/praktor/src/yml/yaml_fields.c)
 target_link_libraries(orch_yaml_fault_test PRIVATE
-    Salts::Core Salts::CYaml Salts::TinyTest)
+    Salts::Core Salts::CYaml Salts::TinyTest Salts::JsonParser)
 
 add_test(NAME orch_yaml_fault_test COMMAND orch_yaml_fault_test)
 add_executable(orch_workflow_c_test ${CMAKE_CURRENT_SOURCE_DIR}/orch_workflow_c_test.c)
@@ -884,11 +884,16 @@ target_link_libraries(praktor_init_c_test PRIVATE
 add_test(NAME praktor_init_c_test COMMAND praktor_init_c_test)
 
 add_executable(praktor_runtime_c_test ${CMAKE_CURRENT_SOURCE_DIR}/praktor_runtime_test.c)
+target_include_directories(praktor_runtime_c_test PRIVATE ${PROJECT_SOURCE_DIR}/praktor/src/runtime)
+target_compile_definitions(praktor_runtime_c_test PRIVATE
+    PRAKTOR_DEVICE_AUDIT_LIBRARY="${PROJECT_SOURCE_DIR}/examples/libraries/device-audit.yml")
 target_sources(praktor_runtime_c_test PRIVATE
     ${PROJECT_SOURCE_DIR}/praktor/src/providers/process.c
     ${PROJECT_SOURCE_DIR}/praktor/src/actions/tool.c
     ${PROJECT_SOURCE_DIR}/praktor/src/yml/yaml_service.c
     ${PROJECT_SOURCE_DIR}/praktor/src/runtime/runtime.c
+    ${PROJECT_SOURCE_DIR}/praktor/src/runtime/statechart.c
+    ${PROJECT_SOURCE_DIR}/praktor/src/runtime/statechart_plan.c
     ${PROJECT_SOURCE_DIR}/praktor/src/runtime/component_host.c
     ${PROJECT_SOURCE_DIR}/praktor/src/yml/workflow_snapshot.c
     ${PROJECT_SOURCE_DIR}/praktor/src/yml/yaml_document.c
@@ -923,13 +928,44 @@ add_test(NAME praktor_runtime_c_test COMMAND praktor_runtime_c_test)
 set_tests_properties(praktor_runtime_c_test PROPERTIES TIMEOUT 45 ENVIRONMENT
     "PRAKTOR_TIMEOUT_MS=50;PRAKTOR_STREAM_OUTPUT=false")
 
+# White-box tests compile the same Session implementation as the shared library.
+foreach(session_test IN ITEMS
+    actions_orch_session_plan_test
+    actions_orch_dag_native_session_test
+    actions_orch_worker_session_test
+    actions_orch_worker_process_test
+    actions_orch_dag_shell_process_test
+    actions_session_c_test
+    actions_plan_test
+    praktor_runtime_c_test)
+    target_sources(${session_test} PRIVATE
+        ${PROJECT_SOURCE_DIR}/praktor/src/actions/condition.c
+        ${PROJECT_SOURCE_DIR}/praktor/src/actions/condition_expr.c
+        ${PROJECT_SOURCE_DIR}/praktor/src/expressions/expression_lexer.c)
+    target_link_libraries(${session_test} PRIVATE Salts::Selector Salts::QueryVM)
+endforeach()
+
+foreach(json_selection_test IN ITEMS
+    actions_workflow_snapshot_values_test
+    actions_orch_session_plan_test
+    actions_orch_dag_native_session_test
+    actions_orch_worker_session_test
+    actions_orch_worker_process_test
+    actions_orch_dag_shell_process_test
+    actions_session_c_test
+    actions_native_host_test
+    praktor_runtime_c_test)
+    target_sources(${json_selection_test} PRIVATE
+        ${PROJECT_SOURCE_DIR}/praktor/src/actions/json_selection.c)
+endforeach()
+
 # Generic provider fixture and its formal integration/ownership suite.
 add_executable(praktor_execution_fixture ${CMAKE_CURRENT_SOURCE_DIR}/service_fixture.c)
 target_link_libraries(praktor_execution_fixture PRIVATE Salts::Core)
 set_target_properties(praktor_execution_fixture PROPERTIES FOLDER "praktor/test")
 foreach(_mode IN ITEMS echo sleep sleep-long env fail)
     if(_mode STREQUAL "echo")
-        set(_arguments "['emit', '{text}']")
+        set(_arguments "['emit', '$text']")
         set(_timeout 5000)
     elseif(_mode STREQUAL "sleep" OR _mode STREQUAL "sleep-long")
         set(_arguments "['sleep']")
@@ -977,6 +1013,7 @@ target_compile_definitions(praktor_service_test PRIVATE
     PRAKTOR_SERVICE_PAYLOAD_URL="${_payload_url}"
     PRAKTOR_SERVICE_PAYLOAD_FILE="${CMAKE_CURRENT_SOURCE_DIR}/data/service-payload.txt"
     PRAKTOR_SERVICE_UNSUPPORTED="${CMAKE_CURRENT_SOURCE_DIR}/data/service-unsupported.yml"
+    PRAKTOR_SERVICE_DUPLICATE_CAPABILITY="${CMAKE_CURRENT_SOURCE_DIR}/data/service-duplicate-capability.yml"
     PRAKTOR_SERVICE_OUTPUT_A="${CMAKE_CURRENT_BINARY_DIR}/service-first with spaces.txt"
     PRAKTOR_SERVICE_OUTPUT_B="${CMAKE_CURRENT_BINARY_DIR}/service-second.txt")
 add_dependencies(praktor_service_test praktor_execution_fixture)
@@ -993,6 +1030,7 @@ target_link_libraries(praktor_cli_test PRIVATE Salts::Core Salts::JsonParser Sal
 target_compile_definitions(praktor_cli_test PRIVATE
     PRAKTOR_CLI_PATH="$<TARGET_FILE:praktor>"
     PRAKTOR_CLI_WORKFLOW="${CMAKE_CURRENT_SOURCE_DIR}/data/cli-shell.yml"
+    PRAKTOR_CLI_BASIC_EXAMPLE="${PROJECT_SOURCE_DIR}/examples/basic.yml"
     PRAKTOR_CLI_TASK_WORKFLOW="${CMAKE_CURRENT_SOURCE_DIR}/data/cli-tasks.yml"
     PRAKTOR_CLI_TIMEOUT_WORKFLOW="${CMAKE_CURRENT_SOURCE_DIR}/data/cli-timeout.yml"
     PRAKTOR_CLI_INVALID_DEFAULTS_WORKFLOW="${CMAKE_CURRENT_BINARY_DIR}/cli-invalid-defaults.yml"

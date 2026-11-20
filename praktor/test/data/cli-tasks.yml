@@ -7,7 +7,7 @@ tasks:
   - name: build
     depends_on: [configure]
     set_variable: built
-    from: configured
+    from: $configured
   - name: test
     depends_on: [build]
     command: exit 7

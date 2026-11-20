@@ -23,9 +23,8 @@ extern "C" {
  * The unchanged pre-existing store is usable after any failure.
  */
 #define PRAKTOR_WORKFLOW_MAX_ROOT_VARIABLES 4096u
-int praktor_workflow_seed_root_text_variables(
-    const praktor_workflow_snapshot *snapshot,
-    praktor_value_store *store);
+int praktor_workflow_seed_root_text_variables(const praktor_workflow_snapshot *snapshot,
+                                              praktor_value_store *store);
 
 /* Task-local text snapshot.
  * The root/base store is borrowed and never modified. Child must be a
@@ -37,10 +36,9 @@ int praktor_workflow_seed_root_text_variables(
  * not track a local-write delta or permit merging inherited values back.
  * Reuse existing value_store transactions for a future owner-controlled
  * per-task/Parallel commit instead of merging this map wholesale. */
-int praktor_workflow_fork_task_text_variables(
-    const praktor_workflow_snapshot *snapshot, size_t task_index,
-    const praktor_value_store *root,
-    praktor_value_store *child);
+int praktor_workflow_fork_task_text_variables(const praktor_workflow_snapshot *snapshot,
+                                              size_t task_index, const praktor_value_store *root,
+                                              praktor_value_store *child);
 
 /* Single-owner task scope boundary.
  * Materializes the canonical immutable root + task.vars using the existing
@@ -49,10 +47,9 @@ int praktor_workflow_fork_task_text_variables(
  * for a newly initialized NativeHost before Session starts or hooks run.
  * Root and prior destination are untouched on any failure; no implicit
  * local-write or inherited-variable mergeback. */
-int praktor_workflow_load_task_text_scope(
-    const praktor_workflow_snapshot *snapshot,size_t task_index,
-    const praktor_value_store *root,
-    praktor_value_store *destination);
+int praktor_workflow_load_task_text_scope(const praktor_workflow_snapshot *snapshot,
+                                          size_t task_index, const praktor_value_store *root,
+                                          praktor_value_store *destination);
 
 /* Only explicitly selected output names may flow from a private task
  * scope back into the canonical root. This prepares an independent existing
@@ -63,11 +60,10 @@ int praktor_workflow_load_task_text_scope(
  * No CFlow worker may use the root while the one Owner prepares/publishes. */
 #define PRAKTOR_WORKFLOW_MAX_TEXT_OUTPUTS 128u
 #define PRAKTOR_WORKFLOW_MAX_TEXT_OUTPUT_BYTES (1024u * 1024u)
-int praktor_workflow_prepare_task_text_outputs(
-    praktor_value_store *root,
-    const praktor_value_store *task_scope,
-    const char *const *selected_keys,size_t key_count,
-    praktor_value_txn *out);
+int praktor_workflow_prepare_task_text_outputs(praktor_value_store *root,
+                                               const praktor_value_store *task_scope,
+                                               const char *const *selected_keys, size_t key_count,
+                                               praktor_value_txn *out);
 
 #ifdef __cplusplus
 }

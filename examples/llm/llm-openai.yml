@@ -1,42 +1,40 @@
-name: "OpenAI Chat Completion"
-description: "Reusable template for OpenAI API calls"
-
-variables:
-  OPENAI_MODEL: "gpt-4o"
-  OPENAI_MAX_TOKENS: "1024"
-  OPENAI_TEMPERATURE: "0.7"
-  OPENAI_SYSTEM_PROMPT: ""
+name: OpenAI build summary
+description: Request a short model summary and validate the returned text
+services:
+  model: examples/services/llm-openai.yml
 
 tasks:
   - name: call_openai
-    script: |
-      import("net");
-      var messages = [];
-      var sys = ctx.get("OPENAI_SYSTEM_PROMPT");
-      if (sys != "" && sys != null) {
-        messages = [map{role: "system", content: sys}];
-      }
-      messages = messages + [map{role: "user", content: ctx.get("PROMPT")}];
-      var body = json.stringify(map{
-        model: ctx.get("OPENAI_MODEL"),
-        messages: messages,
-        max_tokens: json.parse(ctx.get("OPENAI_MAX_TOKENS")),
-        temperature: json.parse(ctx.get("OPENAI_TEMPERATURE"))
-      });
-      var headers = json.parse(
-        "{\"Authorization\":" + json.stringify("Bearer " + ctx.get("OPENAI_API_KEY")) +
-        ",\"Content-Type\":\"application/json\"}"
-      );
+    tool: model
+    with:
+      request: |
+        {
+          "model": "gpt-4o-mini",
+          "messages": [
+            {"role": "user", "content": "Summarize this build result in one sentence: 71 tests passed, 0 failed."}
+          ],
+          "max_completion_tokens": 128,
+          "store": false
+        }
 
-      var resp = http.post("https://api.openai.com/v1/chat/completions", body, map{
-        headers: headers
-      });
-
-      if (resp.status != 200) {
-        fail("OpenAI API error " + resp.status + ": " + json.stringify(resp.data));
-      }
-
-      var answer = resp.data.choices[0].message.content;
-      ctx.output("answer", answer);
-      ctx.output("model", resp.data.model);
-      ctx.output("usage", resp.data.usage);
+  - name: validate_summary
+    depends_on: [call_openai]
+    actions:
+      Sequence:
+        - ParseJson:
+            input_key: $shell_output
+            path: '$.choices[0].finish_reason'
+            output_key: finish_reason
+            result: one
+        - assert:
+            guard: {fields: [finish_reason], match: '$finish_reason == "stop"'}
+            message: OpenAI did not complete the text response
+            actual: $finish_reason
+        - ParseJson:
+            input_key: $shell_output
+            path: '$.choices[0].message.content'
+            output_key: summary
+            result: one
+        - assert:
+            guard: {fields: [summary], match: '$summary != "" && $summary != "null"'}
+            message: OpenAI returned no summary text

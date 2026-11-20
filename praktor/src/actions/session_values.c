@@ -1,5 +1,6 @@
 #include "actions/session_internal.h"
 #include "actions/plan.h"
+#include "actions/variable_reference.h"
 #include <ctype.h>
 #include <errno.h>
 #include <limits.h>
@@ -78,6 +79,14 @@ const praktor_leaf_parameter *session_parameter(session_impl *s, size_t node, co
     if (!strcmp(s->nodes[node].parameters[i].name, name)) return &s->nodes[node].parameters[i];
   return NULL;
 }
+static int read_reference(session_impl *s, vstr key, size_t scratch, session_text *out) {
+  int r = session_buffer_reserve(&s->scratch[3], key.len, s->config.max_value_bytes);
+  if (r != SALTS_OK) return r;
+  memcpy(s->scratch[3].data, key.data, key.len);
+  s->scratch[3].data[key.len] = '\0';
+  return session_get(s, s->scratch[3].data, scratch, out);
+}
+
 int session_resolve(session_impl *s, size_t node, const char *name,
                     const char *fallback, size_t scratch, session_text *out) {
   const praktor_leaf_parameter *p = session_parameter(s, node, name);
@@ -104,15 +113,69 @@ int session_resolve(session_impl *s, size_t node, const char *name,
   }
   size = s->text_sizes[p - s->parameters];
   if (size > s->config.max_value_bytes) return SALTS_ENOBUFS;
-  if (size >= 3u && p->text[0] == '{' && p->text[size - 1u] == '}') {
-    r = session_buffer_reserve(&s->scratch[3], size - 2u, s->config.max_value_bytes);
-    if (r != SALTS_OK) return r;
-    memcpy(s->scratch[3].data, p->text + 1, size - 2u); s->scratch[3].data[size - 2u] = '\0';
-    if (memchr(s->scratch[3].data, '\0', size - 2u)) return SALTS_EINVAL;
-    return session_get(s, s->scratch[3].data, scratch, out);
-  }
+  const vstr key = praktor_variable_reference(vstr_from_buf(p->text,size));
+  if (key.data) return session_get(s, key.data, scratch, out);
   out->data = p->text; out->size = size; return SALTS_OK;
 }
+
+int session_command(session_impl *s, size_t node, session_text *out) {
+  const praktor_leaf_parameter *p = session_parameter(s, node, "cmd");
+  if (!p || p->kind != PRAKTOR_LEAF_STRING)
+    return session_key(s, node, "cmd", NULL, 0u, out);
+  const vstr command = vstr_from_buf(p->text,s->text_sizes[p - s->parameters]);
+  if (command.len > s->config.max_value_bytes) return SALTS_ENOBUFS;
+  if (memchr(command.data, '\0', command.len)) return SALTS_EINVAL;
+  if (praktor_variable_reference(command).data || !memchr(command.data, '$', command.len))
+    return session_key(s, node, "cmd", NULL, 0u, out);
+
+  session_buffer *buffer = &s->scratch[0];
+  size_t used = 0u;
+  for (size_t i = 0u; i < command.len;) {
+    session_text part = {command.data + i, 1u};
+    if (i + 1u < command.len && (command.data[i] == '\\' || command.data[i] == '$') &&
+        command.data[i + 1u] == '$') {
+      part.size = 2u;
+      i += 2u;
+    } else if (command.data[i++] == '$') {
+      vstr key = {command.data + i, command.len - i};
+      if (key.len && key.data[0] == '{')
+        return session_error(s, SALTS_EINVAL, "Use $name in shell commands");
+      key.len = praktor_variable_name_size(key, false);
+      if (key.len) {
+        if (praktor_retired_variable_namespace(key))
+          return session_error(s, SALTS_EINVAL, "Use $name in shell commands");
+        int r = read_reference(s, key, 1u, &part);
+        if (r != SALTS_OK) return r;
+        if (memchr(part.data, '\0', part.size)) return SALTS_EINVAL;
+        i += key.len;
+      }
+    }
+    if (part.size > s->config.max_value_bytes - used) return SALTS_ENOBUFS;
+    int r = session_buffer_reserve(buffer, used + part.size, s->config.max_value_bytes);
+    if (r != SALTS_OK) return r;
+    memcpy(buffer->data + used, part.data, part.size);
+    used += part.size;
+  }
+  buffer->data[used] = '\0';
+  *out = (session_text){buffer->data, used};
+  return SALTS_OK;
+}
+
+int session_source_key(session_impl *s, size_t node, const char *name,
+                       const char *fallback, session_text *out) {
+  const praktor_leaf_parameter *p = session_parameter(s, node, name);
+  if (!p && fallback) {
+    *out = (session_text){fallback, strlen(fallback)};
+    return SALTS_OK;
+  }
+  const vstr key = p && p->kind == PRAKTOR_LEAF_STRING
+    ? praktor_variable_reference(vstr_from_buf(p->text,s->text_sizes[p - s->parameters]))
+    : (vstr){0};
+  if (!key.data) return SALTS_EINVAL;
+  *out = (session_text){key.data, key.len};
+  return SALTS_OK;
+}
+
 int session_integer(session_impl *s, size_t node, const char *name, int fallback, int *out) {
   const praktor_leaf_parameter *p = session_parameter(s, node, name);
   session_text value;
@@ -124,33 +187,34 @@ int session_integer(session_impl *s, size_t node, const char *name, int fallback
       return SALTS_EINVAL;
     *out = (int)p->number; return SALTS_OK;
   }
-  /* Numeric control substitutions historically include the empty key ({}).
-   * Ordinary string ports and Switch keep their separate >=3-byte rule. */
-  if (s->text_sizes[p - s->parameters] == 2u && p->text[0] == '{' && p->text[1] == '}')
-    r = session_get(s, "", 0u, &value);
-  else r = session_resolve(s, node, name, NULL, 0u, &value);
+  r = session_resolve(s, node, name, NULL, 0u, &value);
   return r == SALTS_OK ? praktor_parse_integer(value.data, value.size, out) : r;
 }
 int session_switch(session_impl *s, size_t node, size_t *out) {
-  const praktor_leaf_parameter *p = session_parameter(s, node, "variable");
-  session_text value;
-  int result, parsed;
-  bool contains = false;
-  if (p == NULL || p->kind == PRAKTOR_LEAF_BOOLEAN) return SALTS_EINVAL;
-  if (p->kind == PRAKTOR_LEAF_NUMBER) result = session_integer(s, node, "variable", 0, &parsed);
-  else {
-    result = session_resolve(s, node, "variable", NULL, 0u, &value);
-    if (result != SALTS_OK) return result;
-    /* Legacy bare text may name a key, including a resolved self-reference. */
-    if (value.size == s->text_sizes[p - s->parameters] && !memcmp(value.data, p->text, value.size)) {
-      if (memchr(value.data, '\0', value.size)) return SALTS_EINVAL;
-      result = session_has(s, value.data, &contains);
-      if (result != SALTS_OK) return result;
-      if (contains) result = session_get(s, value.data, 1u, &value);
+  const json_value_t *labels = s->state[node].case_labels;
+  if (labels) {
+    session_text value;
+    const size_t count = json_array_size(labels);
+    const size_t children = s->state[node].child_count;
+    if (count > children || children - count > 1u) return SALTS_EINVAL;
+    int r = session_resolve(s,node,"variable",NULL,0u,&value);
+    if (r != SALTS_OK) return r;
+    for (size_t i = 0u; i < count; ++i) {
+      const json_value_t *label = json_array_get(labels,i);
+      const char *text = json_string(label);
+      if (!text) return SALTS_EINVAL;
+      if (json_string_len(label) == value.size && !memcmp(text,value.data,value.size)) {
+        *out = i;
+        return SALTS_OK;
+      }
     }
-    if (result == SALTS_OK) result = praktor_parse_integer(value.data, value.size, &parsed);
+    *out = count;
+    return SALTS_OK;
   }
-  if (result != SALTS_OK) return session_error(s, result, "C11 Switch selector failed: variable must resolve to a 32-bit integer");
+  int parsed;
+  const int result = session_integer(s, node, "variable", 0, &parsed);
+  if (result != SALTS_OK)
+    return session_hook_status(s, result, "Switch selector must resolve to a 32-bit integer");
   *out = parsed < 0 ? s->state[node].child_count : (size_t)parsed; return SALTS_OK;
 }
 session_text session_cached(session_impl *s, size_t node, size_t slot) {

@@ -37,8 +37,7 @@ function(cmake_config_target target_name)
 
     if(NOT ARG_NO_INSTALL)
         if(NOT CMAKE_CONFIG_TARGET_EXPORT_SET)
-            message(FATAL_ERROR
-                "cmake_config_target: CMAKE_CONFIG_TARGET_EXPORT_SET must name the export set")
+            message(FATAL_ERROR "cmake_config_target: CMAKE_CONFIG_TARGET_EXPORT_SET must name the export set")
         endif()
 
         install(
@@ -46,7 +45,8 @@ function(cmake_config_target target_name)
             EXPORT ${CMAKE_CONFIG_TARGET_EXPORT_SET}
             LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
             ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
-            RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+            RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+        )
     endif()
 
 endfunction()
@@ -70,7 +70,8 @@ function(cmake_install_headers)
             set(ARG_DESTINATION "include")
         endif()
 
-        install(DIRECTORY ${ARG_DIRECTORY}
+        install(
+            DIRECTORY ${ARG_DIRECTORY}
             DESTINATION ${ARG_DESTINATION}
             ${match_args}
         )
@@ -109,7 +110,10 @@ function(cmake_add_source VAR)
         list(REMOVE_ITEM collected ${ARG_EXCLUDES})
     endif()
 
-    set(${VAR} ${collected} PARENT_SCOPE)
+    set(${VAR}
+        ${collected}
+        PARENT_SCOPE
+    )
 endfunction()
 
 function(cmake_add_test)
@@ -145,7 +149,10 @@ function(cmake_add_test)
     endforeach()
 
     if(ARG_OUT_TARGETS)
-        set(${ARG_OUT_TARGETS} ${created_targets} PARENT_SCOPE)
+        set(${ARG_OUT_TARGETS}
+            ${created_targets}
+            PARENT_SCOPE
+        )
     endif()
 endfunction()
 

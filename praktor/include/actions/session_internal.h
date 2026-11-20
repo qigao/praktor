@@ -1,7 +1,9 @@
 #ifndef PRAKTOR_SESSION_INTERNAL_H
 #define PRAKTOR_SESSION_INTERNAL_H
 #include "actions/session.h"
+#include "actions/condition.h"
 #include "praktor/process_driver.h"
+#include <json_parser.h>
 typedef struct session_text { const char *data; size_t size; } session_text;
 typedef struct session_buffer { char *data; size_t capacity; } session_buffer;
 typedef struct session_slot { size_t offset, size; bool present; } session_slot;
@@ -13,6 +15,9 @@ typedef struct session_node_state {
   unsigned char leaf_owner;
   size_t child_count, active_child;
   uint64_t restore_tick;
+  praktor_condition condition;
+  json_value_t *case_labels;
+  uint64_t wait_started_ns;
   praktor_process_driver process;
 } session_node_state;
 typedef struct session_impl {
@@ -29,10 +34,14 @@ typedef struct session_impl {
   bool busy;
   praktor_bt_tree runtime;
   char error[512];
+  char guard_failure[512];
 } session_impl;
 int session_error(session_impl *s, int result, const char *format, ...);
 int session_buffer_reserve(session_buffer *buffer, size_t bytes, size_t limit);
 int session_get(session_impl *s, const char *key, size_t scratch, session_text *out);
+int session_command(session_impl *s, size_t node, session_text *out);
+int session_source_key(session_impl *s, size_t node, const char *name,
+                       const char *fallback, session_text *out);
 int session_has(session_impl *s, const char *key, bool *out);
 int session_set(session_impl *s, const char *key, session_text value);
 int session_resolve(session_impl *s, size_t node, const char *name,
@@ -47,6 +56,8 @@ int session_key(session_impl *s, size_t node, const char *name, const char *fall
 int session_restore_pipeline(session_impl *s, size_t node);
 int session_dynamic(void *user, size_t node, salts_bt_node_parameters *params);
 int session_condition(void *user, size_t node, salts_bt_node_status *status);
+int session_condition_expr(session_impl *session,const praktor_condition_expr *program,
+                           salts_bt_node_status *status);
 int session_select(void *user, size_t node, size_t *child);
 int session_pipeline_prepare(void *user, size_t node, size_t child);
 int session_pipeline_complete(void *user, size_t node, size_t child, salts_bt_node_status status);

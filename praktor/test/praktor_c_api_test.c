@@ -8,6 +8,56 @@ static const char *required_text(const json_value_t *object, const char *key) {
     return text;
 }
 
+typedef struct event_fixture {
+    unsigned document_polls,task_polls;
+    int failure;
+    const char *attempt;
+    praktor_event_field fields[2];
+} event_fixture;
+
+static int poll_events(void *context,const char *task,praktor_host_event *event) {
+    event_fixture *fixture=context;
+    if(!task) {
+        ++fixture->document_polls;
+        if(fixture->document_polls==1u)return 0;
+        *event=(praktor_host_event){.name="host.ready"};
+        return 1;
+    }
+    if(strcmp(task,"device"))return -9;
+    ++fixture->task_polls;
+    if(fixture->failure)return fixture->failure;
+    fixture->fields[0]=(praktor_event_field){"attempt",fixture->attempt};
+    fixture->fields[1]=(praktor_event_field){"token","$literal"};
+    *event=(praktor_host_event){.name="device.ack",.fields=fixture->fields,.field_count=2u};
+    return 1;
+}
+
+static const char external_yaml[]=
+    "statechart:\n"
+    "  initial: waiting\n"
+    "  events: {host.ready: {source: external}}\n"
+    "  states:\n"
+    "    waiting: {transitions: [{'on': host.ready, target: ready}]}\n"
+    "    ready: {type: final}\n"
+    "tasks:\n"
+    "  - name: device\n"
+    "    statechart:\n"
+    "      initial: polling\n"
+    "      events: {device.ack: {source: external, fields: {attempt: int64, token: text}}}\n"
+    "      states:\n"
+    "        polling:\n"
+    "          transitions:\n"
+    "            - 'on': device.ack\n"
+    "              target: accepted\n"
+    "              guard: {fields: [event.data.attempt, event.data.token], match: '$event.data.attempt == \"9007199254740993\" && $event.data.token == \"$literal\"'}\n"
+    "            - 'on': device.ack\n"
+    "              target: refused\n"
+    "        accepted: {type: final}\n"
+    "        refused: {type: final}\n"
+    "    wait_until:\n"
+    "      guard: {fields: [chart.workflow.ready, chart.task.accepted], expr: '$chart.workflow.ready == 1 && $chart.task.accepted == 1'}\n"
+    "      timeout_ms: 200\n";
+
 spec("C11 Praktor SDK ABI v3") {
     static praktor_runtime_result shell_result;
     static json_value_t *document;
@@ -69,5 +119,52 @@ spec("C11 Praktor SDK ABI v3") {
         const json_value_t *outputs = json_object_get(json_object_get(
             json_object_get(document, "tasks"), "shell"), "outputs");
         check(!outputs || json_object_get(outputs, "stdout") == NULL);
+    }
+    it("routes host events to the document and named task charts") {
+        const praktor_execute_request request={
+            .yaml=external_yaml,.yaml_size=sizeof external_yaml-1u,
+            .limits=praktor_default_limits()
+        };
+        event_fixture fixture={.attempt="9007199254740993"};
+        check(praktor_execute_with_events(&request,"device",poll_events,&fixture,&shell_result)
+              ==PRAKTOR_RUNTIME_OK,"%s",shell_result.error);
+        check_equal(fixture.document_polls,2u);
+        check_equal(fixture.task_polls,1u);
+    }
+    it("fails on an invalid typed host event rather than taking a transition") {
+        const praktor_execute_request request={
+            .yaml=external_yaml,.yaml_size=sizeof external_yaml-1u,
+            .limits=praktor_default_limits()
+        };
+        event_fixture fixture={.attempt="9223372036854775808"};
+        check_equal(praktor_execute_with_events(&request,NULL,poll_events,&fixture,&shell_result),
+                    PRAKTOR_RUNTIME_FAILED);
+        check_contains(shell_result.error,"invalid typed host event payload");
+    }
+    it("propagates the event source error to the execution result") {
+        const praktor_execute_request request={
+            .yaml=external_yaml,.yaml_size=sizeof external_yaml-1u,
+            .limits=praktor_default_limits()
+        };
+        event_fixture fixture={.failure=-7};
+        check_equal(praktor_execute_with_events(&request,NULL,poll_events,&fixture,&shell_result),
+                    PRAKTOR_RUNTIME_FAILED);
+        check_contains(shell_result.error,"event source for 'device' returned -7");
+    }
+    it("rejects a BT Raise for a host-owned event at admission") {
+        const char yaml[]=
+            "tasks:\n"
+            "  - name: device\n"
+            "    statechart: {initial: waiting, states: {waiting: {}}, events: {device.ack: {source: external}}}\n"
+            "    actions: {raise: {event: device.ack}}\n";
+        const praktor_execute_request request={
+            .yaml=yaml,.yaml_size=sizeof yaml-1u,.limits=praktor_default_limits()
+        };
+        event_fixture fixture={0};
+        check_equal(praktor_execute_with_events(&request,NULL,poll_events,&fixture,&shell_result),
+                    PRAKTOR_RUNTIME_INVALID);
+        check_null(shell_result.json);
+        check_equal(fixture.task_polls,0u);
+        check_contains(shell_result.error,"declared internal event");
     }
 }

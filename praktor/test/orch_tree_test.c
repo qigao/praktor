@@ -109,7 +109,7 @@ spec("Native orchestration catalog and command lowering") {
         const praktor_orch_node *node;
         input.command = view("echo"); input.regex.present = true; input.regex.pattern = view("(x)"); input.regex.output_key = view(""); input.regex.capture_group = INT_MIN;
         tree = build(&input); node = child(praktor_orch_tree_root(tree), 1, PRAKTOR_ORCH_PARSE_REGEX);
-        param_is(node, 0, "input_key", "stdout"); param_is(node, 1, "pattern", "(x)"); param_is(node, 2, "capture_group", "-2147483648"); param_is(node, 3, "output_key", ""); praktor_orch_tree_destroy(tree);
+        param_is(node, 0, "input_key", "$stdout"); param_is(node, 1, "pattern", "(x)"); param_is(node, 2, "capture_group", "-2147483648"); param_is(node, 3, "output_key", ""); praktor_orch_tree_destroy(tree);
     }
     it("chooses the original postprocessor priority and JSON format fallback") {
         praktor_orch_command input = {0};

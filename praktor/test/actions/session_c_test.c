@@ -52,21 +52,6 @@ static void halt(void *user, const praktor_leaf_request *req) {
   fixture *f = user; ++f->halts;
   f->native_hooks.halt_typed_leaf(f->native_hooks.user,req);
 }
-/* A C value provider can intentionally support an empty key even though the
- * bounded Native Host rejects empty storage keys. Exercise the Session's
- * numeric-control substitution contract independently of that policy. */
-static int empty_get(void *user, const char *key, char *out, size_t cap, size_t *size) {
-  fixture *f = user;
-  return f->native_hooks.value_get(f->native_hooks.value_user,*key ? key : "empty_control",out,cap,size);
-}
-static int empty_set(void *user, const char *key, const char *value) {
-  fixture *f = user;
-  return f->native_hooks.value_set(f->native_hooks.value_user,*key ? key : "empty_control",value);
-}
-static int empty_contains(void *user, const char *key, int *contains) {
-  fixture *f = user;
-  return f->native_hooks.value_contains(f->native_hooks.value_user,*key ? key : "empty_control",contains);
-}
 static void init(fixture *f) {
   praktor_native_host_config host;
   memset(f,0,sizeof(*f));
@@ -129,7 +114,7 @@ spec("C11 Session without a C++ compiler or runtime") {
   it("compiles action names and typed ports into an executable C plan") {
     fixture f; praktor_session_node ns[3]; bool prune; char error[128];
     praktor_leaf_parameter set_ports[] = {text("key","answer"),text("value","7")};
-    praktor_leaf_parameter check_ports[] = {text("input_key","answer"),text("expected","7.0")};
+    praktor_leaf_parameter check_ports[] = {text("input_key","$answer"),text("expected","7.0")};
     init(&f);
     check(praktor_compile_node(&f.config.tree,"Sequence",NULL,0,NULL,2,PRAKTOR_BT_NO_PARENT,&ns[0],&prune,error,sizeof(error)) == SALTS_OK && !prune);
     check(praktor_compile_node(&f.config.tree,"SetVariable",set_ports,2,NULL,0,0,&ns[1],&prune,error,sizeof(error)) == SALTS_OK && !prune);
@@ -150,7 +135,7 @@ spec("C11 Session without a C++ compiler or runtime") {
   }
   it("compiles bounded dynamic placeholders and validates empty Switch before lowering") {
     fixture f; praktor_session_node n; bool prune; char error[128];
-    praktor_leaf_parameter p = text("num_attempts","{later}");
+    praktor_leaf_parameter p = text("num_attempts","$later");
     init(&f); f.config.tree.max_control_iterations = 1;
     check(praktor_compile_node(&f.config.tree,"Retry",&p,1,NULL,1,PRAKTOR_BT_NO_PARENT,&n,&prune,error,sizeof(error)) == SALTS_OK);
     check(!prune && n.tree.limit == 1 && n.tree.dynamic_parameter_mask == SALTS_BT_DYNAMIC_PARAMETER_LIMIT);
@@ -200,7 +185,7 @@ spec("C11 Session without a C++ compiler or runtime") {
     check(!f.calls); destroy(&f);
   }
   it("resolves live Switch values and refuses malformed selectors before child effects") {
-    fixture f; praktor_leaf_parameter p = text("variable","{choice}");
+    fixture f; praktor_leaf_parameter p = text("variable","$choice");
     praktor_session_node ns[] = {node("Switch",SALTS_BT_NODE_SWITCH,PRAKTOR_BT_NO_PARENT),node("Fail",SALTS_BT_NODE_LEAF,0),node("Observe",SALTS_BT_NODE_LEAF,0)};
     salts_bt_node_status status; init(&f); ns[0].parameters = &p; ns[0].parameter_count = 1;
     check(praktor_session_init(&f.session,&f.config,ns,3) == SALTS_OK);
@@ -210,7 +195,7 @@ spec("C11 Session without a C++ compiler or runtime") {
     check(praktor_session_tick(&f.session,&status) == SALTS_EINVAL); check(f.calls == 2); destroy(&f);
   }
   it("revalidates dynamic retry limits and preserves the iteration budget") {
-    fixture f; praktor_leaf_parameter p = text("num_attempts","{attempts}");
+    fixture f; praktor_leaf_parameter p = text("num_attempts","$attempts");
     praktor_session_node ns[] = {node("Retry",SALTS_BT_NODE_RETRY,PRAKTOR_BT_NO_PARENT),node("Fail",SALTS_BT_NODE_LEAF,0)};
     salts_bt_node_status status; init(&f); ns[0].tree.dynamic_parameter_mask = SALTS_BT_DYNAMIC_PARAMETER_LIMIT; ns[0].tree.limit = 3;
     ns[0].parameters = &p; ns[0].parameter_count = 1;
@@ -219,16 +204,15 @@ spec("C11 Session without a C++ compiler or runtime") {
     check(praktor_session_reset(&f.session) == SALTS_OK); set(&f,"attempts","-1");
     check(praktor_session_tick(&f.session,&status) == SALTS_EINVAL && f.calls == 3); destroy(&f);
   }
-  it("preserves empty-key numeric substitutions without changing ordinary string ports") {
+  it("rejects an empty-key numeric substitution and preserves the JSON object literal") {
     fixture f; praktor_leaf_parameter p = text("num_attempts","{}");
+    salts_bt_node_status status;
     praktor_session_node ns[] = {node("Retry",SALTS_BT_NODE_RETRY,PRAKTOR_BT_NO_PARENT),node("Fail",SALTS_BT_NODE_LEAF,0)};
-    init(&f); set(&f,"empty_control","2");
-    f.config.host.value_get = empty_get; f.config.host.value_set = empty_set;
-    f.config.host.value_contains = empty_contains; f.config.host.value_user = &f;
+    init(&f);
     ns[0].parameters = &p; ns[0].parameter_count = 1; ns[0].tree.limit = 3;
     ns[0].tree.dynamic_parameter_mask = SALTS_BT_DYNAMIC_PARAMETER_LIMIT;
     check(praktor_session_init(&f.session,&f.config,ns,2) == SALTS_OK);
-    check(drive(&f) == SALTS_BT_FAILURE && f.calls == 2); destroy(&f);
+    check(praktor_session_tick(&f.session,&status) == SALTS_EINVAL && !f.calls); destroy(&f);
     init(&f); { praktor_leaf_parameter ports[] = {text("key","literal"),text("value","{}")};
       praktor_session_node leaf = node("SetVariable",SALTS_BT_NODE_LEAF,PRAKTOR_BT_NO_PARENT);
       leaf.parameters = ports; leaf.parameter_count = 2;
@@ -246,7 +230,7 @@ spec("C11 Session without a C++ compiler or runtime") {
     check(praktor_session_tick(&f.session,&status) == SALTS_ENOBUFS && !f.calls); destroy(&f);
   }
   it("tracks EntryUpdated observations and clears them on cancellation") {
-    fixture f; praktor_leaf_parameter p = text("watch_key","watched");
+    fixture f; praktor_leaf_parameter p = text("watch_key","$watched");
     praktor_session_node ns[] = {node("EntryUpdated",SALTS_BT_NODE_ENTRY_UPDATED,PRAKTOR_BT_NO_PARENT),node("Observe",SALTS_BT_NODE_LEAF,0)};
     init(&f); ns[0].parameters = &p; ns[0].parameter_count = 1; set(&f,"watched","one");
     check(praktor_session_init(&f.session,&f.config,ns,2) == SALTS_OK);
@@ -291,7 +275,7 @@ spec("C11 Session without a C++ compiler or runtime") {
   }
   it("times out a running native leaf and rejects invalid dynamic deadlines") {
     fixture f; salts_bt_node_status status;
-    praktor_leaf_parameter timeout = text("timeout_ms","{deadline}"), sleep = text("duration","10s");
+    praktor_leaf_parameter timeout = text("timeout_ms","$deadline"), sleep = text("duration","10s");
     praktor_session_node ns[] = {node("Timeout",SALTS_BT_NODE_TIMEOUT,PRAKTOR_BT_NO_PARENT),node("Sleep",SALTS_BT_NODE_LEAF,0)};
     init(&f); ns[0].parameters = &timeout; ns[0].parameter_count = 1;
     ns[0].tree.dynamic_parameter_mask = SALTS_BT_DYNAMIC_PARAMETER_DURATION_NS;
@@ -304,7 +288,7 @@ spec("C11 Session without a C++ compiler or runtime") {
     check(praktor_session_tick(&f.session,&status) == SALTS_EINVAL && f.calls == 1); destroy(&f);
   }
   it("evaluates substituted conditions before guarded child effects") {
-    fixture f; praktor_leaf_parameter p = text("condition","{guard}");
+    fixture f; praktor_leaf_parameter p = text("condition","$guard");
     praktor_session_node ns[] = {node("Precondition",SALTS_BT_NODE_PRECONDITION,PRAKTOR_BT_NO_PARENT),node("Observe",SALTS_BT_NODE_LEAF,0)};
     init(&f); ns[0].tree.condition_callback = true; ns[0].parameters = &p; ns[0].parameter_count = 1;
     check(praktor_session_init(&f.session,&f.config,ns,2) == SALTS_OK);

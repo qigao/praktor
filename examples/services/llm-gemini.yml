@@ -1,0 +1,25 @@
+# curl reads the API key and any model override from the inherited environment.
+provider:
+  kind: exe
+  path: curl
+config:
+  args:
+    - --disable
+    - --silent
+    - --show-error
+    - --fail
+    - --proto
+    - '=https'
+    - --connect-timeout
+    - '10'
+    - --variable
+    - '%GEMINI_API_KEY'
+    - --variable
+    - '%GEMINI_MODEL=gemini-3.8-flash'
+    - --expand-header
+    - 'x-goog-api-key: {{GEMINI_API_KEY}}'
+    - --json
+    - $request
+    - --expand-url
+    - 'https://generativelanguage.googleapis.com/v1beta/models/{{GEMINI_MODEL:url}}:generateContent'
+  timeout_ms: 60000

@@ -306,3 +306,121 @@ CTest 70/70 通过，install 成功；本次为增量构建。临时 runner 已�
   `build/cmake-cleanup/`。CTest preset 将相对 JUnit 路径解释为相对 binary
   目录，原报告位于其 `build/cmake-cleanup/ctest.xml`，另复制一份到日志目录。
   安装前缀保持在当前 user preset 的 stage。其他平台和 sanitizer 未验证。
+
+## 2026-11-20：Statechart 的只读 guard
+
+- 将状态图从独立执行体迁移为任务或文档的观察者时，旧 Session 契约即使只包含
+  内建 `Assert` 也会要求宿主 leaf 的 tick/halt，导致首次迁移报告
+  `statechart: cannot prepare transition guard`。
+- 修正 Session 的准入边界：仅含内建 guard 的计划可以省略宿主 leaf 回调，
+  普通运行时叶仍需成对提供回调。状态图 guard 禁止写入，并且没有进程 owner。
+  复现和验证用 `ctest --preset llvm-mingw-x64-release-user -R praktor_runtime_c_test --output-on-failure`。
+
+## 2026-11-20：模型服务的 JSON 请求与响应
+
+- curl 8.9.1 的 `:json` 变量展开只转义字符串内容。直接把它放在 JSON
+  字段值的位置会发出无引号的请求。模型服务改用 `--json` 传完整请求，
+  curl 的变量展开只用于认证头及 Gemini 的模型路径。
+- 以 `{` 开头且以 `}` 结尾的整个 `with` 参数会被解释为变量引用。
+  YAML 的 `|` 保留末尾换行，让完整 JSON 作为字面 argv 参数。Claude 的
+  文本块过滤路径用 `ParseJson result: first`，其筛选后取子字段的路径需要 DOM。
+- 三种服务用本机 HTTP 回环和虚拟密钥验证请求与状态传递，覆盖正常响应、
+  生成截断、空文本、null 文本、HTTP 429 和缺少密钥。离线入口为
+  `praktor --config examples/llm/summary-workflow.yml --task confirm_summary`。
+
+## 2026-11-20：构建缓存与安装边界
+
+- CMake 的包版本即使匹配，旧的 `<Package>_DIR` 也可能覆盖新选定的搜索根。
+  配置现在校验 SaltsBase、CMeta、SaltsUtils 实际加载的配置文件路径。
+  提供 vcpkg triplet 和安装根时，PCRE2 也必须来自选定 triplet 下的共享
+  SDK 或当前产品安装。路径错配时提示显式使用 `cmake --fresh`。
+- Windows 上的 `tlhelp32.h` 依赖 `windows.h` 先声明的类型。格式化如果
+  交换了两者顺序，LLVM-MinGW 会报告 `HANDLE` 和 `DWORD` 未声明。
+  保留两个头文件之间的分组可避免排序再次引入这一错误。
+- 用独立 Praktor 原生加载 `.env`，并用临时 dotenv 文件逐项覆盖四个 SDK
+  根，确认配置均拒绝旧缓存。恢复配置后执行
+  `praktor --config build.yml --task install --timeout-ms 3600000`，完整
+  构建、71/71 CTest 和 `cmake --install` 通过，安装的 CLI 和 DLL 摘要
+  与构建目录中的产物一致。
+
+- `build.yml` 原生加载 `.env`，在 Shell 启动前展开命令里的
+  `$PRESET`。`validate_preset` 先校验非空值和名称字符，CMake 校验
+  preset 是否存在。安装阶段执行 `cmake --install "build/$PRESET"`。
+- DSL 的整值、读取端口和 guard 统一使用 `$name`。Selector 编译输入
+  将 sigil 替换为空格以保留诊断位置，并给缓冲区补 NUL 以满足当前
+  SaltsBase Selector lexer 的 EOF 哨兵。使用独立副本执行
+  `praktor --config build.yml --task install --timeout-ms 3600000`，
+  Windows LLVM-MinGW x64 完整构建、71/71 CTest 和安装通过。已用安装
+  产物执行设备状态、发布分流、离线模型响应和上游版本检查示例。
+
+## 任务准入与输出结算
+
+- YAML 任务元数据可以描述比运行时更广的字段。已选择任务在创建服务
+  或启动 BT 前拒绝未接线的元数据。进程时限与目录由 `shell` 端口
+  处理，`timeout` 加同级 `child` 属于 BT 装饰器。
+- 公开运行时按直接 Shell 声明的键结算，CLI 的默认输出标签保持
+  `stdout`、`stderr`、`exit_code`。任务级 `outputs: [$name]`
+  显式选择完整的成功输出集合。复用工作流 owner 的值事务和任务结果
+  提交，缺少任一值时整组拒绝。旧版本可使用直接 SetVariable 任务或
+  固定进程输出传值，并移除新增的任务 `outputs` 声明。
+- Windows LLVM-MinGW x64 使用 `praktor --config build.yml --task install
+  --timeout-ms 3600000` 完整构建、71/71 CTest 及安装通过。安装后运行
+  离线模型示例，文档 Statechart 在 `task.finished` 读取已提交的
+  `$summary`，后继 BT 也能读取该值。两个状态图示例及上游版本检查通过。
+
+## BT 内的进程动作与字符串分支
+
+- 任务级 `tool` 和 BT 内的 `Tool` 使用同一绑定路径。准入按 Session
+  节点索引保存绑定，树的串行驱动只持有一个活动 job。正常完成先复制
+  结果再释放 job，`timeout` 或 halt 则取消并排空后释放。此顺序允许
+  `repeat` 重启同一个叶节点，也允许 `Fallback` 启动另一个服务。
+- 字符串 `switch` 以 `cases` 映射的键精确匹配；找不到匹配时才选
+  同级 `default`。默认分支由 BT 选择一次，选中分支执行失败时直接
+  回传失败状态。原有序列形式继续读取零基整数索引。
+- Windows LLVM-MinGW x64 完整构建、71/71 CTest、安装通过。安装后
+  运行发布分流、设备状态和离线模型例子。下载示例用本地文件 URL
+  验证了直接 Tool 与嵌套 Tool，并核对了两个下载文件的 SHA-256。
+
+## DAG 同组并行与宿主 Statechart 事件
+
+- 根 `parallelism` 控制一次领取的就绪任务数，范围 1 到 16。DAG 领取后
+  先检查同组输出键冲突，再由一个手动 CFlow 描述符轮转各个 BT。所有
+  Session 与服务 job 关闭、共享 Shell retainer 排空后，owner 用原有事务
+  一起提交本组结果。后继未启动时报告 `pending`。
+- SDK 的 `praktor_execute_with_events` 通过工作流线程中的同步回调轮询
+  文档图和活动任务图。事件先匹配声明并校验类型，再复制进状态图原有
+  有界队列。内部 `raise` 和外部事件入口各自校验来源。
+- Windows LLVM-MinGW x64 完整构建、71/71 CTest 与安装通过。SDK 测试
+  验证了两个作用域、精确 int64、载荷校验与回调错误。安装后运行
+  `praktor --config examples/upstream-version-checks.yml --task confirm_compatible`，
+  以及设备、发布和离线模型示例。
+
+## 工作流组合准入
+
+- `includes` 的路径从进程工作目录解析。启动前展开 `uses` 的依赖闭包
+  和 `dynamic_tasks` 数组，再构建 DAG 并执行 `--task` 选择。遇到
+  找不到生成任务的情况，可先核对 JSON 输入及结果中的完整任务名。
+  展开不读取本轮任务产生的输出。
+- 生成任务和调用入口计入 `max_tasks`。任务库的 YAML 由 snapshot
+  持有，以保证实例的 Statechart 声明有效。生成任务使用原有 BT、
+  Statechart 生命周期和输出结算。设备示例的汇合任务产生
+  `task.finished` 后，文档图进入 `commissioned`。
+- 修改 CMake 后先运行 `praktor --config build.yml --task build`
+  加载 `.env` 并完成配置，再用 `update-workflow-schema` 生成
+  编辑器 schema。直接执行该 CMake 目标触发重新配置时，
+  父环境缺少 SDK 变量会导致包查找失败。
+- Windows LLVM-MinGW x64 完整构建、71/71 CTest 与安装通过。
+  安装产物运行了组合示例的 `confirm` 和 `inspect.device-1`，
+  分别验证汇合与生成任务的依赖选择。
+
+## 跨任务 Statechart 信号
+
+- `raise` 增加 `scope: workflow`，接收方为文档图。排查同名变量在两种
+  上下文取值不一致时，确认载荷引用由发送任务解析，接收图只从
+  `$event.data.<字段>` 读取载荷。文档图其他 guard 字段仍读取工作流值。
+- 自定义信号在发送节点返回前提交迁移。需要观察已结算输出的迁移
+  继续使用 `task.finished`。选择握手示例的 `confirm` 可将等待方和发送方
+  一起纳入运行范围。
+- Windows LLVM-MinGW x64 完整构建、71/71 CTest 与安装通过。安装后执行
+  `praktor --config examples/statechart-signals.yml --task confirm`，
+  同时复核设备状态和组合示例。生成的 Schema 通过握手和组合示例校验。

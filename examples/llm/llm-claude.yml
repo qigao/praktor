@@ -1,43 +1,39 @@
-name: "Claude Chat Completion"
-description: "Reusable template for Anthropic Claude API calls"
-
-variables:
-  CLAUDE_MODEL: "claude-sonnet-4-20250514"
-  CLAUDE_MAX_TOKENS: "1024"
-  CLAUDE_TEMPERATURE: "0.7"
-  CLAUDE_SYSTEM_PROMPT: ""
+name: Claude build summary
+description: Request a short model summary and validate the returned text
+services:
+  model: examples/services/llm-claude.yml
 
 tasks:
   - name: call_claude
-    script: |
-      import("net");
-      var body = json.stringify(map{
-        model: ctx.get("CLAUDE_MODEL"),
-        max_tokens: json.parse(ctx.get("CLAUDE_MAX_TOKENS")),
-        temperature: json.parse(ctx.get("CLAUDE_TEMPERATURE")),
-        messages: [map{role: "user", content: ctx.get("PROMPT")}]
-      });
+    tool: model
+    with:
+      request: |
+        {
+          "model": "claude-haiku-4-5",
+          "messages": [
+            {"role": "user", "content": "Summarize this build result in one sentence: 71 tests passed, 0 failed."}
+          ],
+          "max_tokens": 128
+        }
 
-      var sys = ctx.get("CLAUDE_SYSTEM_PROMPT");
-      if (sys != "" && sys != null) {
-        var parsed_body = json.parse(body);
-        parsed_body.system = sys;
-        body = json.stringify(parsed_body);
-      }
-      var headers = json.parse(
-        "{\"x-api-key\":" + json.stringify(ctx.get("ANTHROPIC_API_KEY")) +
-        ",\"anthropic-version\":\"2023-06-01\",\"Content-Type\":\"application/json\"}"
-      );
-
-      var resp = http.post("https://api.anthropic.com/v1/messages", body, map{
-        headers: headers
-      });
-
-      if (resp.status != 200) {
-        fail("Claude API error " + resp.status + ": " + json.stringify(resp.data));
-      }
-
-      var answer = resp.data.content[0].text;
-      ctx.output("answer", answer);
-      ctx.output("model", resp.data.model);
-      ctx.output("usage", resp.data.usage);
+  - name: validate_summary
+    depends_on: [call_claude]
+    actions:
+      Sequence:
+        - ParseJson:
+            input_key: $shell_output
+            path: '$.stop_reason'
+            output_key: finish_reason
+            result: one
+        - assert:
+            guard: {fields: [finish_reason], match: '$finish_reason == "end_turn"'}
+            message: Claude did not complete the text response
+            actual: $finish_reason
+        - ParseJson:
+            input_key: $shell_output
+            path: '$.content[?(@.type == "text")].text'
+            output_key: summary
+            result: first
+        - assert:
+            guard: {fields: [summary], match: '$summary != "" && $summary != "null"'}
+            message: Claude returned no summary text

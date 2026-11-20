@@ -1,327 +1,214 @@
 {
-  "version": 6,
-  "include": [
-    "CMakePresets.json",
-    "presets/UserEnvironments.json"
-  ],
-  "configurePresets": [
-    {
-      "name": "native-release-user",
-      "displayName": "Windows llvm-mingw Release",
-      "inherits": [
-        "llvm-mingw-native-environment",
-        "windows-llvm-mingw",
-        "full-native"
-      ]
-    },
-    {
-      "name": "msvc-release-user",
-      "displayName": "Windows MSVC Release",
-      "inherits": [
-        "msvc-environment",
-        "windows-msvc",
-        "full-native"
-      ]
-    },
-    {
-      "name": "llvm-native-release-user",
-      "displayName": "POSIX LLVM Release",
-      "inherits": [
-        "llvm-native-environment",
-        "toolkit-llvm-native",
-        "full-native"
-      ]
-    },
-    {
-      "name": "gcc-release-user",
-      "displayName": "Linux GCC Release",
-      "inherits": [
-        "gcc-environment",
-        "linux-gcc",
-        "full-native"
-      ]
-    },
-    {
-      "name": "android-release-user",
-      "displayName": "Android NDK Clang Release",
-      "inherits": [
-        "android-environment",
-        "android-release"
-      ]
-    },
-    {
-      "name": "llvm-mingw-x64-release-user",
-      "displayName": "llvm-mingw Windows x64 Release",
-      "inherits": [
-        "llvm-mingw-x64-environment",
-        "target-llvm-mingw-x64",
-        "full-native"
-      ]
-    },
-    {
-      "name": "llvm-mingw-arm64-release-user",
-      "displayName": "llvm-mingw Windows ARM64 Release",
-      "inherits": [
-        "target-llvm-mingw-arm64",
-        "llvm-mingw-arm64-environment",
-        "release-mode"
-      ],
-      "environment": {
-        "SALTS_BASE_ROOT": "$penv{LLVM_MINGW_ARM64_SALTS_BASE_ROOT}",
-        "VCPKG_INSTALLED_DIR": "$penv{LLVM_MINGW_ARM64_VCPKG_INSTALLED_DIR}"
-      }
-    },
-    {
-      "name": "android-arm64-release-user",
-      "displayName": "Android NDK arm64-v8a Release",
-      "inherits": [
-        "android-arm64-environment",
-        "android-arm64-v8a-release"
-      ]
-    },
-    {
-      "name": "android-x64-release-user",
-      "displayName": "Android NDK x86_64 Release",
-      "inherits": [
-        "android-x64-environment",
-        "android-x86_64-release"
-      ]
-    },
-    {
-      "name": "macos-gcc-release-user",
-      "displayName": "macOS GCC Release",
-      "inherits": [
-        "gcc-environment",
-        "macos-gcc",
-        "full-native"
-      ]
-    },
-    {
-      "name": "gcc-arm64-release-user",
-      "displayName": "Linux ARM64 GCC Release",
-      "inherits": [
-        "gcc-environment",
-        "linux-gcc-arm64",
-        "full-native"
-      ]
-    }
-  ],
-  "buildPresets": [
-    {
-      "name": "native-release-user",
-      "inherits": [
-        "base-build",
-        "build-windows"
-      ],
-      "configurePreset": "native-release-user"
-    },
-    {
-      "name": "install-native-release-user",
-      "inherits": [
-        "base-install",
-        "build-windows"
-      ],
-      "configurePreset": "native-release-user"
-    },
-    {
-      "name": "msvc-release-user",
-      "inherits": [
-        "base-build",
-        "build-windows"
-      ],
-      "configurePreset": "msvc-release-user"
-    },
-    {
-      "name": "install-msvc-release-user",
-      "inherits": [
-        "base-install",
-        "build-windows"
-      ],
-      "configurePreset": "msvc-release-user"
-    },
-    {
-      "name": "llvm-native-release-user",
-      "inherits": [
-        "base-build",
-        "build-posix"
-      ],
-      "configurePreset": "llvm-native-release-user"
-    },
-    {
-      "name": "install-llvm-native-release-user",
-      "inherits": [
-        "base-install",
-        "build-posix"
-      ],
-      "configurePreset": "llvm-native-release-user"
-    },
-    {
-      "name": "gcc-release-user",
-      "inherits": [
-        "base-build",
-        "build-linux"
-      ],
-      "configurePreset": "gcc-release-user"
-    },
-    {
-      "name": "install-gcc-release-user",
-      "inherits": [
-        "base-install",
-        "build-linux"
-      ],
-      "configurePreset": "gcc-release-user"
-    },
-    {
-      "name": "android-release-user",
-      "inherits": "base-build",
-      "configurePreset": "android-release-user"
-    },
-    {
-      "name": "install-android-release-user",
-      "inherits": "base-install",
-      "configurePreset": "android-release-user"
-    },
-    {
-      "name": "llvm-mingw-x64-release-user",
-      "inherits": [
-        "base-build",
-        "build-windows"
-      ],
-      "configurePreset": "llvm-mingw-x64-release-user"
-    },
-    {
-      "name": "install-llvm-mingw-x64-release-user",
-      "inherits": [
-        "base-install",
-        "build-windows"
-      ],
-      "configurePreset": "llvm-mingw-x64-release-user"
-    },
-    {
-      "name": "llvm-mingw-arm64-release-user",
-      "inherits": [
-        "base-build",
-        "build-windows"
-      ],
-      "configurePreset": "llvm-mingw-arm64-release-user"
-    },
-    {
-      "name": "install-llvm-mingw-arm64-release-user",
-      "inherits": [
-        "base-install",
-        "build-windows"
-      ],
-      "configurePreset": "llvm-mingw-arm64-release-user"
-    },
-    {
-      "name": "android-arm64-release-user",
-      "inherits": "base-build",
-      "configurePreset": "android-arm64-release-user"
-    },
-    {
-      "name": "install-android-arm64-release-user",
-      "inherits": "base-install",
-      "configurePreset": "android-arm64-release-user"
-    },
-    {
-      "name": "android-x64-release-user",
-      "inherits": "base-build",
-      "configurePreset": "android-x64-release-user"
-    },
-    {
-      "name": "install-android-x64-release-user",
-      "inherits": "base-install",
-      "configurePreset": "android-x64-release-user"
-    },
-    {
-      "name": "macos-gcc-release-user",
-      "inherits": [
-        "base-build",
-        "build-macos"
-      ],
-      "configurePreset": "macos-gcc-release-user"
-    },
-    {
-      "name": "install-macos-gcc-release-user",
-      "inherits": [
-        "base-install",
-        "build-macos"
-      ],
-      "configurePreset": "macos-gcc-release-user"
-    },
-    {
-      "name": "gcc-arm64-release-user",
-      "inherits": [
-        "base-build",
-        "build-linux"
-      ],
-      "configurePreset": "gcc-arm64-release-user"
-    },
-    {
-      "name": "install-gcc-arm64-release-user",
-      "inherits": [
-        "base-install",
-        "build-linux"
-      ],
-      "configurePreset": "gcc-arm64-release-user"
-    }
-  ],
-  "testPresets": [
-    {
-      "name": "native-release-user",
-      "inherits": [
-        "base-test",
-        "test-windows"
-      ],
-      "configurePreset": "native-release-user"
-    },
-    {
-      "name": "msvc-release-user",
-      "inherits": [
-        "base-test",
-        "test-windows"
-      ],
-      "configurePreset": "msvc-release-user"
-    },
-    {
-      "name": "llvm-native-release-user",
-      "inherits": [
-        "base-test",
-        "test-posix"
-      ],
-      "configurePreset": "llvm-native-release-user"
-    },
-    {
-      "name": "gcc-release-user",
-      "inherits": [
-        "base-test",
-        "test-linux"
-      ],
-      "configurePreset": "gcc-release-user"
-    },
-    {
-      "name": "macos-gcc-release-user",
-      "inherits": [
-        "base-test",
-        "test-macos"
-      ],
-      "configurePreset": "macos-gcc-release-user"
-    },
-    {
-      "name": "gcc-arm64-release-user",
-      "inherits": [
-        "base-test",
-        "test-linux"
-      ],
-      "configurePreset": "gcc-arm64-release-user"
-    },
-    {
-      "name": "llvm-mingw-x64-release-user",
-      "inherits": [
-        "base-test",
-        "test-windows"
-      ],
-      "configurePreset": "llvm-mingw-x64-release-user"
-    }
-  ]
+    "version": 6,
+    "include": ["CMakePresets.json", "presets/UserEnvironments.json"],
+    "configurePresets": [
+        {
+            "name": "native-release-user",
+            "displayName": "Windows llvm-mingw Release",
+            "inherits": ["llvm-mingw-native-environment", "windows-llvm-mingw", "full-native"]
+        },
+        {
+            "name": "msvc-release-user",
+            "displayName": "Windows MSVC Release",
+            "inherits": ["msvc-environment", "windows-msvc", "full-native"]
+        },
+        {
+            "name": "llvm-native-release-user",
+            "displayName": "POSIX LLVM Release",
+            "inherits": ["llvm-native-environment", "toolkit-llvm-native", "full-native"]
+        },
+        {
+            "name": "gcc-release-user",
+            "displayName": "Linux GCC Release",
+            "inherits": ["gcc-environment", "linux-gcc", "full-native"]
+        },
+        {
+            "name": "android-release-user",
+            "displayName": "Android NDK Clang Release",
+            "inherits": ["android-environment", "android-release"]
+        },
+        {
+            "name": "llvm-mingw-x64-release-user",
+            "displayName": "llvm-mingw Windows x64 Release",
+            "inherits": ["llvm-mingw-x64-environment", "target-llvm-mingw-x64", "full-native"]
+        },
+        {
+            "name": "llvm-mingw-arm64-release-user",
+            "displayName": "llvm-mingw Windows ARM64 Release",
+            "inherits": ["target-llvm-mingw-arm64", "llvm-mingw-arm64-environment", "release-mode"],
+            "environment": {
+                "SALTS_BASE_ROOT": "$penv{LLVM_MINGW_ARM64_SALTS_BASE_ROOT}",
+                "VCPKG_INSTALLED_DIR": "$penv{LLVM_MINGW_ARM64_VCPKG_INSTALLED_DIR}"
+            }
+        },
+        {
+            "name": "android-arm64-release-user",
+            "displayName": "Android NDK arm64-v8a Release",
+            "inherits": ["android-arm64-environment", "android-arm64-v8a-release"]
+        },
+        {
+            "name": "android-x64-release-user",
+            "displayName": "Android NDK x86_64 Release",
+            "inherits": ["android-x64-environment", "android-x86_64-release"]
+        },
+        {
+            "name": "macos-gcc-release-user",
+            "displayName": "macOS GCC Release",
+            "inherits": ["gcc-environment", "macos-gcc", "full-native"]
+        },
+        {
+            "name": "gcc-arm64-release-user",
+            "displayName": "Linux ARM64 GCC Release",
+            "inherits": ["gcc-environment", "linux-gcc-arm64", "full-native"]
+        }
+    ],
+    "buildPresets": [
+        {
+            "name": "native-release-user",
+            "inherits": ["base-build", "build-windows"],
+            "configurePreset": "native-release-user"
+        },
+        {
+            "name": "install-native-release-user",
+            "inherits": ["base-install", "build-windows"],
+            "configurePreset": "native-release-user"
+        },
+        {
+            "name": "msvc-release-user",
+            "inherits": ["base-build", "build-windows"],
+            "configurePreset": "msvc-release-user"
+        },
+        {
+            "name": "install-msvc-release-user",
+            "inherits": ["base-install", "build-windows"],
+            "configurePreset": "msvc-release-user"
+        },
+        {
+            "name": "llvm-native-release-user",
+            "inherits": ["base-build", "build-posix"],
+            "configurePreset": "llvm-native-release-user"
+        },
+        {
+            "name": "install-llvm-native-release-user",
+            "inherits": ["base-install", "build-posix"],
+            "configurePreset": "llvm-native-release-user"
+        },
+        {
+            "name": "gcc-release-user",
+            "inherits": ["base-build", "build-linux"],
+            "configurePreset": "gcc-release-user"
+        },
+        {
+            "name": "install-gcc-release-user",
+            "inherits": ["base-install", "build-linux"],
+            "configurePreset": "gcc-release-user"
+        },
+        {
+            "name": "android-release-user",
+            "inherits": "base-build",
+            "configurePreset": "android-release-user"
+        },
+        {
+            "name": "install-android-release-user",
+            "inherits": "base-install",
+            "configurePreset": "android-release-user"
+        },
+        {
+            "name": "llvm-mingw-x64-release-user",
+            "inherits": ["base-build", "build-windows"],
+            "configurePreset": "llvm-mingw-x64-release-user"
+        },
+        {
+            "name": "install-llvm-mingw-x64-release-user",
+            "inherits": ["base-install", "build-windows"],
+            "configurePreset": "llvm-mingw-x64-release-user"
+        },
+        {
+            "name": "llvm-mingw-arm64-release-user",
+            "inherits": ["base-build", "build-windows"],
+            "configurePreset": "llvm-mingw-arm64-release-user"
+        },
+        {
+            "name": "install-llvm-mingw-arm64-release-user",
+            "inherits": ["base-install", "build-windows"],
+            "configurePreset": "llvm-mingw-arm64-release-user"
+        },
+        {
+            "name": "android-arm64-release-user",
+            "inherits": "base-build",
+            "configurePreset": "android-arm64-release-user"
+        },
+        {
+            "name": "install-android-arm64-release-user",
+            "inherits": "base-install",
+            "configurePreset": "android-arm64-release-user"
+        },
+        {
+            "name": "android-x64-release-user",
+            "inherits": "base-build",
+            "configurePreset": "android-x64-release-user"
+        },
+        {
+            "name": "install-android-x64-release-user",
+            "inherits": "base-install",
+            "configurePreset": "android-x64-release-user"
+        },
+        {
+            "name": "macos-gcc-release-user",
+            "inherits": ["base-build", "build-macos"],
+            "configurePreset": "macos-gcc-release-user"
+        },
+        {
+            "name": "install-macos-gcc-release-user",
+            "inherits": ["base-install", "build-macos"],
+            "configurePreset": "macos-gcc-release-user"
+        },
+        {
+            "name": "gcc-arm64-release-user",
+            "inherits": ["base-build", "build-linux"],
+            "configurePreset": "gcc-arm64-release-user"
+        },
+        {
+            "name": "install-gcc-arm64-release-user",
+            "inherits": ["base-install", "build-linux"],
+            "configurePreset": "gcc-arm64-release-user"
+        }
+    ],
+    "testPresets": [
+        {
+            "name": "native-release-user",
+            "inherits": ["base-test", "test-windows"],
+            "configurePreset": "native-release-user"
+        },
+        {
+            "name": "msvc-release-user",
+            "inherits": ["base-test", "test-windows"],
+            "configurePreset": "msvc-release-user"
+        },
+        {
+            "name": "llvm-native-release-user",
+            "inherits": ["base-test", "test-posix"],
+            "configurePreset": "llvm-native-release-user"
+        },
+        {
+            "name": "gcc-release-user",
+            "inherits": ["base-test", "test-linux"],
+            "configurePreset": "gcc-release-user"
+        },
+        {
+            "name": "macos-gcc-release-user",
+            "inherits": ["base-test", "test-macos"],
+            "configurePreset": "macos-gcc-release-user"
+        },
+        {
+            "name": "gcc-arm64-release-user",
+            "inherits": ["base-test", "test-linux"],
+            "configurePreset": "gcc-arm64-release-user"
+        },
+        {
+            "name": "llvm-mingw-x64-release-user",
+            "inherits": ["base-test", "test-windows"],
+            "configurePreset": "llvm-mingw-x64-release-user"
+        }
+    ]
 }

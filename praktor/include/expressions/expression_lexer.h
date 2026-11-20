@@ -18,6 +18,8 @@ typedef struct praktor_expression_lexer {
     size_t size, offset, error_position;
     praktor_expression_token_kind previous;
     int has_previous;
+    /* Guard expressions opt into integer operators, including '/' as division. */
+    int integer_operators;
 } praktor_expression_lexer;
 /* Borrow input until all tokens are consumed. No allocations. */
 int praktor_expression_lexer_init(praktor_expression_lexer *lexer,

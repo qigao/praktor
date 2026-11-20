@@ -173,6 +173,27 @@ int praktor_yaml_key(praktor_yaml_node node, tstr *out, praktor_yaml_diagnostic 
     return scalar_text(node.document, node.key_node, out, error);
 }
 
+int praktor_yaml_text(praktor_yaml_node node, bool key, tstr *out) {
+    cyaml_node_t *scalar = resolve_alias(key ? node.key_node : node.node);
+    if (!node.document || !cyaml_is_scalar(scalar)) return SALTS_EINVAL;
+    const char *source = cyaml_str(node.document, scalar);
+    const size_t size = cyaml_len(scalar);
+    if (size && (!source || memchr(source, '\0', size))) return SALTS_EINVAL;
+    /* The SDK returns a decoded C string without length. Reject the YAML
+     * escapes that encode NUL before calling that decoder. */
+    if (scalar->style == CYAML_DOUBLE) {
+        for (size_t i = 0; i + 1u < size; ++i) {
+            if (source[i] != '\\') continue;
+            char escape = source[++i];
+            if (escape == '0') return SALTS_EINVAL;
+            const size_t digits = escape == 'x' ? 2u : escape == 'u' ? 4u : escape == 'U' ? 8u : 0u;
+            if (digits && digits < size - i && !memcmp(source + i + 1u, "00000000", digits))
+                return SALTS_EINVAL;
+        }
+    }
+    return scalar_text(node.document, scalar, out, NULL);
+}
+
 static bool find_location(cyaml_node_t *node, cyaml_span_t *out) {
     unsigned depth;
     for (depth = 0; depth < PRAKTOR_YAML_LOCATION_DEPTH; ++depth) {

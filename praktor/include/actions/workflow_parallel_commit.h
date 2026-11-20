@@ -34,22 +34,21 @@ extern "C" {
  * substitute for execution-level atomic Parallel qualification. This is
  * an internal ABI, not an installed public SDK contract. */
 typedef enum praktor_parallel_commit_status {
-    PRAKTOR_PARALLEL_OK = 0,
-    PRAKTOR_PARALLEL_INVALID,
-    PRAKTOR_PARALLEL_CONFLICT,
-    PRAKTOR_PARALLEL_CAPACITY,
-    PRAKTOR_PARALLEL_MEMORY,
-    PRAKTOR_PARALLEL_BUSY,
-    PRAKTOR_PARALLEL_INVARIANT,
-    PRAKTOR_PARALLEL_RECOVERY, /* Native Process/ack failure; retain owner */
-    PRAKTOR_PARALLEL_CANCELLED, /* CFlow canceled any accepted task; abort group */
-    PRAKTOR_PARALLEL_FAILED /* Callback settled but leaf failed; abort group */
+  PRAKTOR_PARALLEL_OK = 0,
+  PRAKTOR_PARALLEL_INVALID,
+  PRAKTOR_PARALLEL_CONFLICT,
+  PRAKTOR_PARALLEL_CAPACITY,
+  PRAKTOR_PARALLEL_MEMORY,
+  PRAKTOR_PARALLEL_BUSY,
+  PRAKTOR_PARALLEL_INVARIANT,
+  PRAKTOR_PARALLEL_RECOVERY,  /* Native Process/ack failure; retain owner */
+  PRAKTOR_PARALLEL_CANCELLED, /* CFlow canceled any accepted task; abort group */
+  PRAKTOR_PARALLEL_FAILED     /* Callback settled but leaf failed; abort group */
 } praktor_parallel_commit_status;
 
-int praktor_workflow_parallel_commit(
-    praktor_workflow_task_registry *registry,
-    const praktor_workflow_task_output_update *task_outputs,
-    praktor_value_txn *branch_values,size_t branch_count);
+int praktor_workflow_parallel_commit(praktor_workflow_task_registry *registry,
+                                     const praktor_workflow_task_output_update *task_outputs,
+                                     praktor_value_txn *branch_values, size_t branch_count);
 
 #ifdef __cplusplus
 }

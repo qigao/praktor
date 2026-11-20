@@ -79,6 +79,9 @@ typedef struct praktor_leaf_request {
   /* Ephemeral identity for one Session, never dereferenced or serialized by a
    * host. It disambiguates equal node indices in different live Sessions. */
   const void *session_owner;
+  /* Optional error diagnostic sink, borrowed only during tick_typed_leaf. */
+  char *error;
+  size_t error_capacity;
 } praktor_leaf_request;
 
 typedef struct praktor_bt_host {

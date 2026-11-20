@@ -114,11 +114,11 @@ spec("C-owned YAML task fields") {
         refuses("on_success: ['']", PRAKTOR_YAML_TRIGGERS, "task name cannot be empty");
     }
     it("owns dynamic template lists maps and explicitly empty optional fields") {
-        praktor_yaml_task_fields *owner = fields("items_variable: jobs\ntemplate: {name: '${item}', command: [echo, 7], timeout: '', when: '', depends_on: ['', ready], env: {z: old, a: true, \"z\\0last\": last}}", PRAKTOR_YAML_DYNAMIC_TASKS);
+        praktor_yaml_task_fields *owner = fields("items_variable: $jobs\ntemplate: {name: '$item', command: [echo, 7], timeout: '', when: '', depends_on: ['', ready], env: {z: old, a: true, \"z\\0last\": last}}", PRAKTOR_YAML_DYNAMIC_TASKS);
         praktor_yaml_dynamic_view view = {0};
         praktor_yaml_string_entry entry = {0};
         check(praktor_yaml_task_dynamic(owner, &view) == SALTS_OK && view.sequence && view.has_timeout && view.has_when);
-        check(text_is(view.items_variable, "jobs") && text_is(view.name, "${item}") && !view.timeout.len && !view.when.len);
+        check(text_is(view.items_variable, "$jobs") && text_is(view.name, "$item") && !view.timeout.len && !view.when.len);
         list_is(view.commands, 1, "7"); list_is(view.depends_on, 0, "");
         check(praktor_yaml_string_map_at(view.env, 0, &entry) == SALTS_OK && text_is(entry.key, "z") && text_is(entry.value, "last"));
         praktor_yaml_task_fields_destroy(owner);

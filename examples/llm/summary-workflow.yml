@@ -1,0 +1,72 @@
+name: Build summary workflow
+description: Validate a sample model response and expose the validation state
+
+statechart:
+  initial: awaiting_response
+  states:
+    awaiting_response:
+      transitions:
+        - 'on': task.finished
+          guard:
+            fields: [event.data.task, event.data.status]
+            match: '$event.data.task == "read_sample_response" && $event.data.status == "success"'
+          target: validating
+    validating:
+      transitions:
+        - 'on': task.finished
+          guard:
+            fields: [event.data.task, event.data.status, summary]
+            match: '$event.data.task == "validate_summary" && $event.data.status == "success" && has($summary)'
+          target: accepted
+        - 'on': task.finished
+          guard: {fields: [event.data.task], match: '$event.data.task == "validate_summary"'}
+          target: rejected
+    accepted: {type: final}
+    rejected: {type: final}
+
+tasks:
+  - name: read_sample_response
+    set_variable: model_response
+    value: |
+      {
+        "choices": [
+          {
+            "finish_reason": "stop",
+            "message": {"content": "All 71 tests passed."}
+          }
+        ]
+      }
+
+  - name: validate_summary
+    depends_on: [read_sample_response]
+    outputs: [$summary]
+    actions:
+      Sequence:
+        - ParseJson:
+            input_key: $model_response
+            path: '$.choices[0].finish_reason'
+            output_key: finish_reason
+            result: one
+        - assert:
+            guard: {fields: [finish_reason], match: '$finish_reason == "stop"'}
+            message: The model did not complete the text response
+            actual: $finish_reason
+        - ParseJson:
+            input_key: $model_response
+            path: '$.choices[0].message.content'
+            output_key: summary
+            result: one
+        - assert:
+            guard: {fields: [summary], match: '$summary != "" && $summary != "null"'}
+            message: The model returned no summary text
+
+  - name: confirm_summary
+    depends_on: [validate_summary]
+    actions:
+      Sequence:
+        - assert:
+            guard: {fields: [chart.workflow.accepted], expr: '$chart.workflow.accepted == 1'}
+            message: The workflow has not accepted the summary
+        - assert:
+            guard: {fields: [summary], match: 'has($summary) && $summary != ""'}
+            message: The validated summary was not published

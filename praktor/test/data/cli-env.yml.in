@@ -7,10 +7,17 @@ variables:
 tasks:
   - name: root
     shell:
-      cmd: '{command}'
+      cmd: $command
   - name: overlay
     depends_on: [root]
     vars:
       command: @PRAKTOR_CLI_ENV_COMMAND@
     shell:
-      cmd: '{command}'
+      cmd: $command
+  - name: matrix
+    depends_on: [overlay]
+    dynamic_tasks:
+      items_variable: $PRAKTOR_CLI_MATRIX
+      template:
+        name: $item-$index
+        assert: {guard: {fields: [item], match: '$item == "dotenv"'}}

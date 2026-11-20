@@ -1,0 +1,6 @@
+provider:
+  kind: exe
+  path: unused
+capabilities: [download, download]
+config:
+  args: []

@@ -63,7 +63,7 @@ spec("C11 control compiler migrated from C++ plan tests") {
     check(prune && n.tree.kind == SALTS_BT_NODE_LEAF && n.terminal == PRAKTOR_TERMINAL_FAILURE);
   }
   it("lowers a static zero-budget WhileDo to SUCCESS without evaluating its condition") {
-    praktor_leaf_parameter p[] = {number("max_iterations",0),text("condition","{missing}")}; bool prune;
+    praktor_leaf_parameter p[] = {number("max_iterations",0),text("condition","$missing")}; bool prune;
     praktor_session_node n = success("WhileDo",p,2,1,&prune);
     check(prune && n.tree.kind == SALTS_BT_NODE_LEAF && n.terminal == PRAKTOR_TERMINAL_SUCCESS && !n.tree.condition_callback);
   }
@@ -81,14 +81,14 @@ spec("C11 control compiler migrated from C++ plan tests") {
     n = success("WhileDo",p,1,2,&prune); check(prune && n.terminal == PRAKTOR_TERMINAL_SUCCESS);
   }
   it("compiles runtime-bound Retry and Delay without consulting values") {
-    praktor_leaf_parameter p = text("num_attempts","{missing}"); bool prune;
+    praktor_leaf_parameter p = text("num_attempts","$missing"); bool prune;
     praktor_session_node n = success("Retry",&p,1,1,&prune);
     check(!prune && n.tree.dynamic_parameter_mask == SALTS_BT_DYNAMIC_PARAMETER_LIMIT);
-    p = text("delay_ms","{missing}"); n = success("Delay",&p,1,1,&prune);
+    p = text("delay_ms","$missing"); n = success("Delay",&p,1,1,&prune);
     check(!prune && n.tree.dynamic_parameter_mask == SALTS_BT_DYNAMIC_PARAMETER_DURATION_NS);
   }
   it("keeps dynamic zero controls as runtime nodes") {
-    praktor_leaf_parameter p = text("num_attempts","{attempts}"); bool prune;
+    praktor_leaf_parameter p = text("num_attempts","$attempts"); bool prune;
     praktor_session_node n = success("Retry",&p,1,1,&prune);
     check(!prune && n.tree.kind == SALTS_BT_NODE_RETRY && n.tree.limit == 3 && n.terminal == PRAKTOR_TERMINAL_RUNTIME);
   }
@@ -96,9 +96,9 @@ spec("C11 control compiler migrated from C++ plan tests") {
     praktor_leaf_parameter p = text("num_cycles","3.0"); bool prune;
     praktor_session_node n = success("Repeat",&p,1,1,&prune);
     check(n.tree.limit == 3);
-    p.text = "{cycles}"; n = success("Repeat",&p,1,1,&prune);
+    p.text = "$cycles"; n = success("Repeat",&p,1,1,&prune);
     check(n.tree.limit == 0 && n.tree.dynamic_parameter_mask == SALTS_BT_DYNAMIC_PARAMETER_LIMIT);
-    p = text("delay_ms","{delay}"); n = success("Delay",&p,1,1,&prune);
+    p = text("delay_ms","$delay"); n = success("Delay",&p,1,1,&prune);
     check(n.tree.duration_ns == UINT64_C(100000000) && n.tree.dynamic_parameter_mask == SALTS_BT_DYNAMIC_PARAMETER_DURATION_NS);
   }
   it("rejects malformed controls and keeps empty Switch selector validation at runtime") {

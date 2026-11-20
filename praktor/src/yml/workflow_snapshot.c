@@ -4,15 +4,22 @@
 #include "yml/yaml_workflow_metadata.h"
 #include "yml/yaml_action_params.h"
 #include "yml/orch_yaml.h"
+#include "actions/variable_reference.h"
 #include <core/error_codes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+enum { MAX_LIBRARIES=16, MAX_COMPOSED_NAME=128, MAX_WORKFLOW_BYTES=1024*1024,
+       MAX_ITEM_BYTES=4096 };
 struct praktor_workflow_snapshot {
     json_value_t *metadata;
     json_value_t **tasks;
     praktor_orch_tree **trees;
+    praktor_yaml_node *charts;
+    praktor_yaml_node workflow_chart;
+    praktor_yaml_document *chart_document;
+    praktor_yaml_document *library_documents[MAX_LIBRARIES];
     praktor_workflow_snapshot_task_kind *kinds;
     praktor_workflow_dependencies *graph;
     size_t task_count;
@@ -43,6 +50,9 @@ void praktor_workflow_snapshot_destroy(praktor_workflow_snapshot *snapshot) {
     json_free(snapshot->metadata);
     free(snapshot->tasks);
     free(snapshot->trees);
+    free(snapshot->charts);
+    praktor_yaml_document_destroy(snapshot->chart_document);
+    for(i=0;i<MAX_LIBRARIES;++i)praktor_yaml_document_destroy(snapshot->library_documents[i]);
     free(snapshot->kinds);
     free(snapshot);
 }
@@ -152,6 +162,8 @@ static int task_tree(praktor_yaml_node task,const json_value_t *metadata,
             "Unsupported C11 workflow snapshot script task");
     if(!runner_name)
         return snapshot_fail(error,capacity,SALTS_EINVAL,
+            praktor_yaml_has(task,"statechart")?
+            "statechart requires a task runner such as actions":
             "Native workflow task must declare a supported runner");
     if(strcmp(runner_name,"command")==0) {
         *kind=PRAKTOR_WORKFLOW_SNAPSHOT_COMMAND;
@@ -160,10 +172,24 @@ static int task_tree(praktor_yaml_node task,const json_value_t *metadata,
     if(strcmp(runner_name,"tool")==0) {
         const char *service=json_get_string(metadata,"tool");
         if(!service||!*service)return snapshot_fail(error,capacity,SALTS_EINVAL,"tool must name a service");
-        praktor_orch_input_param parameter={vstr_from_cstr("service"),vstr_from_cstr(service)};
-        praktor_orch_flat_node node={PRAKTOR_ORCH_TOOL,PRAKTOR_ORCH_ROOT_PARENT,&parameter,1u};
+        const json_value_t *inputs=json_object_get(metadata,"with");
+        praktor_orch_input_param parameters[2]={
+            {vstr_from_cstr("service"),vstr_from_cstr(service)}
+        };
+        char *payload=NULL;
+        if(inputs) {
+            size_t size=0u;
+            payload=json_serialize(inputs,&size);
+            if(!payload)return SALTS_ENOMEM;
+            parameters[1]=(praktor_orch_input_param){
+                vstr_from_cstr("with"),vstr_from_buf(payload,size)
+            };
+        }
+        praktor_orch_flat_node node={PRAKTOR_ORCH_TOOL,PRAKTOR_ORCH_ROOT_PARENT,parameters,inputs?2u:1u};
         *kind=PRAKTOR_WORKFLOW_SNAPSHOT_ORCHESTRATION;
-        return praktor_orch_from_flat_nodes(&node,1u,out,error,capacity);
+        const int rc=praktor_orch_from_flat_nodes(&node,1u,out,error,capacity);
+        if(payload)json_serialize_free(payload);
+        return rc;
     }
     if(strcmp(runner_name,"actions")==0) {
         praktor_yaml_node branch={0};
@@ -187,7 +213,506 @@ static int task_tree(praktor_yaml_node task,const json_value_t *metadata,
         "Unsupported C11 workflow snapshot runner");
 }
 
-int praktor_workflow_snapshot_create_inline(vstr yaml_source,
+typedef struct task_library {
+    tstr alias;
+    praktor_yaml_node tasks;
+    json_value_t **metadata;
+    json_value_t *root;
+    praktor_workflow_dependencies *graph;
+    size_t count;
+} task_library;
+
+typedef struct snapshot_builder {
+    praktor_workflow_snapshot *snapshot;
+    task_library libraries[MAX_LIBRARIES];
+    size_t library_count,limit,remaining_bytes;
+    char *error;
+    size_t capacity;
+} snapshot_builder;
+
+static int build_error(const snapshot_builder *b,int status,const char *message) {
+    return snapshot_fail(b->error,b->capacity,status,message);
+}
+
+static void free_libraries(snapshot_builder *b) {
+    for(size_t i=0u;i<b->library_count;++i) {
+        task_library *lib=&b->libraries[i];
+        for(size_t j=0u;j<lib->count&&lib->metadata;++j)
+            json_free(lib->metadata[j]);
+        free(lib->metadata);
+        json_free(lib->root);
+        praktor_workflow_dependencies_destroy(lib->graph);
+        tstr_free(lib->alias);
+    }
+}
+
+static int put_json(json_value_t *obj,const char *key,json_value_t *owned) {
+    if(owned&&json_object_add_checked(obj,key,owned))return SALTS_OK;
+    json_free(owned);
+    return SALTS_ENOMEM;
+}
+
+static int push_json(json_value_t *array,json_value_t *owned) {
+    if(owned&&json_array_add_checked(array,owned))return SALTS_OK;
+    json_free(owned);
+    return SALTS_ENOMEM;
+}
+
+static int overlay_vars(json_value_t *dst,const json_value_t *src) {
+    for(size_t i=0u;i<json_object_size(src);++i) {
+        json_value_t *item=json_clone(json_object_value(src,i));
+        if(!item||!json_object_add_n(dst,json_object_key(src,i),json_object_key_len(src,i),item)) {
+            json_free(item);
+            return SALTS_ENOMEM;
+        }
+    }
+    return SALTS_OK;
+}
+
+static int append_dependencies(json_value_t *dst,const json_value_t *src) {
+    for(size_t i=0u;i<json_array_size(src);++i) {
+        int rc=push_json(dst,json_clone(json_array_get(src,i)));
+        if(rc!=SALTS_OK)return rc;
+    }
+    return SALTS_OK;
+}
+
+static int read_task_metadata(snapshot_builder *b,praktor_yaml_node task,json_value_t **out) {
+    praktor_yaml_field_error field={0};
+    int rc=praktor_yaml_task_metadata_create(task,out,&field);
+    if(rc!=SALTS_OK)return field_failure(rc,&field,b->error,b->capacity);
+    praktor_yaml_field_error_dispose(&field);
+    return SALTS_OK;
+}
+
+static int composed_keys(snapshot_builder *b,praktor_yaml_node node,
+                         const vstr *keys,size_t count) {
+    praktor_yaml_field_error field={0};
+    int rc=praktor_yaml_check_keys(node,keys,count,&field);
+    if(rc!=SALTS_OK)return field_failure(rc,&field,b->error,b->capacity);
+    praktor_yaml_field_error_dispose(&field);
+    return SALTS_OK;
+}
+
+static int name_segment(const char *text,size_t length) {
+    if(!length||length>MAX_COMPOSED_NAME)return 0;
+    for(size_t i=0u;i<length;++i) {
+        const char ch=text[i];
+        if(!praktor_identifier_start(ch)&&!(ch>='0'&&ch<='9')&&ch!='-')return 0;
+    }
+    return 1;
+}
+
+static int read_library_document(snapshot_builder *b,const char *path,praktor_yaml_document **out) {
+    FILE *file=fopen(path,"rb");
+    if(!file) {
+        if(b->error&&b->capacity)(void)snprintf(b->error,b->capacity,"cannot open task library '%s'",path);
+        return SALTS_EINVAL;
+    }
+    const long size=fseek(file,0,SEEK_END)==0?ftell(file):-1;
+    if(size<=0||(size_t)size>b->remaining_bytes||fseek(file,0,SEEK_SET)!=0) {
+        fclose(file);
+        return build_error(b,SALTS_EINVAL,"task library exceeds the YAML byte budget or cannot be read");
+    }
+    char *bytes=malloc((size_t)size);
+    if(!bytes) { fclose(file);return SALTS_ENOMEM; }
+    const size_t read=fread(bytes,1u,(size_t)size,file);
+    fclose(file);
+    praktor_yaml_diagnostic diagnostic={b->error,b->capacity,PRAKTOR_YAML_FAILURE_NONE};
+    const int rc=read==(size_t)size?praktor_yaml_document_create(vstr_from_buf(bytes,read),out,&diagnostic):
+        build_error(b,SALTS_EINVAL,"cannot read complete task library");
+    free(bytes);
+    if(rc==SALTS_OK)b->remaining_bytes-=read;
+    return rc;
+}
+
+static bool template_runner(const json_value_t *metadata) {
+    const char *kind=json_get_string(metadata,"runner_kind");
+    return kind&&json_number(json_object_get(metadata,"runner_count"))==1&&
+        (!strcmp(kind,"command")||!strcmp(kind,"actions")||
+         !strcmp(kind,"orch_root")||!strcmp(kind,"tool"));
+}
+
+static int load_library(snapshot_builder *b,praktor_yaml_node entry) {
+    const size_t index=b->library_count++;
+    task_library *lib=&b->libraries[index];
+    tstr path=NULL;
+    int rc=praktor_yaml_text(entry,true,&lib->alias);
+    if(rc==SALTS_OK)rc=praktor_yaml_text(entry,false,&path);
+    if(rc==SALTS_OK) {
+        if(!name_segment(lib->alias,tstr_len(lib->alias))||!tstr_len(path)||
+           strlen(path)!=tstr_len(path))
+            rc=build_error(b,SALTS_EINVAL,"includes requires a library alias and literal file path");
+        else rc=read_library_document(b,path,&b->snapshot->library_documents[index]);
+    }else if(rc!=SALTS_ENOMEM)
+        rc=build_error(b,rc,"includes requires a library alias and literal file path");
+    tstr_free(path);
+    if(rc!=SALTS_OK)return rc;
+
+    static const vstr root_keys[]={{"name",4},{"description",11},{"variables",9},{"tasks",5}};
+    const praktor_yaml_node root=praktor_yaml_root(b->snapshot->library_documents[index]);
+    if(!praktor_yaml_is_map(root))return build_error(b,SALTS_EINVAL,"task library must be a map");
+    rc=composed_keys(b,root,root_keys,sizeof root_keys/sizeof *root_keys);
+    if(rc!=SALTS_OK)return rc;
+    praktor_yaml_field_error field={0};
+    rc=praktor_yaml_workflow_metadata_create(root,&lib->root,&field);
+    if(rc!=SALTS_OK)return field_failure(rc,&field,b->error,b->capacity);
+    rc=praktor_yaml_get(root,"tasks",&lib->tasks,NULL);
+    if(rc!=SALTS_OK||!praktor_yaml_is_seq(lib->tasks))
+        return build_error(b,rc==SALTS_ENOMEM?rc:SALTS_EINVAL,"task library requires a tasks sequence");
+    lib->count=praktor_yaml_count(lib->tasks);
+    if(!lib->count||lib->count>PRAKTOR_WORKFLOW_MAX_TASKS)
+        return build_error(b,SALTS_EINVAL,"invalid task library task count");
+    lib->metadata=calloc(lib->count,sizeof(*lib->metadata));
+    if(!lib->metadata)return SALTS_ENOMEM;
+    const json_value_t **views=malloc(lib->count*sizeof(*views));
+    if(!views)return SALTS_ENOMEM;
+    for(size_t i=0u;i<lib->count;++i) {
+        const praktor_yaml_node task=praktor_yaml_at(lib->tasks,i);
+        rc=read_task_metadata(b,task,&lib->metadata[i]);
+        if(rc!=SALTS_OK)break;
+        views[i]=lib->metadata[i];
+        const json_value_t *name=json_object_get(views[i],"name");
+        if(praktor_yaml_has(task,"script")||!template_runner(views[i])||
+           !name_segment(json_string(name),json_string_len(name))) {
+            rc=build_error(b,SALTS_EINVAL,"library tasks require a simple name and one ordinary runner");
+            break;
+        }
+    }
+    if(rc==SALTS_OK)rc=praktor_workflow_dependencies_create(views,lib->count,&lib->graph,
+                                                            b->error,b->capacity);
+    free(views);
+    return rc;
+}
+
+static int load_libraries(snapshot_builder *b,praktor_yaml_node root) {
+    if(!praktor_yaml_has(root,"includes"))return SALTS_OK;
+    praktor_yaml_node includes={0};
+    int rc=praktor_yaml_get(root,"includes",&includes,NULL);
+    if(rc!=SALTS_OK)return rc;
+    if(!praktor_yaml_is_map(includes)||praktor_yaml_count(includes)>MAX_LIBRARIES)
+        return build_error(b,SALTS_EINVAL,"includes must map at most 16 aliases to task libraries");
+    for(size_t i=0u;i<praktor_yaml_count(includes);++i) {
+        rc=load_library(b,praktor_yaml_at(includes,i));
+        if(rc!=SALTS_OK)return rc;
+    }
+    return SALTS_OK;
+}
+
+/* append_task consumes metadata even when tree admission or chart binding fails. */
+static int append_task(snapshot_builder *b,praktor_yaml_node task,
+    praktor_yaml_node chart,json_value_t *metadata,bool join) {
+    praktor_workflow_snapshot *s=b->snapshot;
+    if(s->task_count==b->limit) {
+        json_free(metadata);
+        return build_error(b,SALTS_EINVAL,"workflow exceeds configured task capacity after expansion");
+    }
+    const size_t index=s->task_count++;
+    s->tasks[index]=metadata;
+    int rc;
+    if(join) {
+        static const praktor_orch_input_param params[]={
+            {{"condition",9},{"true",4}},{{"guard_fields",12},{"",0}},
+            {{"guard_kind",10},{"expr",4}}
+        };
+        const praktor_orch_flat_node node={PRAKTOR_ORCH_ASSERT,PRAKTOR_ORCH_ROOT_PARENT,
+                                          params,sizeof params/sizeof *params};
+        s->kinds[index]=PRAKTOR_WORKFLOW_SNAPSHOT_ORCHESTRATION;
+        rc=praktor_orch_from_flat_nodes(&node,1u,&s->trees[index],b->error,b->capacity);
+    }else rc=task_tree(task,metadata,&s->trees[index],&s->kinds[index],b->error,b->capacity);
+    if(rc!=SALTS_OK)return rc;
+    if(!praktor_yaml_has(chart,"statechart"))return SALTS_OK;
+    if(!s->charts)s->charts=calloc(b->limit,sizeof(*s->charts));
+    if(!s->charts)return SALTS_ENOMEM;
+    return praktor_yaml_get(chart,"statechart",&s->charts[index],NULL);
+}
+
+static int composed_metadata(const json_value_t *source,const json_value_t *caller,
+    const json_value_t *library,const char *name,json_value_t *dependencies,
+    const char *item,const char *index,bool entry,json_value_t **out) {
+    json_value_t *copy=json_clone(source);
+    json_value_t *vars=json_create_object();
+    int rc=copy&&vars?SALTS_OK:SALTS_ENOMEM;
+    if(rc==SALTS_OK)rc=overlay_vars(vars,json_object_get(library,"variables"));
+    if(rc==SALTS_OK)rc=overlay_vars(vars,json_object_get(source,"vars"));
+    if(rc==SALTS_OK)rc=overlay_vars(vars,json_object_get(caller,"vars"));
+    if(rc==SALTS_OK&&item)rc=put_json(vars,"item",json_create_string(item));
+    if(rc==SALTS_OK&&index)rc=put_json(vars,"index",json_create_string(index));
+    if(rc==SALTS_OK) {
+        rc=put_json(copy,"vars",vars);
+        vars=NULL;
+    }
+    if(rc==SALTS_OK)rc=put_json(copy,"name",json_create_string(name));
+    if(rc==SALTS_OK) {
+        rc=put_json(copy,"depends_on",dependencies);
+        dependencies=NULL;
+    }
+    const json_value_t *outputs=entry?json_object_get(caller,"outputs"):NULL;
+    if(rc==SALTS_OK&&outputs)rc=put_json(copy,"outputs",json_clone(outputs));
+    const json_value_t *description=entry?json_object_get(caller,"description"):NULL;
+    if(rc==SALTS_OK&&description)
+        rc=put_json(copy,"description",json_clone(description));
+    json_free(vars);
+    json_free(dependencies);
+    if(rc==SALTS_OK)*out=copy;
+    else json_free(copy);
+    return rc;
+}
+
+static int scoped_name(char *out,const char *scope,const char *name) {
+    const int length=snprintf(out,MAX_COMPOSED_NAME+1u,"%s.%s",scope,name);
+    return length>0&&length<=MAX_COMPOSED_NAME?SALTS_OK:SALTS_EINVAL;
+}
+
+static int instantiate_library(snapshot_builder *b,praktor_yaml_node invocation,
+    const json_value_t *caller) {
+    tstr reference=NULL;
+    praktor_yaml_node uses={0};
+    int rc=praktor_yaml_get(invocation,"uses",&uses,NULL);
+    if(rc==SALTS_OK)rc=praktor_yaml_text(uses,false,&reference);
+    if(rc!=SALTS_OK) {
+        tstr_free(reference);
+        return build_error(b,rc,"uses requires a library.task reference");
+    }
+    const char *dot=strchr(reference,'.');
+    const size_t alias=dot?(size_t)(dot-reference):0u;
+    task_library *lib=NULL;
+    if(dot&&strlen(reference)==tstr_len(reference)) {
+        for(size_t i=0u;i<b->library_count;++i)
+            if(alias==tstr_len(b->libraries[i].alias)&&!memcmp(reference,b->libraries[i].alias,alias)) {
+                lib=&b->libraries[i];
+                break;
+            }
+    }
+    size_t entry=0u;
+    if(lib)
+        while(entry<lib->count&&strcmp(dot+1u,json_get_string(lib->metadata[entry],"name")))++entry;
+    if(!lib||entry==lib->count) {
+        if(b->error&&b->capacity)(void)snprintf(b->error,b->capacity,
+            "uses references unknown library task '%s'",reference);
+        tstr_free(reference);
+        return SALTS_EINVAL;
+    }
+    tstr_free(reference);
+    const char *scope=json_get_string(caller,"name");
+    if(!name_segment(scope,strlen(scope)))
+        return build_error(b,SALTS_EINVAL,"uses requires a simple task name");
+
+    bool needed[PRAKTOR_WORKFLOW_MAX_TASKS]={0};
+    needed[entry]=true;
+    size_t count=1u;
+    const size_t available=b->limit-b->snapshot->task_count;
+    if(count>available)
+        return build_error(b,SALTS_EINVAL,"uses exceeds configured task capacity after expansion");
+    const size_t edge_count=praktor_workflow_dependencies_edge_count(lib->graph);
+    bool changed;
+    do {
+        changed=false;
+        for(size_t i=0u;i<edge_count;++i) {
+            size_t from,to;
+            rc=praktor_workflow_dependencies_edge_at(lib->graph,i,&from,&to);
+            if(rc!=SALTS_OK)return rc;
+            if(needed[to]&&!needed[from]) {
+                if(++count>available)
+                    return build_error(b,SALTS_EINVAL,"uses exceeds configured task capacity after expansion");
+                needed[from]=changed=true;
+            }
+        }
+    }while(changed);
+    /* Preserve the call site's position for the entry and the library's order
+     * for its prerequisites. The graph owns their actual execution order. */
+    for(size_t n=0u;n<=lib->count;++n) {
+        const size_t i=n==0u?entry:n-1u;
+        if((n&&i==entry)||!needed[i])continue;
+        const json_value_t *source=lib->metadata[i];
+        const char *name=scope;
+        char scoped[MAX_COMPOSED_NAME+1u];
+        if(i!=entry) {
+            if(scoped_name(scoped,scope,json_get_string(source,"name"))!=SALTS_OK)
+                return build_error(b,SALTS_EINVAL,"library task name exceeds composition capacity");
+            name=scoped;
+        }
+        json_value_t *deps=json_create_array();
+        if(!deps)return SALTS_ENOMEM;
+        rc=append_dependencies(deps,json_object_get(caller,"depends_on"));
+        const json_value_t *local=json_object_get(source,"depends_on");
+        for(size_t j=0u;rc==SALTS_OK&&j<json_array_size(local);++j) {
+            char target[MAX_COMPOSED_NAME+1u];
+            rc=scoped_name(target,scope,json_string(json_array_get(local,j)));
+            if(rc==SALTS_OK)rc=push_json(deps,json_create_string(target));
+            else rc=build_error(b,rc,"library dependency name exceeds composition capacity");
+        }
+        if(rc!=SALTS_OK) { json_free(deps);return rc; }
+        json_value_t *metadata=NULL;
+        rc=composed_metadata(source,caller,lib->root,name,deps,NULL,NULL,i==entry,&metadata);
+        if(rc!=SALTS_OK)return rc;
+        const praktor_yaml_node task=praktor_yaml_at(lib->tasks,i);
+        const praktor_yaml_node chart=i==entry&&praktor_yaml_has(invocation,"statechart")?invocation:task;
+        rc=append_task(b,task,chart,metadata,false);
+        if(rc!=SALTS_OK)return rc;
+    }
+    return SALTS_OK;
+}
+
+static int dynamic_name(const char *pattern,const char *item,const char *index,char *out) {
+    size_t written=0u;
+    while(*pattern) {
+        const char *value=pattern;
+        size_t length=1u;
+        if(*pattern=='$') {
+            ++pattern;
+            size_t span=0u;
+            while(praktor_identifier_start(pattern[span])||
+                  (pattern[span]>='0'&&pattern[span]<='9'))++span;
+            if(span==4u&&!memcmp(pattern,"item",4u))value=item;
+            else if(span==5u&&!memcmp(pattern,"index",5u))value=index;
+            else return SALTS_EINVAL;
+            length=strlen(value);
+            pattern+=span;
+        }else ++pattern;
+        if(!name_segment(value,length)||length>MAX_COMPOSED_NAME-written)return SALTS_EINVAL;
+        memcpy(out+written,value,length);
+        written+=length;
+    }
+    out[written]='\0';
+    return written?SALTS_OK:SALTS_EINVAL;
+}
+
+static int dynamic_items(snapshot_builder *b,praktor_yaml_node variable,
+    const json_value_t *caller,json_value_t **out) {
+    tstr ref=NULL;
+    int rc=praktor_yaml_text(variable,false,&ref);
+    if(rc!=SALTS_OK) {
+        tstr_free(ref);
+        return build_error(b,rc,"items_variable requires a $name reference");
+    }
+    const vstr name=praktor_variable_reference(vstr_from_buf(ref,tstr_len(ref)));
+    const json_value_t *value=NULL;
+    const char *text=NULL;
+    size_t length=0u;
+    if(name.len) {
+        value=json_object_get(json_object_get(caller,"vars"),name.data);
+        if(!value)value=json_object_get(json_object_get(b->snapshot->metadata,"variables"),name.data);
+        text=value?json_string(value):getenv(name.data);
+        if(text)length=value?json_string_len(value):strlen(text);
+    }
+    if(text&&length&&length<=MAX_ITEM_BYTES&&!memchr(text,0,length))
+        *out=json_parse(text,length);
+    tstr_free(ref);
+    if(!*out||json_type(*out)!=JSON_ARRAY)
+        return build_error(b,SALTS_EINVAL,"items_variable must resolve to a JSON array of at most 4096 bytes");
+    return SALTS_OK;
+}
+
+static int instantiate_dynamic(snapshot_builder *b,praktor_yaml_node node,json_value_t *caller) {
+    static const vstr keys[]={{"items_variable",14},{"template",8}};
+    praktor_yaml_node section={0},variable={0},task={0};
+    json_value_t *items=NULL,*base=NULL,*join_deps=NULL;
+    int rc=praktor_yaml_get(node,"dynamic_tasks",&section,NULL);
+    if(rc!=SALTS_OK)goto done;
+    if(!praktor_yaml_is_map(section)) {
+        rc=build_error(b,SALTS_EINVAL,"dynamic_tasks must be a map");
+        goto done;
+    }
+    rc=composed_keys(b,section,keys,sizeof keys/sizeof *keys);
+    if(rc!=SALTS_OK)goto done;
+    rc=praktor_yaml_get(section,"items_variable",&variable,NULL);
+    if(rc==SALTS_OK)rc=praktor_yaml_get(section,"template",&task,NULL);
+    if(rc!=SALTS_OK) {
+        if(rc==SALTS_ENOENT)
+            rc=build_error(b,SALTS_EINVAL,"dynamic_tasks requires items_variable and template");
+        goto done;
+    }
+    rc=read_task_metadata(b,task,&base);
+    if(rc!=SALTS_OK)goto done;
+    if(!template_runner(base)||praktor_yaml_has(task,"script")) {
+        rc=build_error(b,SALTS_EINVAL,"dynamic task template requires one ordinary runner");
+        goto done;
+    }
+    const char *scope=json_get_string(caller,"name"),*pattern=json_get_string(base,"name");
+    char rendered[MAX_COMPOSED_NAME+1u],name[MAX_COMPOSED_NAME+1u];
+    if(!name_segment(scope,strlen(scope))||dynamic_name(pattern,"x","0",rendered)!=SALTS_OK||
+       scoped_name(name,scope,rendered)!=SALTS_OK) {
+        rc=build_error(b,SALTS_EINVAL,"invalid dynamic task name or template name");
+        goto done;
+    }
+    rc=dynamic_items(b,variable,caller,&items);
+    if(rc!=SALTS_OK)goto done;
+    if(!json_array_size(items)) {
+        praktor_orch_tree *tree=NULL;
+        praktor_workflow_snapshot_task_kind kind;
+        rc=task_tree(task,base,&tree,&kind,b->error,b->capacity);
+        praktor_orch_tree_destroy(tree);
+        if(rc!=SALTS_OK)goto done;
+    }
+    if(json_array_size(items)>=b->limit-b->snapshot->task_count) {
+        rc=build_error(b,SALTS_EINVAL,"dynamic tasks exceed configured task capacity after expansion");
+        goto done;
+    }
+    join_deps=json_create_array();
+    if(!join_deps) { rc=SALTS_ENOMEM;goto done; }
+    rc=append_dependencies(join_deps,json_object_get(caller,"depends_on"));
+    for(size_t i=0u;rc==SALTS_OK&&i<json_array_size(items);++i) {
+        const json_value_t *element=json_array_get(items,i);
+        char ordinal[24],*encoded=NULL;
+        const char *item=json_string(element);
+        size_t length=json_string_len(element);
+        if(!item) {
+            encoded=json_serialize(element,&length);
+            item=encoded;
+        }
+        (void)snprintf(ordinal,sizeof ordinal,"%zu",i);
+        if(!item)rc=SALTS_ENOMEM;
+        else if(length>MAX_ITEM_BYTES||memchr(item,0,length)||
+                dynamic_name(pattern,item,ordinal,rendered)!=SALTS_OK||
+                scoped_name(name,scope,rendered)!=SALTS_OK)
+            rc=build_error(b,SALTS_EINVAL,"invalid dynamic task item or generated name");
+        else {
+            json_value_t *deps=json_create_array(),*metadata=NULL;
+            rc=deps?append_dependencies(deps,json_object_get(caller,"depends_on")):SALTS_ENOMEM;
+            if(rc==SALTS_OK)rc=append_dependencies(deps,json_object_get(base,"depends_on"));
+            if(rc==SALTS_OK)
+                rc=composed_metadata(base,caller,NULL,name,deps,item,ordinal,false,&metadata);
+            else json_free(deps);
+            if(rc==SALTS_OK)rc=append_task(b,task,task,metadata,false);
+            if(rc==SALTS_OK)rc=push_json(join_deps,json_create_string(name));
+        }
+        json_serialize_free(encoded);
+    }
+    if(rc==SALTS_OK) {
+        rc=put_json(caller,"depends_on",join_deps);
+        join_deps=NULL;
+    }
+    if(rc==SALTS_OK) {
+        rc=append_task(b,node,node,caller,true);
+        caller=NULL;
+    }
+done:
+    json_free(join_deps);
+    json_free(caller);
+    json_free(base);
+    json_free(items);
+    return rc;
+}
+
+static int admit_task(snapshot_builder *b,praktor_yaml_node node,bool compose) {
+    json_value_t *metadata=NULL;
+    int rc=read_task_metadata(b,node,&metadata);
+    if(rc!=SALTS_OK)return rc;
+    const bool uses=compose&&praktor_yaml_has(node,"uses");
+    const bool dynamic=compose&&praktor_yaml_has(node,"dynamic_tasks");
+    if(!uses&&!dynamic)return append_task(b,node,node,metadata,false);
+    const vstr keys[]={{"name",4},{"description",11},{"vars",4},{"depends_on",10},
+                       {"outputs",7},{"statechart",10},
+                       uses?(vstr){"uses",4}:(vstr){"dynamic_tasks",13}};
+    rc=composed_keys(b,node,keys,sizeof keys/sizeof *keys);
+    if(rc==SALTS_OK&&dynamic)return instantiate_dynamic(b,node,metadata);
+    if(rc==SALTS_OK)rc=instantiate_library(b,node,metadata);
+    json_free(metadata);
+    return rc;
+}
+
+static int create_snapshot(vstr yaml_source,size_t limit,bool compose,
     praktor_workflow_snapshot **out,char *error,size_t error_capacity) {
     praktor_yaml_document *document=NULL;
     praktor_yaml_node root,tasks={0};
@@ -195,11 +720,13 @@ int praktor_workflow_snapshot_create_inline(vstr yaml_source,
     praktor_yaml_field_error field={0};
     praktor_yaml_diagnostic yaml_error={error,error_capacity,PRAKTOR_YAML_FAILURE_NONE};
     const json_value_t **views=NULL;
-    size_t i,count=0;
+    size_t count=0;
+    snapshot_builder builder={.limit=limit,.error=error,.capacity=error_capacity};
     int status;
     if(error&&error_capacity)error[0]='\0';
     if(!out||(!error&&error_capacity)||!vstr_is_valid(yaml_source)||
-       yaml_source.len==0)
+       yaml_source.len==0||limit==0u||limit>PRAKTOR_WORKFLOW_MAX_TASKS||
+       (compose&&yaml_source.len>MAX_WORKFLOW_BYTES))
         return snapshot_fail(error,error_capacity,SALTS_EINVAL,
             "Invalid inline workflow source or output");
     status=praktor_yaml_document_create(yaml_source,&document,&yaml_error);
@@ -210,9 +737,19 @@ int praktor_workflow_snapshot_create_inline(vstr yaml_source,
             "workflow must be a map");
         goto done;
     }
-    if(praktor_yaml_has(root,"includes")) {
+    if(!compose&&praktor_yaml_has(root,"includes")) {
         status=snapshot_fail(error,error_capacity,SALTS_EINVAL,
             "inline workflows cannot declare includes");
+        goto done;
+    }
+    if(praktor_yaml_has(root,"env")) {
+        status=snapshot_fail(error,error_capacity,SALTS_ENOTSUP,
+            "workflow field 'env' is unsupported; use dotEnv or the inherited environment");
+        goto done;
+    }
+    if(praktor_yaml_has(root,"outputs")) {
+        status=snapshot_fail(error,error_capacity,SALTS_ENOTSUP,
+            "workflow field 'outputs' is unsupported; direct tasks publish their own outputs");
         goto done;
     }
     status=praktor_yaml_get(root,"tasks",&tasks,NULL);
@@ -228,7 +765,7 @@ int praktor_workflow_snapshot_create_inline(vstr yaml_source,
         goto done;
     }
     count=praktor_yaml_count(tasks);
-    if(!count||count>PRAKTOR_WORKFLOW_MAX_TASKS) {
+    if(!count||count>limit) {
         status=snapshot_fail(error,error_capacity,SALTS_EINVAL,
             "Invalid native workflow task count or capacity");
         goto done;
@@ -239,10 +776,11 @@ int praktor_workflow_snapshot_create_inline(vstr yaml_source,
             "Cannot allocate native workflow snapshot");
         goto done;
     }
-    snapshot->task_count=count;
-    snapshot->tasks=(json_value_t **)calloc(count,sizeof(*snapshot->tasks));
-    snapshot->trees=(praktor_orch_tree **)calloc(count,sizeof(*snapshot->trees));
-    snapshot->kinds=(praktor_workflow_snapshot_task_kind *)calloc(count,
+    builder.snapshot=snapshot;
+    builder.limit=compose?limit:count;
+    snapshot->tasks=(json_value_t **)calloc(builder.limit,sizeof(*snapshot->tasks));
+    snapshot->trees=(praktor_orch_tree **)calloc(builder.limit,sizeof(*snapshot->trees));
+    snapshot->kinds=(praktor_workflow_snapshot_task_kind *)calloc(builder.limit,
         sizeof(*snapshot->kinds));
     if(!snapshot->tasks||!snapshot->trees||!snapshot->kinds) {
         status=snapshot_fail(error,error_capacity,SALTS_ENOMEM,
@@ -255,38 +793,53 @@ int praktor_workflow_snapshot_create_inline(vstr yaml_source,
         goto done;
     }
     praktor_yaml_field_error_dispose(&field);
-    for(i=0;i<count;++i) {
-        const praktor_yaml_node task=praktor_yaml_at(tasks,i);
-        status=praktor_yaml_task_metadata_create(task,&snapshot->tasks[i],&field);
-        if(status!=SALTS_OK) {
-            status=field_failure(status,&field,error,error_capacity);
-            goto done;
-        }
-        praktor_yaml_field_error_dispose(&field);
-        status=task_tree(task,snapshot->tasks[i],&snapshot->trees[i],
-            &snapshot->kinds[i],error,error_capacity);
+    if(praktor_yaml_has(root,"statechart")) {
+        status=praktor_yaml_get(root,"statechart",&snapshot->workflow_chart,NULL);
         if(status!=SALTS_OK)goto done;
     }
+    if(compose) {
+        builder.remaining_bytes=MAX_WORKFLOW_BYTES-yaml_source.len;
+        status=load_libraries(&builder,root);
+        if(status!=SALTS_OK)goto done;
+    }
+    for(size_t i=0u;i<count;++i) {
+        status=admit_task(&builder,praktor_yaml_at(tasks,i),compose);
+        if(status!=SALTS_OK)goto done;
+    }
+    count=snapshot->task_count;
     views=(const json_value_t **)malloc(count*sizeof(*views));
     if(!views) {
         status=snapshot_fail(error,error_capacity,SALTS_ENOMEM,
             "Cannot allocate native workflow graph views");
         goto done;
     }
-    for(i=0;i<count;++i)views[i]=snapshot->tasks[i];
+    for(size_t i=0;i<count;++i)views[i]=snapshot->tasks[i];
     status=praktor_workflow_dependencies_create(views,count,&snapshot->graph,
         error,error_capacity);
     if(status!=SALTS_OK)goto done;
-    praktor_yaml_document_destroy(document);
+    if(snapshot->charts || praktor_yaml_valid(snapshot->workflow_chart))
+        snapshot->chart_document=document;
+    else praktor_yaml_document_destroy(document);
+    free_libraries(&builder);
     free(views);
     *out=snapshot;
     return SALTS_OK;
 done:
     praktor_yaml_field_error_dispose(&field);
     praktor_yaml_document_destroy(document);
+    free_libraries(&builder);
     free(views);
     praktor_workflow_snapshot_destroy(snapshot);
     return status;
+}
+int praktor_workflow_snapshot_create_inline(vstr yaml_source,
+    praktor_workflow_snapshot **out,char *error,size_t error_capacity) {
+    return create_snapshot(yaml_source,PRAKTOR_WORKFLOW_MAX_TASKS,false,out,error,error_capacity);
+}
+
+int praktor_workflow_snapshot_create_for_run(vstr yaml_source,size_t limit,
+    praktor_workflow_snapshot **out,char *error,size_t error_capacity) {
+    return create_snapshot(yaml_source,limit,true,out,error,error_capacity);
 }
 size_t praktor_workflow_snapshot_task_count(const praktor_workflow_snapshot *snapshot) {
     return snapshot?snapshot->task_count:0u;
@@ -302,6 +855,15 @@ const json_value_t *praktor_workflow_snapshot_task_metadata(
 const praktor_orch_tree *praktor_workflow_snapshot_task_tree(
     const praktor_workflow_snapshot *snapshot,size_t index) {
     return snapshot&&index<snapshot->task_count?snapshot->trees[index]:NULL;
+}
+praktor_yaml_node praktor_workflow_snapshot_statechart(
+    const praktor_workflow_snapshot *snapshot) {
+    return snapshot?snapshot->workflow_chart:(praktor_yaml_node){0};
+}
+praktor_yaml_node praktor_workflow_snapshot_task_statechart(
+    const praktor_workflow_snapshot *snapshot,size_t index) {
+    if(snapshot&&snapshot->charts&&index<snapshot->task_count)return snapshot->charts[index];
+    return (praktor_yaml_node){0};
 }
 int praktor_workflow_snapshot_task_kind_at(
     const praktor_workflow_snapshot *snapshot,size_t index,

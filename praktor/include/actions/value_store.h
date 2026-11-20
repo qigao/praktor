@@ -31,22 +31,18 @@ typedef enum praktor_value_status {
  * here. This API is single-driver and requires external synchronization if
  * shared between threads. A failed set never changes an existing value.
  */
-int praktor_value_store_init(praktor_value_store *store,
-                                 size_t capacity,
-                                 size_t max_key_bytes,
-                                 size_t max_value_bytes);
+int praktor_value_store_init(praktor_value_store *store, size_t capacity, size_t max_key_bytes,
+                             size_t max_value_bytes);
 void praktor_value_store_destroy(praktor_value_store *store);
 /* Deep-copy an immutable baseline into an independent store with equal bounds. */
-int praktor_value_store_clone(praktor_value_store *destination,
-                                  const praktor_value_store *source);
+int praktor_value_store_clone(praktor_value_store *destination, const praktor_value_store *source);
 /* Strong single-owner replacement of an already initialized store by a deep
  * copy with exactly matching capacity and key/value limits. Neither owner is
  * changed on error (including allocation failure). Never use on a store
  * actively accessed by a Session/other callback or held by live transactions. */
 int praktor_value_store_replace_clone(praktor_value_store *destination,
-                                          const praktor_value_store *source);
-int praktor_value_store_set(praktor_value_store *store,
-                                const char *key, const char *value);
+                                      const praktor_value_store *source);
+int praktor_value_store_set(praktor_value_store *store, const char *key, const char *value);
 typedef struct praktor_value_write {
   const char *key;
   const char *value;
@@ -54,16 +50,13 @@ typedef struct praktor_value_write {
 /* Single-driver, allocation-free all-or-nothing publication. Keys must be
  * distinct; zero writes is a no-op. All lengths and new slots are validated
  * before any existing value changes. Inputs are borrowed for this call only. */
-int praktor_value_store_set_many(praktor_value_store *store,
-                                     const praktor_value_write *writes,
-                                     size_t count);
-int praktor_value_store_get(const praktor_value_store *store,
-                                const char *key, char *out_value,
-                                size_t out_capacity, size_t *out_size);
-int praktor_value_store_contains(const praktor_value_store *store,
-                                     const char *key, int *out_contains);
-int praktor_value_store_erase(praktor_value_store *store,
-                                  const char *key);
+int praktor_value_store_set_many(praktor_value_store *store, const praktor_value_write *writes,
+                                 size_t count);
+int praktor_value_store_get(const praktor_value_store *store, const char *key, char *out_value,
+                            size_t out_capacity, size_t *out_size);
+int praktor_value_store_contains(const praktor_value_store *store, const char *key,
+                                 int *out_contains);
+int praktor_value_store_erase(praktor_value_store *store, const char *key);
 size_t praktor_value_store_size(const praktor_value_store *store);
 
 /*

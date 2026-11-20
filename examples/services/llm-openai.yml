@@ -1,0 +1,23 @@
+# curl reads the API key from the inherited environment.
+provider:
+  kind: exe
+  path: curl
+config:
+  args:
+    - --disable
+    - --silent
+    - --show-error
+    - --fail
+    - --proto
+    - '=https'
+    - --connect-timeout
+    - '10'
+    - --variable
+    - '%OPENAI_API_KEY'
+    - --expand-header
+    - 'Authorization: Bearer {{OPENAI_API_KEY}}'
+    - --json
+    - $request
+    - --url
+    - 'https://api.openai.com/v1/chat/completions'
+  timeout_ms: 60000

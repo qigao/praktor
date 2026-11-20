@@ -1,0 +1,126 @@
+variables:
+  expected_request_id: '42'
+  # A simulated report from a 24 V edge device. Bit 2 enables fast diagnostics.
+  device_report: >-
+    {
+      "device": {"id": "edge-17", "mode": "auto", "feature_flags": 5},
+      "telemetry": {"request_id": 42, "temperature_c": 73, "supply_mv": 24000},
+      "alarms": {"critical": [], "warning": [{"code": "fan_speed_low"}]}
+    }
+  diagnostic_report: >-
+    {"diagnostics": {"self_test": "pass", "cooling": {"fan_rpm": 1800}}}
+
+statechart:
+  initial: awaiting_assessment
+  states:
+    awaiting_assessment:
+      transitions:
+        - 'on': task.started
+          guard: {fields: [event.data.task], match: '$event.data.task == "assess_device"'}
+          target: assessing
+    assessing:
+      transitions:
+        - 'on': task.finished
+          guard:
+            fields: [event.data.task, event.data.status]
+            match: '$event.data.task == "assess_device" && $event.data.status == "success"'
+          target: cleared
+        - 'on': task.finished
+          guard: {fields: [event.data.task], match: '$event.data.task == "assess_device"'}
+          target: blocked
+    cleared: {type: final}
+    blocked: {type: final}
+
+tasks:
+  - name: assess_device
+    statechart:
+      initial: await_report
+      events:
+        telemetry.received: {source: internal, fields: {request_id: int64}}
+        telemetry.parsed: {source: internal}
+        diagnostics.parsed: {source: internal}
+      states:
+        await_report:
+          transitions:
+            - 'on': telemetry.received
+              guard:
+                fields: [event.data.request_id, expected_request_id]
+                expr: '$event.data.request_id == $expected_request_id'
+              target: assess_report
+            - {after_ms: 200, target: report_timeout}
+        assess_report:
+          transitions:
+            - 'on': telemetry.parsed
+              guard:
+                fields: [critical_count, temperature_c, supply_mv]
+                expr: '$critical_count > 0 || $temperature_c >= 90 || $supply_mv < 21000'
+              target: critical_alarm
+            - 'on': telemetry.parsed
+              guard: {fields: [mode], match: '$mode in ["maintenance", "offline"]'}
+              target: manual_review
+            - 'on': telemetry.parsed
+              guard:
+                fields: [temperature_c, warning_count]
+                expr: '$temperature_c >= 70 || $warning_count > 0'
+              target: diagnose
+            - {'on': telemetry.parsed, target: nominal}
+        diagnose:
+          transitions:
+            - 'on': diagnostics.parsed
+              guard:
+                fields: [self_test]
+                match: '$self_test == "pass"'
+              target: check_cooling
+            - {'on': diagnostics.parsed, target: inspection_required}
+            - {after_ms: 500, target: diagnostic_timeout}
+        check_cooling:
+          transitions:
+            - guard: {fields: [fan_rpm], expr: '$fan_rpm >= 1500'}
+              target: recovered
+            - {target: inspection_required}
+        nominal: {type: final}
+        recovered: {type: final}
+        critical_alarm: {type: final}
+        manual_review: {type: final}
+        inspection_required: {type: final}
+        report_timeout: {type: final}
+        diagnostic_timeout: {type: final}
+    actions:
+      Sequence:
+        - ParseJson: {input_key: $device_report, path: '$.telemetry.request_id', output_key: request_id, result: one}
+        # Simulate a late notification followed by the report notification.
+        - raise: {event: telemetry.received, with: {request_id: 41}}
+        - raise: {event: telemetry.received, with: {request_id: $request_id}}
+        - wait_until:
+            guard: {fields: [chart.task.await_report], expr: '$chart.task.await_report == 0'}
+            timeout_ms: 1000
+        - assert:
+            guard: {fields: [chart.task.assess_report], expr: '$chart.task.assess_report == 1'}
+            message: No telemetry report for the current device request
+        - ParseJson: {input_key: $device_report, path: '$.device.mode', output_key: mode, result: one}
+        - ParseJson: {input_key: $device_report, path: '$.device.feature_flags', output_key: feature_flags, result: one}
+        - ParseJson: {input_key: $device_report, path: '$.telemetry.temperature_c', output_key: temperature_c, result: one}
+        - ParseJson: {input_key: $device_report, path: '$.telemetry.supply_mv', output_key: supply_mv, result: one}
+        - ParseJson: {input_key: $device_report, path: '$.alarms.critical[*]', output_key: critical_count, result: count}
+        - ParseJson: {input_key: $device_report, path: '$.alarms.warning[*]', output_key: warning_count, result: count}
+        - raise: {event: telemetry.parsed}
+        - if: {guard: {fields: [chart.task.diagnose], expr: '$chart.task.diagnose == 1'}}
+          then:
+            Sequence:
+              - if: {guard: {fields: [feature_flags], expr: '($feature_flags & 4) != 0'}}
+                then: {Sleep: {duration: '15ms'}}
+                else: {Sleep: {duration: '60ms'}}
+              - ParseJson: {input_key: $diagnostic_report, path: '$.diagnostics.self_test', output_key: self_test, result: one}
+              - ParseJson: {input_key: $diagnostic_report, path: '$.diagnostics.cooling.fan_rpm', output_key: fan_rpm, result: one}
+              - raise: {event: diagnostics.parsed}
+        - assert:
+            guard:
+              fields: [chart.task.nominal, chart.task.recovered]
+              expr: '$chart.task.nominal == 1 || $chart.task.recovered == 1'
+            message: Device needs further inspection
+
+  - name: confirm_device
+    depends_on: [assess_device]
+    assert:
+      guard: {fields: [chart.workflow.cleared], expr: '$chart.workflow.cleared == 1'}
+      message: The workflow has not cleared the device assessment

@@ -24,12 +24,12 @@ static const char *success_yaml=
     "  - name: prepare\n"
     "    vars: {seed: '7'}\n"
     "    set_variable: answer\n"
-    "    from: seed\n"
+    "    from: $seed\n"
     "  - name: verify\n"
     "    depends_on: [prepare]\n"
     "    actions:\n"
     "      Sequence:\n"
-    "        - CheckExitCode: {input_key: answer, expected: 7}\n"
+    "        - CheckExitCode: {input_key: $answer, expected: 7}\n"
     "        - Sleep: {duration: 0s}\n";
 static const char *cancel_yaml=
     "variables: {late: original}\n"

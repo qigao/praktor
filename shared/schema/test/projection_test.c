@@ -51,15 +51,30 @@ static json_value_t *get(const json_value_t *root, const char *path) { return js
 
 spec("C schema projection") {
     it("matches the checked-in schema and the generated C CLI artifact") {
-        fs_buf_t idl = source("schema/workflow.schema"), policy = source("schema/workflow.editor.json"), checked = source("grammar.schema.json"), generated = {0};
+        fs_buf_t idl = source("schema/workflow.schema"), policy = source("schema/workflow.editor.json"), checked = source("docs/grammar.schema.json"), generated = {0};
         json_value_t *editor = json_parse(policy.base, policy.len), *expected = json_parse(checked.base, checked.len), *actual = NULL, *from_cli;
         char error[512] = {0};
         check(editor != NULL && expected != NULL);
         check(praktor_schema_project(idl.base, idl.len, editor, &actual, error, sizeof(error)) == SALTS_OK);
         check(actual != NULL && error[0] == '\0'); check(equal(actual, expected));
+        const json_value_t *task_properties =
+            get(actual, "$['$defs'].taskDefinition.properties");
+        check(string_is(json_object_get(json_object_get(task_properties,"actions"),"$ref"),
+                        "#/$defs/orchestrationNode"));
+        check_null(json_object_get(task_properties,"praktor/actions"));
+        const json_value_t *aliases =
+            get(actual, "$['$defs'].orchestrationNamedAliases.properties");
+        check(string_is(json_object_get(json_object_get(aliases,"Sequence"),"$ref"),
+                        "#/$defs/orchestrationNodeChildren"));
+        check(string_is(json_object_get(json_object_get(aliases,"ParseJson"),"$ref"),
+                        "#/$defs/orchestrationParseJsonNode"));
+        check(string_is(json_object_get(json_object_get(aliases,"Tool"),"$ref"),
+                        "#/$defs/orchestrationToolNode"));
         check(number_is(get(actual, "$['$defs'].taskDefinition.properties.tool.minLength"), "1"));
         check(string_is(get(actual, "$['$defs'].taskDefinition.dependencies.with[0]"), "tool"));
-        check(string_is(get(actual, "$['$defs'].taskDefinition.properties.with.type"), "object"));
+        check(string_is(get(actual, "$['$defs'].taskDefinition.properties.with['$ref']"),
+                        "#/$defs/toolInputs"));
+        check(string_is(get(actual, "$['$defs'].toolInputs.type"), "object"));
         check(json_object_get(json_object_get(actual,"properties"),"inputs")==NULL);
         check(json_object_get(json_object_get(actual,"properties"),"input_policy")==NULL);
         check(string_is(get(actual,"$.properties.defaults.properties.timeout.type"),"integer"));

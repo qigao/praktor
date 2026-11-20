@@ -76,15 +76,69 @@ int session_dynamic(void *user, size_t node, salts_bt_node_parameters *params) {
   if (r != SALTS_OK) return session_error(s, r, "C11 dynamic control parameter resolution failed: %s", key ? key : "invalid mask");
   return SALTS_OK;
 }
+typedef struct match_context {
+  session_impl *session;
+  int status;
+} match_context;
+
+static int resolve_match_field(void *user, const char *field, size_t length,
+                               const char **out_value, size_t *out_length) {
+  match_context *context = user;
+  char key[SALTS_SELECTOR_MAX_STRING_BYTES_V1+1u];
+  bool found;
+  session_text value;
+  if (length >= sizeof key) {
+    context->status = SALTS_EINVAL;
+    return -1;
+  }
+  memcpy(key, field, length);
+  key[length] = '\0';
+  context->status = session_has(context->session, key, &found);
+  if (context->status != SALTS_OK) return -1;
+  if (!found) return 0;
+  context->status = session_get(context->session, key, 0u, &value);
+  if (context->status != SALTS_OK) return -1;
+  *out_value = value.data;
+  *out_length = value.size;
+  return 1;
+}
+
+static int resolve_match_capability(void *user, const char *name, size_t length) {
+  const match_context *context = user;
+  const praktor_session_config *config = &context->session->config;
+  return config->has_capability(config->capability_user, name, length);
+}
+
+static int evaluate_match(session_impl *s, size_t node,
+                          salts_bt_node_status *status) {
+  const selector_eval_ops_v1_t ops = {
+    SALTS_SELECTOR_EVAL_OPS_V1_SIZE, resolve_match_field,
+    s->config.has_capability ? resolve_match_capability : NULL
+  };
+  selector_diagnostic_v1_t detail = {.size = SALTS_SELECTOR_DIAGNOSTIC_V1_SIZE};
+  match_context context = {s, SALTS_OK};
+  int matched;
+  int result = selector_program_evaluate_v1(s->state[node].condition.match,
+                                            &ops, &context, &matched, &detail);
+  if (context.status != SALTS_OK) return context.status;
+  if (result != SALTS_SELECTOR_OK)
+    return session_error(s, SALTS_EINVAL, "guard match at node %zu: %s", node, detail.message);
+  *status = matched ? SALTS_BT_SUCCESS : SALTS_BT_FAILURE;
+  return SALTS_OK;
+}
+
 int session_condition(void *user, size_t node, salts_bt_node_status *status) {
   session_impl *s = user;
   const praktor_leaf_parameter *p;
   session_text text;
   bool truth;
   int r;
+  s->guard_failure[0] = '\0';
   if (s->state[node].branch && !s->config.host.condition)
     return session_error(s, SALTS_ENOTSUP, "C11 Parallel condition requires a host branch-aware condition hook");
   r = restore(s, node); if (r != SALTS_OK) return r;
+  if (s->state[node].condition.match) return evaluate_match(s, node, status);
+  if (s->state[node].condition.expr) return session_condition_expr(s,s->state[node].condition.expr,status);
   if (s->config.host.condition) return s->config.host.condition(s->config.host.user, node, status);
   p = session_parameter(s, node, "condition");
   if (!p) return session_error(s, SALTS_EINVAL, "condition callback requested without scalar condition parameter");
@@ -123,7 +177,7 @@ int session_pipeline_prepare(void *user, size_t node, size_t child) {
   if (!st->pipeline) {
     r = session_key(s, node, "output_key", "pipeline_result", 0, &key);
     if (r == SALTS_OK) r = session_cache(s, node, SESSION_PIPE_KEY, key);
-    if (r == SALTS_OK) r = session_key(s, node, "input_key", "pipeline_input", 0, &key);
+    if (r == SALTS_OK) r = session_source_key(s, node, "input_key", "pipeline_input", &key);
     if (r == SALTS_OK) r = session_has(s, key.data, &has);
     if (r == SALTS_OK && has) r = session_get(s, key.data, 1, &data);
     if (r == SALTS_OK) r = session_cache(s, node, SESSION_PIPE_DATA, data);
@@ -169,7 +223,7 @@ int session_entry_changed(void *user, size_t node, bool *changed) {
   if (s->config.host.entry_changed)
     return session_hook_status(s, s->config.host.entry_changed(s->config.host.user, node, changed), "C11 EntryUpdated hook failed");
   if (s->state[node].branch) return session_error(s, SALTS_ENOTSUP, "C11 Parallel EntryUpdated requires a host branch-aware observation hook");
-  r = session_key(s, node, "watch_key", NULL, 0, &key);
+  r = session_source_key(s, node, "watch_key", NULL, &key);
   if (r == SALTS_OK && !key.size) r = session_error(s, SALTS_EINVAL, "EntryUpdated requires a non-empty 'watch_key'");
   if (r == SALTS_OK) r = session_has(s, key.data, &has);
   if (r == SALTS_OK && has) r = session_get(s, key.data, 1, &current);
@@ -192,7 +246,7 @@ int session_queue_begin(void *user, size_t node, bool *item) {
     return session_hook_status(s, s->config.host.queue_begin(s->config.host.user, node, item), "C11 ConsumeQueue begin hook failed");
   if (s->state[node].branch) return session_error(s, SALTS_ENOTSUP, "C11 Parallel ConsumeQueue requires host branch-aware hooks");
   s->state[node].queue_active = s->state[node].queue_more = false; *item = false;
-  r = session_key(s, node, "queue_key", "task_queue", 0, &key);
+  r = session_source_key(s, node, "queue_key", "task_queue", &key);
   if (r == SALTS_OK) r = session_has(s, key.data, &has);
   if (r != SALTS_OK || !has) return r;
   r = session_get(s, key.data, 1, &input); if (r != SALTS_OK) return r;
