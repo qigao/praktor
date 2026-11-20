@@ -29,12 +29,12 @@
 
 #define PRK_MAX_TASKS 64u
 #define PRK_MAX_VALUE 4096u
-#define PRK_MAX_KEY 128u
+#define PRK_MAX_KEY PRAKTOR_VARIABLE_MAX_KEY_BYTES
 enum { PRK_EXIT_CODE, PRK_STDOUT, PRK_STDERR, PRK_PROCESS_OUTPUTS };
 typedef struct prk_task_outputs {
     const char *keys[PRK_PROCESS_OUTPUTS];
     const json_value_t *declared;
-    bool process;
+    bool process,collect_member;
 } prk_task_outputs;
 
 typedef struct prk_state {
@@ -361,6 +361,7 @@ static int bind_outputs(const praktor_orch_node *root,bool command,
     char *error,size_t capacity) {
     const praktor_orch_type type=praktor_orch_node_type(root);
     const char *name=json_get_string(task,"name");
+    out->collect_member=json_object_get(task,"collect_member")!=NULL;
     out->declared=json_object_get(task,"outputs");
     const size_t count=json_array_size(out->declared);
     if(count>PRAKTOR_WORKFLOW_MAX_TEXT_OUTPUTS||count>value_capacity) {
@@ -469,7 +470,10 @@ static int stage_outputs(praktor_value_store *root,praktor_value_store *scope,
             goto done;
         }
     }
-    rc=praktor_workflow_prepare_task_text_outputs(root,scope,ports,count,txn);
+    /* Collected members publish to the registry using an empty shared-scope
+     * transaction, so the same commit covers ordinary siblings. */
+    rc=bindings->collect_member?praktor_value_txn_begin(txn,root):
+        praktor_workflow_prepare_task_text_outputs(root,scope,ports,count,txn);
     if(rc==PRAKTOR_VALUE_OK) {
         *out=typed;
         return SALTS_OK;
@@ -587,6 +591,7 @@ static bool check_output_keys(const prk_task_outputs *outputs,const size_t *ids,
         const prk_task_outputs *a=&outputs[ids[i]];
         for(size_t j=i+1u;j<count;++j) {
             const prk_task_outputs *b=&outputs[ids[j]];
+            if(a->collect_member||b->collect_member)continue;
             for(size_t p=0u;p<output_count(a);++p) {
                 const char *key=output_key(a,p);
                 for(size_t q=0u;q<output_count(b);++q) {
@@ -650,6 +655,44 @@ static int prepare_task(const prk_cohort_context *ctx,size_t index,prk_running_t
     return praktor_orch_session_plan_init_session(ctx->plans[index],&config,&task->session);
 }
 
+static int collect_task_outputs(const prk_state *owner,size_t index,
+    praktor_value_store *scope,char *error,size_t capacity) {
+    const json_value_t *metadata=praktor_workflow_snapshot_task_metadata(owner->snapshot,index);
+    const char *key=json_get_string(metadata,"collect_key");
+    if(!key)return SALTS_OK;
+    const size_t first=(size_t)json_number(json_object_get(metadata,"collect_first"));
+    const size_t count=(size_t)json_number(json_object_get(metadata,"collect_count"));
+    char array[PRK_MAX_VALUE+1u]={'['};
+    size_t used=1u;
+    for(size_t i=0u;i<count;++i) {
+        const json_value_t *outputs=NULL;
+        const int rc=praktor_workflow_task_registry_get_outputs(owner->registry,first+i,&outputs);
+        if(rc!=SALTS_OK&&rc!=SALTS_ENOENT)return rc;
+        size_t length=2u;
+        char *encoded=outputs?json_serialize(outputs,&length):NULL;
+        if(outputs&&!encoded)return SALTS_ENOMEM;
+        const size_t overhead=1u+(i!=0u); /* Closing bracket and optional comma. */
+        if(overhead>PRK_MAX_VALUE-used||length>PRK_MAX_VALUE-used-overhead) {
+            json_serialize_free(encoded);
+            (void)snprintf(error,capacity,"collected task outputs for '$%s' exceed %u bytes",
+                key,PRK_MAX_VALUE);
+            return SALTS_EINVAL;
+        }
+        if(i)array[used++]=',';
+        memcpy(array+used,encoded?encoded:"{}",length);
+        used+=length;
+        json_serialize_free(encoded);
+    }
+    array[used++]=']';
+    array[used]='\0';
+    const int stored=praktor_value_store_set(scope,key,array);
+    if(stored!=PRAKTOR_VALUE_OK) {
+        (void)snprintf(error,capacity,"cannot store collected task outputs for '$%s'",key);
+        return stored==PRAKTOR_VALUE_ENOMEM?SALTS_ENOMEM:SALTS_EINVAL;
+    }
+    return SALTS_OK;
+}
+
 static int publish_cohort(const prk_cohort_context *ctx,const size_t *ids,
     prk_running_task *tasks,size_t count,char *error,size_t capacity) {
     praktor_workflow_task_output_update updates[PRAKTOR_WORKFLOW_MAX_PARALLELISM]={0};
@@ -658,8 +701,10 @@ static int publish_cohort(const prk_cohort_context *ctx,const size_t *ids,
     size_t used=0u;
     int rc=SALTS_OK;
     for(size_t i=0u;i<count;++i) {
-        rc=stage_outputs(&ctx->owner->root,
-            praktor_native_host_values(&tasks[i].host),
+        praktor_value_store *scope=praktor_native_host_values(&tasks[i].host);
+        rc=collect_task_outputs(ctx->owner,ids[i],scope,error,capacity);
+        if(rc!=SALTS_OK)break;
+        rc=stage_outputs(&ctx->owner->root,scope,
             &ctx->outputs[ids[i]],&staged[used],&values[used],error,capacity);
         if(rc!=SALTS_OK)break;
         if(values[used]) {
@@ -750,7 +795,8 @@ settle:
             status=rc==SALTS_ENOENT||rc==SALTS_EINVAL?PRAKTOR_RUNTIME_FAILED:PRAKTOR_RUNTIME_RESOURCE;
     }else if(driver.failed_slot<count) {
         const size_t slot=driver.failed_slot,index=ids[slot];
-        if(ctx->outputs[index].process)
+        /* The task scope can contain a predecessor's exit code before a Tool starts. */
+        if(ctx->outputs[index].process&&(!tasks[slot].tool.count||tasks[slot].tool.has_exit_code))
             (void)publish_failure_exit(owner,index,praktor_native_host_values(&tasks[slot].host),
                                        ctx->outputs[index].keys[PRK_EXIT_CODE]);
     }
@@ -938,7 +984,7 @@ static praktor_runtime_status execute_yaml(
         }
     }
     rc=praktor_value_store_init(&owner.root,
-        (size_t)options.value_capacity,128u,PRK_MAX_VALUE);
+        (size_t)options.value_capacity,PRK_MAX_KEY,PRK_MAX_VALUE);
     if(rc!=PRAKTOR_VALUE_OK)goto done;
     (void)cmeta_cleanup_arm(&cleanup[3],clean_root,NULL,&owner.root);
     rc=praktor_workflow_seed_root_text_variables(
@@ -946,7 +992,7 @@ static praktor_runtime_status execute_yaml(
     if(rc!=PRAKTOR_VALUE_OK)goto done;
     if(workflow_plan) {
         praktor_native_host_config chart_config;
-        praktor_native_host_config_init(&chart_config,1u,128u,PRK_MAX_VALUE);
+        praktor_native_host_config_init(&chart_config,1u,PRK_MAX_KEY,PRK_MAX_VALUE);
         chart_config.parent_values=&owner.root;
         chart_config.reserve_event_fields=true;
         chart_config.chart_active=chart_active;

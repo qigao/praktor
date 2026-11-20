@@ -424,3 +424,17 @@ CTest 70/70 通过，install 成功；本次为增量构建。临时 runner 已�
 - Windows LLVM-MinGW x64 完整构建、71/71 CTest 与安装通过。安装后执行
   `praktor --config examples/statechart-signals.yml --task confirm`，
   同时复核设备状态和组合示例。生成的 Schema 通过握手和组合示例校验。
+
+## DSL 准入与动态任务结果
+
+- Tool 的任务上下文继承工作流值，可能带有前序任务的 `shell_exit_code`。
+  若新 Tool 在参数求值或进程启动时失败，只在本次 job 已写入真实退出码时
+  发布该字段。既有进程非零退出仍报告实际退出码。
+- `dynamic_tasks.collect` 将生成任务的输出保留在任务注册表，汇合时按
+  输入顺序读取并写入一个最多 4096 字节的 JSON 数组。生成任务可以在同组
+  使用相同输出键。汇合失败沿用原有组结算，已结算的成员结果仍可查看。
+- 编辑器校验已同步可执行形状、变量标量和命名规则。用
+  `update-workflow-schema` 重新生成 Schema。14 个工作流与任务库文件和
+  10 个边界用例通过 Schema 校验。
+- Windows LLVM-MinGW x64 完整构建、71/71 CTest 和安装通过。安装产物
+  验证设备巡检、跨任务握手，以及两个并行 Command 的 stdout 和退出码汇总。

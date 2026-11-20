@@ -9,9 +9,9 @@ APIs. It does not infer native layouts or implement another IDL parser. Parsed
 metadata stays alive through projection; unsupported declarations and conflicting
 policies fail explicitly.
 
-Runtime YAML parsing uses SaltsBase `Salts::CYaml`. The schema describes the
-parser/editor model; the installed workflow runtime admits a narrower subset,
-documented in the [user guide](../docs/USER_GUIDE.md#当前执行范围). The task
+Runtime YAML parsing uses SaltsBase `Salts::CYaml`. The editor schema checks
+the executable workflow shape. The installed runtime also validates dependency
+graphs, bindings, capacities and values. See the [user guide](../docs/USER_GUIDE.md#当前执行范围). The task
 `outputs` list is part of the native runtime and selects values to publish on
 successful task completion. The root output contract describes parser metadata.
 The native runtime also expands local `includes`, `uses`, and `dynamic_tasks`

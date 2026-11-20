@@ -18,6 +18,7 @@ typedef struct praktor_tool_action {
   size_t count;
   praktor_service_job job;
   int halt_status;
+  bool has_exit_code;
 } praktor_tool_action;
 int praktor_tool_admit(const json_value_t *definition, const json_value_t *inputs, char *error,
                        size_t capacity);

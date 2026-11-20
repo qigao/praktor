@@ -264,6 +264,7 @@ tasks:
 `command` 和 `tool` 默认发布其进程输出。Shell 的
 `output_key`、`stderr_key` 和 `exit_code_key` 可指定三个不同的变量名，
 CLI 的默认结果字段仍为 `stdout`、`stderr` 和 `exit_code`。
+Tool 在解析参数或启动进程时失败，结果省略本次没有取得的退出码。
 
 ## 复用任务与生成任务
 
@@ -278,6 +279,10 @@ CLI 的默认结果字段仍为 `stdout`、`stderr` 和 `exit_code`。
 等待 `inspect` 生成的整组任务成功，文档 Statechart 可订阅
 `task.finished` 观察该汇合点。上游执行后产生的数组可以交给 BT 处理，
 本轮 DAG 在执行前已确定。 [设备巡检示例](../examples/workflow-composition.yml) · [组合语法](grammar.md#workflow-composition)
+
+用 `dynamic_tasks.collect: $results` 汇总并行任务的输出。生成任务的结果
+各自可见，汇合任务成功后按输入顺序发布 JSON 数组 `$results`，后继 BT
+可用 `ParseJson` 读取各项。数组文本上限为 4096 字节。
 
 从仓库根目录运行示例。
 

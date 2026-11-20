@@ -94,6 +94,19 @@ spec("Reusable YAML execution services") {
     for (size_t i = 0u; i < 2u; ++i)
       (void)fs_unlink(files[i]);
   }
+  it("omits a previous task exit code when a Tool fails before launch") {
+    source=workflow(PRAKTOR_SERVICE_ECHO);
+    source=tstr_cat(source,
+        "  - {name: first, tool: shared, with: {text: ready}}\n"
+        "  - name: failed\n"
+        "    depends_on: [first]\n"
+        "    tool: shared\n"
+        "    with: {text: $praktor_test_missing_tool_argument}\n");
+    check_equal(execute(),PRAKTOR_RUNTIME_FAILED);
+    check_contains(result.error,"tool start failed");
+    check_equal(json_get_string(outputs("first"),"exit_code"),"0");
+    check_null(outputs("failed"));
+  }
   it("binds one instance per name and isolates simultaneous job arguments") {
     setup_host(PRAKTOR_SERVICE_ECHO, true);
     praktor_execution_service again = {0}, other = {0};

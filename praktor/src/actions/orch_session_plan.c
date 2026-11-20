@@ -316,6 +316,15 @@ static int create_plan(
             plan->retained_bytes+=size+1u;
         }
         for(j=0u;j<params;++j) {
+            const char *key=copies[j].name;
+            const bool destination=!strcmp(key,"output_key")||!strcmp(key,"stderr_key")||
+                !strcmp(key,"exit_code_key")||!strcmp(key,"item_key")||
+                (type==PRAKTOR_ORCH_SET_VARIABLE&&!strcmp(key,"key"));
+            if(destination&&(sizes[j]>PRAKTOR_VARIABLE_MAX_KEY_BYTES||
+               !praktor_valid_variable_name(vstr_from_buf(copies[j].text,sizes[j])))) {
+                status=fail(error,cap,SALTS_EINVAL,"output ports require a literal variable name");
+                goto done;
+            }
             /* Guard source is parsed by its own frontend. */
             if(has_fields&&strcmp(copies[j].name,"condition")==0)continue;
             if(type==PRAKTOR_ORCH_SHELL&&strcmp(copies[j].name,"cmd")==0&&

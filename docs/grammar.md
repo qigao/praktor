@@ -4,9 +4,9 @@ The maintained grammar sources are `schema/workflow.schema` and
 `schema/workflow.editor.json`. The generated editor artifact is
 `docs/grammar.schema.json`. See [schema maintenance](../schema/README.md).
 
-The YAML/data modules expose a broader immutable metadata and AST model than
-the application runtime executes. Parsing a field or describing it in an editor
-schema does not authorize its execution.
+The editor schema checks the executable YAML shape. Runtime admission also
+checks dependencies, service bindings, and value capacities. The internal
+YAML/data modules expose metadata and AST models for additional parser tests.
 
 The installed CLI and SDK admit Command, Shell, SetVariable, Tool and
 action trees with in-process and process leaves, with optional workflow
@@ -52,6 +52,10 @@ running successors or dispatching `task.finished`. An empty list suppresses
 successful output publication. Root-level `outputs` is outside the native
 execution profile.
 
+A failed Tool reports an exit code only after it receives a process result.
+If argument resolution fails before launch, the diagnostic describes the
+launch failure and the task has no process exit code.
+
 Without a list, a direct SetVariable publishes its destination and process
 tasks publish the default result fields `stdout`, `stderr`, and `exit_code`.
 A directly bound Shell may customize its three distinct store keys with
@@ -89,6 +93,22 @@ task inherits the caller and template `depends_on` lists. The declaring task
 depends on all generated tasks and uses a BT success assertion as its runner.
 A zero-item array leaves the declaring task's original dependencies.
 
+Set `collect: $results` inside `dynamic_tasks` to publish one JSON array
+when the declaring task settles successfully. Each array element is one
+generated task's output object, in input order. A task with no exports
+contributes `{}`. An empty input publishes `[]`. In this mode, member
+outputs remain available in their task results. The join publishes
+`$results` alongside any other explicit outputs it declares.
+
+The workflow owner reads committed member results from the task registry
+during join settlement. It borrows each object only while encoding it into
+a buffer limited to 4096 bytes. The join uses the same output transaction
+as an ordinary task. An oversized array fails settlement with a diagnostic.
+A failed or cancelled member prevents the join from running. For workflows
+that publish member values directly to the shared scope, omit `collect`
+and use distinct output keys. On an older runtime, fixed tasks with named
+outputs and an explicit join can represent the same dependency graph.
+
 The snapshot owns the parsed libraries, copied metadata and compiled task
 trees until destruction. Materialization precedes task selection, service
 activation and DAG construction. The combined YAML input is limited to
@@ -108,7 +128,9 @@ root `variables`, which override the dotenv or inherited environment.
 Names start with an ASCII letter or underscore. Digits can follow the first
 character, and dotted names use the same rule for each segment. Whole-value
 references and Selector fields also accept hyphens after the first character
-of a segment. YAML quotes are optional where the YAML scalar permits them.
+of a segment. Variable declarations and output destinations use the same names
+without the leading `$`, up to 128 bytes. YAML quotes are optional where the
+YAML scalar permits them.
 
 ```yaml
 variables:
@@ -175,6 +197,8 @@ milliseconds; removing defaults restores inherited/built-in behavior.
 Use `shell.timeout` and `shell.working_dir` for an individual process, and
 `timeout` with a sibling `child` for a BT decorator. The native runtime
 rejects standalone task metadata `timeout` and `working_dir` before startup.
+Task-level `args` and `stdin` are rejected at admission. Use an executable
+Tool service for standalone argv arguments.
 
 ## Named execution services
 

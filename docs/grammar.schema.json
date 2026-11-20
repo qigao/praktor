@@ -22,7 +22,7 @@
       "description": "Typed public workflow output contract."
     },
     "variables": {
-      "$ref": "#/$defs/stringMap",
+      "$ref": "#/$defs/variableMap",
       "description": "Workflow variables inherited by tasks and available through whole-value references and guards."
     },
     "env": {
@@ -101,9 +101,29 @@
   },
   "additionalProperties": false,
   "$defs": {
+    "variableName": {
+      "type": "string",
+      "maxLength": 128,
+      "pattern": "^(?!vars\\.)[A-Za-z_][A-Za-z0-9_-]*(\\.[A-Za-z_][A-Za-z0-9_-]*)*(?![\\s\\S])"
+    },
     "variableReference": {
       "type": "string",
+      "maxLength": 129,
       "pattern": "^\\$(?!vars\\.)[A-Za-z_][A-Za-z0-9_-]*(\\.[A-Za-z_][A-Za-z0-9_-]*)*(?![\\s\\S])"
+    },
+    "variableMap": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/variableName"
+      },
+      "additionalProperties": {
+        "type": [
+          "string",
+          "number",
+          "boolean",
+          "null"
+        ]
+      }
     },
     "workflowContractValueTypes": {
       "oneOf": [
@@ -537,7 +557,7 @@
           "$ref": "#/$defs/stringOrStringArray"
         },
         "vars": {
-          "$ref": "#/$defs/stringMap",
+          "$ref": "#/$defs/variableMap",
           "description": "Task variables override workflow variables and can be read by whole-value references and guards."
         },
         "outputs": {
@@ -599,6 +619,7 @@
         },
         "command": {
           "$ref": "#/$defs/nonEmptyStringOrStringArray",
+          "maxItems": 1,
           "description": "The native runtime accepts one shell command with whole-value or inline $name references.",
           "not": {
             "type": "string",
@@ -691,8 +712,7 @@
         },
         "output_format": {
           "enum": [
-            "text",
-            "json"
+            "text"
           ]
         },
         "script": {
@@ -713,6 +733,11 @@
             "items_variable": {
               "$ref": "#/$defs/variableReference",
               "description": "Variable containing a JSON array in task vars, document variables or the environment."
+            },
+            "collect": {
+              "$ref": "#/$defs/variableReference",
+              "pattern": "^\\$(?!(chart|event)\\.)",
+              "description": "Publish generated task results as a JSON array in input order."
             },
             "template": {
               "$ref": "#/$defs/taskDefinition",
@@ -944,6 +969,7 @@
           "$ref": "#/$defs/orchestrationSleepNode"
         },
         "set_variable": {
+          "$ref": "#/$defs/variableName",
           "type": "string"
         },
         "value": {
@@ -961,8 +987,11 @@
         "with": [
           "tool"
         ],
-        "retries": [
-          "tool"
+        "output_format": [
+          "command"
+        ],
+        "timeout": [
+          "child"
         ]
       },
       "allOf": [
@@ -985,6 +1014,101 @@
               {
                 "required": [
                   "triggers"
+                ]
+              },
+              {
+                "required": [
+                  "dotEnv"
+                ]
+              },
+              {
+                "required": [
+                  "each"
+                ]
+              },
+              {
+                "required": [
+                  "retries"
+                ]
+              },
+              {
+                "required": [
+                  "working_dir"
+                ]
+              },
+              {
+                "required": [
+                  "silent"
+                ]
+              },
+              {
+                "required": [
+                  "sources"
+                ]
+              },
+              {
+                "required": [
+                  "generates"
+                ]
+              },
+              {
+                "required": [
+                  "finally"
+                ]
+              },
+              {
+                "required": [
+                  "args"
+                ]
+              },
+              {
+                "required": [
+                  "stdin"
+                ]
+              },
+              {
+                "required": [
+                  "program"
+                ]
+              },
+              {
+                "required": [
+                  "script"
+                ]
+              },
+              {
+                "required": [
+                  "download"
+                ]
+              },
+              {
+                "required": [
+                  "service"
+                ]
+              },
+              {
+                "required": [
+                  "managed_process"
+                ]
+              },
+              {
+                "required": [
+                  "parallel"
+                ]
+              },
+              {
+                "required": [
+                  "wait_event"
+                ]
+              },
+              {
+                "required": [
+                  "file_exists"
+                ]
+              },
+              {
+                "required": [
+                  "subtree"
                 ]
               }
             ]
@@ -2048,6 +2172,30 @@
       "description": "Send a declared internal event to the task Statechart or the document Statechart."
     },
     "orchestrationNode": {
+      "not": {
+        "anyOf": [
+          {
+            "required": [
+              "parallel"
+            ]
+          },
+          {
+            "required": [
+              "wait_event"
+            ]
+          },
+          {
+            "required": [
+              "file_exists"
+            ]
+          },
+          {
+            "required": [
+              "subtree"
+            ]
+          }
+        ]
+      },
       "oneOf": [
         {
           "$ref": "#/$defs/orchestrationControlNode"
@@ -2759,10 +2907,10 @@
           "type": "object",
           "properties": {
             "input_key": {
-              "type": "string"
+              "$ref": "#/$defs/variableReference"
             },
             "output_key": {
-              "type": "string"
+              "$ref": "#/$defs/variableName"
             },
             "child": {
               "$ref": "#/$defs/orchestrationNodeChildren"
@@ -2853,7 +3001,7 @@
               "$ref": "#/$defs/variableReference"
             },
             "item_key": {
-              "type": "string"
+              "$ref": "#/$defs/variableName"
             },
             "child": {
               "$ref": "#/$defs/orchestrationNodeChildren"
@@ -2978,15 +3126,15 @@
               "description": "Shell command with full-value or inline $name references"
             },
             "output_key": {
-              "type": "string",
+              "$ref": "#/$defs/variableName",
               "description": "Blackboard key to store stdout"
             },
             "stderr_key": {
-              "type": "string",
+              "$ref": "#/$defs/variableName",
               "description": "Blackboard key to store stderr"
             },
             "exit_code_key": {
-              "type": "string",
+              "$ref": "#/$defs/variableName",
               "description": "Blackboard key to store the process exit code"
             },
             "working_dir": {
@@ -3117,6 +3265,7 @@
           "type": "string"
         },
         "output_key": {
+          "$ref": "#/$defs/variableName",
           "description": "Blackboard key to store extracted data",
           "type": "string"
         },
@@ -3158,6 +3307,7 @@
           "description": "Capture group to extract (default: 1)"
         },
         "output_key": {
+          "$ref": "#/$defs/variableName",
           "description": "Blackboard key to store extracted data",
           "type": "string"
         }
@@ -3180,6 +3330,7 @@
           "type": "string"
         },
         "output_key": {
+          "$ref": "#/$defs/variableName",
           "description": "Blackboard key to store extracted lines",
           "type": "string"
         }
@@ -3205,6 +3356,7 @@
           "type": "string"
         },
         "output_key": {
+          "$ref": "#/$defs/variableName",
           "description": "Blackboard key to store parsed key/value data",
           "type": "string"
         }
@@ -3345,6 +3497,7 @@
     "orchestrationSetVariableNode": {
       "properties": {
         "set_variable": {
+          "$ref": "#/$defs/variableName",
           "description": "Blackboard key to set",
           "type": "string"
         },

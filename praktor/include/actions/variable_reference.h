@@ -4,6 +4,8 @@
 #include <core/vstr.h>
 #include <string.h>
 
+#define PRAKTOR_VARIABLE_MAX_KEY_BYTES 128u
+
 static inline bool praktor_identifier_start(char ch) {
     return (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || ch == '_';
 }
@@ -27,11 +29,15 @@ static inline bool praktor_retired_variable_namespace(vstr name) {
     return name.len > 5u && !memcmp(name.data, "vars.", 5u);
 }
 
+static inline bool praktor_valid_variable_name(vstr name) {
+    return name.len && praktor_variable_name_size(name, true) == name.len &&
+           !praktor_retired_variable_namespace(name);
+}
+
 static inline vstr praktor_variable_reference(vstr text) {
     if (text.len >= 2u && text.data[0] == '$') {
         const vstr name = {text.data + 1u, text.len - 1u};
-        if (praktor_variable_name_size(name, true) == name.len &&
-            !praktor_retired_variable_namespace(name)) return name;
+        if (praktor_valid_variable_name(name)) return name;
     }
     return (vstr){0};
 }

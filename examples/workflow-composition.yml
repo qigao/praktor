@@ -24,8 +24,10 @@ tasks:
     depends_on: [audit]
     dynamic_tasks:
       items_variable: $devices
+      collect: $inspected_voltages
       template:
         name: device-$index
+        outputs: [$voltage_mv]
         actions:
           Sequence:
             - ParseJson: {input_key: $item, path: '$.voltage_mv', output_key: voltage_mv, result: one}
@@ -39,7 +41,13 @@ tasks:
                   match: '$audit_ready == "ready"'
   - name: confirm
     depends_on: [inspect]
-    assert:
-      guard:
-        fields: [chart.workflow.commissioned]
-        expr: '$chart.workflow.commissioned == 1'
+    sequence:
+      - ParseJson:
+          input_key: $inspected_voltages
+          path: '$[*].voltage_mv'
+          result: count
+          output_key: inspected_count
+      - assert:
+          guard:
+            fields: [chart.workflow.commissioned, inspected_count]
+            expr: '$chart.workflow.commissioned == 1 && $inspected_count == 2'

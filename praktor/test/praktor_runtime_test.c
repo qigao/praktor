@@ -1068,6 +1068,50 @@ spec("C11 Configurator CFlow CMeta runtime") {
         check_contains(execution.json,"\"inspect.north-0\":{\"status\":\"skipped\"}");
         check_contains(execution.json,"\"inspect\":{\"status\":\"skipped\"}");
     }
+    it("collects parallel member outputs in input order without sharing their keys") {
+        const char yaml[]=
+            "parallelism: 3\n"
+            "variables: {list: '[1,2]'}\n"
+            "tasks:\n"
+            "  - {name: peer, set_variable: ordinary_result, value: 3}\n"
+            "  - name: matrix\n"
+            "    dynamic_tasks:\n"
+            "      items_variable: $list\n"
+            "      collect: $results\n"
+            "      template: {name: item-$index, set_variable: matrix_reading, from: $item}\n"
+            "  - name: confirm\n"
+            "    depends_on: [matrix, peer]\n"
+            "    sequence:\n"
+            "      - ParseJson: {input_key: $results, path: '$[0].matrix_reading', output_key: first, result: one}\n"
+            "      - ParseJson: {input_key: $results, path: '$[1].matrix_reading', output_key: second, result: one}\n"
+            "      - assert: {guard: {fields: [first, second, matrix_reading, ordinary_result], expr: '$first == 1 && $second == 2 && $ordinary_result == 3 && !has($matrix_reading)'}}\n";
+        check(praktor_runtime_execute_task_yaml(yaml,sizeof yaml-1u,NULL,NULL,NULL,
+            "confirm",&execution)==PRAKTOR_RUNTIME_OK,"%s",execution.error);
+        check_contains(execution.json,"\"matrix.item-0\":{\"status\":\"success\",\"outputs\":{\"matrix_reading\":\"1\"}}");
+        check_contains(execution.json,"\"matrix.item-1\":{\"status\":\"success\",\"outputs\":{\"matrix_reading\":\"2\"}}");
+        check_contains(execution.json,"\"results\":\"[");
+    }
+    it("fails join settlement when the collected array exceeds the value budget") {
+        char text[3001],yaml[4096];
+        memset(text,'x',sizeof text-1u);
+        text[sizeof text-1u]='\0';
+        const int n=snprintf(yaml,sizeof yaml,
+            "variables: {list: '[1,2]', large: '%s'}\n"
+            "parallelism: 2\n"
+            "tasks:\n"
+            "  - name: matrix\n"
+            "    dynamic_tasks:\n"
+            "      items_variable: $list\n"
+            "      collect: $results\n"
+            "      template: {name: item-$index, set_variable: collected, from: $large}\n",
+            text);
+        check(n>0&&(size_t)n<sizeof yaml);
+        check_equal(praktor_runtime_execute_yaml(yaml,(size_t)n,NULL,NULL,NULL,&execution),
+                    PRAKTOR_RUNTIME_FAILED);
+        check_contains(execution.error,"exceed 4096 bytes");
+        check_contains(execution.json,"\"matrix\":{\"status\":\"failed\"}");
+        check_null(strstr(execution.json,"\"results\""));
+    }
     it("runs the dynamic join with its prerequisite for an empty array") {
         const char yaml[]=
             "variables: {list: '[]'}\n"
@@ -1075,11 +1119,11 @@ spec("C11 Configurator CFlow CMeta runtime") {
             "  - {name: setup, set_variable: ready, value: yes}\n"
             "  - name: inspect\n"
             "    depends_on: [setup]\n"
-            "    dynamic_tasks: {items_variable: $list, template: {name: item-$index, command: echo unused}}\n"
+            "    dynamic_tasks: {items_variable: $list, collect: $results, template: {name: item-$index, command: echo unused}}\n"
             "  - {name: confirm, depends_on: [inspect], set_variable: done, from: $ready}\n";
         check(praktor_runtime_execute_task_yaml(yaml,sizeof yaml-1u,NULL,NULL,NULL,
             "confirm",&execution)==PRAKTOR_RUNTIME_OK,"%s",execution.error);
-        check_contains(execution.json,"\"inspect\":{\"status\":\"success\"}");
+        check_contains(execution.json,"\"inspect\":{\"status\":\"success\",\"outputs\":{\"results\":\"[]\"}}");
         check_contains(execution.json,"\"done\":\"yes\"");
         check(strstr(execution.json,"inspect.item-")==NULL);
     }
@@ -1108,6 +1152,26 @@ spec("C11 Configurator CFlow CMeta runtime") {
             limits.max_tasks=cases[i].capacity;
             check_equal(praktor_runtime_execute_yaml(yaml,(size_t)n,&limits,NULL,NULL,&execution),
                         PRAKTOR_RUNTIME_INVALID);
+            check_null(execution.json);
+            check_contains(execution.error,cases[i].diagnostic);
+            praktor_runtime_result_destroy(&execution);
+        }
+    }
+    it("rejects ineffective runner fields and unreadable variable names at admission") {
+        static const struct {const char *yaml,*diagnostic;} cases[]={
+            {"tasks: [{name: go, command: echo unexpected, args: [extra]}]","'args'"},
+            {"tasks: [{name: go, command: echo unexpected, stdin: extra}]","'stdin'"},
+            {"variables: {vars.legacy: old}\ntasks: [{name: go, command: echo unexpected}]",
+             "invalid variable name in variables"},
+            {"tasks: [{name: go, vars: {1bad: invalid}, command: echo unexpected}]",
+             "invalid variable name in vars"},
+            {"tasks: [{name: go, set_variable: '1bad', value: text}]","literal variable name"},
+            {"tasks: [{name: go, sequence: [{Shell: {cmd: echo unexpected, output_key: 'a b'}}]}]",
+             "literal variable name"}
+        };
+        for(size_t i=0u;i<sizeof cases/sizeof *cases;++i) {
+            check(praktor_runtime_execute_yaml(cases[i].yaml,strlen(cases[i].yaml),
+                NULL,NULL,NULL,&execution)!=PRAKTOR_RUNTIME_OK);
             check_null(execution.json);
             check_contains(execution.error,cases[i].diagnostic);
             praktor_runtime_result_destroy(&execution);

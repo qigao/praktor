@@ -131,6 +131,7 @@ static int publish_result(praktor_tool_action *action,const praktor_service_resu
   if (action->native.value_set(action->native.value_user, "shell_exit_code", exit_code) !=
       PRAKTOR_BT_VALUE_OK)
     return SALTS_ENOBUFS;
+  action->has_exit_code = true;
   if (!result->success) {
     if (request->error && request->error_capacity)
       fmt_text(request->error,request->error_capacity,result->error);
@@ -157,6 +158,7 @@ static int tick(void *self,const praktor_leaf_request *request,salts_bt_node_sta
     return action->native.tick_typed_leaf(action->native.user,request,status);
   if (request->in_parallel_branch) return SALTS_ENOTSUP;
   if (!action->active) {
+    action->has_exit_code = false;
     size_t i = 0u;
     while (i < action->count && action->bindings[i].node_index != request->node_index) ++i;
     if (i == action->count) return SALTS_EINVAL;
