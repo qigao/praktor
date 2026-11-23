@@ -1,0 +1,71 @@
+{
+  "include": [
+    "slates/Platforms.json"
+  ],
+  "env": [
+    "VCPKG_INSTALLED_DIR",
+    "SALTS_BASE_ROOT",
+    "CMETA_ROOT",
+    "SALTS_UTILS_ROOT",
+    "LLVM_MINGW_ROOT",
+    "VSDEVCMD_BAT",
+    "ANDROID_NDK_TOOLCHAIN_DIR"
+  ],
+  "defaultPreset": "release",
+  "modules": [
+    "third_party",
+    "shared",
+    "praktor",
+    "app"
+  ],
+  "presets": {
+    "base": {
+      "cStd": "c11",
+      "cxxStd": "c++17",
+      "tests": false
+    },
+    "release": {
+      "config": "release",
+      "options": {
+        "optimization": "speed"
+      },
+      "defines": {
+        "NDEBUG": null
+      },
+      "inherits": "base"
+    },
+    "debug": {
+      "inherits": "base",
+      "config": "debug",
+      "options": {
+        "optimization": "none",
+        "debugInfo": "full"
+      }
+    },
+    "tests": {
+      "inherits": "release",
+      "tests": true
+    },
+    "debug-mingw": {
+      "inherits": "debug",
+      "targetPlatform": "windows-x64",
+      "toolchain": "llvm-mingw-x64"
+    },
+    "debug-msvc": {
+      "inherits": "debug",
+      "targetPlatform": "windows-x64",
+      "toolchain": "msvc-win64",
+      "vsDevCmd": "${envPath:VSDEVCMD_BAT}"
+    },
+    "release-msvc": {
+      "inherits": "release",
+      "targetPlatform": "windows-x64",
+      "toolchain": "msvc-win64",
+      "vsDevCmd": "${envPath:VSDEVCMD_BAT}"
+    },
+    "debug-tests": {
+      "inherits": "debug",
+      "tests": true
+    }
+  }
+}

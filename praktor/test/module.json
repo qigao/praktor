@@ -1,0 +1,1569 @@
+{
+  "include": [
+    "actions/module.json"
+  ],
+  "targets": {
+    "expression_evaluator_c_test": {
+      "kind": "executable",
+      "sources": {
+        "files": [
+          "expression_evaluator_test.c",
+          "../src/expressions/expression_evaluator.c",
+          "../src/expressions/expression_lexer.c",
+          "../src/expressions/expression_regex_salts.c"
+        ]
+      },
+      "private": {
+        "deps": [
+          "saltsbase_core",
+          "saltsbase_tinytest"
+        ],
+        "includeDirs": [
+          "../include",
+          "../../shared/process/include",
+          "../src/runtime",
+          "../src/profile",
+          "../src/util"
+        ]
+      },
+      "when": {
+        "native": true
+      },
+      "test": {
+        "labels": [
+          "praktor"
+        ]
+      }
+    },
+    "expression_lexer_test": {
+      "kind": "executable",
+      "sources": {
+        "files": [
+          "expression_lexer_test.c",
+          "../src/expressions/expression_lexer.c"
+        ]
+      },
+      "private": {
+        "deps": [
+          "saltsbase_core",
+          "saltsbase_tinytest"
+        ],
+        "includeDirs": [
+          "../include",
+          "../../shared/process/include",
+          "../src/runtime",
+          "../src/profile",
+          "../src/util"
+        ]
+      },
+      "when": {
+        "native": true
+      },
+      "test": {
+        "labels": [
+          "praktor"
+        ]
+      }
+    },
+    "orch_tree_c_test": {
+      "kind": "executable",
+      "sources": {
+        "files": [
+          "orch_tree_test.c",
+          "../src/yml/orch_tree.c"
+        ]
+      },
+      "private": {
+        "deps": [
+          "saltsbase_core",
+          "saltsbase_tinytest"
+        ],
+        "includeDirs": [
+          "../include",
+          "../../shared/process/include",
+          "../src/runtime",
+          "../src/profile",
+          "../src/util"
+        ]
+      },
+      "when": {
+        "native": true
+      },
+      "test": {
+        "labels": [
+          "praktor"
+        ]
+      }
+    },
+    "orch_tree_fault_test": {
+      "kind": "executable",
+      "sources": {
+        "files": [
+          "orch_tree_fault_test.c"
+        ]
+      },
+      "private": {
+        "deps": [
+          "saltsbase_core",
+          "saltsbase_tinytest"
+        ],
+        "includeDirs": [
+          "../include"
+        ]
+      },
+      "when": {
+        "native": true
+      },
+      "test": {
+        "labels": [
+          "praktor"
+        ]
+      }
+    },
+    "orch_workflow_c_test": {
+      "kind": "executable",
+      "sources": {
+        "files": [
+          "orch_workflow_c_test.c",
+          "../src/yml/orch_yaml.c",
+          "../src/yml/orch_tree.c",
+          "../src/yml/yaml_document.c",
+          "../src/yml/yaml_fields.c",
+          "../src/yml/yaml_task_metadata.c",
+          "../src/yml/yaml_task_fields.c",
+          "../src/yml/yaml_workflow_metadata.c",
+          "../src/yml/workflow_dependencies.c"
+        ]
+      },
+      "private": {
+        "deps": [
+          "saltsbase_yaml",
+          "cmeta_cstl",
+          "saltsbase_json",
+          "saltsbase_tinytest",
+          "cmeta_cmeta",
+          "saltsbase_core",
+          "saltsbase_query"
+        ],
+        "includeDirs": [
+          "../include",
+          "../include",
+          "../../shared/process/include",
+          "../src/runtime",
+          "../src/profile",
+          "../src/util"
+        ]
+      },
+      "when": {
+        "native": true
+      },
+      "test": {
+        "labels": [
+          "praktor"
+        ]
+      }
+    },
+    "orch_yaml_c_test": {
+      "kind": "executable",
+      "sources": {
+        "files": [
+          "orch_yaml_test.c",
+          "../src/yml/orch_yaml.c",
+          "../src/yml/orch_tree.c",
+          "../src/yml/yaml_document.c",
+          "../src/yml/yaml_fields.c"
+        ]
+      },
+      "private": {
+        "deps": [
+          "saltsbase_yaml",
+          "saltsbase_tinytest",
+          "saltsbase_json",
+          "saltsbase_core",
+          "saltsbase_query"
+        ],
+        "includeDirs": [
+          "../include",
+          "../../shared/process/include",
+          "../src/runtime",
+          "../src/profile",
+          "../src/util"
+        ]
+      },
+      "when": {
+        "native": true
+      },
+      "test": {
+        "labels": [
+          "praktor"
+        ]
+      }
+    },
+    "orch_yaml_fault_test": {
+      "kind": "executable",
+      "sources": {
+        "files": [
+          "orch_yaml_fault_test.c",
+          "../src/yml/orch_tree.c",
+          "../src/yml/yaml_document.c",
+          "../src/yml/yaml_fields.c"
+        ]
+      },
+      "private": {
+        "deps": [
+          "saltsbase_yaml",
+          "saltsbase_tinytest",
+          "saltsbase_json",
+          "saltsbase_core",
+          "saltsbase_query"
+        ],
+        "includeDirs": [
+          "../include",
+          "../include",
+          "../../shared/process/include",
+          "../src/runtime",
+          "../src/profile",
+          "../src/util"
+        ]
+      },
+      "when": {
+        "native": true
+      },
+      "test": {
+        "labels": [
+          "praktor"
+        ]
+      }
+    },
+    "praktor_c_api_test": {
+      "kind": "executable",
+      "sources": {
+        "files": [
+          "praktor_c_api_test.c"
+        ]
+      },
+      "private": {
+        "deps": [
+          "praktor_runtime",
+          "saltsbase_tinytest",
+          "saltsbase_json",
+          "cmeta_cmeta",
+          "saltsbase_core",
+          "saltsbase_query"
+        ],
+        "includeDirs": [
+          "../include"
+        ]
+      },
+      "when": {
+        "native": true
+      },
+      "test": {
+        "labels": [
+          "praktor"
+        ]
+      }
+    },
+    "praktor_cli_test": {
+      "kind": "executable",
+      "sources": {
+        "files": [
+          "praktor_cli_test.c"
+        ]
+      },
+      "private": {
+        "deps": [
+          "saltsbase_json",
+          "saltsbase_tinytest",
+          "saltsbase_core",
+          "saltsbase_query"
+        ],
+        "defines": {
+          "PRAKTOR_CLI_BASIC_EXAMPLE": "\"$root/examples/basic.yml\"",
+          "PRAKTOR_CLI_ENV_WORKFLOW": "\"$builddir/fixtures/cli-env.yml\"",
+          "PRAKTOR_CLI_INVALID_DEFAULTS_WORKFLOW": "\"$builddir/fixtures/cli-invalid-defaults.yml\"",
+          "PRAKTOR_CLI_PATH": "\"$builddir/bin/praktor${host:exe}\"",
+          "PRAKTOR_CLI_TASK_WORKFLOW": "\"$root/praktor/test/data/cli-tasks.yml\"",
+          "PRAKTOR_CLI_TIMEOUT_WORKFLOW": "\"$root/praktor/test/data/cli-timeout.yml\"",
+          "PRAKTOR_CLI_WORKFLOW": "\"$root/praktor/test/data/cli-shell.yml\""
+        }
+      },
+      "when": {
+        "native": true
+      },
+      "test": {
+        "labels": [
+          "praktor"
+        ],
+        "timeout": 30
+      },
+      "runtimeDeps": [
+        "praktor"
+      ],
+      "preTasks": [
+        {
+          "name": "configure-cli-invalid-defaults",
+          "tool": "praktor_fixture_configure",
+          "inputs": [
+            "data/cli-invalid-defaults.yml.in"
+          ],
+          "outputs": [
+            "$builddir/fixtures/cli-invalid-defaults.yml"
+          ],
+          "args": [
+            "$moduledir/data/cli-invalid-defaults.yml.in",
+            "$builddir/fixtures/cli-invalid-defaults.yml",
+            "@CMAKE_CURRENT_SOURCE_DIR@",
+            "$moduledir"
+          ]
+        }
+      ],
+      "variants": [
+        {
+          "when": {
+            "os": "windows"
+          },
+          "preTasks": [
+            {
+              "name": "configure-cli-env",
+              "tool": "praktor_fixture_configure",
+              "inputs": [
+                "data/cli-env.yml.in"
+              ],
+              "outputs": [
+                "$builddir/fixtures/cli-env.yml"
+              ],
+              "args": [
+                "$moduledir/data/cli-env.yml.in",
+                "$builddir/fixtures/cli-env.yml",
+                "@CMAKE_CURRENT_SOURCE_DIR@",
+                "$moduledir",
+                "@PRAKTOR_CLI_ENV_COMMAND@",
+                "echo %PRAKTOR_CLI_ENV_TEST_VALUE%"
+              ]
+            }
+          ]
+        },
+        {
+          "when": {
+            "os": [
+              "linux",
+              "macos",
+              "android"
+            ]
+          },
+          "preTasks": [
+            {
+              "name": "configure-cli-env",
+              "tool": "praktor_fixture_configure",
+              "inputs": [
+                "data/cli-env.yml.in"
+              ],
+              "outputs": [
+                "$builddir/fixtures/cli-env.yml"
+              ],
+              "args": [
+                "$moduledir/data/cli-env.yml.in",
+                "$builddir/fixtures/cli-env.yml",
+                "@CMAKE_CURRENT_SOURCE_DIR@",
+                "$moduledir",
+                "@PRAKTOR_CLI_ENV_COMMAND@",
+                "echo $PRAKTOR_CLI_ENV_TEST_VALUE"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "praktor_execution_fixture": {
+      "kind": "executable",
+      "sources": {
+        "files": [
+          "service_fixture.c"
+        ]
+      },
+      "private": {
+        "deps": [
+          "saltsbase_core"
+        ]
+      },
+      "when": {
+        "native": true
+      },
+      "testOnly": true
+    },
+    "praktor_file_hash_c_test": {
+      "kind": "executable",
+      "sources": {
+        "files": [
+          "file_hash_c_test.c",
+          "../src/util/file_hash.c"
+        ]
+      },
+      "private": {
+        "deps": [
+          "saltsbase_tinytest",
+          "saltsbase_core"
+        ],
+        "includeDirs": [
+          "../include",
+          "../../shared/process/include",
+          "../src/runtime",
+          "../src/profile",
+          "../src/util"
+        ]
+      },
+      "when": {
+        "native": true
+      },
+      "test": {
+        "labels": [
+          "praktor"
+        ]
+      }
+    },
+    "praktor_init_c_test": {
+      "kind": "executable",
+      "sources": {
+        "files": [
+          "praktor_init_c_test.c",
+          "../src/util/praktor_init.c"
+        ]
+      },
+      "private": {
+        "deps": [
+          "cmeta_cstl",
+          "saltsbase_tinytest",
+          "cmeta_cmeta",
+          "saltsbase_core"
+        ],
+        "includeDirs": [
+          "../include",
+          "../../shared/process/include",
+          "../src/runtime",
+          "../src/profile",
+          "../src/util"
+        ]
+      },
+      "when": {
+        "native": true
+      },
+      "test": {
+        "labels": [
+          "praktor"
+        ]
+      }
+    },
+    "praktor_runtime_c_test": {
+      "kind": "executable",
+      "sources": {
+        "files": [
+          "praktor_runtime_test.c",
+          "../src/providers/process.c",
+          "../src/actions/tool.c",
+          "../src/yml/yaml_service.c",
+          "../src/runtime/runtime.c",
+          "../src/runtime/statechart.c",
+          "../src/runtime/statechart_plan.c",
+          "../src/runtime/component_host.c",
+          "../src/yml/workflow_snapshot.c",
+          "../src/yml/yaml_document.c",
+          "../src/yml/yaml_fields.c",
+          "../src/yml/yaml_workflow_metadata.c",
+          "../src/yml/yaml_task_fields.c",
+          "../src/yml/yaml_task_metadata.c",
+          "../src/yml/yaml_action_params.c",
+          "../src/yml/orch_yaml.c",
+          "../src/yml/orch_tree.c",
+          "../src/yml/workflow_dependencies.c",
+          "../src/yml/workflow_dag_state.c",
+          "../src/yml/workflow_task_registry.c",
+          "../src/actions/orch_session_plan.c",
+          "../src/actions/plan.c",
+          "../src/actions/session.c",
+          "../src/actions/session_values.c",
+          "../src/actions/session_controls.c",
+          "../src/actions/tree_adapter.c",
+          "../src/actions/native_host.c",
+          "../src/actions/value_store.c",
+          "../src/actions/output_scan.c",
+          "../src/actions/regex_pcre2.c",
+          "../src/actions/workflow_snapshot_values.c",
+          "../src/actions/workflow_parallel_process_guard.c",
+          "../src/actions/workflow_owner_settlement.c",
+          "../src/actions/workflow_parallel_commit.c",
+          "../src/actions/condition.c",
+          "../src/actions/condition_expr.c",
+          "../src/expressions/expression_lexer.c",
+          "../src/actions/json_selection.c"
+        ]
+      },
+      "private": {
+        "deps": [
+          "cmeta_cmeta",
+          "cmeta_ace",
+          "cmeta_cflow",
+          "saltsbase_yaml",
+          "cmeta_cstl",
+          "saltsbase_json",
+          "salts_behavior_tree",
+          "praktor_process_driver",
+          "pcre2_8",
+          "praktor_process_retainer",
+          "saltsbase_native_io",
+          "saltsbase_tinytest",
+          "saltsbase_selector",
+          "saltsbase_query",
+          "cmeta_plugin",
+          "saltsbase_core"
+        ],
+        "includeDirs": [
+          "../src/runtime",
+          "../include",
+          "../../shared/process/include",
+          "../src/profile",
+          "../src/util",
+          "../../shared/behavior-tree/include"
+        ],
+        "defines": {
+          "PRAKTOR_DEVICE_AUDIT_LIBRARY": "\"$root/examples/libraries/device-audit.yml\""
+        }
+      },
+      "when": {
+        "native": true
+      },
+      "test": {
+        "labels": [
+          "praktor"
+        ],
+        "timeout": 45,
+        "environment": [
+          "PRAKTOR_TIMEOUT_MS=500",
+          "PRAKTOR_STREAM_OUTPUT=false"
+        ]
+      }
+    },
+    "praktor_service_test": {
+      "kind": "executable",
+      "sources": {
+        "files": [
+          "service_test.c",
+          "../src/runtime/component_host.c",
+          "../src/providers/process.c",
+          "../src/actions/tool.c",
+          "../src/yml/yaml_service.c",
+          "../src/yml/yaml_document.c",
+          "../src/yml/yaml_fields.c",
+          "../src/yml/yaml_task_fields.c"
+        ]
+      },
+      "private": {
+        "deps": [
+          "praktor_runtime",
+          "cmeta_ace",
+          "cmeta_cstl",
+          "saltsbase_yaml",
+          "saltsbase_json",
+          "saltsbase_tinytest",
+          "salts_behavior_tree",
+          "praktor_process_driver",
+          "cmeta_plugin",
+          "cmeta_cmeta",
+          "saltsbase_query",
+          "praktor_process_retainer",
+          "saltsbase_native_io",
+          "saltsbase_core"
+        ],
+        "includeDirs": [
+          "../include",
+          "../src/runtime",
+          "../../shared/behavior-tree/include",
+          "../../shared/process/include"
+        ],
+        "defines": {
+          "PRAKTOR_SERVICE_CURL": "\"$root/examples/services/download.yml\"",
+          "PRAKTOR_SERVICE_DOTENV": "\"$root/praktor/test/data/cli.env\"",
+          "PRAKTOR_SERVICE_DUPLICATE_CAPABILITY": "\"$root/praktor/test/data/service-duplicate-capability.yml\"",
+          "PRAKTOR_SERVICE_ECHO": "\"$builddir/fixtures/echo.yml\"",
+          "PRAKTOR_SERVICE_ENV": "\"$builddir/fixtures/env.yml\"",
+          "PRAKTOR_SERVICE_FAIL": "\"$builddir/fixtures/fail.yml\"",
+          "PRAKTOR_SERVICE_LONG_SLEEP": "\"$builddir/fixtures/sleep-long.yml\"",
+          "PRAKTOR_SERVICE_OUTPUT_A": "\"$builddir/service-first with spaces.txt\"",
+          "PRAKTOR_SERVICE_OUTPUT_B": "\"$builddir/service-second.txt\"",
+          "PRAKTOR_SERVICE_PAYLOAD_FILE": "\"$root/praktor/test/data/service-payload.txt\"",
+          "PRAKTOR_SERVICE_PAYLOAD_URL": "\"file://$root/praktor/test/data/service-payload.txt\"",
+          "PRAKTOR_SERVICE_SLEEP": "\"$builddir/fixtures/sleep.yml\"",
+          "PRAKTOR_SERVICE_UNSUPPORTED": "\"$root/praktor/test/data/service-unsupported.yml\""
+        }
+      },
+      "when": {
+        "native": true
+      },
+      "test": {
+        "labels": [
+          "praktor"
+        ],
+        "timeout": 30
+      },
+      "runtimeDeps": [
+        "praktor_execution_fixture"
+      ],
+      "variants": [
+        {
+          "when": {
+            "os": "windows"
+          },
+          "private": {
+            "defines": {
+              "PRAKTOR_SERVICE_PAYLOAD_URL": "\"file:///$root/praktor/test/data/service-payload.txt\""
+            }
+          }
+        }
+      ],
+      "preTasks": [
+        {
+          "name": "configure-service-echo",
+          "tool": "praktor_fixture_configure",
+          "inputs": [
+            "data/execution-provider.yml.in"
+          ],
+          "outputs": [
+            "$builddir/fixtures/echo.yml"
+          ],
+          "args": [
+            "$moduledir/data/execution-provider.yml.in",
+            "$builddir/fixtures/echo.yml",
+            "@FIXTURE_PROGRAM@",
+            "$builddir/bin/praktor_execution_fixture${host:exe}",
+            "@FIXTURE_ARGS@",
+            "['emit', '$text']",
+            "@FIXTURE_TIMEOUT@",
+            "5000"
+          ]
+        },
+        {
+          "name": "configure-service-sleep",
+          "tool": "praktor_fixture_configure",
+          "inputs": [
+            "data/execution-provider.yml.in"
+          ],
+          "outputs": [
+            "$builddir/fixtures/sleep.yml"
+          ],
+          "args": [
+            "$moduledir/data/execution-provider.yml.in",
+            "$builddir/fixtures/sleep.yml",
+            "@FIXTURE_PROGRAM@",
+            "$builddir/bin/praktor_execution_fixture${host:exe}",
+            "@FIXTURE_ARGS@",
+            "['sleep']",
+            "@FIXTURE_TIMEOUT@",
+            "50"
+          ]
+        },
+        {
+          "name": "configure-service-sleep-long",
+          "tool": "praktor_fixture_configure",
+          "inputs": [
+            "data/execution-provider.yml.in"
+          ],
+          "outputs": [
+            "$builddir/fixtures/sleep-long.yml"
+          ],
+          "args": [
+            "$moduledir/data/execution-provider.yml.in",
+            "$builddir/fixtures/sleep-long.yml",
+            "@FIXTURE_PROGRAM@",
+            "$builddir/bin/praktor_execution_fixture${host:exe}",
+            "@FIXTURE_ARGS@",
+            "['sleep']",
+            "@FIXTURE_TIMEOUT@",
+            "5000"
+          ]
+        },
+        {
+          "name": "configure-service-env",
+          "tool": "praktor_fixture_configure",
+          "inputs": [
+            "data/execution-provider.yml.in"
+          ],
+          "outputs": [
+            "$builddir/fixtures/env.yml"
+          ],
+          "args": [
+            "$moduledir/data/execution-provider.yml.in",
+            "$builddir/fixtures/env.yml",
+            "@FIXTURE_PROGRAM@",
+            "$builddir/bin/praktor_execution_fixture${host:exe}",
+            "@FIXTURE_ARGS@",
+            "['env', 'PRAKTOR_CLI_ENV_TEST_VALUE']",
+            "@FIXTURE_TIMEOUT@",
+            "5000"
+          ]
+        },
+        {
+          "name": "configure-service-fail",
+          "tool": "praktor_fixture_configure",
+          "inputs": [
+            "data/execution-provider.yml.in"
+          ],
+          "outputs": [
+            "$builddir/fixtures/fail.yml"
+          ],
+          "args": [
+            "$moduledir/data/execution-provider.yml.in",
+            "$builddir/fixtures/fail.yml",
+            "@FIXTURE_PROGRAM@",
+            "$builddir/bin/praktor_execution_fixture${host:exe}",
+            "@FIXTURE_ARGS@",
+            "['fail']",
+            "@FIXTURE_TIMEOUT@",
+            "5000"
+          ]
+        }
+      ]
+    },
+    "structured_document_query_c_test": {
+      "kind": "executable",
+      "sources": {
+        "files": [
+          "structured_document_query_test.c",
+          "../src/data/structured_document_query.c"
+        ]
+      },
+      "private": {
+        "deps": [
+          "saltsbase_json",
+          "saltsbase_yaml",
+          "saltsbase_yaml_json",
+          "saltsbase_xml",
+          "saltsbase_csv",
+          "saltsbase_tinytest",
+          "saltsbase_core",
+          "saltsbase_query"
+        ],
+        "includeDirs": [
+          "../include",
+          "../../shared/process/include",
+          "../src/runtime",
+          "../src/profile",
+          "../src/util"
+        ]
+      },
+      "when": {
+        "native": true
+      },
+      "test": {
+        "labels": [
+          "praktor"
+        ]
+      }
+    },
+    "workflow_contract_value_c_test": {
+      "kind": "executable",
+      "sources": {
+        "files": [
+          "workflow_contract_value_test.c",
+          "../src/data/workflow_contract_value.c",
+          "../src/data/workflow_value.c"
+        ]
+      },
+      "private": {
+        "deps": [
+          "saltsbase_json",
+          "saltsbase_core",
+          "saltsbase_tinytest",
+          "saltsbase_query"
+        ],
+        "includeDirs": [
+          "../include",
+          "../../shared/process/include",
+          "../src/runtime",
+          "../src/profile",
+          "../src/util"
+        ]
+      },
+      "when": {
+        "native": true
+      },
+      "test": {
+        "labels": [
+          "praktor"
+        ]
+      }
+    },
+    "workflow_dag_state_c_test": {
+      "kind": "executable",
+      "sources": {
+        "files": [
+          "workflow_dag_state_test.c",
+          "../src/yml/workflow_dag_state.c",
+          "../src/yml/workflow_dependencies.c"
+        ]
+      },
+      "private": {
+        "deps": [
+          "saltsbase_json",
+          "saltsbase_tinytest",
+          "saltsbase_core",
+          "saltsbase_query"
+        ],
+        "includeDirs": [
+          "../include",
+          "../../shared/process/include",
+          "../src/runtime",
+          "../src/profile",
+          "../src/util"
+        ]
+      },
+      "when": {
+        "native": true
+      },
+      "test": {
+        "labels": [
+          "praktor"
+        ]
+      }
+    },
+    "workflow_dependencies_fault_test": {
+      "kind": "executable",
+      "sources": {
+        "files": [
+          "workflow_dependencies_fault_test.c"
+        ]
+      },
+      "private": {
+        "deps": [
+          "saltsbase_json",
+          "saltsbase_tinytest",
+          "saltsbase_core",
+          "saltsbase_query"
+        ],
+        "includeDirs": [
+          "../include"
+        ]
+      },
+      "when": {
+        "native": true
+      },
+      "test": {
+        "labels": [
+          "praktor"
+        ]
+      }
+    },
+    "workflow_profile_c_test": {
+      "kind": "executable",
+      "sources": {
+        "files": [
+          "workflow_profile_c_test.c",
+          "../src/profile/workflow_profile.c"
+        ]
+      },
+      "private": {
+        "deps": [
+          "saltsbase_tinytest",
+          "saltsbase_core"
+        ],
+        "includeDirs": [
+          "../include",
+          "../../shared/process/include",
+          "../src/runtime",
+          "../src/profile",
+          "../src/util"
+        ]
+      },
+      "when": {
+        "native": true
+      },
+      "test": {
+        "labels": [
+          "praktor"
+        ]
+      }
+    },
+    "workflow_snapshot_c_test": {
+      "kind": "executable",
+      "sources": {
+        "files": [
+          "workflow_snapshot_test.c",
+          "../src/yml/workflow_snapshot.c",
+          "../src/yml/yaml_document.c",
+          "../src/yml/yaml_fields.c",
+          "../src/yml/yaml_workflow_metadata.c",
+          "../src/yml/yaml_task_fields.c",
+          "../src/yml/yaml_task_metadata.c",
+          "../src/yml/yaml_action_params.c",
+          "../src/yml/orch_yaml.c",
+          "../src/yml/orch_tree.c",
+          "../src/yml/workflow_dependencies.c"
+        ]
+      },
+      "private": {
+        "deps": [
+          "saltsbase_yaml",
+          "cmeta_cstl",
+          "saltsbase_json",
+          "saltsbase_tinytest",
+          "cmeta_cmeta",
+          "saltsbase_core",
+          "saltsbase_query"
+        ],
+        "includeDirs": [
+          "../include",
+          "../include",
+          "../../shared/process/include",
+          "../src/runtime",
+          "../src/profile",
+          "../src/util"
+        ]
+      },
+      "when": {
+        "native": true
+      },
+      "test": {
+        "labels": [
+          "praktor"
+        ]
+      }
+    },
+    "workflow_snapshot_fault_test": {
+      "kind": "executable",
+      "sources": {
+        "files": [
+          "workflow_snapshot_fault_test.c",
+          "../src/yml/yaml_document.c",
+          "../src/yml/yaml_fields.c",
+          "../src/yml/yaml_workflow_metadata.c",
+          "../src/yml/yaml_task_fields.c",
+          "../src/yml/yaml_task_metadata.c",
+          "../src/yml/yaml_action_params.c",
+          "../src/yml/orch_yaml.c",
+          "../src/yml/orch_tree.c",
+          "../src/yml/workflow_dependencies.c"
+        ]
+      },
+      "private": {
+        "deps": [
+          "saltsbase_yaml",
+          "cmeta_cstl",
+          "saltsbase_json",
+          "saltsbase_tinytest",
+          "cmeta_cmeta",
+          "saltsbase_core",
+          "saltsbase_query"
+        ],
+        "includeDirs": [
+          "../include",
+          "../include",
+          "../../shared/process/include",
+          "../src/runtime",
+          "../src/profile",
+          "../src/util"
+        ]
+      },
+      "when": {
+        "native": true
+      },
+      "test": {
+        "labels": [
+          "praktor"
+        ]
+      }
+    },
+    "workflow_task_registry_c_test": {
+      "kind": "executable",
+      "sources": {
+        "files": [
+          "workflow_task_registry_test.c",
+          "../src/yml/workflow_task_registry.c",
+          "../src/yml/workflow_snapshot.c",
+          "../src/yml/yaml_document.c",
+          "../src/yml/yaml_fields.c",
+          "../src/yml/yaml_workflow_metadata.c",
+          "../src/yml/yaml_task_fields.c",
+          "../src/yml/yaml_task_metadata.c",
+          "../src/yml/yaml_action_params.c",
+          "../src/yml/orch_yaml.c",
+          "../src/yml/orch_tree.c",
+          "../src/yml/workflow_dependencies.c"
+        ]
+      },
+      "private": {
+        "deps": [
+          "saltsbase_yaml",
+          "cmeta_cstl",
+          "saltsbase_json",
+          "saltsbase_tinytest",
+          "cmeta_cmeta",
+          "saltsbase_core",
+          "saltsbase_query"
+        ],
+        "includeDirs": [
+          "../include",
+          "../include",
+          "../../shared/process/include",
+          "../src/runtime",
+          "../src/profile",
+          "../src/util"
+        ]
+      },
+      "when": {
+        "native": true
+      },
+      "test": {
+        "labels": [
+          "praktor"
+        ]
+      }
+    },
+    "workflow_task_registry_fault_test": {
+      "kind": "executable",
+      "sources": {
+        "files": [
+          "workflow_task_registry_fault_test.c",
+          "../src/yml/workflow_snapshot.c",
+          "../src/yml/yaml_document.c",
+          "../src/yml/yaml_fields.c",
+          "../src/yml/yaml_workflow_metadata.c",
+          "../src/yml/yaml_task_fields.c",
+          "../src/yml/yaml_task_metadata.c",
+          "../src/yml/yaml_action_params.c",
+          "../src/yml/orch_yaml.c",
+          "../src/yml/orch_tree.c",
+          "../src/yml/workflow_dependencies.c"
+        ]
+      },
+      "private": {
+        "deps": [
+          "saltsbase_yaml",
+          "cmeta_cstl",
+          "saltsbase_json",
+          "saltsbase_tinytest",
+          "cmeta_cmeta",
+          "saltsbase_core",
+          "saltsbase_query"
+        ],
+        "includeDirs": [
+          "../include",
+          "../include",
+          "../../shared/process/include",
+          "../src/runtime",
+          "../src/profile",
+          "../src/util"
+        ]
+      },
+      "when": {
+        "native": true
+      },
+      "test": {
+        "labels": [
+          "praktor"
+        ]
+      }
+    },
+    "workflow_value_c_test": {
+      "kind": "executable",
+      "sources": {
+        "files": [
+          "workflow_value_test.c",
+          "../src/data/workflow_value.c"
+        ]
+      },
+      "private": {
+        "deps": [
+          "saltsbase_json",
+          "saltsbase_core",
+          "saltsbase_tinytest",
+          "saltsbase_query"
+        ],
+        "includeDirs": [
+          "../include",
+          "../../shared/process/include",
+          "../src/runtime",
+          "../src/profile",
+          "../src/util"
+        ]
+      },
+      "when": {
+        "native": true
+      },
+      "test": {
+        "labels": [
+          "praktor"
+        ]
+      }
+    },
+    "workflow_value_fault_test": {
+      "kind": "executable",
+      "sources": {
+        "files": [
+          "workflow_value_fault_test.c"
+        ]
+      },
+      "private": {
+        "deps": [
+          "saltsbase_json",
+          "saltsbase_core",
+          "saltsbase_tinytest",
+          "saltsbase_query"
+        ],
+        "includeDirs": [
+          "../include"
+        ]
+      },
+      "when": {
+        "native": true
+      },
+      "test": {
+        "labels": [
+          "praktor"
+        ]
+      },
+      "variants": [
+        {
+          "when": {
+            "os": [
+              "linux",
+              "macos",
+              "android"
+            ]
+          },
+          "private": {
+            "libs": [
+              "m"
+            ]
+          }
+        }
+      ]
+    },
+    "yaml_action_c_test": {
+      "kind": "executable",
+      "sources": {
+        "files": [
+          "yaml_action_test.c",
+          "../src/yml/yaml_action_params.c",
+          "../src/yml/yaml_document.c",
+          "../src/yml/yaml_fields.c",
+          "../src/yml/orch_tree.c",
+          "../src/actions/output_scan.c"
+        ]
+      },
+      "private": {
+        "deps": [
+          "saltsbase_yaml",
+          "praktor_process_native",
+          "saltsbase_tinytest",
+          "saltsbase_query",
+          "saltsbase_core"
+        ],
+        "includeDirs": [
+          "../include",
+          "../../shared/process/include",
+          "../src/runtime",
+          "../src/profile",
+          "../src/util"
+        ],
+        "defines": {
+          "PRAKTOR_YAML_ACTION_CORPUS_DIR": "\"$root/praktor/test/data\""
+        }
+      },
+      "when": {
+        "native": true
+      },
+      "test": {
+        "labels": [
+          "praktor"
+        ]
+      }
+    },
+    "yaml_action_fault_test": {
+      "kind": "executable",
+      "sources": {
+        "files": [
+          "yaml_action_fault_test.c"
+        ]
+      },
+      "private": {
+        "deps": [
+          "cmeta_cstl",
+          "saltsbase_yaml",
+          "saltsbase_tinytest",
+          "cmeta_cmeta",
+          "saltsbase_core",
+          "saltsbase_query"
+        ],
+        "includeDirs": [
+          "../include",
+          "../../shared/process/include"
+        ]
+      },
+      "when": {
+        "native": true
+      },
+      "test": {
+        "labels": [
+          "praktor"
+        ]
+      }
+    },
+    "yaml_contract_c_test": {
+      "kind": "executable",
+      "sources": {
+        "files": [
+          "yaml_contract_test.c",
+          "../src/yml/yaml_contract.c",
+          "../src/yml/yaml_value.c",
+          "../src/yml/yaml_document.c",
+          "../src/yml/yaml_fields.c",
+          "../src/data/workflow_contract_value.c",
+          "../src/data/workflow_value.c"
+        ]
+      },
+      "private": {
+        "deps": [
+          "saltsbase_yaml",
+          "saltsbase_json",
+          "saltsbase_tinytest",
+          "saltsbase_core",
+          "saltsbase_query"
+        ],
+        "includeDirs": [
+          "../include",
+          "../../shared/process/include",
+          "../src/runtime",
+          "../src/profile",
+          "../src/util"
+        ]
+      },
+      "when": {
+        "native": true
+      },
+      "test": {
+        "labels": [
+          "praktor"
+        ]
+      }
+    },
+    "yaml_document_c_test": {
+      "kind": "executable",
+      "sources": {
+        "files": [
+          "yaml_document_test.c",
+          "../src/yml/yaml_document.c",
+          "../src/yml/yaml_fields.c"
+        ]
+      },
+      "private": {
+        "deps": [
+          "saltsbase_yaml",
+          "saltsbase_core",
+          "saltsbase_tinytest",
+          "saltsbase_query"
+        ],
+        "includeDirs": [
+          "../include",
+          "../../shared/process/include",
+          "../src/runtime",
+          "../src/profile",
+          "../src/util"
+        ]
+      },
+      "when": {
+        "native": true
+      },
+      "test": {
+        "labels": [
+          "praktor"
+        ]
+      }
+    },
+    "yaml_fields_c_test": {
+      "kind": "executable",
+      "sources": {
+        "files": [
+          "yaml_fields_test.c",
+          "../src/yml/yaml_document.c",
+          "../src/yml/yaml_fields.c"
+        ]
+      },
+      "private": {
+        "deps": [
+          "saltsbase_yaml",
+          "saltsbase_core",
+          "saltsbase_tinytest",
+          "saltsbase_query"
+        ],
+        "includeDirs": [
+          "../include",
+          "../../shared/process/include",
+          "../src/runtime",
+          "../src/profile",
+          "../src/util"
+        ],
+        "defines": {
+          "PRAKTOR_YAML_FIELD_CORPUS_DIR": "\"$root/praktor/test/data\""
+        }
+      },
+      "when": {
+        "native": true
+      },
+      "test": {
+        "labels": [
+          "praktor"
+        ]
+      }
+    },
+    "yaml_task_fields_c_test": {
+      "kind": "executable",
+      "sources": {
+        "files": [
+          "yaml_task_fields_test.c",
+          "../src/yml/yaml_task_fields.c",
+          "../src/yml/yaml_document.c",
+          "../src/yml/yaml_fields.c"
+        ]
+      },
+      "private": {
+        "deps": [
+          "saltsbase_yaml",
+          "cmeta_cstl",
+          "saltsbase_tinytest",
+          "saltsbase_query",
+          "cmeta_cmeta",
+          "saltsbase_core"
+        ],
+        "includeDirs": [
+          "../include",
+          "../../shared/process/include",
+          "../src/runtime",
+          "../src/profile",
+          "../src/util"
+        ]
+      },
+      "when": {
+        "native": true
+      },
+      "test": {
+        "labels": [
+          "praktor"
+        ]
+      }
+    },
+    "yaml_task_fields_fault_test": {
+      "kind": "executable",
+      "sources": {
+        "files": [
+          "yaml_task_fields_fault_test.c"
+        ]
+      },
+      "private": {
+        "deps": [
+          "cmeta_cstl",
+          "saltsbase_yaml",
+          "saltsbase_tinytest",
+          "cmeta_cmeta",
+          "saltsbase_core",
+          "saltsbase_query"
+        ],
+        "includeDirs": [
+          "../include"
+        ]
+      },
+      "when": {
+        "native": true
+      },
+      "test": {
+        "labels": [
+          "praktor"
+        ]
+      }
+    },
+    "yaml_task_metadata_c_test": {
+      "kind": "executable",
+      "sources": {
+        "files": [
+          "yaml_task_metadata_test.c",
+          "../src/yml/yaml_task_metadata.c",
+          "../src/yml/yaml_task_fields.c",
+          "../src/yml/yaml_document.c",
+          "../src/yml/yaml_fields.c"
+        ]
+      },
+      "private": {
+        "deps": [
+          "saltsbase_yaml",
+          "cmeta_cstl",
+          "saltsbase_json",
+          "saltsbase_tinytest",
+          "cmeta_cmeta",
+          "saltsbase_core",
+          "saltsbase_query"
+        ],
+        "includeDirs": [
+          "../include",
+          "../../shared/process/include",
+          "../src/runtime",
+          "../src/profile",
+          "../src/util"
+        ]
+      },
+      "when": {
+        "native": true
+      },
+      "test": {
+        "labels": [
+          "praktor"
+        ]
+      }
+    },
+    "yaml_value_c_test": {
+      "kind": "executable",
+      "sources": {
+        "files": [
+          "yaml_value_test.c",
+          "../src/yml/yaml_value.c",
+          "../src/yml/yaml_document.c",
+          "../src/yml/yaml_fields.c"
+        ]
+      },
+      "private": {
+        "deps": [
+          "saltsbase_yaml",
+          "saltsbase_json",
+          "saltsbase_tinytest",
+          "saltsbase_core",
+          "saltsbase_query"
+        ],
+        "includeDirs": [
+          "../include",
+          "../../shared/process/include",
+          "../src/runtime",
+          "../src/profile",
+          "../src/util"
+        ]
+      },
+      "when": {
+        "native": true
+      },
+      "test": {
+        "labels": [
+          "praktor"
+        ]
+      }
+    },
+    "yaml_value_fault_test": {
+      "kind": "executable",
+      "sources": {
+        "files": [
+          "yaml_value_fault_test.c"
+        ]
+      },
+      "private": {
+        "deps": [
+          "saltsbase_json",
+          "saltsbase_yaml",
+          "saltsbase_core",
+          "saltsbase_tinytest",
+          "saltsbase_query"
+        ],
+        "includeDirs": [
+          "../include"
+        ]
+      },
+      "when": {
+        "native": true
+      },
+      "test": {
+        "labels": [
+          "praktor"
+        ]
+      }
+    },
+    "yaml_workflow_metadata_c_test": {
+      "kind": "executable",
+      "sources": {
+        "files": [
+          "yaml_workflow_metadata_test.c",
+          "../src/yml/yaml_workflow_metadata.c",
+          "../src/yml/yaml_document.c",
+          "../src/yml/yaml_fields.c",
+          "../src/yml/yaml_task_fields.c"
+        ]
+      },
+      "private": {
+        "deps": [
+          "saltsbase_yaml",
+          "cmeta_cstl",
+          "saltsbase_json",
+          "saltsbase_tinytest",
+          "cmeta_cmeta",
+          "saltsbase_core",
+          "saltsbase_query"
+        ],
+        "includeDirs": [
+          "../include",
+          "../../shared/process/include",
+          "../src/runtime",
+          "../src/profile",
+          "../src/util"
+        ]
+      },
+      "when": {
+        "native": true
+      },
+      "test": {
+        "labels": [
+          "praktor"
+        ]
+      }
+    },
+    "praktor_fixture_configure": {
+      "kind": "executable",
+      "sources": {
+        "files": [
+          "fixture_configure.c"
+        ]
+      },
+      "private": {
+        "deps": [
+          "saltsbase_core"
+        ]
+      },
+      "testOnly": true,
+      "when": {
+        "native": true
+      }
+    }
+  },
+  "forEach": [
+    {
+      "files": [
+        "yaml_document_fault_test.c",
+        "yaml_fields_fault_test.c"
+      ],
+      "target": {
+        "kind": "executable",
+        "private": {
+          "deps": [
+            "saltsbase_yaml",
+            "saltsbase_core",
+            "saltsbase_tinytest",
+            "saltsbase_query"
+          ],
+          "includeDirs": [
+            "../include"
+          ]
+        },
+        "test": {
+          "labels": [
+            "praktor"
+          ]
+        },
+        "when": {
+          "native": true
+        }
+      }
+    }
+  ]
+}

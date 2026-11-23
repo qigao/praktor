@@ -926,7 +926,7 @@ target_link_libraries(praktor_runtime_c_test PRIVATE
 
 add_test(NAME praktor_runtime_c_test COMMAND praktor_runtime_c_test)
 set_tests_properties(praktor_runtime_c_test PROPERTIES TIMEOUT 45 ENVIRONMENT
-    "PRAKTOR_TIMEOUT_MS=50;PRAKTOR_STREAM_OUTPUT=false")
+    "PRAKTOR_TIMEOUT_MS=500;PRAKTOR_STREAM_OUTPUT=false")
 
 # White-box tests compile the same Session implementation as the shared library.
 foreach(session_test IN ITEMS
@@ -981,8 +981,12 @@ foreach(_mode IN ITEMS echo sleep sleep-long env fail)
         set(_arguments "['fail']")
         set(_timeout 5000)
     endif()
+    set(FIXTURE_PROGRAM "$<TARGET_FILE:praktor_execution_fixture>")
+    set(FIXTURE_ARGS "${_arguments}")
+    set(FIXTURE_TIMEOUT "${_timeout}")
+    configure_file(data/execution-provider.yml.in "services/${_mode}.yml.in" @ONLY)
     file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/services/${_mode}.yml"
-        CONTENT "provider:\n  kind: exe\n  path: '$<TARGET_FILE:praktor_execution_fixture>'\nconfig:\n  args: ${_arguments}\n  timeout_ms: ${_timeout}\n")
+        INPUT "${CMAKE_CURRENT_BINARY_DIR}/services/${_mode}.yml.in")
 endforeach()
 add_executable(praktor_service_test ${CMAKE_CURRENT_SOURCE_DIR}/service_test.c)
 target_sources(praktor_service_test PRIVATE

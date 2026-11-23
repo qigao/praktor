@@ -1,0 +1,17 @@
+{
+  "targets": {
+    "praktor": {
+      "kind": "executable",
+      "sources": {
+        "files": [
+          "main.c"
+        ]
+      },
+      "private": {
+        "deps": [
+          "praktor_runtime"
+        ]
+      }
+    }
+  }
+}

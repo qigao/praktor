@@ -1,0 +1,6 @@
+provider:
+  kind: exe
+  path: '@FIXTURE_PROGRAM@'
+config:
+  args: @FIXTURE_ARGS@
+  timeout_ms: @FIXTURE_TIMEOUT@

@@ -1,0 +1,784 @@
+{
+  "targets": {
+    "saltsbase_core": {
+      "kind": "prebuilt",
+      "public": {
+        "requiredIncludeDirs": [
+          "${envPath:SALTS_BASE_ROOT}/include"
+        ],
+        "defines": {
+          "HAS_ZSTD": "1"
+        }
+      },
+      "variants": [
+        {
+          "when": {
+            "os": "windows",
+            "driver": "llvm-mingw"
+          },
+          "public": {
+            "libs": [
+              "${envPath:SALTS_BASE_ROOT}/lib/libsalts.dll.a"
+            ]
+          },
+          "runtimeBins": [
+            "${envPath:SALTS_BASE_ROOT}/bin/libsalts.dll"
+          ]
+        },
+        {
+          "when": {
+            "os": "windows",
+            "driver": "msvc"
+          },
+          "public": {
+            "libs": [
+              "${envPath:SALTS_BASE_ROOT}/lib/salts.lib"
+            ]
+          },
+          "runtimeBins": [
+            "${envPath:SALTS_BASE_ROOT}/bin/salts.dll"
+          ]
+        },
+        {
+          "when": {
+            "os": [
+              "linux",
+              "android"
+            ]
+          },
+          "public": {
+            "libs": [
+              "${envPath:SALTS_BASE_ROOT}/lib/libsalts.so"
+            ]
+          },
+          "runtimeBins": [
+            "${envPath:SALTS_BASE_ROOT}/lib/libsalts.so"
+          ]
+        },
+        {
+          "when": {
+            "os": "macos"
+          },
+          "public": {
+            "libs": [
+              "${envPath:SALTS_BASE_ROOT}/lib/libsalts.dylib"
+            ]
+          },
+          "runtimeBins": [
+            "${envPath:SALTS_BASE_ROOT}/lib/libsalts.dylib"
+          ]
+        }
+      ]
+    },
+    "saltsbase_tinytest": {
+      "kind": "prebuilt",
+      "public": {
+        "requiredIncludeDirs": [
+          "${envPath:SALTS_BASE_ROOT}/include"
+        ]
+      },
+      "variants": [
+        {
+          "when": {
+            "driver": "msvc"
+          },
+          "public": {
+            "libs": [
+              "${envPath:SALTS_BASE_ROOT}/lib/saltscore_tinytest.lib"
+            ]
+          }
+        },
+        {
+          "when": {
+            "driver": [
+              "llvm-mingw",
+              "clang",
+              "gcc"
+            ]
+          },
+          "public": {
+            "libs": [
+              "${envPath:SALTS_BASE_ROOT}/lib/libsaltscore_tinytest.a"
+            ]
+          }
+        }
+      ],
+      "testOnly": true
+    },
+    "saltsbase_coroutine": {
+      "kind": "prebuilt",
+      "public": {
+        "requiredIncludeDirs": [
+          "${envPath:SALTS_BASE_ROOT}/include"
+        ],
+        "deps": [
+          "saltsbase_core"
+        ]
+      },
+      "variants": [
+        {
+          "when": {
+            "driver": "msvc"
+          },
+          "public": {
+            "libs": [
+              "${envPath:SALTS_BASE_ROOT}/lib/coroutine.lib"
+            ]
+          }
+        },
+        {
+          "when": {
+            "driver": [
+              "llvm-mingw",
+              "clang",
+              "gcc"
+            ]
+          },
+          "public": {
+            "libs": [
+              "${envPath:SALTS_BASE_ROOT}/lib/libcoroutine.a"
+            ]
+          }
+        }
+      ]
+    },
+    "saltsbase_native_io": {
+      "kind": "prebuilt",
+      "public": {
+        "requiredIncludeDirs": [
+          "${envPath:SALTS_BASE_ROOT}/include"
+        ],
+        "deps": [
+          "saltsbase_coroutine",
+          "saltsbase_core"
+        ]
+      },
+      "variants": [
+        {
+          "when": {
+            "driver": "msvc"
+          },
+          "public": {
+            "libs": [
+              "${envPath:SALTS_BASE_ROOT}/lib/native_io.lib"
+            ]
+          }
+        },
+        {
+          "when": {
+            "driver": [
+              "llvm-mingw",
+              "clang",
+              "gcc"
+            ]
+          },
+          "public": {
+            "libs": [
+              "${envPath:SALTS_BASE_ROOT}/lib/libnative_io.a"
+            ]
+          }
+        },
+        {
+          "when": {
+            "os": "windows"
+          },
+          "public": {
+            "libs": [
+              "ws2_32"
+            ]
+          }
+        }
+      ]
+    },
+    "saltsbase_query": {
+      "kind": "prebuilt",
+      "public": {
+        "requiredIncludeDirs": [
+          "${envPath:SALTS_BASE_ROOT}/include"
+        ]
+      },
+      "variants": [
+        {
+          "when": {
+            "driver": "msvc"
+          },
+          "public": {
+            "libs": [
+              "${envPath:SALTS_BASE_ROOT}/lib/query_vm.lib"
+            ]
+          }
+        },
+        {
+          "when": {
+            "driver": [
+              "llvm-mingw",
+              "clang",
+              "gcc"
+            ]
+          },
+          "public": {
+            "libs": [
+              "${envPath:SALTS_BASE_ROOT}/lib/libquery_vm.a"
+            ]
+          }
+        }
+      ]
+    },
+    "saltsbase_selector": {
+      "kind": "prebuilt",
+      "public": {
+        "requiredIncludeDirs": [
+          "${envPath:SALTS_BASE_ROOT}/include"
+        ],
+        "deps": [
+          "saltsbase_core"
+        ]
+      },
+      "variants": [
+        {
+          "when": {
+            "driver": "msvc"
+          },
+          "public": {
+            "libs": [
+              "${envPath:SALTS_BASE_ROOT}/lib/selector.lib"
+            ]
+          }
+        },
+        {
+          "when": {
+            "driver": [
+              "llvm-mingw",
+              "clang",
+              "gcc"
+            ]
+          },
+          "public": {
+            "libs": [
+              "${envPath:SALTS_BASE_ROOT}/lib/libselector.a"
+            ]
+          }
+        }
+      ]
+    },
+    "saltsbase_json": {
+      "kind": "prebuilt",
+      "public": {
+        "requiredIncludeDirs": [
+          "${envPath:SALTS_BASE_ROOT}/include"
+        ],
+        "deps": [
+          "saltsbase_core",
+          "saltsbase_query"
+        ]
+      },
+      "variants": [
+        {
+          "when": {
+            "driver": "msvc"
+          },
+          "public": {
+            "libs": [
+              "${envPath:SALTS_BASE_ROOT}/lib/json_parser.lib"
+            ]
+          }
+        },
+        {
+          "when": {
+            "driver": [
+              "llvm-mingw",
+              "clang",
+              "gcc"
+            ]
+          },
+          "public": {
+            "libs": [
+              "${envPath:SALTS_BASE_ROOT}/lib/libjson_parser.a"
+            ]
+          }
+        }
+      ]
+    },
+    "saltsbase_yaml": {
+      "kind": "prebuilt",
+      "public": {
+        "requiredIncludeDirs": [
+          "${envPath:SALTS_BASE_ROOT}/include"
+        ],
+        "deps": [
+          "saltsbase_core",
+          "saltsbase_query"
+        ]
+      },
+      "variants": [
+        {
+          "when": {
+            "driver": "msvc"
+          },
+          "public": {
+            "libs": [
+              "${envPath:SALTS_BASE_ROOT}/lib/cyaml.lib"
+            ]
+          }
+        },
+        {
+          "when": {
+            "driver": [
+              "llvm-mingw",
+              "clang",
+              "gcc"
+            ]
+          },
+          "public": {
+            "libs": [
+              "${envPath:SALTS_BASE_ROOT}/lib/libcyaml.a"
+            ]
+          }
+        }
+      ]
+    },
+    "saltsbase_dotenv": {
+      "kind": "prebuilt",
+      "public": {
+        "requiredIncludeDirs": [
+          "${envPath:SALTS_BASE_ROOT}/include"
+        ],
+        "deps": [
+          "saltsbase_core"
+        ]
+      },
+      "variants": [
+        {
+          "when": {
+            "driver": "msvc"
+          },
+          "public": {
+            "libs": [
+              "${envPath:SALTS_BASE_ROOT}/lib/dotenv_parser.lib"
+            ]
+          }
+        },
+        {
+          "when": {
+            "driver": [
+              "llvm-mingw",
+              "clang",
+              "gcc"
+            ]
+          },
+          "public": {
+            "libs": [
+              "${envPath:SALTS_BASE_ROOT}/lib/libdotenv_parser.a"
+            ]
+          }
+        }
+      ]
+    },
+    "saltsbase_yaml_json": {
+      "kind": "prebuilt",
+      "public": {
+        "requiredIncludeDirs": [
+          "${envPath:SALTS_BASE_ROOT}/include"
+        ],
+        "deps": [
+          "saltsbase_yaml",
+          "saltsbase_json"
+        ]
+      },
+      "variants": [
+        {
+          "when": {
+            "driver": "msvc"
+          },
+          "public": {
+            "libs": [
+              "${envPath:SALTS_BASE_ROOT}/lib/cyaml_json_adapter.lib"
+            ]
+          }
+        },
+        {
+          "when": {
+            "driver": [
+              "llvm-mingw",
+              "clang",
+              "gcc"
+            ]
+          },
+          "public": {
+            "libs": [
+              "${envPath:SALTS_BASE_ROOT}/lib/libcyaml_json_adapter.a"
+            ]
+          }
+        }
+      ]
+    },
+    "saltsbase_xml": {
+      "kind": "prebuilt",
+      "public": {
+        "requiredIncludeDirs": [
+          "${envPath:SALTS_BASE_ROOT}/include"
+        ],
+        "deps": [
+          "saltsbase_core",
+          "saltsbase_query"
+        ]
+      },
+      "variants": [
+        {
+          "when": {
+            "driver": "msvc"
+          },
+          "public": {
+            "libs": [
+              "${envPath:SALTS_BASE_ROOT}/lib/xml_parser.lib"
+            ]
+          }
+        },
+        {
+          "when": {
+            "driver": [
+              "llvm-mingw",
+              "clang",
+              "gcc"
+            ]
+          },
+          "public": {
+            "libs": [
+              "${envPath:SALTS_BASE_ROOT}/lib/libxml_parser.a"
+            ]
+          }
+        }
+      ]
+    },
+    "saltsbase_csv": {
+      "kind": "prebuilt",
+      "public": {
+        "requiredIncludeDirs": [
+          "${envPath:SALTS_BASE_ROOT}/include"
+        ],
+        "deps": [
+          "saltsbase_core",
+          "saltsbase_query"
+        ]
+      },
+      "variants": [
+        {
+          "when": {
+            "driver": "msvc"
+          },
+          "public": {
+            "libs": [
+              "${envPath:SALTS_BASE_ROOT}/lib/csv_parser.lib"
+            ]
+          }
+        },
+        {
+          "when": {
+            "driver": [
+              "llvm-mingw",
+              "clang",
+              "gcc"
+            ]
+          },
+          "public": {
+            "libs": [
+              "${envPath:SALTS_BASE_ROOT}/lib/libcsv_parser.a"
+            ]
+          }
+        }
+      ]
+    },
+    "cmeta_cmeta": {
+      "kind": "prebuilt",
+      "public": {
+        "requiredIncludeDirs": [
+          "${envPath:CMETA_ROOT}/include"
+        ],
+        "deps": [
+          "saltsbase_core"
+        ]
+      },
+      "variants": [
+        {
+          "when": {
+            "driver": "msvc"
+          },
+          "public": {
+            "libs": [
+              "${envPath:CMETA_ROOT}/lib/cmeta_cmeta.lib"
+            ]
+          }
+        },
+        {
+          "when": {
+            "driver": [
+              "llvm-mingw",
+              "clang",
+              "gcc"
+            ]
+          },
+          "public": {
+            "libs": [
+              "${envPath:CMETA_ROOT}/lib/libcmeta_cmeta.a"
+            ]
+          }
+        }
+      ]
+    },
+    "cmeta_plugin": {
+      "kind": "prebuilt",
+      "public": {
+        "requiredIncludeDirs": [
+          "${envPath:CMETA_ROOT}/include"
+        ],
+        "deps": [
+          "cmeta_cmeta",
+          "saltsbase_core"
+        ]
+      },
+      "variants": [
+        {
+          "when": {
+            "driver": "msvc"
+          },
+          "public": {
+            "libs": [
+              "${envPath:CMETA_ROOT}/lib/cmeta_plugin.lib"
+            ]
+          }
+        },
+        {
+          "when": {
+            "driver": [
+              "llvm-mingw",
+              "clang",
+              "gcc"
+            ]
+          },
+          "public": {
+            "libs": [
+              "${envPath:CMETA_ROOT}/lib/libcmeta_plugin.a"
+            ]
+          }
+        }
+      ]
+    },
+    "cmeta_ace": {
+      "kind": "prebuilt",
+      "public": {
+        "requiredIncludeDirs": [
+          "${envPath:CMETA_ROOT}/include"
+        ],
+        "deps": [
+          "cmeta_plugin",
+          "cmeta_cmeta",
+          "saltsbase_core"
+        ]
+      },
+      "variants": [
+        {
+          "when": {
+            "driver": "msvc"
+          },
+          "public": {
+            "libs": [
+              "${envPath:CMETA_ROOT}/lib/cmeta_ace.lib"
+            ]
+          }
+        },
+        {
+          "when": {
+            "driver": [
+              "llvm-mingw",
+              "clang",
+              "gcc"
+            ]
+          },
+          "public": {
+            "libs": [
+              "${envPath:CMETA_ROOT}/lib/libcmeta_ace.a"
+            ]
+          }
+        }
+      ]
+    },
+    "cmeta_cflow": {
+      "kind": "prebuilt",
+      "public": {
+        "requiredIncludeDirs": [
+          "${envPath:CMETA_ROOT}/include"
+        ],
+        "deps": [
+          "cmeta_cmeta",
+          "saltsbase_native_io",
+          "saltsbase_core"
+        ],
+        "defines": {
+          "CFLOW_MACHINE_MAX_STATES": "65536",
+          "CFLOW_MACHINE_MAX_EVENTS": "65536",
+          "CFLOW_MACHINE_MAX_GUARDS": "65536",
+          "CFLOW_MACHINE_MAX_ACTIONS": "65536",
+          "CFLOW_MACHINE_MAX_TRANSITIONS": "1048576",
+          "CFLOW_STATECHART_MAX_ACTION_REFS": "1048576",
+          "CFLOW_STATECHART_MAX_INSTANCE_BYTES": "67108864"
+        }
+      },
+      "variants": [
+        {
+          "when": {
+            "driver": "msvc"
+          },
+          "public": {
+            "libs": [
+              "${envPath:CMETA_ROOT}/lib/cmeta_cflow.lib"
+            ]
+          }
+        },
+        {
+          "when": {
+            "driver": [
+              "llvm-mingw",
+              "clang",
+              "gcc"
+            ]
+          },
+          "public": {
+            "libs": [
+              "${envPath:CMETA_ROOT}/lib/libcmeta_cflow.a"
+            ]
+          }
+        },
+        {
+          "when": {
+            "os": "windows"
+          },
+          "public": {
+            "libs": [
+              "ws2_32"
+            ]
+          }
+        }
+      ]
+    },
+    "cmeta_cstl": {
+      "kind": "prebuilt",
+      "public": {
+        "requiredIncludeDirs": [
+          "${envPath:CMETA_ROOT}/include"
+        ],
+        "deps": [
+          "cmeta_cmeta"
+        ]
+      },
+      "variants": [
+        {
+          "when": {
+            "driver": "msvc"
+          },
+          "public": {
+            "libs": [
+              "${envPath:CMETA_ROOT}/lib/cmeta_cstl.lib"
+            ]
+          }
+        },
+        {
+          "when": {
+            "driver": [
+              "llvm-mingw",
+              "clang",
+              "gcc"
+            ]
+          },
+          "public": {
+            "libs": [
+              "${envPath:CMETA_ROOT}/lib/libcmeta_cstl.a"
+            ]
+          }
+        }
+      ]
+    },
+    "saltsutils_schema": {
+      "kind": "prebuilt",
+      "public": {
+        "requiredIncludeDirs": [
+          "${envPath:SALTS_UTILS_ROOT}/include"
+        ],
+        "deps": [
+          "cmeta_cmeta"
+        ]
+      },
+      "variants": [
+        {
+          "when": {
+            "driver": "msvc"
+          },
+          "public": {
+            "libs": [
+              "${envPath:SALTS_UTILS_ROOT}/lib/databind_schema.lib"
+            ]
+          }
+        },
+        {
+          "when": {
+            "driver": [
+              "llvm-mingw",
+              "clang",
+              "gcc"
+            ]
+          },
+          "public": {
+            "libs": [
+              "${envPath:SALTS_UTILS_ROOT}/lib/libdatabind_schema.a"
+            ]
+          }
+        }
+      ]
+    },
+    "saltsutils_idl": {
+      "kind": "prebuilt",
+      "public": {
+        "requiredIncludeDirs": [
+          "${envPath:SALTS_UTILS_ROOT}/include"
+        ],
+        "deps": [
+          "saltsutils_schema",
+          "saltsbase_core"
+        ]
+      },
+      "variants": [
+        {
+          "when": {
+            "driver": "msvc"
+          },
+          "public": {
+            "libs": [
+              "${envPath:SALTS_UTILS_ROOT}/lib/databind_idl.lib"
+            ]
+          }
+        },
+        {
+          "when": {
+            "driver": [
+              "llvm-mingw",
+              "clang",
+              "gcc"
+            ]
+          },
+          "public": {
+            "libs": [
+              "${envPath:SALTS_UTILS_ROOT}/lib/libdatabind_idl.a"
+            ]
+          }
+        }
+      ]
+    },
+    "pcre2_8": {
+      "kind": "external",
+      "package": {
+        "provider": "vcpkg",
+        "name": "pcre2",
+        "pc": "libpcre2-8"
+      }
+    }
+  }
+}

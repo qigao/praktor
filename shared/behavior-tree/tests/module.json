@@ -1,0 +1,31 @@
+{
+  "forEach": [
+    {
+      "files": [
+        "behavior_tree_*.c",
+        "behavior_tree_*.cpp"
+      ],
+      "target": {
+        "kind": "executable",
+        "private": {
+          "deps": [
+            "salts_behavior_tree",
+            "saltsbase_tinytest",
+            "saltsbase_core"
+          ],
+          "includeDirs": [
+            "../include"
+          ]
+        },
+        "test": {
+          "labels": [
+            "behavior-tree"
+          ]
+        },
+        "when": {
+          "native": true
+        }
+      }
+    }
+  ]
+}

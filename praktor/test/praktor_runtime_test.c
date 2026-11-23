@@ -412,6 +412,7 @@ spec("C11 Configurator CFlow CMeta runtime") {
     it("applies the environment command timeout when the document omits it") {
         const char yaml[]="tasks:\n  - name: slow\n    command: " BLOCKING_COMMAND "\n";
         check(praktor_runtime_execute_yaml(yaml,sizeof yaml-1u,NULL,NULL,NULL,&execution)==PRAKTOR_RUNTIME_FAILED);
+        check_contains(execution.error,"Shell command timed out");
         check_contains(execution.json,"\"workflow_status\":\"failed\"");
     }
     it("overrides an environment timeout with document defaults for lowered Command nodes") {

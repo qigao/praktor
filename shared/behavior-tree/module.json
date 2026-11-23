@@ -1,0 +1,31 @@
+{
+  "include": [
+    "tests/module.json"
+  ],
+  "targets": {
+    "salts_behavior_tree": {
+      "kind": "static",
+      "sources": {
+        "files": [
+          "src/behavior_tree.c"
+        ]
+      },
+      "public": {
+        "includeDirs": [
+          "include"
+        ],
+        "deps": [
+          "saltsbase_core"
+        ]
+      },
+      "install": {
+        "headers": [
+          {
+            "from": "include/behavior_tree.h",
+            "to": "include"
+          }
+        ]
+      }
+    }
+  }
+}

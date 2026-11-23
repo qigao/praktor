@@ -1,0 +1,98 @@
+{
+  "targets": {
+    "schema_projection_test": {
+      "kind": "executable",
+      "sources": {
+        "files": [
+          "projection_test.c"
+        ]
+      },
+      "private": {
+        "deps": [
+          "praktor_schema_projection",
+          "saltsbase_tinytest",
+          "saltsbase_json",
+          "saltsbase_query",
+          "saltsutils_idl",
+          "saltsutils_schema",
+          "cmeta_cmeta",
+          "saltsbase_core"
+        ],
+        "includeDirs": [
+          ".."
+        ],
+        "defines": {
+          "PRAKTOR_SCHEMA_GENERATED_PATH": "\"$builddir/schema/workflow.generated.json\"",
+          "PRAKTOR_SCHEMA_SOURCE_DIR": "\"$root/.\"",
+          "PRAKTOR_SCHEMA_CLI_PATH": "\"$builddir/bin/praktor-schema${host:exe}\""
+        }
+      },
+      "when": {
+        "native": true
+      },
+      "test": {
+        "labels": [
+          "schema"
+        ]
+      },
+      "preTasks": [
+        {
+          "name": "project-workflow-schema",
+          "tool": "praktor-schema",
+          "inputs": [
+            "$root/schema/workflow.schema",
+            "$root/schema/workflow.editor.json"
+          ],
+          "outputs": [
+            "$builddir/schema/workflow.generated.json"
+          ],
+          "args": [
+            "$root/schema/workflow.schema",
+            "$root/schema/workflow.editor.json",
+            "$builddir/schema/workflow.generated.json"
+          ]
+        }
+      ]
+    },
+    "schema_projection_cli": {
+      "kind": "header_only",
+      "when": {
+        "native": true
+      },
+      "runtimeDeps": [
+        "praktor-schema"
+      ],
+      "test": {
+        "program": "${artifact:praktor-schema}",
+        "args": [
+          "$root/schema/workflow.schema",
+          "$root/schema/workflow.editor.json",
+          "$builddir/workflow.cli.json"
+        ],
+        "labels": [
+          "schema"
+        ]
+      }
+    },
+    "schema_projection_cli_usage": {
+      "kind": "header_only",
+      "when": {
+        "native": true
+      },
+      "runtimeDeps": [
+        "schema_projection_test",
+        "praktor-schema"
+      ],
+      "test": {
+        "program": "${artifact:schema_projection_test}",
+        "args": [
+          "--filter",
+          "rejects incorrect schema CLI usage"
+        ],
+        "labels": [
+          "schema"
+        ]
+      }
+    }
+  }
+}

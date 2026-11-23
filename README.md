@@ -302,6 +302,33 @@ The retired CI, source-policy audits, NuGet wrapper and separate consumer/smoke 
 
 See [the user guide](docs/USER_GUIDE.md#当前执行范围) for the current execution profile.
 
+## Build with Slate
+
+[`slate.json`](slate.json) uses the same installed SDK roots and vcpkg
+triplets as the CMake presets. Slate reads the local `.env` directly. Put
+Ninja and pkgconf on `PATH` and choose SDKs that match the selected compiler
+and architecture. The Windows LLVM-MinGW build uses `LLVM_MINGW_ROOT`.
+The `release-msvc` and `debug-msvc` presets use `VSDEVCMD_BAT`.
+
+```sh
+slate doctor --preset release --target praktor
+slate build --preset release
+slate build --preset debug --target praktor
+slate run --target praktor -- --config "$PWD/examples/basic.yml" --task hello
+slate test --list --preset tests
+slate test --preset tests
+slate install --targets praktor praktor_runtime salts_behavior_tree --components runtime,dev
+```
+
+The `debug-tests` preset runs the same tests in a debug build. Use
+`slate test --preset tests --label process` to run the process suites. The
+other labels are `praktor`, `schema`, and `behavior-tree`. Slate builds the
+native helper targets before generating the test fixtures.
+
+The Slate runtime target is `praktor_runtime` so its Ninja object directory
+is distinct from the `praktor` CLI on case-insensitive filesystems. Use
+the CMake install workflow for the `Praktor::Praktor` CMake package.
+
 ## Upstream dependency versions
 
 The locally tested Windows LLVM-MinGW chain uses SaltsBase 0.1.8, CMeta 0.1.6,

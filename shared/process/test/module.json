@@ -1,0 +1,198 @@
+{
+  "targets": {
+    "praktor_process_control_test": {
+      "kind": "executable",
+      "sources": {
+        "files": [
+          "process_control_test.c"
+        ]
+      },
+      "private": {
+        "deps": [
+          "praktor_process_native",
+          "saltsbase_tinytest",
+          "saltsbase_core"
+        ],
+        "includeDirs": [
+          "../include"
+        ]
+      },
+      "when": {
+        "native": true
+      },
+      "test": {
+        "labels": [
+          "process"
+        ],
+        "timeout": 30
+      }
+    },
+    "praktor_process_driver_test": {
+      "kind": "executable",
+      "sources": {
+        "files": [
+          "process_driver_test.c"
+        ]
+      },
+      "private": {
+        "deps": [
+          "praktor_process_driver",
+          "saltsbase_tinytest",
+          "praktor_process_retainer",
+          "saltsbase_native_io",
+          "saltsbase_core"
+        ],
+        "includeDirs": [
+          "../include"
+        ]
+      },
+      "when": {
+        "native": true
+      },
+      "test": {
+        "labels": [
+          "process"
+        ],
+        "timeout": 30
+      }
+    },
+    "praktor_process_native_test": {
+      "kind": "executable",
+      "sources": {
+        "files": [
+          "process_native_test.c"
+        ]
+      },
+      "private": {
+        "deps": [
+          "praktor_process_native",
+          "saltsbase_tinytest",
+          "saltsbase_core"
+        ],
+        "includeDirs": [
+          "../include"
+        ]
+      },
+      "when": {
+        "native": true
+      },
+      "test": {
+        "labels": [
+          "process"
+        ],
+        "timeout": 30
+      }
+    },
+    "praktor_process_worker_test": {
+      "kind": "executable",
+      "sources": {
+        "files": [
+          "process_worker_test.c"
+        ]
+      },
+      "private": {
+        "deps": [
+          "praktor_process_driver",
+          "saltsbase_tinytest",
+          "praktor_process_retainer",
+          "saltsbase_native_io",
+          "saltsbase_core"
+        ],
+        "includeDirs": [
+          "../include"
+        ]
+      },
+      "when": {
+        "native": true
+      },
+      "test": {
+        "labels": [
+          "process"
+        ],
+        "timeout": 30
+      }
+    },
+    "praktor_service_control_test": {
+      "kind": "executable",
+      "sources": {
+        "files": [
+          "service_control_test.c"
+        ]
+      },
+      "private": {
+        "deps": [
+          "praktor_service_control",
+          "saltsbase_tinytest",
+          "saltsbase_core"
+        ],
+        "includeDirs": [
+          "../include"
+        ]
+      },
+      "when": {
+        "native": true
+      },
+      "test": {
+        "labels": [
+          "process"
+        ],
+        "timeout": 30
+      }
+    },
+    "praktor_service_fixture": {
+      "kind": "executable",
+      "sources": {
+        "files": [
+          "service_fixture.c"
+        ]
+      },
+      "private": {
+        "deps": [
+          "saltsbase_core"
+        ]
+      },
+      "when": {
+        "native": true
+      },
+      "testOnly": true
+    },
+    "praktor_service_process_test": {
+      "kind": "executable",
+      "sources": {
+        "files": [
+          "service_process_test.c"
+        ]
+      },
+      "private": {
+        "deps": [
+          "praktor_service_process_host",
+          "saltsbase_tinytest",
+          "praktor_service_control",
+          "praktor_process_driver",
+          "praktor_process_retainer",
+          "saltsbase_native_io",
+          "saltsbase_core"
+        ],
+        "includeDirs": [
+          "../include"
+        ],
+        "defines": {
+          "PRAKTOR_SERVICE_FIXTURE": "\"$builddir/bin/praktor_service_fixture${host:exe}\"",
+          "PRAKTOR_SERVICE_STATE_PATH": "\"$builddir/praktor-service-state.txt\""
+        }
+      },
+      "when": {
+        "native": true
+      },
+      "test": {
+        "labels": [
+          "process"
+        ],
+        "timeout": 30
+      },
+      "runtimeDeps": [
+        "praktor_service_fixture"
+      ]
+    }
+  }
+}

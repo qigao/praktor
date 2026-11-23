@@ -5,6 +5,9 @@
 #include <string.h>
 #include <tinytest.h>
 #include <core/tstr.h>
+#ifdef PRAKTOR_SCHEMA_CLI_PATH
+#include <core/process.h>
+#endif
 
 static fs_buf_t source(const char *name) {
     fs_buf_t bytes = {0};
@@ -50,6 +53,23 @@ static int number_is(const json_value_t *value, const char *expected) {
 static json_value_t *get(const json_value_t *root, const char *path) { return json_path_get(root, path); }
 
 spec("C schema projection") {
+#ifdef PRAKTOR_SCHEMA_CLI_PATH
+    it("rejects incorrect schema CLI usage") {
+        process_options_t options;
+        process_options_init(&options);
+        options.program = PRAKTOR_SCHEMA_CLI_PATH;
+        process_t *child = NULL;
+        process_result_t result = {0};
+        int status = process_spawn(&options, &child);
+        if (status == SALTS_OK) {
+            status = process_wait_for(child, 10000u, &result);
+            process_destroy(child);
+        }
+        check_equal(status, SALTS_OK);
+        check_equal(result.state, SALTS_PROCESS_EXITED);
+        check_equal(result.exit_code, 2);
+    }
+#endif
     it("matches the checked-in schema and the generated C CLI artifact") {
         fs_buf_t idl = source("schema/workflow.schema"), policy = source("schema/workflow.editor.json"), checked = source("docs/grammar.schema.json"), generated = {0};
         json_value_t *editor = json_parse(policy.base, policy.len), *expected = json_parse(checked.base, checked.len), *actual = NULL, *from_cli;

@@ -1,0 +1,115 @@
+{
+  "include": [
+    "test/module.json"
+  ],
+  "targets": {
+    "praktor_process_retainer": {
+      "kind": "static",
+      "sources": {
+        "files": [
+          "src/process_retainer.c"
+        ]
+      },
+      "public": {
+        "includeDirs": [
+          "include"
+        ],
+        "deps": [
+          "saltsbase_native_io"
+        ]
+      }
+    },
+    "praktor_process_driver": {
+      "kind": "static",
+      "sources": {
+        "files": [
+          "src/process_driver.c",
+          "src/process_worker.c"
+        ]
+      },
+      "public": {
+        "includeDirs": [
+          "include"
+        ],
+        "deps": [
+          "praktor_process_retainer"
+        ]
+      },
+      "private": {
+        "deps": [
+          "saltsbase_core"
+        ]
+      }
+    },
+    "praktor_process_native": {
+      "kind": "static",
+      "sources": {
+        "files": [
+          "src/process_control.c",
+          "src/process_native.c"
+        ]
+      },
+      "public": {
+        "includeDirs": [
+          "include"
+        ]
+      },
+      "private": {
+        "deps": [
+          "saltsbase_core"
+        ]
+      },
+      "variants": [
+        {
+          "when": {
+            "os": "windows"
+          },
+          "private": {
+            "libs": [
+              "user32"
+            ]
+          }
+        }
+      ]
+    },
+    "praktor_service_control": {
+      "kind": "static",
+      "sources": {
+        "files": [
+          "src/service_control.c"
+        ]
+      },
+      "public": {
+        "includeDirs": [
+          "include"
+        ]
+      },
+      "private": {
+        "deps": [
+          "saltsbase_core"
+        ]
+      }
+    },
+    "praktor_service_process_host": {
+      "kind": "static",
+      "sources": {
+        "files": [
+          "src/service_process_host.c"
+        ]
+      },
+      "public": {
+        "includeDirs": [
+          "include"
+        ],
+        "deps": [
+          "praktor_service_control"
+        ]
+      },
+      "private": {
+        "deps": [
+          "praktor_process_driver"
+        ]
+      }
+    }
+  }
+}

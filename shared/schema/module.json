@@ -1,0 +1,50 @@
+{
+  "include": [
+    "test/module.json"
+  ],
+  "targets": {
+    "praktor_schema_projection": {
+      "kind": "static",
+      "sources": {
+        "files": [
+          "projection.c"
+        ]
+      },
+      "public": {
+        "includeDirs": [
+          "."
+        ],
+        "deps": [
+          "saltsbase_json"
+        ]
+      },
+      "private": {
+        "deps": [
+          "saltsutils_idl",
+          "saltsutils_schema",
+          "saltsbase_core"
+        ]
+      },
+      "when": {
+        "native": true
+      }
+    },
+    "praktor-schema": {
+      "kind": "executable",
+      "sources": {
+        "files": [
+          "main.c"
+        ]
+      },
+      "private": {
+        "deps": [
+          "praktor_schema_projection",
+          "saltsbase_core"
+        ]
+      },
+      "when": {
+        "native": true
+      }
+    }
+  }
+}

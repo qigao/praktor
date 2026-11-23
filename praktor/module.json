@@ -1,0 +1,138 @@
+{
+  "include": [
+    "test/module.json"
+  ],
+  "targets": {
+    "praktor_runtime": {
+      "kind": "shared",
+      "outputPrefix": "lib",
+      "sources": {
+        "files": [
+          "src/actions/condition.c",
+          "src/actions/condition_expr.c",
+          "src/actions/json_selection.c",
+          "src/actions/native_host.c",
+          "src/actions/orch_session_plan.c",
+          "src/actions/output_scan.c",
+          "src/actions/plan.c",
+          "src/actions/regex_pcre2.c",
+          "src/actions/session.c",
+          "src/actions/session_controls.c",
+          "src/actions/session_values.c",
+          "src/actions/tool.c",
+          "src/actions/tree_adapter.c",
+          "src/actions/value_store.c",
+          "src/actions/workflow_owner_settlement.c",
+          "src/actions/workflow_parallel_commit.c",
+          "src/actions/workflow_parallel_process_guard.c",
+          "src/actions/workflow_snapshot_values.c",
+          "src/data/structured_document_query.c",
+          "src/data/workflow_contract_value.c",
+          "src/data/workflow_value.c",
+          "src/expressions/expression_evaluator.c",
+          "src/expressions/expression_lexer.c",
+          "src/expressions/expression_regex_salts.c",
+          "src/profile/workflow_profile.c",
+          "src/providers/process.c",
+          "src/runtime/component_host.c",
+          "src/runtime/praktor_api.c",
+          "src/runtime/runtime.c",
+          "src/runtime/statechart.c",
+          "src/runtime/statechart_plan.c",
+          "src/util/file_hash.c",
+          "src/util/praktor_init.c",
+          "src/yml/orch_tree.c",
+          "src/yml/orch_yaml.c",
+          "src/yml/workflow_dag_state.c",
+          "src/yml/workflow_dependencies.c",
+          "src/yml/workflow_snapshot.c",
+          "src/yml/workflow_task_registry.c",
+          "src/yml/yaml_action_params.c",
+          "src/yml/yaml_contract.c",
+          "src/yml/yaml_document.c",
+          "src/yml/yaml_fields.c",
+          "src/yml/yaml_service.c",
+          "src/yml/yaml_task_fields.c",
+          "src/yml/yaml_task_metadata.c",
+          "src/yml/yaml_value.c",
+          "src/yml/yaml_workflow_metadata.c"
+        ]
+      },
+      "options": {
+        "symbolVisibility": "hidden"
+      },
+      "public": {
+        "includeDirs": [
+          "include"
+        ],
+        "deps": [
+          "cmeta_cmeta"
+        ]
+      },
+      "private": {
+        "includeDirs": [
+          "src/runtime",
+          "src/profile",
+          "src/util"
+        ],
+        "defines": {
+          "PRAKTOR_BUILD_SHARED": "1"
+        },
+        "deps": [
+          "cmeta_ace",
+          "cmeta_cflow",
+          "cmeta_cstl",
+          "saltsbase_core",
+          "saltsbase_json",
+          "saltsbase_yaml",
+          "saltsbase_dotenv",
+          "saltsbase_yaml_json",
+          "saltsbase_xml",
+          "saltsbase_csv",
+          "saltsbase_native_io",
+          "saltsbase_selector",
+          "saltsbase_query",
+          "salts_behavior_tree",
+          "praktor_process_driver",
+          "praktor_process_retainer",
+          "praktor_process_native",
+          "pcre2_8"
+        ]
+      },
+      "variants": [
+        {
+          "when": {
+            "os": [
+              "linux",
+              "macos",
+              "android"
+            ]
+          },
+          "private": {
+            "libs": [
+              "m"
+            ]
+          }
+        }
+      ],
+      "install": {
+        "headers": [
+          {
+            "from": "include/praktor.h",
+            "to": "include"
+          }
+        ],
+        "assets": [
+          {
+            "from": "../LICENSE",
+            "to": "share/Praktor"
+          },
+          {
+            "from": "../THIRD_PARTY_NOTICES.md",
+            "to": "share/Praktor"
+          }
+        ]
+      }
+    }
+  }
+}

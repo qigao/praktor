@@ -1,5 +1,14 @@
 # 构建与运行时排障记录
 
+## 2026-11-23 · Slate Ninja 构建
+
+- Slate 的对象目录按目标名生成。Windows 会让 `Praktor` 与 `praktor`
+  写入同一个目录，因此 Slate 使用 `praktor_runtime` 作为动态库目标名。
+  LLVM-MinGW 下对照 CMake 的动态库，两边均导出相同的 7 个公共符号。
+- `praktor_runtime_c_test` 的 50 ms 环境超时在 Windows 上会误伤普通
+  Shell 用例。两套测试注册将该环境值调整为 500 ms，原有阻塞命令仍会触发
+  超时，测试同时校验超时错误。显式 50 ms 的覆盖用例各自保留。
+
 ## 2026-11-13：split SDK 与完整构建
 
 - 构建方向为完整组装所有生产模块、CLI 和共享 SDK；已移除 foundation

@@ -1,0 +1,7 @@
+{
+  "include": [
+    "process/module.json",
+    "schema/module.json",
+    "behavior-tree/module.json"
+  ]
+}
