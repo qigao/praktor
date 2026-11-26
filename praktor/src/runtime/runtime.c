@@ -219,7 +219,8 @@ static void callback_run(void *p) {
             }
             const int rc=tick_task(task,c);
             if(rc!=SALTS_OK||task->outcome==SALTS_BT_FAILURE) {
-                c->status=PRAKTOR_RUNTIME_FAILED;
+                const praktor_runtime_status tool_status=c->tasks[i].tool.terminal_status;
+                c->status=tool_status==PRAKTOR_RUNTIME_OK?PRAKTOR_RUNTIME_FAILED:tool_status;
                 c->failed_slot=i;
                 if(!c->error[0])
                     (void)snprintf(c->error,c->error_capacity,"%s",
@@ -308,7 +309,7 @@ typedef struct prk_task_tools {
 } prk_task_tools;
 
 static int bind_tools(praktor_component_host *components,const praktor_orch_session_plan *plan,
-    prk_task_tools *tools,char *error,size_t capacity) {
+    bool check_only,prk_task_tools *tools,char *error,size_t capacity) {
     const size_t nodes=praktor_orch_session_plan_node_count(plan);
     size_t count=0u,used=0u;
     for(size_t i=0u;i<nodes;++i)
@@ -331,8 +332,7 @@ static int bind_tools(praktor_component_host *components,const praktor_orch_sess
         }
         praktor_tool_binding *binding=&tools->bindings[used++];
         binding->node_index=i;
-        if(!service||praktor_component_host_service(components,service,&binding->service,
-                                                      &binding->definition)!=SALTS_OK) {
+        if(!service) {
             (void)snprintf(error,capacity,"unknown tool service '%s'",service?service:"");
             return SALTS_EINVAL;
         }
@@ -343,7 +343,15 @@ static int bind_tools(praktor_component_host *components,const praktor_orch_sess
                 return SALTS_EINVAL;
             }
         }
-        int rc=praktor_tool_admit(binding->definition,binding->inputs,error,capacity);
+        const praktor_execution_admission admission={binding->inputs,error,capacity};
+        int rc;
+        if(check_only) {
+            rc=praktor_component_host_check_tool(components,service,&admission,&binding->output_key);
+        } else {
+            rc=praktor_component_host_service(components,service,&binding->service,&binding->output_key);
+            if(rc==SALTS_OK)rc=praktor_execution_service_admit(&binding->service,&admission);
+        }
+        if(rc==SALTS_ENOENT)(void)snprintf(error,capacity,"unknown tool service '%s'",service);
         if(rc!=SALTS_OK)return rc;
     }
     return SALTS_OK;
@@ -356,7 +364,7 @@ static vstr action_parameter(const praktor_orch_node *node,const char *name) {
     }
     return (vstr){0};
 }
-static int bind_outputs(const praktor_orch_node *root,bool command,
+static int bind_outputs(const praktor_orch_node *root,bool command,const prk_task_tools *tools,
     const json_value_t *task,size_t value_capacity,prk_task_outputs *out,
     char *error,size_t capacity) {
     const praktor_orch_type type=praktor_orch_node_type(root);
@@ -383,7 +391,9 @@ static int bind_outputs(const praktor_orch_node *root,bool command,
             }
         }
     }
-    out->process=command||type==PRAKTOR_ORCH_SHELL||type==PRAKTOR_ORCH_TOOL;
+    const char *wasm_output=type==PRAKTOR_ORCH_TOOL&&tools->count?tools->bindings[0].output_key:NULL;
+    out->process=command||type==PRAKTOR_ORCH_SHELL||(type==PRAKTOR_ORCH_TOOL&&!wasm_output);
+    if(wasm_output)out->keys[0]=wasm_output;
     if(out->process) {
         out->keys[PRK_EXIT_CODE]="shell_exit_code";
         out->keys[PRK_STDOUT]=command?"stdout":"shell_output";
@@ -796,7 +806,7 @@ settle:
     }else if(driver.failed_slot<count) {
         const size_t slot=driver.failed_slot,index=ids[slot];
         /* The task scope can contain a predecessor's exit code before a Tool starts. */
-        if(ctx->outputs[index].process&&(!tasks[slot].tool.count||tasks[slot].tool.has_exit_code))
+        if(ctx->outputs[index].process&&(!tasks[slot].tool.count||tasks[slot].tool.published_output))
             (void)publish_failure_exit(owner,index,praktor_native_host_values(&tasks[slot].host),
                                        ctx->outputs[index].keys[PRK_EXIT_CODE]);
     }
@@ -833,6 +843,7 @@ static praktor_runtime_status execute_yaml(
     const char *yaml,size_t yaml_size,const praktor_runtime_limits *specified,
     praktor_cancel_probe cancel,void *cancel_context,
      const char *selected_task,praktor_event_poll event_poll,void *event_context,
+     const praktor_wasm_host *wasm,bool check_only,
      praktor_runtime_result *out) {
     praktor_runtime_limits options=
         specified?*specified:praktor_runtime_limits_default();
@@ -874,8 +885,9 @@ static praktor_runtime_status execute_yaml(
     praktor_session_config_init(&defaults);
     const char *defaults_error=NULL;
     rc=praktor_yaml_workflow_resolve_defaults(
-        praktor_workflow_snapshot_metadata(owner.snapshot),getenv("PRAKTOR_TIMEOUT_MS"),
-        getenv("PRAKTOR_STREAM_OUTPUT"),&defaults.shell_timeout_ms,
+        praktor_workflow_snapshot_metadata(owner.snapshot),
+        check_only?NULL:getenv("PRAKTOR_TIMEOUT_MS"),
+        check_only?NULL:getenv("PRAKTOR_STREAM_OUTPUT"),&defaults.shell_timeout_ms,
         &defaults.shell_stream_output,&defaults_error);
     if(rc!=SALTS_OK) {
         if(defaults_error)(void)snprintf(out->error,sizeof out->error,"%s",defaults_error);
@@ -898,16 +910,22 @@ static praktor_runtime_status execute_yaml(
         if(rc==SALTS_ENOTSUP)status=PRAKTOR_RUNTIME_UNSUPPORTED;
         goto done;
     }
-    rc=praktor_component_host_start(&components,&options,
-        praktor_workflow_snapshot_metadata(owner.snapshot),out->error,sizeof out->error);
+    const praktor_wasm_service wasm_options={
+        .host=wasm,.workflow_deadline=deadline,.cancel=cancel,.cancel_context=cancel_context};
+    const json_value_t *metadata=praktor_workflow_snapshot_metadata(owner.snapshot);
+    rc=check_only?praktor_component_host_load_definitions(&components,metadata,out->error,sizeof out->error):
+        praktor_component_host_start(&components,&options,metadata,&wasm_options,out->error,sizeof out->error);
     if(rc!=SALTS_OK) {
-        status=rc==SALTS_ENOMEM?PRAKTOR_RUNTIME_RESOURCE:PRAKTOR_RUNTIME_INVALID;
+        status=components.wasm_status;
+        if(status==PRAKTOR_RUNTIME_OK)
+            status=rc==SALTS_ENOMEM?PRAKTOR_RUNTIME_RESOURCE:
+                   rc==SALTS_ENOTSUP?PRAKTOR_RUNTIME_UNSUPPORTED:PRAKTOR_RUNTIME_INVALID;
         if(!out->error[0])(void)snprintf(out->error,sizeof(out->error),
             "CMeta Configurator refused the workflow services");goto done;
     }
     const praktor_yaml_node workflow_declaration=praktor_workflow_snapshot_statechart(owner.snapshot);
     if(praktor_yaml_valid(workflow_declaration)) {
-        rc=praktor_statechart_plan_create(workflow_declaration,&defaults.tree,event_poll!=NULL,
+        rc=praktor_statechart_plan_create(workflow_declaration,&defaults.tree,check_only||event_poll!=NULL,
             &workflow_plan,out->error,sizeof out->error);
         if(rc!=SALTS_OK) {
             status=rc==SALTS_ENOTSUP?PRAKTOR_RUNTIME_UNSUPPORTED:
@@ -940,7 +958,7 @@ static praktor_runtime_status execute_yaml(
         if(has_chart) {
             has_chart_scope=true;
             rc=praktor_statechart_plan_create(declaration,
-                &defaults.tree,event_poll!=NULL,&charts[i],out->error,sizeof out->error);
+                &defaults.tree,check_only||event_poll!=NULL,&charts[i],out->error,sizeof out->error);
             if(rc!=SALTS_OK) {
                 status=rc==SALTS_ENOTSUP?PRAKTOR_RUNTIME_UNSUPPORTED:
                        rc==SALTS_ENOMEM?PRAKTOR_RUNTIME_RESOURCE:PRAKTOR_RUNTIME_INVALID;
@@ -951,10 +969,6 @@ static praktor_runtime_status execute_yaml(
             praktor_workflow_snapshot_task_tree(owner.snapshot,i));
         praktor_workflow_snapshot_task_kind kind;
         rc=praktor_workflow_snapshot_task_kind_at(owner.snapshot,i,&kind);
-        if(rc!=SALTS_OK)goto done;
-        rc=bind_outputs(root,kind==PRAKTOR_WORKFLOW_SNAPSHOT_COMMAND,
-            praktor_workflow_snapshot_task_metadata(owner.snapshot,i),(size_t)options.value_capacity,&outputs[i],
-            out->error,sizeof(out->error));
         if(rc!=SALTS_OK)goto done;
         rc=praktor_statechart_validate_raises(charts[i],workflow_plan,root,out->error,sizeof out->error);
         if(rc!=SALTS_OK) {
@@ -967,11 +981,15 @@ static praktor_runtime_status execute_yaml(
             if(!out->error[0])(void)snprintf(out->error,sizeof(out->error),
                 "Native C11 action is not implemented");goto done;
         }
-        rc=bind_tools(&components,plans[i],&tools[i],out->error,sizeof(out->error));
+        rc=bind_tools(&components,plans[i],check_only,&tools[i],out->error,sizeof(out->error));
         if(rc!=SALTS_OK) {
             status=rc==SALTS_ENOMEM?PRAKTOR_RUNTIME_RESOURCE:PRAKTOR_RUNTIME_INVALID;
             goto done;
         }
+        rc=bind_outputs(root,kind==PRAKTOR_WORKFLOW_SNAPSHOT_COMMAND,&tools[i],
+            praktor_workflow_snapshot_task_metadata(owner.snapshot,i),(size_t)options.value_capacity,&outputs[i],
+            out->error,sizeof(out->error));
+        if(rc!=SALTS_OK)goto done;
     }
     if(has_chart_scope) {
         const json_value_t *variables=json_object_get(praktor_workflow_snapshot_metadata(owner.snapshot),"variables");
@@ -990,6 +1008,10 @@ static praktor_runtime_status execute_yaml(
     rc=praktor_workflow_seed_root_text_variables(
         owner.snapshot,&owner.root);
     if(rc!=PRAKTOR_VALUE_OK)goto done;
+    if(check_only) {
+        status=PRAKTOR_RUNTIME_OK;
+        goto done;
+    }
     if(workflow_plan) {
         praktor_native_host_config chart_config;
         praktor_native_host_config_init(&chart_config,1u,PRK_MAX_KEY,PRK_MAX_VALUE);
@@ -1076,18 +1098,33 @@ done:
 praktor_runtime_status praktor_runtime_execute_yaml(
     const char *yaml,size_t size,const praktor_runtime_limits *limits,
     praktor_cancel_probe cancel,void *context,praktor_runtime_result *out) {
-    return execute_yaml(yaml,size,limits,cancel,context,NULL,NULL,NULL,out);
+    return execute_yaml(yaml,size,limits,cancel,context,NULL,NULL,NULL,NULL,false,out);
 }
 praktor_runtime_status praktor_runtime_execute_task_yaml(
     const char *yaml,size_t size,const praktor_runtime_limits *limits,
     praktor_cancel_probe cancel,void *context,const char *task,praktor_runtime_result *out) {
     if(!task||!*task)return PRAKTOR_RUNTIME_INVALID;
-    return execute_yaml(yaml,size,limits,cancel,context,task,NULL,NULL,out);
+    return execute_yaml(yaml,size,limits,cancel,context,task,NULL,NULL,NULL,false,out);
 }
 praktor_runtime_status praktor_runtime_execute_events_yaml(
     const praktor_execute_request *request,const char *task,praktor_event_poll poll,
     void *event_context,praktor_runtime_result *out) {
     if(!request||!out||!poll||(task&&!*task))return PRAKTOR_RUNTIME_INVALID;
     return execute_yaml(request->yaml,request->yaml_size,&request->limits,
-        request->is_cancelled,request->cancel_context,task,poll,event_context,out);
+        request->is_cancelled,request->cancel_context,task,poll,event_context,NULL,false,out);
+}
+praktor_runtime_status praktor_runtime_execute_wasm_yaml(
+    const praktor_execute_request *request,const char *task,const praktor_wasm_host *host,
+    praktor_runtime_result *out) {
+    if(!request||!out||!host||!host->bind||!host->unbind||!host->start||!host->step||
+       !host->release||(task&&!*task))return PRAKTOR_RUNTIME_INVALID;
+    return execute_yaml(request->yaml,request->yaml_size,&request->limits,
+        request->is_cancelled,request->cancel_context,task,NULL,NULL,host,false,out);
+}
+
+praktor_runtime_status praktor_runtime_check_yaml(const praktor_execute_request *request,
+    praktor_runtime_result *out) {
+    if(!request||!out)return PRAKTOR_RUNTIME_INVALID;
+    return execute_yaml(request->yaml,request->yaml_size,&request->limits,
+        NULL,NULL,NULL,NULL,NULL,NULL,true,out);
 }

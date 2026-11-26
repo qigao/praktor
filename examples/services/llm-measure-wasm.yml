@@ -1,0 +1,8 @@
+provider:
+  kind: wasm
+  module: llm.measure
+config:
+  export: run
+  fuel: 100000
+  timeout_ms: 1000
+  output_key: argument_metrics

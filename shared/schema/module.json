@@ -31,6 +31,7 @@
     },
     "praktor-schema": {
       "kind": "executable",
+      "testOnly": false,
       "sources": {
         "files": [
           "main.c"
@@ -44,6 +45,17 @@
       },
       "when": {
         "native": true
+      },
+      "test": {
+        "name": "schema_projection_cli",
+        "args": [
+          "$root/schema/workflow.schema",
+          "$root/schema/workflow.editor.json",
+          "$builddir/workflow.cli.json"
+        ],
+        "labels": [
+          "schema"
+        ]
       }
     }
   }

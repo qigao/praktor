@@ -34,6 +34,7 @@
           "src/expressions/expression_regex_salts.c",
           "src/profile/workflow_profile.c",
           "src/providers/process.c",
+          "src/providers/wasm.c",
           "src/runtime/component_host.c",
           "src/runtime/praktor_api.c",
           "src/runtime/runtime.c",

@@ -1,6 +1,7 @@
 #include "yml/yaml_service.h"
 #include "yaml_diagnostic_internal.h"
 #include "yml/yaml_task_fields.h"
+#include "actions/variable_reference.h"
 #include <core/tstr.h>
 #include <string.h>
 static int at_error(praktor_yaml_node n, const char *m, praktor_yaml_field_error *e) {
@@ -111,6 +112,54 @@ done:
   json_free(names);
   return rc;
 }
+static int add_wasm_name(json_value_t *entry, praktor_yaml_node map, const char *key,
+                         const char *fallback, praktor_yaml_field_error *error) {
+  static const char name_chars[] =
+      "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_.-";
+  praktor_yaml_node field = {0};
+  tstr text = NULL;
+  int rc = optional(map, key, &field, error);
+  if (rc != SALTS_OK) return rc;
+  if (!praktor_yaml_valid(field) && fallback)
+    return add_value(entry, key, json_create_string(fallback));
+  rc = praktor_yaml_field_string(field, vstr_from_cstr("WASM name must be a string"), &text, error);
+  if (rc == SALTS_OK) {
+    size_t len = tstr_len(text);
+    if (!len || len > 128u || strspn(text, name_chars) != len ||
+        (!strcmp(key, "output_key") &&
+          (!praktor_valid_variable_name(vstr_from_buf(text, len)) ||
+           !strncmp(text, "chart.", 6u) || !strncmp(text, "event.", 6u) ||
+           !strcmp(text, "shell_error"))))
+      rc = at_error(field, "invalid WASM module, export or output key", error);
+    else
+      rc = add_value(entry, key, json_create_string_n(text, len));
+  }
+  tstr_free(text);
+  return rc;
+}
+static int add_wasm_limit(json_value_t *entry, praktor_yaml_node config, const char *key,
+                          int limit, praktor_yaml_field_error *error) {
+  praktor_yaml_node field = {0};
+  int rc = optional(config, key, &field, error);
+  if (rc != SALTS_OK) return rc;
+  if (praktor_yaml_valid(field) &&
+      (praktor_yaml_integer(field, &limit, NULL) != SALTS_OK || limit <= 0))
+    return at_error(field, "WASM fuel and timeout_ms must be positive integers", error);
+  return add_value(entry, key, json_create_number(limit));
+}
+static int add_wasm_definition(json_value_t *entry, praktor_yaml_node provider,
+                               praktor_yaml_node config, praktor_yaml_field_error *error) {
+  static const vstr provider_keys[] = {{"kind", 4}, {"module", 6}};
+  static const vstr config_keys[] = {{"export", 6}, {"fuel", 4}, {"timeout_ms", 10}, {"output_key", 10}};
+  int rc = praktor_yaml_check_keys(provider, provider_keys, 2u, error);
+  if (rc == SALTS_OK) rc = praktor_yaml_check_keys(config, config_keys, 4u, error);
+  if (rc == SALTS_OK) rc = add_wasm_name(entry, provider, "module", NULL, error);
+  if (rc == SALTS_OK) rc = add_wasm_name(entry, config, "export", "run", error);
+  if (rc == SALTS_OK) rc = add_wasm_name(entry, config, "output_key", "wasm_output", error);
+  if (rc == SALTS_OK) rc = add_wasm_limit(entry, config, "fuel", 1000000, error);
+  if (rc == SALTS_OK) rc = add_wasm_limit(entry, config, "timeout_ms", 1000, error);
+  return rc;
+}
 int praktor_yaml_service_definition_create(praktor_yaml_node item, json_value_t **out,
                                            praktor_yaml_field_error *error) {
   praktor_yaml_field_error_dispose(error);
@@ -133,9 +182,6 @@ int praktor_yaml_service_definition_create(praktor_yaml_node item, json_value_t 
     rc = at_error(item, "service.provider must be a map", error);
     goto done;
   }
-  rc = praktor_yaml_check_keys(provider, provider_keys, 2u, error);
-  if (rc != SALTS_OK)
-    goto done;
   rc = praktor_yaml_field_get(provider, "kind", &value, error);
   if (rc != SALTS_OK)
     goto done;
@@ -143,10 +189,25 @@ int praktor_yaml_service_definition_create(praktor_yaml_node item, json_value_t 
                                  error);
   if (rc != SALTS_OK)
     goto done;
-  if (strcmp(kind, "exe")) {
-    rc = at_error(provider, "unsupported provider.kind; currently supported: exe", error);
+  const bool wasm = !strcmp(kind, "wasm");
+  if (!wasm && strcmp(kind, "exe")) {
+    rc = at_error(provider, "unsupported provider.kind; currently supported: exe, wasm", error);
     goto done;
   }
+  if (wasm) {
+    rc = optional(item, "config", &config, error);
+    if (rc != SALTS_OK) goto done;
+    if (!praktor_yaml_is_map(config)) {
+      rc = at_error(item, "service.config must be a map", error);
+      goto done;
+    }
+    entry = json_create_object();
+    rc = entry ? add_wasm_definition(entry, provider, config, error) : SALTS_ENOMEM;
+    if (rc != SALTS_OK) goto done;
+    goto capabilities;
+  }
+  rc = praktor_yaml_check_keys(provider, provider_keys, 2u, error);
+  if (rc != SALTS_OK) goto done;
   rc = praktor_yaml_field_get(provider, "path", &value, error);
   if (rc != SALTS_OK)
     goto done;
@@ -209,6 +270,7 @@ int praktor_yaml_service_definition_create(praktor_yaml_node item, json_value_t 
     if (rc != SALTS_OK)
       goto done;
   }
+capabilities:
   rc = optional(item, "capabilities", &value, error);
   if (rc != SALTS_OK)
     goto done;

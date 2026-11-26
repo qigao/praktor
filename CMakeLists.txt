@@ -3,7 +3,7 @@ include(CMakeOptions.cmake)
 
 project(
     Praktor
-    VERSION 0.2.0
+    VERSION 0.5.0
     DESCRIPTION "workflow engine based on C11"
     HOMEPAGE_URL "https://github.com/qigao/praktor"
     LANGUAGES C

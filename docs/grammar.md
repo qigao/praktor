@@ -8,9 +8,10 @@ The editor schema checks the executable YAML shape. Runtime admission also
 checks dependencies, service bindings, and value capacities. The internal
 YAML/data modules expose metadata and AST models for additional parser tests.
 
-The installed CLI and SDK admit Command, Shell, SetVariable, Tool and
-action trees with in-process and process leaves, with optional workflow
-and task statecharts.
+The CLI and SDK admit Command, Shell, SetVariable, Tool and action trees
+with optional workflow and task statecharts. The CLI runs executable Tool
+services. Embedded callers can run WASM Tool services through
+`praktor_execute_with_wasm`. [WASM service syntax](#wasm-services)
 See the [user guide](USER_GUIDE.md) and
 [runtime syntax](../README.md#current-admitted-subset).
 
@@ -18,6 +19,21 @@ Root `inputs` and `input_policy` are invalid keys. External variable values come
 from dotenv/inherited environment; explicit root/task variables remain internal
 workflow state. The CLI selects execution with
 `praktor --config build.yml --task build`; it has no `--input`/`--var` channel.
+
+## Syntax checking
+
+`praktor --config workflow.yml --check` checks the whole workflow and its
+referenced YAML files. It returns 0 on success. A diagnostic goes to stderr
+with exit code 2 on failure. `--task` and `--timeout-ms` apply to execution.
+
+The editor schema describes document shapes. The CLI check also uses the
+native parser and plan builders to resolve includes, expand dynamic tasks,
+validate dependencies and statecharts, and check each Tool's service and
+inputs. Dynamic task expansion uses values from the workflow and inherited
+environment. The check ends before component activation or task execution.
+Dotenv loading, WASM module authorization, and external event binding take
+place in the execution entrypoints. The C SDK exposes the same check through
+`praktor_check`. [Public header](../praktor/include/praktor.h)
 
 ## DAG parallelism
 
@@ -52,12 +68,15 @@ running successors or dispatching `task.finished`. An empty list suppresses
 successful output publication. Root-level `outputs` is outside the native
 execution profile.
 
-A failed Tool reports an exit code only after it receives a process result.
-If argument resolution fails before launch, the diagnostic describes the
-launch failure and the task has no process exit code.
+An executable Tool can report a failed process's exit code once it has
+received a process result. Argument resolution can fail at launch and
+produces a diagnostic.
 
 Without a list, a direct SetVariable publishes its destination and process
 tasks publish the default result fields `stdout`, `stderr`, and `exit_code`.
+A successful root WASM Tool publishes one JSON text value under its
+`config.output_key`. For an `actions` tree, declare that key in task
+`outputs` to make the value available to successor tasks.
 A directly bound Shell may customize its three distinct store keys with
 `output_key`, `stderr_key`, and `exit_code_key`. The result uses the
 canonical field names when the task uses implicit outputs. The runtime
@@ -203,9 +222,12 @@ Tool service for standalone argv arguments.
 ## Named execution services
 
 Root `services` maps service names to independent YAML declaration files. A
-`tool: <service-name>` task supplies scalar `with` inputs. The declaration's
-`provider.kind: exe`, `provider.path` and `config.args` describe generic process
-execution; operation names and command-line meanings remain entirely in YAML.
+`tool: <service-name>` task supplies an optional `with` map of scalar
+values. Values are passed as text, with a whole-value `$name` resolved at
+invocation. The workflow editor schema validates the paths in `services`
+and the Tool invocation shape. Runtime admission loads and validates each
+service declaration. A service with `provider.kind: exe` uses
+`provider.path` to select the executable and `config.args` to bind argv.
 
 An optional `capabilities` list in a service declaration supplies names for
 Selector's `capability("name")` predicate in `guard.match`. Labels are explicit
@@ -218,7 +240,52 @@ Existing service files can omit the list. To run the same configuration on a
 release without this feature, remove the list and replace its capability
 predicates with the branch conditions appropriate for that deployment.
 
-### Process actions inside a behavior tree
+### WASM services
+
+Declare the service in a separate YAML file.
+
+```yaml
+provider:
+  kind: wasm
+  module: llm.measure
+config:
+  export: run
+  fuel: 100000
+  timeout_ms: 1000
+  output_key: argument_metrics
+```
+
+`provider.module` is a logical module name resolved by the host. The
+required `config` map accepts the following optional fields.
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `export` | `run` | Guest entry approved by the host |
+| `fuel` | `1000000` | Total fuel requested for one invocation |
+| `timeout_ms` | `1000` | Per-invocation timeout in milliseconds |
+| `output_key` | `wasm_output` | Task variable holding the guest result |
+
+Module and export names use 1 to 128 ASCII letters, digits, underscores,
+dots or hyphens. Fuel and timeout are positive integers. `output_key` is
+a literal workflow variable name of up to 128 bytes without a leading `$`.
+The runtime reserves
+`chart.*`, `event.*`, and `shell_error`.
+
+For a root task, declare `tool: measure` and supply an optional `with` map.
+For a behavior-tree leaf, use `Tool: {service: measure, with: {arguments: $payload}}`.
+A WASM tool receives up to 64 resolved fields as one UTF-8 JSON object with
+string values, limited to 64 KiB. A successful invocation writes one UTF-8
+JSON document of up to 4,096 bytes to the configured output key. A later
+action can read the result with `ParseJson`. [Example workflow](../examples/llm/wasm-tool.yml)
+
+Use `praktor_execute_with_wasm` to supply the host. The host approves the
+module, export, requested fuel and timeout during admission. The reference
+TurboWasm host reads its authorization policy from a deployment-owned YAML
+file. A workflow declaring a WASM service requires a host binding.
+The standard CLI reports unsupported input at admission and exits with code 2.
+[Host contract and sandbox policy](WASM.md#embed-the-host)
+
+### Shell and Tool actions inside a behavior tree
 
 Use `Shell: {cmd: ...}` or `Tool: {service: name, with: {...}}` as leaf
 actions. A Tool uses a service declared in the document and resolves its
@@ -229,10 +296,12 @@ the tree succeeds.
 Before execution, the workflow binds every selected Tool leaf, including
 leaves in untaken branches. The task driver owns one active service job and
 its binding, and borrows each definition from Configurator. The owner
-retains decoded inputs through task teardown. The provider copies argv at
-start and lends result buffers until release. The driver copies completed
-results into the task store before release. Halting an active leaf cancels,
-drains and releases its job through the same bounded service protocol.
+retains decoded inputs through task teardown. The provider resolves its
+inputs at start and lends result buffers until release. The driver copies
+completed results into the task store before release. Halting an active
+leaf cancels, drains and releases its job through the same bounded service
+protocol. Tool leaves require serial BT branches. Workflow `parallelism`
+can admit independent Tool tasks into the same group.
 Shell leaves use the existing Session process driver and workflow retainer.
 Admission, execution and cleanup still run through the serial task driver.
 
@@ -248,7 +317,7 @@ literal JSON or a whole-value reference such as `with: {request: $payload}`.
 Provider-specific options and any expansions performed by curl belong in the
 service declaration.
 
-A successful tool task publishes its stdout to the workflow value
+A successful executable tool task publishes its stdout to the workflow value
 `shell_output`. Its CLI result exposes the same bytes as the task's
 `outputs.stdout`. Give the validating task a `depends_on` edge to the call,
 then use `ParseJson` and `assert` in `actions`. Use `result: one` when the

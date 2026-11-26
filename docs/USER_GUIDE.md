@@ -44,6 +44,19 @@ CLI 原生加载根 `dotEnv` 指定的文件，然后执行工作流；不使用
 并通过 `shell.timeout`、`shell.working_dir`、`shell.stream_output`
 配置进程。
 
+## 检查语法
+
+```sh
+praktor --config examples/llm/wasm-tool.yml --check
+```
+
+`--check` 检查完整工作流的 YAML、任务依赖、行为树、状态图以及引用的
+服务文件和工具参数。检查通过时返回 0，发现错误时在 stderr 输出诊断并
+返回 2。这个模式使用整份工作流，`--task` 和 `--timeout-ms` 用于执行模式。
+
+动态任务使用工作流变量和调用时继承的环境值完成展开。加载 `dotEnv` 文件、
+绑定 WASM 宿主和启动任务属于运行阶段。 [检查范围](grammar.md#syntax-checking)
+
 ## 命令默认配置
 
 Shell 和由 `command` 降低得到的命令逐字段继承配置：内置默认值 →
@@ -124,8 +137,8 @@ tasks:
 时会创建不同实例。同组任务通过各自的 job 共享已声明服务。
 
 服务文件路径相对调用方当前工作目录；`config.working_dir` 可设置子进程
-目录。服务声明最多 16 个，每个文件最多 1 MiB。当前只接纳 `kind: exe`，
-文件缺失、声明无效、服务名未知或参数不匹配都会失败；不会切换其他后端。
+目录。服务声明最多 16 个，每个文件最多 1 MiB。文件缺失、声明无效、服务名
+未知或参数不匹配都会失败。CLI 接纳 `kind: exe` 服务。
 
 `config.args` 最多 256 项。`$name` 必须占据完整 argv 项，并在任务 `with`
 中提供对应标量；多余参数也会拒绝。若传入值本身为 `$variable`，则从现有
@@ -135,16 +148,28 @@ tasks:
 超限会失败，不截断成成功。
 
 任务输出沿用 `exit_code`、`stdout`、`stderr`。取消后等待实际进程与 IO 排空，
-再释放 job 和服务。DLL、嵌入式 TurboScript、WASM provider 尚未接入。
-完整工作流示例见 [shared-downloads.yml](../examples/shared-downloads.yml)。
+再释放 job 和服务。 [shared-downloads.yml](../examples/shared-downloads.yml)
+
+### WASM 服务
+
+在独立服务 YAML 中设置 `provider.kind: wasm`、逻辑模块名
+`provider.module` 和 `config` 映射。工作流在根 `services` 中引用
+该文件，任务用 `tool` 调用，BT 叶节点用 `Tool` 调用。两种写法
+都通过 `with` 传入标量或 `$name` 引用。 [服务字段与默认值](grammar.md#wasm-services)
+
+嵌入式应用通过 `praktor_execute_with_wasm` 提供宿主。TurboWasm 示例宿主
+从部署方提供的沙箱策略 YAML 读取允许的模块、SHA-256、导出函数和
+fuel／超时上限。调用成功后，任务可以用 `ParseJson` 读取
+`config.output_key` 下的 JSON 文本。标准 CLI 在准入时报告 WASM 服务
+需要宿主并返回退出码 2。 [宿主和沙箱策略](WASM.md#embed-the-host)
 
 ### 在 guard 中查询服务能力
 
 服务文件可用 `capabilities` 声明最多 32 个名称，每个名称包含 1 至 128 个
 ASCII 字母、数字、下划线、点或连字符。同一服务中的重复声明会在任务运行前
 报错。一次工作流中，任意已激活的服务声明某名称，`capability("名称")` 就
-返回真。名称区分大小写，未声明或没有服务时返回假。判定只读取声明，在调用
-`tool` 时才启动进程。
+返回真。名称区分大小写，未声明或没有服务时返回假。判定只读取声明。
+WASM 模块的执行授权由宿主检查。
 
 ```yaml
 services:
@@ -199,6 +224,10 @@ CLI 结果中的 `tasks.call_<服务>.outputs.stdout` 保留原始响应。后�
 `shell_output` 读取同一响应。示例请求短文本，服务仍受 stdout/stderr
 合计 4096 字节的捕获上限约束。HTTP 错误或捕获超限会使模型任务失败。
 缺少摘要或返回生成截断的完成码会使校验任务失败。
+
+离线 WASM 工具示例把样例模型参数通过 `with.arguments` 交给 guest，
+再由后继任务用 `ParseJson` 读取返回结果。运行入口是带沙箱策略的
+TurboWasm 示例宿主。 [工作流](../examples/llm/wasm-tool.yml) · [构建和运行](WASM.md#run-the-llm-example)
 
 Praktor 可以按预先声明的 DAG 编排模型、工具和校验任务。模型响应作为
 数据交给 BT 中已声明的 guard，批准与拒绝可由文档级状态图记录。

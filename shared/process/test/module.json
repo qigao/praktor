@@ -192,6 +192,9 @@
       },
       "runtimeDeps": [
         "praktor_service_fixture"
+      ],
+      "runtimeBins": [
+        "$builddir/bin/praktor_service_fixture${host:exe}"
       ]
     }
   }

@@ -56,6 +56,15 @@ praktor_runtime_status praktor_execute_with_events(
     void *event_context,praktor_runtime_result *out) {
     return praktor_runtime_execute_events_yaml(request,task,poll,event_context,out);
 }
+praktor_runtime_status praktor_execute_with_wasm(
+    const praktor_execute_request *request,const char *task,const praktor_wasm_host *host,
+    praktor_runtime_result *out) {
+    return praktor_runtime_execute_wasm_yaml(request,task,host,out);
+}
+praktor_runtime_status praktor_check(const praktor_execute_request *request,
+    praktor_runtime_result *out) {
+    return praktor_runtime_check_yaml(request,out);
+}
 praktor_runtime_limits praktor_default_limits(void) {
     return praktor_runtime_limits_default();
 }

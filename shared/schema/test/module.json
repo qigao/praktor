@@ -53,46 +53,6 @@
           ]
         }
       ]
-    },
-    "schema_projection_cli": {
-      "kind": "header_only",
-      "when": {
-        "native": true
-      },
-      "runtimeDeps": [
-        "praktor-schema"
-      ],
-      "test": {
-        "program": "${artifact:praktor-schema}",
-        "args": [
-          "$root/schema/workflow.schema",
-          "$root/schema/workflow.editor.json",
-          "$builddir/workflow.cli.json"
-        ],
-        "labels": [
-          "schema"
-        ]
-      }
-    },
-    "schema_projection_cli_usage": {
-      "kind": "header_only",
-      "when": {
-        "native": true
-      },
-      "runtimeDeps": [
-        "schema_projection_test",
-        "praktor-schema"
-      ],
-      "test": {
-        "program": "${artifact:schema_projection_test}",
-        "args": [
-          "--filter",
-          "rejects incorrect schema CLI usage"
-        ],
-        "labels": [
-          "schema"
-        ]
-      }
     }
   }
 }

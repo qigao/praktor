@@ -132,6 +132,39 @@ spec("Praktor CLI workflow execution") {
     check(process_read_stderr(child,error,sizeof error-1u,&size)==SALTS_OK);
     check_contains(error,"PRAKTOR_TIMEOUT_MS");
   }
+  it("checks a workflow without loading dotEnv or running its command") {
+    const char *arguments[] = {"--config", PRAKTOR_CLI_INVALID_DEFAULTS_WORKFLOW, "--check", NULL};
+    process_options_t options;
+    process_result_t result = {0};
+    char output[32];
+    size_t size = 0u;
+    process_options_init(&options);
+    options.program = PRAKTOR_CLI_PATH;
+    options.args = arguments;
+    options.timeout_ms = 5000u;
+    check_equal(process_spawn(&options, &child), SALTS_OK);
+    check_equal(process_wait_for(child, 10000u, &result), SALTS_OK);
+    check(result.state == SALTS_PROCESS_EXITED && result.exit_code == 0);
+    const int stream = process_read_stdout(child, output, sizeof output, &size);
+    check(stream == SALTS_OK || stream == SALTS_EOF);
+    check_equal(size, 0u);
+  }
+  it("reports a workflow syntax diagnostic in check mode") {
+    const char *arguments[] = {"--config", PRAKTOR_CLI_SERVICE_FILE, "--check", NULL};
+    process_options_t options;
+    process_result_t result = {0};
+    char error[256] = {0};
+    size_t size = 0u;
+    process_options_init(&options);
+    options.program = PRAKTOR_CLI_PATH;
+    options.args = arguments;
+    options.timeout_ms = 5000u;
+    check_equal(process_spawn(&options, &child), SALTS_OK);
+    check_equal(process_wait_for(child, 10000u, &result), SALTS_OK);
+    check(result.state == SALTS_PROCESS_EXITED && result.exit_code == 2);
+    check_equal(process_read_stderr(child, error, sizeof error - 1u, &size), SALTS_OK);
+    check_contains(error, "workflow must define a 'tasks' list");
+  }
   it("applies the requested deadline to a running workflow") {
     const char *arguments[] = {PRAKTOR_CLI_TIMEOUT_WORKFLOW, "--timeout-ms", "50", NULL};
     process_options_t options;
@@ -198,6 +231,8 @@ spec("Praktor CLI workflow execution") {
         {"--config", PRAKTOR_CLI_TASK_WORKFLOW, "--task", "build", "--task", "test", NULL},
         {"--config", PRAKTOR_CLI_TASK_WORKFLOW, "--input", "PRESET=x", NULL},
         {"--config", PRAKTOR_CLI_TASK_WORKFLOW, "--var", "PRESET=x", NULL},
+        {"--config", PRAKTOR_CLI_TASK_WORKFLOW, "--check", "--task", "build", NULL},
+        {"--config", PRAKTOR_CLI_TASK_WORKFLOW, "--check", "--timeout-ms", "1", NULL},
         {"--config", "--task", "build", NULL},
         {"--config", PRAKTOR_CLI_TASK_WORKFLOW, NULL}};
     for (size_t i = 0u; i < sizeof cases / sizeof cases[0]; ++i) {

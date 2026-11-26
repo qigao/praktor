@@ -46,6 +46,33 @@ typedef struct praktor_execute_request {
     void *cancel_context;
 } praktor_execute_request;
 
+/* Callbacks run on the workflow owner and may call check only during step.
+ * bind resolves an approved logical module and validates its export and
+ * requested limits without running guest code. The reported timeout is the
+ * service timeout in milliseconds; the workflow can end an invocation sooner.
+ * start creates one invocation without running guest code.
+ * On success each returns a non-NULL handle, owned until unbind or release.
+ * On failure the callback cleans up its own work and returns a runtime status.
+ * Input is borrowed and valid through release. Output capacity excludes NUL.
+ * A successful step with done == 0 yields. With done == 1 it returns one
+ * UTF-8 JSON document in output. Other statuses terminate the invocation.
+ * The host enforces cumulative fuel and calls check during execution. Each
+ * step must return promptly, release must synchronously reclaim a yielded job.
+ * No callback may reenter Praktor. */
+typedef struct praktor_wasm_host {
+    void *context;
+    praktor_runtime_status (*bind)(void *context, const char *module, const char *entry,
+                                   unsigned int fuel, unsigned int timeout_ms,
+                                   void **binding);
+    void (*unbind)(void *context, void *binding);
+    praktor_runtime_status (*start)(void *context, void *binding, unsigned int fuel,
+                                    const char *input, size_t input_size, void **job);
+    praktor_runtime_status (*step)(void *context, void *job,
+                                   praktor_runtime_status (*check)(void *), void *check_context,
+                                   char *output, size_t capacity, size_t *size, int *done);
+    void (*release)(void *context, void *job);
+} praktor_wasm_host;
+
 typedef struct praktor_event_field {
     const char *name;
     const char *value;
@@ -77,6 +104,18 @@ PRAKTOR_API praktor_runtime_status praktor_execute_task(
 PRAKTOR_API praktor_runtime_status praktor_execute_with_events(
     const praktor_execute_request *request,const char *task,praktor_event_poll poll,
     void *event_context,praktor_runtime_result *result);
+/* Execute with a borrowed WASM host. task is optional, as with
+ * praktor_execute_with_events. WASM declarations require this host. */
+PRAKTOR_API praktor_runtime_status praktor_execute_with_wasm(
+    const praktor_execute_request *request,const char *task,const praktor_wasm_host *host,
+    praktor_runtime_result *result);
+/* Check YAML and declarations for the whole workflow with request.limits.
+ * Includes and services read local files. Dynamic tasks resolve values from
+ * the document and inherited environment. No dotenv files, callbacks or
+ * actions run. Runtime host bindings are checked during execution admission.
+ * Use a zeroed result. Read its diagnostic on failure; json stays NULL. */
+PRAKTOR_API praktor_runtime_status praktor_check(
+    const praktor_execute_request *request,praktor_runtime_result *result);
 PRAKTOR_API void praktor_release_result(praktor_runtime_result *result);
 PRAKTOR_API praktor_runtime_limits praktor_default_limits(void);
 PRAKTOR_API const cmeta_data_desc *praktor_config_reflection(void);

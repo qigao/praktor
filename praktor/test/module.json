@@ -283,6 +283,7 @@
           "PRAKTOR_CLI_ENV_WORKFLOW": "\"$builddir/fixtures/cli-env.yml\"",
           "PRAKTOR_CLI_INVALID_DEFAULTS_WORKFLOW": "\"$builddir/fixtures/cli-invalid-defaults.yml\"",
           "PRAKTOR_CLI_PATH": "\"$builddir/bin/praktor${host:exe}\"",
+          "PRAKTOR_CLI_SERVICE_FILE": "\"$root/praktor/test/data/service-unsupported.yml\"",
           "PRAKTOR_CLI_TASK_WORKFLOW": "\"$root/praktor/test/data/cli-tasks.yml\"",
           "PRAKTOR_CLI_TIMEOUT_WORKFLOW": "\"$root/praktor/test/data/cli-timeout.yml\"",
           "PRAKTOR_CLI_WORKFLOW": "\"$root/praktor/test/data/cli-shell.yml\""
@@ -299,6 +300,9 @@
       },
       "runtimeDeps": [
         "praktor"
+      ],
+      "runtimeBins": [
+        "$builddir/bin/praktor${host:exe}"
       ],
       "preTasks": [
         {
@@ -460,6 +464,7 @@
         "files": [
           "praktor_runtime_test.c",
           "../src/providers/process.c",
+          "../src/providers/wasm.c",
           "../src/actions/tool.c",
           "../src/yml/yaml_service.c",
           "../src/runtime/runtime.c",
@@ -550,6 +555,7 @@
           "service_test.c",
           "../src/runtime/component_host.c",
           "../src/providers/process.c",
+          "../src/providers/wasm.c",
           "../src/actions/tool.c",
           "../src/yml/yaml_service.c",
           "../src/yml/yaml_document.c",
@@ -581,6 +587,7 @@
           "../../shared/process/include"
         ],
         "defines": {
+          "PRAKTOR_SERVICE_CAPTURE": "\"$builddir/fixtures/capture.yml\"",
           "PRAKTOR_SERVICE_CURL": "\"$root/examples/services/download.yml\"",
           "PRAKTOR_SERVICE_DOTENV": "\"$root/praktor/test/data/cli.env\"",
           "PRAKTOR_SERVICE_DUPLICATE_CAPABILITY": "\"$root/praktor/test/data/service-duplicate-capability.yml\"",
@@ -593,7 +600,8 @@
           "PRAKTOR_SERVICE_PAYLOAD_FILE": "\"$root/praktor/test/data/service-payload.txt\"",
           "PRAKTOR_SERVICE_PAYLOAD_URL": "\"file://$root/praktor/test/data/service-payload.txt\"",
           "PRAKTOR_SERVICE_SLEEP": "\"$builddir/fixtures/sleep.yml\"",
-          "PRAKTOR_SERVICE_UNSUPPORTED": "\"$root/praktor/test/data/service-unsupported.yml\""
+          "PRAKTOR_SERVICE_UNSUPPORTED": "\"$root/praktor/test/data/service-unsupported.yml\"",
+          "PRAKTOR_SERVICE_WASM": "\"$root/examples/services/llm-measure-wasm.yml\""
         }
       },
       "when": {
@@ -621,6 +629,26 @@
         }
       ],
       "preTasks": [
+        {
+          "name": "configure-service-capture",
+          "tool": "praktor_fixture_configure",
+          "inputs": [
+            "data/execution-provider.yml.in"
+          ],
+          "outputs": [
+            "$builddir/fixtures/capture.yml"
+          ],
+          "args": [
+            "$moduledir/data/execution-provider.yml.in",
+            "$builddir/fixtures/capture.yml",
+            "@FIXTURE_PROGRAM@",
+            "$builddir/bin/praktor_execution_fixture${host:exe}",
+            "@FIXTURE_ARGS@",
+            "['$mode']",
+            "@FIXTURE_TIMEOUT@",
+            "5000"
+          ]
+        },
         {
           "name": "configure-service-echo",
           "tool": "praktor_fixture_configure",

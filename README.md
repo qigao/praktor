@@ -8,11 +8,14 @@ Praktor is a **C11** YAML workflow runtime with a shared SDK exposing **C ABI v3
 
 - **Salts CFlow:** the only bounded run/cancel/finalize execution mechanism. The application Owner serializes DAG claims and task-status publication; CFlow workers never own the DAG or root value store.
 - **CMeta:** immutable configuration Reflection, exact-signature Interceptor admission, and lexical cleanup for operations with a no-fail release contract. Fallible close, flush, and Process retirement remain explicitly checked.
-- **CMeta ACE Configurator:** one static provider's dependency and lifecycle authority. Dynamic providers, when implemented, must use the canonical **ServiceHost/Plugin** generation and scope mechanisms; no private loader is supplied.
+- **CMeta ACE Configurator** manages admission and lifetime for static service instances. Dynamic providers use the canonical **ServiceHost/Plugin** generation and scope contracts.
 - **Praktor BehaviorTree + SaltsBase Process/NativeIO:** canonical C11 Session/Actions use `process_async` for OS subprocess and I/O ownership. Praktor's bounded retainer keeps closing async owners and their buffers alive until native drain completes, before outputs are published.
 - **C11 YAML Snapshot, DAG and TaskRegistry:** immutable plan input with bounded task admission and typed, owner-only output publication.
 
 Production code is C11. The shared/behavior-tree tests also compile its public header from C++17. The runtime is **not** a translation of the former C++ class hierarchy.
+
+For persistent message routing, the host can drive RulesForge and pass selected
+decisions into a Praktor workflow. See [long-running message routing](docs/STATECHART.md#常驻分流).
 
 ## Current admitted subset
 
@@ -23,6 +26,7 @@ or `vars` for workflow values. Admission rejects root `env` and `outputs`,
 as well as `env`, `when` and `triggers` on selected tasks.
 
 An `actions` tree can compose control nodes with Shell and Tool leaves.
+Native applications can also bind a WASM executor and call approved guest tools from tasks or BT leaves. [WASM service declarations, host contract and LLM example](docs/WASM.md)
 The workflow admits process defaults and service bindings before execution.
 Use a `cases` sequence for a zero-based integer `switch` or a `cases`
 mapping for exact string matches with an optional `default`. [Workflow grammar](docs/grammar.md)
@@ -183,9 +187,14 @@ tasks:
 
 ```sh
 praktor --config workflow.yml --task build
+praktor --config workflow.yml --check
 ```
 
 The C-only CLI reads one YAML file, executes the admitted subset and returns canonical JSON with workflow/task states. This is not the former subcommand-based CLI.
+
+`--check` validates the whole workflow, including referenced service files
+and execution plans. It exits with code 0 on success or writes a diagnostic
+to stderr and exits with code 2. [Validation scope](docs/grammar.md#syntax-checking)
 
 ## Embedded SDK (C ABI v3)
 
@@ -206,8 +215,16 @@ praktor_release_result(&result);
 
 See [the public header](praktor/include/praktor.h) for ownership and result-release requirements.
 
+Embedded callers use `praktor_check` with the same request limits and a zeroed
+result to perform the CLI's syntax and declaration checks.
+
 Embedded callers use `praktor_execute_with_events` to deliver typed external
 events to the active document and task charts. [Host event protocol](docs/STATECHART.md#宿主事件)
+
+Use `praktor_execute_with_wasm` with a `praktor_wasm_host` to execute
+WASM services. Its `bind` callback approves the module, export, fuel and
+timeout during workflow admission. The standard CLI reports unsupported
+input when the workflow declares such a service. [Provider grammar](docs/grammar.md#wasm-services) · [Host and sandbox policy](docs/WASM.md#embed-the-host)
 
 The public header is `praktor/include/praktor.h`. All Praktor implementation
 sources compile into one shared `Praktor` target. The CLI lives in `app/main.c`,
@@ -216,9 +233,9 @@ live in `praktor/test`, and runnable workflows live in `examples`.
 Actions headers and implementations live in `praktor/include/actions` and
 `praktor/src/actions`; see [the Actions guide](docs/ACTIONS.md).
 Reusable `tool` tasks reference independent service YAML files through the root
-`services` map. Configurator shares one generic execution instance per name;
-executable selection and argv templates belong to YAML. See [the user guide](docs/USER_GUIDE.md)
-and [the curl service declaration](examples/services/download.yml).
+`services` map. Configurator shares one execution service per name. Service
+YAML declares the executable and argv template or requests a logical WASM
+module and invocation limits. [User guide](docs/USER_GUIDE.md#复用独立-yaml-服务) · [curl service declaration](examples/services/download.yml)
 
 Each module adds its own `test` or `tests` directory when `BUILD_TESTS` is
 enabled. Actions tests live in `praktor/test/actions`, process tests in
@@ -321,9 +338,17 @@ slate install --targets praktor praktor_runtime salts_behavior_tree --components
 ```
 
 The `debug-tests` preset runs the same tests in a debug build. Use
-`slate test --preset tests --label process` to run the process suites. The
-other labels are `praktor`, `schema`, and `behavior-tree`. Slate builds the
-native helper targets before generating the test fixtures.
+`slate test --preset tests --label schema` to run `schema_projection_cli`
+and `schema_projection_test`. The first runs `praktor-schema` to generate
+the workflow schema. The second checks the generated schema and verifies
+that incorrect CLI usage exits with code 2. The other labels are
+`praktor`, `process`, and `behavior-tree`.
+
+Slate 0.1.14 requires tests to be registered on executable targets.
+`praktor-schema` declares `testOnly: false` so it is also available in
+the release build. When a test launches a helper executable, its
+`runtimeDeps` selects the helper target and its `runtimeBins` makes
+the helper binary a prerequisite of the test's Ninja target.
 
 The Slate runtime target is `praktor_runtime` so its Ninja object directory
 is distinct from the `praktor` CLI on case-insensitive filesystems. Use

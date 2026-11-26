@@ -889,6 +889,7 @@ target_compile_definitions(praktor_runtime_c_test PRIVATE
     PRAKTOR_DEVICE_AUDIT_LIBRARY="${PROJECT_SOURCE_DIR}/examples/libraries/device-audit.yml")
 target_sources(praktor_runtime_c_test PRIVATE
     ${PROJECT_SOURCE_DIR}/praktor/src/providers/process.c
+    ${PROJECT_SOURCE_DIR}/praktor/src/providers/wasm.c
     ${PROJECT_SOURCE_DIR}/praktor/src/actions/tool.c
     ${PROJECT_SOURCE_DIR}/praktor/src/yml/yaml_service.c
     ${PROJECT_SOURCE_DIR}/praktor/src/runtime/runtime.c
@@ -963,9 +964,12 @@ endforeach()
 add_executable(praktor_execution_fixture ${CMAKE_CURRENT_SOURCE_DIR}/service_fixture.c)
 target_link_libraries(praktor_execution_fixture PRIVATE Salts::Core)
 set_target_properties(praktor_execution_fixture PROPERTIES FOLDER "praktor/test")
-foreach(_mode IN ITEMS echo sleep sleep-long env fail)
+foreach(_mode IN ITEMS echo capture sleep sleep-long env fail)
     if(_mode STREQUAL "echo")
         set(_arguments "['emit', '$text']")
+        set(_timeout 5000)
+    elseif(_mode STREQUAL "capture")
+        set(_arguments "['$mode']")
         set(_timeout 5000)
     elseif(_mode STREQUAL "sleep" OR _mode STREQUAL "sleep-long")
         set(_arguments "['sleep']")
@@ -992,6 +996,7 @@ add_executable(praktor_service_test ${CMAKE_CURRENT_SOURCE_DIR}/service_test.c)
 target_sources(praktor_service_test PRIVATE
     ${PROJECT_SOURCE_DIR}/praktor/src/runtime/component_host.c
     ${PROJECT_SOURCE_DIR}/praktor/src/providers/process.c
+    ${PROJECT_SOURCE_DIR}/praktor/src/providers/wasm.c
     ${PROJECT_SOURCE_DIR}/praktor/src/actions/tool.c
     ${PROJECT_SOURCE_DIR}/praktor/src/yml/yaml_service.c
     ${PROJECT_SOURCE_DIR}/praktor/src/yml/yaml_document.c
@@ -1007,6 +1012,7 @@ else()
     set(_payload_url "file://${CMAKE_CURRENT_SOURCE_DIR}/data/service-payload.txt")
 endif()
 target_compile_definitions(praktor_service_test PRIVATE
+    PRAKTOR_SERVICE_CAPTURE="${CMAKE_CURRENT_BINARY_DIR}/services/capture.yml"
     PRAKTOR_SERVICE_ECHO="${CMAKE_CURRENT_BINARY_DIR}/services/echo.yml"
     PRAKTOR_SERVICE_SLEEP="${CMAKE_CURRENT_BINARY_DIR}/services/sleep.yml"
     PRAKTOR_SERVICE_LONG_SLEEP="${CMAKE_CURRENT_BINARY_DIR}/services/sleep-long.yml"
@@ -1017,6 +1023,7 @@ target_compile_definitions(praktor_service_test PRIVATE
     PRAKTOR_SERVICE_PAYLOAD_URL="${_payload_url}"
     PRAKTOR_SERVICE_PAYLOAD_FILE="${CMAKE_CURRENT_SOURCE_DIR}/data/service-payload.txt"
     PRAKTOR_SERVICE_UNSUPPORTED="${CMAKE_CURRENT_SOURCE_DIR}/data/service-unsupported.yml"
+    PRAKTOR_SERVICE_WASM="${PROJECT_SOURCE_DIR}/examples/services/llm-measure-wasm.yml"
     PRAKTOR_SERVICE_DUPLICATE_CAPABILITY="${CMAKE_CURRENT_SOURCE_DIR}/data/service-duplicate-capability.yml"
     PRAKTOR_SERVICE_OUTPUT_A="${CMAKE_CURRENT_BINARY_DIR}/service-first with spaces.txt"
     PRAKTOR_SERVICE_OUTPUT_B="${CMAKE_CURRENT_BINARY_DIR}/service-second.txt")
@@ -1035,6 +1042,7 @@ target_compile_definitions(praktor_cli_test PRIVATE
     PRAKTOR_CLI_PATH="$<TARGET_FILE:praktor>"
     PRAKTOR_CLI_WORKFLOW="${CMAKE_CURRENT_SOURCE_DIR}/data/cli-shell.yml"
     PRAKTOR_CLI_BASIC_EXAMPLE="${PROJECT_SOURCE_DIR}/examples/basic.yml"
+    PRAKTOR_CLI_SERVICE_FILE="${CMAKE_CURRENT_SOURCE_DIR}/data/service-unsupported.yml"
     PRAKTOR_CLI_TASK_WORKFLOW="${CMAKE_CURRENT_SOURCE_DIR}/data/cli-tasks.yml"
     PRAKTOR_CLI_TIMEOUT_WORKFLOW="${CMAKE_CURRENT_SOURCE_DIR}/data/cli-timeout.yml"
     PRAKTOR_CLI_INVALID_DEFAULTS_WORKFLOW="${CMAKE_CURRENT_BINARY_DIR}/cli-invalid-defaults.yml"

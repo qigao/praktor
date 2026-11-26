@@ -112,6 +112,33 @@ BT guard 可通过 `$chart.task.<状态ID>` 和 `$chart.workflow.<状态ID>` 查
 普通 CLI 和原有执行入口在准入时拒绝外部事件声明。迁移到旧版本时可由
 任务 BT 经 `raise` 携带内部事件，并改用对应的内部事件声明。
 
+### 常驻分流
+
+宿主通过 RulesForge 的 C ABI 运行数据规则。RFL 匹配消息与事实，命中后可通过 `CALL` 调用
+ToadScript 函数，计算 `DROP`、`FORWARD` 和逻辑目的地。RFL 把结果和原事件 ID 写入决策事实。
+宿主持有原消息、发布代际和有界队列，校验决策后完成 MQTT 确认及下游投递。
+涉及任务依赖、服务调用或流程状态时，宿主把规则结果作为输入交给 Praktor。 [RFL 调用与结果归属](https://github.com/qigao/RulesForge/blob/464501ce52dc33c6548c835fe9fe167e9610de65/docs/SCRIPT_PROGRAM.md#rules-and-ownership)
+
+ToadScript `CALL` 通过 RulesForge `Program` 创建的 `StatefulSession` 执行。宿主在同一个线程驱动会话，
+跨消息状态放在有界的会话事实中。需要事件时间、水位线和迟到处理时，宿主可以先用
+`ContinuousSession` 计算数据特征，再交给 `Program` 执行分流。连续会话的批次确认由宿主按顺序处理。
+该会话的 `max_replay_steps` 是累计上限，事件过期和批次确认都不会回收重放步骤。部署前需验证会话恢复与交接。
+[Program 和连续会话](https://github.com/qigao/RulesForge/blob/464501ce52dc33c6548c835fe9fe167e9610de65/docs/USER_GUIDE.md#choose-a-session) · [连续会话限制](https://github.com/qigao/RulesForge/blob/464501ce52dc33c6548c835fe9fe167e9610de65/docs/CONTINUOUS_RULE_ENGINE_DESIGN.md#current-limits)
+
+### 流程级逐事件决策计划
+
+[#89](https://github.com/qigao/praktor/issues/89) 规划给同一次长驻状态图执行增加相关决策回调。
+当前 SDK 提供事件轮询和最终执行结果。计划中的宿主回调将原样返回关联 ID 和发布代际，
+并对每个已接纳事件给出一次结算。宿主在提供事件前预留决策槽。Praktor 在结算前暂停轮询该图，
+并在提交 `FORWARD` 前校验宿主为该代际批准的逻辑目的地。
+
+工作流线程推进状态图和单次事件的处理体。事件未命中允许的迁移时结算 `DROP`。
+命中迁移后，处理体读取本次事件和捕获的状态，只暂存本轮决策。
+成功结束后由工作流线程提交。分支中止、取消、期限或错误使本轮暂存结果作废，
+排空活动工作后结算尚未完成的事件。Statechart 状态跨事件保留，处理体的临时值按事件重置，
+流程级逐事件能力不受普通 BT 循环的迭代预算限制。验收包括同一张图的关联 `DROP` 和 `FORWARD`、
+超过默认 BT 迭代上限的连续事件，以及取消时的唯一结算。
+
 ## 迁移与验证
 
 旧的独立状态图执行体由顶层终态结算任务。每个任务统一进入 BT Session 后，任务只从执行体取得结果，状态迁移只提交状态图数据。依赖图继续负责决定哪些任务可以启动，BT 按业务需要显式等待或读取状态。

@@ -19,6 +19,12 @@ before building the task graph. The editor checks local shape, while admission
 resolves library files, JSON arrays, names, and dependency edges.
 [Workflow composition](../docs/grammar.md#workflow-composition)
 
+The workflow editor schema covers the `services` file references and the
+shared `tool` / `Tool` and `with` fields. During admission, Praktor reads
+the referenced service files and validates their `exe` or `wasm` provider
+declarations. Embedded hosts approve WASM module bindings.
+[Named execution services](../docs/grammar.md#named-execution-services)
+
 In the configured Windows developer environment:
 
 ```sh

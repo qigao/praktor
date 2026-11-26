@@ -1,0 +1,24 @@
+name: Inspect an LLM tool call
+
+services:
+  measure: examples/services/llm-measure-wasm.yml
+
+variables:
+  model_arguments: '{"text":"你好"}'
+
+tasks:
+  - name: measure_arguments
+    tool: measure
+    with:
+      arguments: $model_arguments
+
+  - name: read_metrics
+    depends_on: [measure_arguments]
+    outputs: [$input_bytes]
+    actions:
+      Sequence:
+        - ParseJson:
+            input_key: $argument_metrics
+            path: '$.input_bytes'
+            output_key: input_bytes
+            result: one

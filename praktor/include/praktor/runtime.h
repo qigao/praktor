@@ -10,6 +10,8 @@
 
 praktor_runtime_limits praktor_runtime_limits_default(void);
 const cmeta_data_desc *praktor_runtime_limits_reflection(void);
+praktor_runtime_status praktor_runtime_check_yaml(
+    const praktor_execute_request *request,praktor_runtime_result *out);
 praktor_runtime_status praktor_runtime_execute_yaml(
     const char *yaml,size_t yaml_size,const praktor_runtime_limits *limits,
     praktor_cancel_probe cancel,void *cancel_context,
@@ -22,4 +24,7 @@ praktor_runtime_status praktor_runtime_execute_events_yaml(
     const praktor_execute_request *request,const char *task,praktor_event_poll poll,
     void *event_context,praktor_runtime_result *out);
 void praktor_runtime_result_destroy(praktor_runtime_result *result);
+praktor_runtime_status praktor_runtime_execute_wasm_yaml(
+    const praktor_execute_request *request,const char *task,const praktor_wasm_host *host,
+    praktor_runtime_result *out);
 #endif

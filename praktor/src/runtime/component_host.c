@@ -80,13 +80,19 @@ static void SALTS_CONFIGURATOR_CALL deactivate_owner(
 /* One binding per explicit service name; multiple instances of the same
  * Interface use Configurator's existing explicit provider selection. */
 cmeta_component(praktor_process_component,cmeta_provides(praktor_execution_service));
+cmeta_component(praktor_wasm_component,cmeta_provides(praktor_execution_service));
 CMETA_OBJECT_INTERFACE_ADAPTER(praktor_execution_service);
 static cmeta_status project_execution(void *user,const cmeta_object_ref *object,
     const cmeta_interface_desc *expected,cmeta_interface_projection *out) {
     (void)user;
     if(!object||!out||!cmeta_interface_desc_equal(expected,praktor_execution_service_interface()))
         return CMETA_TRAIT_MISSING;
-    praktor_execution_service service=praktor_process_service_bind(object->object);
+    praktor_execution_service service;
+    if(cmeta_data_desc_equal(object->data,praktor_wasm_service_reflection()))
+        service=praktor_wasm_service_bind(object->object);
+    else if(cmeta_data_desc_equal(object->data,praktor_process_service_reflection()))
+        service=praktor_process_service_bind(object->object);
+    else return CMETA_TRAIT_MISSING;
     out->size=sizeof(*out);out->interface=praktor_execution_service_interface();
     out->self=service.self;out->dispatch=service.vtable;
     return CMETA_OK;
@@ -99,9 +105,10 @@ static cmeta_status SALTS_CONFIGURATOR_CALL create_execution(void *ctx,
     (void)deps;
     const praktor_process_config *config=value;
     if(!ctx||!config||count||!cmeta_data_desc_equal(data,praktor_process_config_reflection())||
-       !config->path||!*config->path||config->timeout_ms<=0)return CMETA_INVALID_ARGUMENT;
+       !config->path||!*config->path||config->timeout_ms<=0||!config->args)return CMETA_INVALID_ARGUMENT;
     praktor_process_service *service=ctx;
-    *service=(praktor_process_service){.path=config->path,.working_dir=config->working_dir,.timeout_ms=config->timeout_ms};
+    *service=(praktor_process_service){.path=config->path,.working_dir=config->working_dir,
+        .timeout_ms=config->timeout_ms,.args=config->args};
     return cmeta_object_borrow(out,ctx,praktor_process_service_reflection(),NULL);
 }
 static cmeta_status SALTS_CONFIGURATOR_CALL activate_execution(void *ctx,const cmeta_object_ref *object) {
@@ -113,6 +120,13 @@ static void SALTS_CONFIGURATOR_CALL deactivate_execution(void *ctx,const cmeta_o
     praktor_process_service *service=ctx;
     if(service->jobs)abort();
     service->active=false;
+}
+static cmeta_status SALTS_CONFIGURATOR_CALL create_wasm(void *ctx,
+    const cmeta_data_desc *data,const void *value,
+    const salts_configurator_dependency *deps,size_t count,cmeta_object_ref *out) {
+    (void)deps;
+    if(!ctx||data||value||count)return CMETA_INVALID_ARGUMENT;
+    return cmeta_object_borrow(out,ctx,praktor_wasm_service_reflection(),NULL);
 }
 /* File references are explicit runtime IO. Parse before Configurator start or
  * any task side effect, and retain only normalized owned declarations. */
@@ -154,13 +168,43 @@ done:
     praktor_yaml_field_error_dispose(&field);praktor_yaml_document_destroy(document);tstr_free(source);
     return rc;
 }
+int praktor_component_host_load_definitions(praktor_component_host *host,
+    const json_value_t *metadata,char *error,size_t capacity) {
+    const json_value_t *services=json_object_get(metadata,"services");
+    const size_t count=json_object_size(services);
+    if(!host||count>PRAKTOR_WORKFLOW_MAX_SERVICES)return SALTS_EINVAL;
+    host->service_count=count;
+    for(size_t i=0u;i<count;++i) {
+        const char *name=json_object_key(services,i);
+        int rc=load_definition(json_get_string(services,name),&host->definitions[i],error,capacity);
+        if(rc!=SALTS_OK)return rc;
+        host->descriptions[i].stable_id=name;
+    }
+    return SALTS_OK;
+}
+
+int praktor_component_host_check_tool(const praktor_component_host *host,const char *name,
+    const praktor_execution_admission *admission,const char **output_key) {
+    for(size_t i=0u;i<host->service_count;++i) {
+        if(strcmp(name,host->descriptions[i].stable_id))continue;
+        const json_value_t *definition=host->definitions[i];
+        *output_key=json_get_string(definition,"output_key");
+        if(*output_key)return praktor_wasm_validate_inputs(admission);
+        return praktor_process_validate_inputs(json_object_get(definition,"args"),admission);
+    }
+    return SALTS_ENOENT;
+}
+
 int praktor_component_host_start(praktor_component_host *host,
                                  const praktor_runtime_limits *limits,
-                                 const json_value_t *metadata,char *error,size_t capacity) {
+                                 const json_value_t *metadata,const praktor_wasm_service *wasm,
+                                 char *error,size_t capacity) {
     salts_configurator_service service={0};
     praktor_owner_service owner=praktor_owner_service_bind(NULL,NULL);
     if (!host || !limits)return SALTS_EINVAL;
     memset(host,0,sizeof(*host));
+    int rc=praktor_component_host_load_definitions(host,metadata,error,capacity);
+    if(rc!=SALTS_OK)return rc;
     host->bindings[0]=(salts_configurator_provider_binding){
         sizeof(salts_configurator_provider_binding),
         SALTS_CONFIGURATOR_PROVIDER_BINDING_ABI_VERSION,
@@ -170,20 +214,46 @@ int praktor_component_host_start(praktor_component_host *host,
     };
     host->deployments[0]=(salts_configurator_deployment){
         &host->bindings[0],cmeta_reflected_data(praktor_runtime_limits),limits};
-    const json_value_t *services=json_object_get(metadata,"services");
-    size_t service_count=json_object_size(services);
-    if(service_count>PRAKTOR_WORKFLOW_MAX_SERVICES)return SALTS_EINVAL;
-    host->service_count=service_count;
     for(size_t i=0u;i<host->service_count;++i) {
-        const char *name=json_object_key(services,i);
-        const char *file=json_get_string(services,name);
-        int rc=load_definition(file,&host->definitions[i],error,capacity);
-        if(rc!=SALTS_OK)return rc;
+        const char *name=host->descriptions[i].stable_id;
         const json_value_t *entry=host->definitions[i];
+        const char *module=json_get_string(entry,"module");
+        if(module) {
+            if(!wasm || !wasm->host) {
+                fmt(error,capacity,"service '{}': WASM requires an explicit execution host",name);
+                return SALTS_ENOTSUP;
+            }
+            praktor_wasm_service *configured=&host->wasm[i];
+            *configured=*wasm;
+            configured->output_key=json_get_string(entry,"output_key");
+            configured->fuel=(int)json_number(json_object_get(entry,"fuel"));
+            const unsigned int timeout_ms=(unsigned int)json_number(json_object_get(entry,"timeout_ms"));
+            configured->timeout_ns=(uint64_t)timeout_ms*UINT64_C(1000000);
+            const char *entry_name=json_get_string(entry,"export");
+            void *binding=NULL;
+            host->wasm_status=wasm->host->bind(wasm->host->context,module,entry_name,
+                (unsigned int)configured->fuel,timeout_ms,&binding);
+            if(host->wasm_status==PRAKTOR_RUNTIME_OK&&!binding)
+                host->wasm_status=PRAKTOR_RUNTIME_INVALID;
+            if(host->wasm_status!=PRAKTOR_RUNTIME_OK) {
+                fmt(error,capacity,"service '{}': WASM host refused module '{}' export '{}' (fuel {}, timeout_ms {})",
+                    name,module,entry_name,configured->fuel,timeout_ms);
+                return SALTS_EINVAL;
+            }
+            configured->binding=binding;
+            host->descriptions[i]=*cmeta_component_meta(praktor_wasm_component);
+            host->descriptions[i].stable_id=name;
+            host->bindings[i+1u]=(salts_configurator_provider_binding){
+                sizeof(salts_configurator_provider_binding),SALTS_CONFIGURATOR_PROVIDER_BINDING_ABI_VERSION,
+                &host->descriptions[i],configured,&execution_interfaces,create_wasm,NULL,NULL};
+            host->deployments[i+1u]=(salts_configurator_deployment){&host->bindings[i+1u],NULL,NULL};
+            continue;
+        }
         const char *path=json_get_string(entry,"path");
         const json_value_t *timeout=json_object_get(entry,"timeout_ms");
         if(!path||!timeout)return SALTS_EINVAL;
-        host->configs[i]=(praktor_process_config){path,json_get_string(entry,"working_dir"),(int)json_number(timeout)};
+        host->configs[i]=(praktor_process_config){.path=path,.working_dir=json_get_string(entry,"working_dir"),
+            .timeout_ms=(int)json_number(timeout),.args=json_object_get(entry,"args")};
         host->descriptions[i]=*cmeta_component_meta(praktor_process_component);
         host->descriptions[i].stable_id=name;
         host->descriptions[i].config=praktor_process_config_reflection();
@@ -224,10 +294,14 @@ int praktor_component_host_start(praktor_component_host *host,
     return SALTS_OK;
 }
 int praktor_component_host_service(praktor_component_host *host,const char *name,
-                                    praktor_execution_service *out,const json_value_t **definition) {
-    if(!host||!host->active||!name||!out||!definition)return SALTS_EINVAL;
+                                    praktor_execution_service *out,const char **output_key) {
+    if(!host||!host->active||!name||!out)return SALTS_EINVAL;
     for(size_t i=0u;i<host->service_count;++i)
-        if(!strcmp(name,host->descriptions[i].stable_id)) {*out=host->services[i];*definition=host->definitions[i];return SALTS_OK;}
+        if(!strcmp(name,host->descriptions[i].stable_id)) {
+            *out=host->services[i];
+            if(output_key)*output_key=host->wasm[i].output_key;
+            return SALTS_OK;
+        }
     return SALTS_ENOENT;
 }
 int praktor_component_host_has_capability(void *context, const char *name, size_t length) {
@@ -246,11 +320,16 @@ int praktor_component_host_has_capability(void *context, const char *name, size_
 int praktor_component_host_stop(praktor_component_host *host) {
     if (!host)return SALTS_EINVAL;
     for(size_t i=0u;i<host->service_count;++i)
-        if(host->processes[i].jobs)return SALTS_EBUSY;
+        if(host->processes[i].jobs||host->wasm[i].jobs)return SALTS_EBUSY;
     if (host->active&&salts_configurator_context_stop(&host->context)!=SALTS_CONFIGURATOR_OK)
         return SALTS_EIO;
     host->active=false;
     for(size_t i=0u;i<host->service_count;++i) {
+        praktor_wasm_service *wasm=&host->wasm[i];
+        if(wasm->binding) {
+            wasm->host->unbind(wasm->host->context,wasm->binding);
+            *wasm=(praktor_wasm_service){0};
+        }
         json_free(host->definitions[i]);host->definitions[i]=NULL;
     }
     host->service_count=0u;

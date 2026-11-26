@@ -68,7 +68,7 @@
     },
     "services": {
       "type": "object",
-      "description": "Names of reusable execution services mapped to independent YAML declaration files, relative to the caller working directory.",
+      "description": "Names of executable or embedded WASM services mapped to independent YAML declaration files, relative to the caller working directory. The runtime validates each service file during admission.",
       "maxProperties": 16,
       "propertyNames": {
         "minLength": 1,
@@ -669,7 +669,7 @@
           "$ref": "#/$defs/managedProcessAction"
         },
         "tool": {
-          "description": "Name of an execution service declared in root services.",
+          "description": "Name of an execution service declared in root services. A WASM service requires a host supplied through praktor_execute_with_wasm.",
           "type": "string",
           "minLength": 1
         },
@@ -3085,7 +3085,7 @@
     },
     "toolInputs": {
       "type": "object",
-      "description": "Scalar values and $name references bound to whole argv entries.",
+      "description": "Scalar inputs and whole-value $name references. Executable services bind them to argv entries. WASM services receive a JSON object with string values.",
       "additionalProperties": {
         "type": [
           "string",
@@ -3097,6 +3097,7 @@
     },
     "orchestrationToolNode": {
       "type": "object",
+      "description": "Invoke a named execution service in a serial behavior-tree branch. A WASM service requires a host supplied through praktor_execute_with_wasm.",
       "properties": {
         "service": {
           "type": "string",

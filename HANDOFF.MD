@@ -1,5 +1,47 @@
 # 构建与运行时排障记录
 
+## 2026-11-26 · Slate schema 测试注册
+
+- Slate 0.1.14 要求测试归属 `executable` target。给 `header_only` target
+  设置 `test.program` 仍会使整个测试发现失败。
+- `praktor-schema` 通过 `testOnly: false` 保留普通构建入口，并以
+  `test.name: schema_projection_cli` 注册。CLI 错误用法由现有
+  `schema_projection_test` 中的 TinyTest 用例检查退出码 2。
+- 用 `slate test --list --preset tests` 验证发现，再用
+  `slate test --preset tests --label schema` 验证两个 schema 测试入口。
+- Slate 0.1.14 的 `runtimeDeps` 会将目标加入构建图，但测试的 Ninja
+  入口只收集共享库和显式 `runtimeBins`。子进程测试同时声明可执行文件为
+  `runtimeBins`，确保 `slate test` 在启动测试前生成 CLI 与服务 fixture。
+- Windows x64 LLVM-MinGW 下，`slate test --preset tests` 通过 70/70，
+  `slate build --preset release --target praktor-schema` 通过。
+
+## 2026-11-26 · TurboWasm 工具宿主
+
+- TurboWasm 0.3.0 Windows Slate SDK 的 `libturbowasm.a` 引用 CMeta 的
+  标量和向量描述符。示例宿主链接同一 SDK 组合的 `cmeta_cmeta`、
+  `simd`、`coroutine` 和 `salts`。版本取自归档的 `BUILD-MANIFEST.txt`。
+- 授权 YAML 的示例宿主使用 SaltsBase CYaml 和同一 vcpkg SDK 的 GmSSL
+  3.2.0#46 计算 SHA-256。手动静态链接示例时，`libcyaml.a` 引用
+  `qvm_verify_slice_ex` 等符号，需要在链接参数中带上 `-lquery_vm`。
+  真实 guest 验证了允许调用及拒绝错误摘要、未授权模块或导出、超配额、
+  重复授权项和歧义 YAML。 [授权文件与运行命令](docs/WASM.md)
+- CMake 4.1 的 `find_dependency` 会解析 SDK 根路径中的反斜杠转义。
+  通过 PowerShell 设置版本匹配的 SDK 根时使用正斜杠路径，再执行
+  `cmake --fresh --preset llvm-mingw-x64-release-user`。
+- 原有 SDK 组合通过完整 Windows x64 构建、71/71 CTest 和安装验证。
+  TurboWasm SDK 组合的真实 guest 校验覆盖中英文 JSON、燃料耗尽、超时、
+  trap、越界访存、未授权导入和无效输出。 [WASM 宿主构建和运行步骤](docs/WASM.md)
+
+## 2026-11-25 · ACE 执行服务
+
+- `build/tools/praktor-defaults-runner` 的旧运行器拒绝 `build.yml` 中的 `assert`。
+  用当前已安装的 `praktor.exe` 和 `libPraktor.dll` 建立独立临时运行器，由它原生加载 `.env`。
+- 当前 CMeta Interface 生成的调用入口接收可变接口 view。`Tool` 保留由工作流拥有的
+  可变绑定，避免在调用 CMeta 时丢弃 const 限定。进程配置及命名输入仍借用至其契约指定的边界。
+- 在 Windows x64 LLVM-MinGW 上执行 `praktor --config build.yml --task install --timeout-ms 3600000`，
+  fresh configure、完整 build、71/71 CTest 和 install 通过，7 个 SDK 导出符号名称一致。
+  `slate test --preset tests --filter praktor_service_test` 的 22 个用例也通过。
+
 ## 2026-11-23 · Slate Ninja 构建
 
 - Slate 的对象目录按目标名生成。Windows 会让 `Praktor` 与 `praktor`
